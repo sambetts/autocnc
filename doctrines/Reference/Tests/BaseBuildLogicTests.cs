@@ -13,7 +13,6 @@ using System.Collections.Generic;
 using AutoCnC.Core;
 using AutoCnC.Reference;
 using AutoCnC.Reference.Logic;
-using AutoCnC.Sdk;
 using NUnit.Framework;
 
 namespace AutoCnC.Reference.Tests
@@ -21,14 +20,20 @@ namespace AutoCnC.Reference.Tests
 	[TestFixture]
 	public class BaseBuildLogicTests
 	{
-		/// <summary>
-		/// The plan the shipped module actually declares, so these tests verify the real
-		/// strategy rather than a copy of it that can drift.
-		/// </summary>
-		static readonly string[] PowerCandidates = ["powr", "nuke"];
+		static readonly string[] PowerCandidates = [.. ReferencePlans.PowerPlants];
 
-		static readonly IReadOnlyList<BuildStep> Plan =
-			DoctrineBuilder.Build(new ReferenceDoctrine()).BuildPlan;
+		/// <summary>
+		/// The plan the shipped doctrine actually declares, so these tests verify the real
+		/// strategy rather than a copy that can drift.
+		/// </summary>
+		/// <remarks>
+		/// Read from ReferencePlans rather than by running Configure. Configure assigns mode
+		/// types, and touching those drags OpenRA's whole assembly closure into the test host —
+		/// which is how this suite passed locally on stale build output but failed on a clean
+		/// CI checkout. Keeping plans as plain data is what lets strategy be tested with no
+		/// engine at all.
+		/// </remarks>
+		static readonly IReadOnlyList<BuildStep> Plan = ReferencePlans.Build;
 
 		static BasePlanState State(
 			int cash = 5000,

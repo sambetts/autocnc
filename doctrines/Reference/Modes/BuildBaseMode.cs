@@ -20,7 +20,7 @@ namespace AutoCnC.Reference.Modes
 	{
 		const string BuildingQueue = "Building";
 
-		static readonly string[] PowerCandidates = ["powr", "nuke"];
+		static readonly string[] PowerCandidates = [.. ReferencePlans.PowerPlants];
 
 		// Where we decided to put the current building, so the choice doesn't wander.
 		CPos? plannedLocation;

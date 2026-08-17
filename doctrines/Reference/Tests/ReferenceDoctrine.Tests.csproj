@@ -5,7 +5,6 @@
     <AssemblyName>AutoCnC.Reference.Tests</AssemblyName>
     <IsPackable>false</IsPackable>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
-    <!-- Tests DO need the assemblies on disk to resolve types at runtime. -->
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
   </PropertyGroup>
 
@@ -18,7 +17,13 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="AutoCnC.Sdk" Version="$(AutoCnCVersion)" />
+    <!--
+      ExcludeAssets=runtime keeps the SDK (and the OpenRA assemblies it carries) off the test
+      host. A doctrine's tests exercise PURE strategy, so if one ever starts loading engine
+      types it fails loudly here instead of silently depending on whatever DLLs happen to be
+      lying around — which is exactly the failure CI caught once and a local run hid.
+    -->
+    <PackageReference Include="AutoCnC.Sdk" Version="$(AutoCnCVersion)" ExcludeAssets="runtime" />
     <PackageReference Include="AutoCnC.Core" Version="$(AutoCnCVersion)" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
     <PackageReference Include="NUnit" Version="4.2.2" />

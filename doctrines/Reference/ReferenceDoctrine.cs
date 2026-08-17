@@ -33,31 +33,13 @@ namespace AutoCnC.Reference
 
 		public void Configure(IDoctrineBuilder b)
 		{
-			// --- Base construction ------------------------------------------------
-			// Ordered. Candidates are alternatives for one role, so "powr" or "nuke"
-			// both mean "a power plant" and this plan works as either faction.
-			b.Build("powr", "nuke").Until(1);
-			b.Build("proc").Until(1);              // income before anything else
-			b.Build("powr", "nuke").Until(2);
-			b.Build("pyle", "hand").Until(1);      // barracks
-			b.Build("proc").Until(2);
-			b.Build("weap", "afld").Until(1);      // vehicle production
-			b.Build("powr", "nuke").Until(3);
-			b.Build("gtwr", "gun").Until(2);       // a little static defence
-			b.Build("proc").Until(3);
-			b.Build("powr", "nuke").Until(5);
-			b.Build("hq", "eye", "tmpl").Until(1); // tech
-			b.Build("weap", "afld").Until(2);
+			// Plans live in ReferencePlans as plain data, so they can be unit-tested without
+			// loading any engine types. Change them there, not here.
+			foreach (var step in ReferencePlans.Build)
+				b.Build(step.Candidates).Until(step.DesiredCount);
 
-			// --- Unit production --------------------------------------------------
-			// Same idea. The last step never completes, so once the army is up to
-			// strength the factory keeps replacing losses instead of going idle.
-			b.Train("Infantry", "e1").Until(6);
-			b.Train("Vehicle", "jeep", "bggy").Until(2);   // early scouting
-			b.Train("Infantry", "e2").Until(4);
-			b.Train("Vehicle", "mtnk", "ltnk").Until(6);
-			b.Train("Infantry", "e1", "e2").Forever();
-			b.Train("Vehicle", "mtnk", "ltnk").Forever();
+			foreach (var step in ReferencePlans.Train)
+				b.Train(step.Queue, step.Candidates).Until(step.DesiredCount);
 
 			// --- Behaviour --------------------------------------------------------
 			// Most specific assignment wins: group > unit type > all.

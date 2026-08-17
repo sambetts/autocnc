@@ -1,19 +1,24 @@
 # AutoC&C — world traits
 #
-# GroupManager holds the SYNCED control-group state that unit behaviour is driven from.
+# ModeExecutor runs unit modes for the LOCAL player only and turns their decisions into orders.
+# Mode code therefore sits outside the lockstep simulation, which is what lets players write
+# their own modes without every opponent needing the same code. See docs/determinism.md.
 #
-# It deliberately does not replace the engine's built-in ControlGroups trait, which stays in
-# place for the UI. That one is client-local (it reads world.Selection and filters on
-# world.LocalPlayer), so it must never drive simulation behaviour. See docs/determinism.md.
+# Control group membership comes from OpenRA's built-in ControlGroups trait. That trait is
+# client-local, which is exactly right here: mode assignment is local policy too.
 #
-# ModeCommands adds chatbox commands for play-testing until a proper UI exists:
-#   /modes                  list available modes
-#   /mode <ModeName>        set the current selection's mode
-#   /mode <1-9> <ModeName>  set a control group's mode
-#   /group <1-9>            assign the selection to a synced group
-#   /whatmode               report the selection's current modes
+# ModeCommands adds the chatbox interface:
+#   /modes                          list available modes
+#   /mode <ModeName>                assign to the current selection
+#   /mode all <ModeName>            assign to every unit
+#   /mode type <actorType> <Mode>   e.g. /mode type harv RunHomeMode
+#   /mode group <1-9> <ModeName>    e.g. /mode group 1 AttackBaseMode
+#   /mode clear                     drop per-unit overrides
+#   /assignments                    show current assignments
+#   /whatmode                       report the selection's modes
 
 World:
-	GroupManager:
+	ModeExecutor:
+		DefaultMode: DefensiveMode
 		GroupCount: 9
 	ModeCommands:

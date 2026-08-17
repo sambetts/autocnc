@@ -2,14 +2,15 @@
 
 ## The problem
 
-We want unit behaviour to be **user-authored code** that is easy to write, easy to test, and
-safe to run inside a lockstep multiplayer simulation. Those three goals pull against each other:
+Unit behaviour should be **player-authored code** that is easy to write, easy to test, and safe
+in multiplayer. Those goals pull against each other:
 
-- *Easy to write* wants full access to the engine.
+- *Easy to write* wants full engine access.
 - *Easy to test* wants no engine at all.
-- *Safe in lockstep* wants a restricted, deterministic subset of the engine.
+- *Safe in multiplayer* wants code that cannot desync a lockstep simulation — and, once players
+  are writing it, code an opponent never has to execute.
 
-The whole design is a response to that tension.
+Everything below is a response to that tension.
 
 ---
 
@@ -17,46 +18,63 @@ The whole design is a response to that tension.
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│  mods/autocnc/rules/*.yaml                                   │
-│  Wiring only: which actors get a controller, which modes.    │
+│  player-modes/            YOUR modes. A normal C# project.   │
+│    RunHomeMode, ScoutMode, HarvesterEscortMode  (templates)  │
+│    → builds to engine/bin/PlayerModes.dll                    │
 └──────────────────────────────────────────────────────────────┘
-                              │ trait names bound by reflection
+                              │ discovered by reflection
 ┌──────────────────────────────────────────────────────────────┐
-│  AutoCnC.Mod            (references OpenRA)                  │
+│  AutoCnC.Mod              (references OpenRA)                │
 │                                                              │
-│   GroupManager            world trait, SYNCED group state    │
-│   ProgrammableController  per-unit trait, runs the loop      │
-│   ModeContext             curated deterministic sense/act    │
-│   ModeRegistry            reflection-based mode discovery    │
-│   Library/*Mode           thin sense→decide→act wrappers     │
+│   ModeExecutor            world trait, CLIENT-LOCAL          │
+│                           runs modes, emits Orders           │
+│   ProgrammableController  per-unit marker + mode state       │
+│   ModeContext             sensing + order construction       │
+│   ModeRegistry            reflection-based discovery         │
+│   ModeCommands            chatbox assignment UI              │
+│   Library/*Mode           shipped reference modes            │
 └──────────────────────────────────────────────────────────────┘
-                              │ plain integer structs
+                              │ plain structs / strings
 ┌──────────────────────────────────────────────────────────────┐
-│  AutoCnC.Modes.Core     (references NOTHING)                 │
+│  AutoCnC.Modes.Core       (references NOTHING)               │
 │                                                              │
 │   DefensiveLogic, AttackBaseLogic   pure Decide() functions  │
+│   ModeAssignments                   precedence resolver      │
 │   ThreatSnapshot, UnitDecision      engine-free data         │
 └──────────────────────────────────────────────────────────────┘
                               │
 ┌──────────────────────────────────────────────────────────────┐
-│  AutoCnC.Modes.Core.Tests   fast, no engine build required   │
+│  AutoCnC.Modes.Core.Tests   36 tests, no engine build needed │
 └──────────────────────────────────────────────────────────────┘
 ```
 
-The bottom two layers are the point. `AutoCnC.Modes.Core` has no OpenRA reference, which is
-enforced by the project file rather than by discipline. Because it cannot reach the engine, its
-logic is necessarily pure, and pure logic is testable in milliseconds.
-
 ---
 
-## Why a separate assembly instead of a folder convention
+## The decision everything follows from
 
-A folder convention is a comment. A missing assembly reference is a compiler error.
+**Modes execute outside the lockstep simulation.**
 
-If decision logic lived alongside engine code, the first time someone needed "just the actor's
-armour type" they would reach for `Actor` and the testability guarantee would quietly evaporate.
-Splitting the assembly makes that reach impossible: to get new information into a decision, you
-must add it to the state struct, which keeps the pure/impure boundary intact by construction.
+`ModeExecutor` is a client-local world trait. It ticks only `world.LocalPlayer`'s units, and its
+sole output is `Order`s — the same channel a human's mouse clicks use.
+
+This is what makes player-authored modes possible at all. If behaviour lived in the simulation,
+every client would need every other player's mode code to reproduce their units, which means
+either desyncs or executing strangers' C#.
+
+Full reasoning: [determinism.md](determinism.md).
+
+### Consequences
+
+**Determinism rules stop applying to mode authors.** Floats, LINQ, `System.Random`, wall-clock
+time — all fine, because none of it touches the simulation.
+
+**Mode assignment is client-local policy.** Nothing about "which mode is unit X running" needs
+syncing, so there are no orders for assignment and no synced group state. An earlier revision
+carried a synced `GroupManager` world trait; moving modes out of the simulation deleted it, and
+let us use OpenRA's built-in (client-local) `ControlGroups` directly.
+
+**Latency is the price.** Decisions land a few ticks later, ~120ms. Identical to human input
+latency, so it is fair, but it rules out frame-perfect micro.
 
 ---
 
@@ -65,73 +83,75 @@ must add it to the state struct, which keeps the pure/impure boundary intact by 
 ### Per tick
 
 ```
-World ticks actor
-   └─ ProgrammableController.Tick
-        ├─ disabled / dead?                     → return
-        ├─ (WorldTick + ActorID) % Interval ≠ 0 → return   (staggered, deterministic)
-        └─ activeMode.OnTick(self, ctx)
-             ├─ ctx.Sense*    → engine → ThreatSnapshot[]
-             ├─ Logic.Decide  → UnitDecision        (pure)
-             └─ ctx.Apply     → QueueActivity / AttackTarget
+ModeExecutor.Tick                          (client-local, local player only)
+  └─ for each owned ProgrammableController
+       ├─ SyncGroup     ← engine ControlGroups (client-local)
+       ├─ SyncMode      ← ModeAssignments.Resolve(override, group, actorType)
+       ├─ due this tick? (staggered by TickInterval)
+       └─ mode.OnTick → UnitDecision
+            ├─ SameIntent as last issued, and unit not idle? → skip
+            └─ ModeContext.BuildOrder → world.IssueOrder
 ```
 
-Evaluations are staggered by `ActorID` so a 200-unit army spreads its cost across ticks instead
-of spiking one. `ActorID` is synced, so the stagger is identical on every client.
+Two throttles keep the order stream sane: duplicate-intent suppression, and `MaxOrdersPerTick`.
 
-### On mode change
+### Assignment precedence
 
 ```
-Player hotkey
-   └─ ProgrammableController.CreateSetModeOrder(selection, "AttackBaseMode")
-        └─ world.IssueOrder                      → network
-             └─ engine: Order.FromGroupedOrder   → one per actor
-                  └─ ProgrammableController.ResolveOrder
-                       ├─ previous.OnExit
-                       ├─ CancelActivity
-                       └─ next.OnEnter
+per-unit override  >  control group  >  unit type  >  all
 ```
 
-Mode switches use the engine's built-in `GroupedActors` batching, so a whole control group
-costs one network order rather than one per unit.
+Resolved by `ModeAssignments`, which is pure and lives in the engine-free assembly so the rules
+are directly testable.
 
 ---
 
 ## Key decisions
 
-### Modes queue activities; they do not issue orders
+### `AutoCnC.Modes.Core` references nothing
 
-Verified against engine source. A per-unit trait's `Tick` runs on every client, so it is already
-replicated and needs no network round-trip — the engine's own `AutoTarget` calls
-`AttackBase.AttackTarget()` directly and constructs no `Order`. The "always use
-`bot.QueueOrder()`" rule applies to bot modules specifically, because those run only on the host
-(`if (IsBot && Game.IsHost)` in `Player.cs`).
+A folder convention is a comment; a missing assembly reference is a compiler error. Because the
+core cannot reach `Actor` or `World`, its logic is necessarily pure — and pure logic tests in
+milliseconds without building the engine. To feed new information into a decision you must add
+it to the state struct, which keeps the boundary intact by construction.
 
-Full reasoning and citations: [determinism.md](determinism.md).
+Note this is now a *testability* guarantee, not a networking one.
 
-### Group state is ours, not the engine's
+### `OnTick` returns a decision instead of acting
 
-OpenRA's `ControlGroups` trait is client-local: it reads `world.Selection` and filters on
-`world.LocalPlayer`. Driving behaviour from it would desync immediately. `GroupManager` holds
-synced membership instead; the engine's trait remains for UI only.
+Decisions are inert data, so they can be asserted in tests, logged, rendered as a debug overlay,
+and — critically — **compared between ticks** so the executor can suppress duplicate orders.
+An earlier revision had modes call actuators directly; that made duplicate suppression
+impossible.
 
-### Modes are per-unit instances, not shared singletons
+### Player modes are just another assembly
 
-A singleton would be marginally cheaper but would force all per-unit memory into an external
+`player-modes/` builds to `engine/bin/PlayerModes.dll`, which is listed in `mod.yaml`'s
+`Assemblies:`. OpenRA's `ObjectCreator` then finds `IUnitMode` implementations by reflection —
+the same mechanism that binds YAML trait names to `TraitInfo` classes.
+
+This deliberately avoids a bespoke loader or an embedded Roslyn compiler. Players get a real
+project with real IntelliSense and a real debugger, and the game gets no new loading code. The
+cost is that picking up changes needs a rebuild and a restart; the fast feedback loop is the
+unit tests, which need neither.
+
+### Modes are per-unit instances
+
+A shared singleton would be marginally cheaper but would force per-unit memory into an external
 blackboard, making modes harder to write — the primary goal. Allocation happens only on mode
-switch, which is rare. Instance fields are the natural place for things like retreat hysteresis.
+switch.
+
+### A mode that throws is contained
+
+Player code is wrapped: the exception is logged and printed to chat, the unit's mode is dropped,
+and the game continues. One bad mode must not end the match.
 
 ### AutoTarget is neutered, not deleted
 
 Deleting it breaks actors that add their own `AutoTargetPriority` (which declares
 `Requires<AutoTargetInfo>`), and gating it behind a never-granted condition fails the engine's
-condition linter. Forcing `HoldFire` is inert — `AutoTarget.Damaged()` returns early below
-`ReturnFire`, `TickIdle()` returns early below `Defend` — and needs no conditions.
-
-### Decisions are data
-
-`Decide` returns a `UnitDecision` value rather than performing actions. That makes behaviour
-assertable in tests, loggable into replays, and renderable as a debug overlay, with one single
-place (`ModeContext.Apply`) translating intent into engine calls.
+condition linter. Forcing `HoldFire` is inert — `Damaged()` returns early below `ReturnFire`,
+`TickIdle()` below `Defend` — and needs no conditions.
 
 ---
 
@@ -139,38 +159,34 @@ place (`ModeContext.Apply`) translating intent into engine calls.
 
 | Layer | How it is verified | Cost |
 |---|---|---|
-| `AutoCnC.Modes.Core` | NUnit unit tests, no engine | milliseconds |
-| Trait/YAML wiring | `./scripts/lint.ps1` — constructs every actor in the mod | ~1 min |
+| `AutoCnC.Modes.Core` | 36 NUnit tests, no engine | ~30ms |
+| Trait/YAML wiring | `./scripts/lint.ps1` — constructs every actor | ~1 min |
 | Engine integration | Compile against pinned engine binaries | seconds |
 
-The YAML lint is more valuable than it sounds: it instantiates every actor, so it catches
-unsatisfied `Requires<T>` constraints, conditions consumed but never granted, and malformed
-trait fields — none of which the C# compiler can see.
+The YAML lint is worth more than it sounds: it instantiates every actor in the mod, catching
+unsatisfied `Requires<T>`, conditions consumed but never granted, and malformed trait fields —
+none of which the C# compiler can see.
 
 ---
 
 ## Engine integration
 
-The engine is a git submodule pinned to tag `playtest-20260222`, never edited. Our assembly
-references `engine/bin/*.dll` as prebuilt binaries rather than by `ProjectReference`, following
-the OpenRA Mod SDK convention, so bumping the engine tag does not drag its internal project
-layout into our build.
+The engine is a git submodule pinned to tag `playtest-20260222`, never edited. Our assemblies
+reference `engine/bin/*.dll` as prebuilt binaries rather than by `ProjectReference`, following
+the OpenRA Mod SDK convention, so bumping the engine tag never drags its internal project layout
+into our build. Both mod assemblies output into `engine/bin/`, because OpenRA resolves the
+assemblies named in `mod.yaml` relative to that directory.
 
-`AutoCnC.Mod.csproj` outputs directly into `engine/bin/`, because OpenRA resolves the assemblies
-named in `mod.yaml` relative to that directory.
-
-To upgrade the engine: bump the submodule, rebuild, run the YAML lint, and fix what breaks.
+To upgrade: bump the submodule, rebuild, run the lint, fix what breaks.
 
 ---
 
 ## Known gaps
 
-Tracked against the roadmap in the README:
-
-- Mode assignment is driven by chatbox commands (`ModeCommands`); there is no hotkey or panel UI
-  yet.
-- `GroupManager` does not implement `IGameSaveTraitData`, so groups and per-group modes are lost
-  on save/load.
+- Changing a mode needs a rebuild and a game restart. Hot-reload via a collectible
+  `AssemblyLoadContext` is the obvious next step.
+- Assignment is chatbox-driven; there is no hotkey or panel UI.
+- Assignments are not persisted between matches.
 - Infantry/vehicle classification falls back to the `Infantry` target type string, which is
   Tiberian Dawn specific.
 - No headless benchmark harness for mode-vs-mode evaluation.

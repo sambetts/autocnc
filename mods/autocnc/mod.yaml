@@ -94,7 +94,7 @@ Cursors:
 Chrome:
 	cnc|chrome.yaml
 
-Assemblies: OpenRA.Mods.Common.dll, OpenRA.Mods.Cnc.dll, AutoCnC.Mod.dll
+Assemblies: OpenRA.Mods.Common.dll, OpenRA.Mods.Cnc.dll, AutoCnC.Mod.dll, PlayerModes.dll
 
 ChromeLayout:
 	cnc|chrome/mainmenu.yaml

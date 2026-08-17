@@ -37,15 +37,15 @@ namespace AutoCnC.Mod.Library
 			objectiveId = 0;
 		}
 
-		public override void OnTick(Actor self, ModeContext ctx)
+		public override UnitDecision OnTick(Actor self, ModeContext ctx)
 		{
 			// --- Sense -------------------------------------------------------------
 			var objective = ctx.ResolveActor(objectiveId);
 			if (objective == null)
 			{
-				// Objective destroyed or never chosen: pick the next one. Deliberately sticky,
-				// so the force commits to a target instead of re-evaluating every tick and
-				// drifting between buildings.
+				// Objective destroyed or never chosen: pick the next one. Deliberately sticky, so
+				// the force commits instead of re-evaluating every tick and drifting between
+				// buildings.
 				objectiveId = AttackBaseLogic.SelectObjective(ctx.SenseStructures(ObjectiveSearchRadius)) ?? 0;
 				objective = ctx.ResolveActor(objectiveId);
 			}
@@ -58,24 +58,19 @@ namespace AutoCnC.Mod.Library
 				CanMove: ctx.CanMove,
 				HasObjective: objective != null,
 				ObjectiveActorId: objectiveId,
-				DistanceToObjectiveUnits: objective != null
-					? (objective.CenterPosition - self.CenterPosition).HorizontalLength
-					: int.MaxValue,
+				DistanceToObjectiveUnits: objective != null ? ctx.DistanceTo(objective) : int.MaxValue,
 				WeaponRangeUnits: weaponRange,
 				Threats: ctx.SenseThreats(new WDist(weaponRange > 0 ? weaponRange : 1024)));
 
 			// --- Decide ------------------------------------------------------------
-			var decision = AttackBaseLogic.Decide(state, tuning);
-
-			// --- Act ---------------------------------------------------------------
-			ctx.Apply(decision);
+			return AttackBaseLogic.Decide(state, tuning);
 		}
 
 		public override void OnDamaged(Actor self, ModeContext ctx, AttackInfo e)
 		{
 			// Intentionally does nothing. Taking fire is the expected cost of a base assault;
-			// reacting to it is exactly the distraction this mode exists to avoid. Static
-			// defences are handled as blockers by AttackBaseLogic when they come into range.
+			// reacting to it is exactly the distraction this mode exists to avoid. Static defences
+			// are handled as blockers by AttackBaseLogic once they come into range.
 		}
 	}
 }

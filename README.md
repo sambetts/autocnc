@@ -2,18 +2,29 @@
 
 **An RTS where you don't play the units — you program them.**
 
-AutoC&C is a mod for [OpenRA](https://github.com/OpenRA/OpenRA) (the open-source Command & Conquer engine) that removes real-time micromanagement from the game. Instead of clicking units, you write **C# behavioural modes** — `DefensiveMode`, `AttackBaseMode`, `HarvesterEscortMode` — and assign them to unit classes, control groups (1–9), or your whole army.
+AutoC&C is a mod for [OpenRA](https://github.com/OpenRA/OpenRA) (the open-source Command &
+Conquer engine) that removes real-time micromanagement. Instead of clicking units, you write
+**C# behavioural modes** and assign them to your army — by unit type, by control group, or
+wholesale.
 
-Once the match starts, your code fights the battle. You direct strategy; your modes handle tactics.
+```
+/mode all DefensiveMode         everything holds ground
+/mode type harv RunHomeMode     harvesters flee instead of dying
+/mode group 1 AttackBaseMode    group 1 pushes the enemy base
+```
+
+Then the match plays itself. You direct strategy; your code handles tactics.
 
 ```csharp
-public sealed class DefensiveMode : IUnitMode
+public sealed class RunHomeMode : UnitMode
 {
-    public void OnTick(Actor self, ModeContext ctx)
+    public override UnitDecision OnTick(Actor self, ModeContext ctx)
     {
-        var state = Sense(self, ctx);                  // read the world
-        var decision = DefensiveLogic.Decide(state);   // pure, testable, no engine
-        Apply(self, ctx, decision);                    // act on the world
+        if (!ctx.SenseThreats(new WDist(7 * 1024)).Any(t => t.CanHitUs))
+            return UnitDecision.Continue;          // all clear, carry on harvesting
+
+        var home = ctx.FindRefinery()?.Location ?? ctx.Anchor;
+        return UnitDecision.MoveTo(home.X, home.Y, "enemy nearby, running home");
     }
 }
 ```
@@ -23,12 +34,12 @@ public sealed class DefensiveMode : IUnitMode
 ## Table of contents
 
 - [Why this exists](#why-this-exists)
+- [Writing your own modes](#writing-your-own-modes)
+- [Assigning modes](#assigning-modes)
 - [Architectural philosophy](#architectural-philosophy)
-- [The one hard rule: determinism](#the-one-hard-rule-determinism)
 - [How it integrates with OpenRA](#how-it-integrates-with-openra)
 - [Repository layout](#repository-layout)
 - [Getting started](#getting-started)
-- [Writing a mode](#writing-a-mode)
 - [Roadmap](#roadmap)
 - [Licence](#licence)
 
@@ -36,127 +47,114 @@ public sealed class DefensiveMode : IUnitMode
 
 ## Why this exists
 
-Competitive RTS play is gated behind actions-per-minute. The strategic layer — force composition, timing, map control — is often decided by who can click faster. AutoC&C keeps the strategy and deletes the clicking.
+Competitive RTS play is gated behind actions-per-minute. The strategic layer — force
+composition, timing, map control — is often decided by who clicks faster. AutoC&C keeps the
+strategy and deletes the clicking.
 
-It is also, deliberately, a **programming game**. Your army is a codebase. A bad mode loses games in ways you can profile, unit-test, and fix.
+It is also, deliberately, a **programming game**. Your army is a codebase. A bad mode loses
+games in ways you can profile, unit-test and fix.
+
+---
+
+## Writing your own modes
+
+Modes live in [`player-modes/`](player-modes/), a normal C# project. Open it in your IDE and you
+get IntelliSense, refactoring and a debugger — no scripting language, no interpreter.
+
+1. Copy a template and rename the class. **The class name is the mode name in-game.**
+2. `./scripts/build.ps1`
+3. `./scripts/launch.ps1`, then `/mode MyMode`
+
+There is no registration step. Discovery uses OpenRA's own `ObjectCreator` reflection, the same
+mechanism that binds YAML trait names to engine traits.
+
+Three templates ship to start from:
+
+| Template | Shows |
+|---|---|
+| `RunHomeMode` | The simplest useful mode — flee to a refinery when threatened |
+| `ScoutMode` | Per-unit state, reacting to damage between evaluations |
+| `HarvesterEscortMode` | Tracking another actor and defending it |
+
+Plus two reference modes built into the mod: **`DefensiveMode`** (holds ground, won't be baited
+past its leash, retreats to repair) and **`AttackBaseMode`** (pushes a base, only fires on what
+is already in range).
+
+See [`docs/writing-modes.md`](docs/writing-modes.md).
+
+### Your code cannot desync the game
+
+Mode code runs **outside the lockstep simulation**, on your machine only, and its output is
+`Order`s — the same channel your mouse clicks use.
+
+That means `float`, LINQ, `System.Random` and `DateTime` are all fine in your modes, your
+opponent never needs your code, and you never execute theirs. A mode that throws is dropped for
+that unit with the error printed to chat; the match continues.
+
+The cost is ~120ms of order latency on decisions — the same latency human input already has.
+[`docs/determinism.md`](docs/determinism.md) explains the whole thing.
+
+---
+
+## Assigning modes
+
+Press `Enter` in-game for the chatbox:
+
+| Command | Effect |
+|---|---|
+| `/modes` | List loaded modes |
+| `/mode ScoutMode` | Current selection |
+| `/mode all DefensiveMode` | Every unit |
+| `/mode type harv RunHomeMode` | Every harvester |
+| `/mode group 1 AttackBaseMode` | Control group 1 |
+| `/mode clear` | Drop per-unit overrides |
+| `/assignments` | What's currently assigned |
+| `/whatmode` | What the selection is running |
+
+Precedence is **most specific wins**: selection > group > unit type > all. So
+`/mode all DefensiveMode` followed by `/mode type harv RunHomeMode` does what you'd expect, and
+neither clobbers the other.
 
 ---
 
 ## Architectural philosophy
 
-### 1. Modes are plain C#, not a scripting language
+### 1. Compiled C#, not a scripting language
 
-OpenRA already embeds Lua for map scripting. We deliberately **do not** use it for unit behaviour:
+OpenRA embeds Lua for map scripting. We deliberately don't use it for unit behaviour:
 
-| | Lua scripting | Compiled C# modes (our choice) |
+| | Lua | Compiled C# (our choice) |
 |---|---|---|
 | Type safety | Runtime errors | Compile-time |
 | IDE support | Minimal | Full IntelliSense, refactoring, debugger |
-| Performance | Interpreter + marshalling per unit per tick | Raw engine speed |
-| Engine API access | Curated bindings only | Everything |
+| Performance | Interpreter + marshalling | Native .NET |
+| Engine API access | Curated bindings | Everything |
 
-Modes compile into a normal .NET assembly that OpenRA loads via `Assemblies:` in `mod.yaml`. There is no interpreter and no marshalling layer.
-
-### 2. Sense → Decide → Act
-
-Every mode is structured in three phases, and the middle one is where the intelligence lives:
+### 2. Sense → decide → act
 
 ```
   Sense                    Decide                     Act
   ─────                    ──────                     ───
-  Read the world     →     Pure function        →     Queue activities
-  via ModeContext          on plain structs           via ModeContext
-  (engine-coupled)         (ZERO engine deps)         (engine-coupled)
+  Read the world     →     Pure function        →     Return a UnitDecision;
+  via ModeContext          on plain structs           the executor emits an Order
+  (engine-coupled)         (ZERO engine deps)
 ```
 
-The `Decide` step is a **pure static function** over plain integer structs. It knows nothing about `Actor`, `World`, or OpenRA at all. That means it lives in a separate assembly with no engine reference, and it can be unit-tested in milliseconds:
+The decide step is a pure function over integer structs, living in an assembly that has **no
+OpenRA reference at all** — enforced by the project file, not by convention. So combat behaviour
+is testable in milliseconds:
 
-```csharp
-[Fact]
-public void RetreatsWhenBadlyHurtAndOutnumbered()
-{
-    var state = new DefensiveState { HealthPercent = 22, ThreatCount = 3, ... };
-    var decision = DefensiveLogic.Decide(state, DefensiveTuning.Default);
-    Assert.Equal(DefensiveAction.Retreat, decision.Action);
-}
+```powershell
+dotnet test src/AutoCnC.Modes.Core.Tests   # 36 tests, ~30ms, no engine build
 ```
 
-No game, no map, no engine build. This is the single most important structural decision in the project: **behaviour is testable because the decisions are pure.**
+A folder convention is a comment. A missing assembly reference is a compiler error.
 
-### 3. The controller owns the loop; modes own the policy
+### 3. Decisions are data
 
-`ProgrammableController` is a per-unit trait that replaces `AutoTarget`. It handles the boring, error-prone parts — tick throttling, mode lifecycle, damage notifications, group membership, activity hygiene — so a mode author only writes decision logic.
-
-### 4. Groups are simulation state, not UI state
-
-See [the determinism section](#the-one-hard-rule-determinism) — this is subtler than it looks and is the most common way a mod like this desyncs.
-
----
-
-## The one hard rule: determinism
-
-OpenRA is a **lockstep** engine. Every client runs the identical simulation and only *player input* travels over the network. If two clients ever compute different results, the game desyncs and dies.
-
-This drives three non-negotiable rules, all verified against engine source:
-
-### Rule 1 — Mode logic runs on every client, so it must not use orders
-
-A per-unit trait's `Tick()` executes on *all* clients. It is therefore already replicated, and it should queue activities **directly**. This is exactly what the engine's own `AutoTarget` does:
-
-```csharp
-// engine/OpenRA.Mods.Common/Traits/AutoTarget.cs
-void Attack(in Target target, bool allowMove)
-{
-    foreach (var ab in ActiveAttackBases)
-        ab.AttackTarget(target, AttackSource.AutoTarget, false, allowMove);
-}
-```
-
-No `Order` is constructed. Contrast with **bot modules** (`IBotTick`), which *must* use `bot.QueueOrder(...)` — because bot logic runs only on the host, so its decisions are genuine external input that has to be broadcast.
-
-> **AutoC&C modes are traits, not bots.** Modes call `ctx.Attack(...)` / `ctx.MoveTo(...)`, which queue activities directly. Never issue an `Order` from inside a mode.
-
-### Rule 2 — Only player intent becomes an Order
-
-Assigning a mode to a group *is* player input, so it travels as an `Order`, resolved identically on every client:
-
-```
-Player presses hotkey
-        ↓
-  Order("SetUnitMode", subject: unit, GroupedActors: selection)
-        ↓  (serialised over the network by the engine)
-  Engine fans out via Order.FromGroupedOrder → Actor.ResolveOrder
-        ↓
-  ProgrammableController.ResolveOrder → mode switched on every client
-```
-
-This reuses the engine's built-in `GroupedActors` batching, so one order covers a whole control group.
-
-### Rule 3 — OpenRA's built-in `ControlGroups` is client-local and must NOT drive behaviour
-
-The engine's `ControlGroups` world trait is **presentation state**:
-
-```csharp
-// engine/OpenRA.Mods.Common/Traits/World/ControlGroups.cs
-controlGroups[group].AddRange(world.Selection.Actors.Where(a => a.Owner == world.LocalPlayer));
-...
-cg.RemoveAll(a => a.Disposed || a.Owner != world.LocalPlayer);
-```
-
-It reads `world.Selection` and filters on `world.LocalPlayer` — both of which differ per client. **If unit behaviour depended on it, every client would simulate a different battle.**
-
-So AutoC&C ships its own `GroupManager`: a world trait holding *synced* group membership as real simulation state, mutated only through orders. The engine's `ControlGroups` is used purely as a UI convenience for *authoring* those orders.
-
-### The determinism checklist for mode authors
-
-- ✅ `ctx.Random` (wraps `World.SharedRandom`, seeded from the synced lobby seed and folded into the sync hash)
-- ❌ `World.LocalRandom`, `System.Random`, `Guid.NewGuid()`
-- ❌ `float` / `double` anywhere in decision logic — use integer `WDist`, `WPos`, `WAngle`
-- ❌ `DateTime.Now`, wall-clock timing, real-world time
-- ❌ `world.LocalPlayer`, `world.Selection`, `world.RenderPlayer`, anything on `ScreenMap`
-- ⚠️ Never rely on enumeration order of spatial queries — break ties deterministically (`ctx` helpers order by `ActorID`)
-
-`docs/determinism.md` covers this in full, including how to catch desyncs early with `[Sync]` fields.
+`OnTick` returns a `UnitDecision` rather than acting. That makes behaviour assertable in tests,
+loggable, renderable as a debug overlay — and comparable between ticks, so the executor only
+sends an order when your intent actually changes. Returning the same decision every tick is free.
 
 ---
 
@@ -165,26 +163,23 @@ So AutoC&C ships its own `GroupManager`: a world trait holding *synced* group me
 **The engine is a pinned git submodule. We do not fork it.**
 
 ```
-engine/   →  github.com/OpenRA/OpenRA @ playtest-20260222   (submodule, untouched)
-src/      →  our C# assembly, references engine DLLs
-mods/     →  our YAML, loads that assembly
+engine/        →  github.com/OpenRA/OpenRA @ playtest-20260222   (submodule, untouched)
+src/           →  our assemblies
+player-modes/  →  your assembly
+mods/          →  YAML wiring
 ```
 
-Upstream stays pristine, so engine upgrades are a submodule bump plus a compile, not a merge war. All our code lives in `src/` and `mods/` and touches the engine only through public APIs.
-
-Loading is a single line in `mods/autocnc/mod.yaml`:
+All three assemblies build into `engine/bin/` and are named in `mods/autocnc/mod.yaml`:
 
 ```yaml
-Assemblies: OpenRA.Mods.Common.dll, OpenRA.Mods.Cnc.dll, AutoCnC.Mod.dll
+Assemblies: OpenRA.Mods.Common.dll, OpenRA.Mods.Cnc.dll, AutoCnC.Mod.dll, PlayerModes.dll
 ```
 
-OpenRA then discovers our traits by reflection — a YAML key `ProgrammableController:` binds to the C# class `ProgrammableControllerInfo`. Modes are discovered the same way, via `ObjectCreator.GetTypesImplementing<IUnitMode>()`, so **adding a mode requires no registration code** — drop in a class, name it in YAML.
+AutoC&C derives its manifest from the shipped `cnc` (Tiberian Dawn) mod, so OpenRA offers to
+download the freeware C&C assets on first run.
 
-AutoC&C derives its manifest from the shipped `cnc` (Tiberian Dawn) mod and layers its own rules on top, so OpenRA will offer to download the freeware C&C assets on first run.
-
-### Engine version
-
-Pinned to tag **`playtest-20260222`** (.NET 8, C# 12). The last *stable* tag (`release-20250330`) is on end-of-life .NET 6 / C# 9; the playtest tag is immutable and current, which is the better foundation for a new project.
+Pinned to tag **`playtest-20260222`** (.NET 8, C# 12). The last *stable* tag is on end-of-life
+.NET 6 / C# 9.
 
 ---
 
@@ -192,47 +187,42 @@ Pinned to tag **`playtest-20260222`** (.NET 8, C# 12). The last *stable* tag (`r
 
 ```
 autocnc/
-├── engine/                              # ← git submodule: OpenRA @ playtest-20260222 (never edited)
+├── engine/                              # ← git submodule: OpenRA (never edited)
+│
+├── player-modes/                        # ★ YOUR MODES — a normal C# project
+│   ├── PlayerModes.csproj               #   every .cs here is compiled automatically
+│   ├── RunHomeMode.cs                   #   templates to copy
+│   ├── ScoutMode.cs
+│   └── HarvesterEscortMode.cs
 │
 ├── src/
-│   ├── AutoCnC.Modes.Core/              # ★ ZERO OpenRA dependencies — pure decision logic
+│   ├── AutoCnC.Modes.Core/              # ★ ZERO OpenRA deps — pure, testable logic
 │   │   ├── DefensiveLogic.cs            #   pure Decide() functions
 │   │   ├── AttackBaseLogic.cs
-│   │   ├── Perception.cs                #   plain int structs: ThreatSnapshot, TargetCandidate…
-│   │   └── Decisions.cs                 #   ModeDecision / action enums
+│   │   ├── ModeAssignments.cs           #   assignment precedence resolver
+│   │   ├── Perception.cs                #   plain int structs
+│   │   └── Decisions.cs                 #   UnitDecision / UnitAction
 │   │
-│   ├── AutoCnC.Mod/                     # engine-facing assembly → bin/AutoCnC.Mod.dll
+│   ├── AutoCnC.Mod/                     # engine-facing assembly
 │   │   ├── Modes/
-│   │   │   ├── IUnitMode.cs             #   the core mode interface
-│   │   │   ├── ModeContext.cs           #   curated, deterministic sense+act API
-│   │   │   └── ModeRegistry.cs          #   reflection-based mode discovery
+│   │   │   ├── IUnitMode.cs             #   the mode interface
+│   │   │   ├── ModeContext.cs           #   sensing + order construction
+│   │   │   └── ModeRegistry.cs          #   reflection-based discovery
 │   │   ├── Traits/
-│   │   │   ├── ProgrammableController.cs#   per-unit trait: ITick, INotifyCreated, INotifyDamage
-│   │   │   ├── GroupManager.cs          #   world trait: SYNCED control groups 1–9
-│   │   │   └── ModeCommands.cs          #   chatbox commands for play-testing
-│   │   └── Library/                     #   shipped modes
+│   │   │   ├── ModeExecutor.cs          #   CLIENT-LOCAL: runs modes, emits Orders
+│   │   │   ├── ProgrammableController.cs#   per-unit marker + mode state
+│   │   │   └── ModeCommands.cs          #   chatbox assignment UI
+│   │   └── Library/                     #   shipped reference modes
 │   │       ├── DefensiveMode.cs
 │   │       └── AttackBaseMode.cs
 │   │
-│   └── AutoCnC.Modes.Core.Tests/        # fast unit tests — no engine build required
+│   └── AutoCnC.Modes.Core.Tests/        # fast tests — no engine build required
 │
-├── mods/autocnc/                        # the mod itself
-│   ├── mod.yaml                         #   manifest, derived from the cnc mod
-│   ├── fluent/autocnc.ftl               #   mod title strings
-│   └── rules/
-│       ├── world.yaml                   #   GroupManager on the World actor
-│       └── units.yaml                   #   ProgrammableController on units, AutoTarget neutered
-│
-├── docs/
-│   ├── architecture.md                  # deep dive and rationale
-│   ├── writing-modes.md                 # mode author's guide
-│   └── determinism.md                   # desync rules, with engine source citations
-│
-├── scripts/                             # setup.ps1 / build.ps1 / launch.ps1 / lint.ps1
+├── mods/autocnc/                        # mod manifest and rules
+├── docs/                                # architecture / writing-modes / determinism
+├── scripts/                             # setup / build / launch / lint
 └── AutoCnC.sln
 ```
-
-**Why `AutoCnC.Modes.Core` is a separate assembly:** it is physically incapable of referencing OpenRA, so the compiler enforces that decision logic stays pure and testable. It's a guardrail, not a convention.
 
 ---
 
@@ -249,78 +239,23 @@ autocnc/
 ```powershell
 git clone --recursive https://github.com/sambetts/autocnc.git
 cd autocnc
-./scripts/setup.ps1      # fetches submodule + engine dependencies
-./scripts/build.ps1      # builds engine, then our mod assembly
-./scripts/launch.ps1     # launches OpenRA with the autocnc mod
+./scripts/setup.ps1      # fetch the engine submodule
+./scripts/build.ps1      # build engine, mod and your modes
+./scripts/launch.ps1     # play
 ```
 
-Already cloned without `--recursive`?
+Cloned without `--recursive`? `git submodule update --init --depth 1`
+
+### Loops
 
 ```powershell
-git submodule update --init --depth 1
+dotnet test src/AutoCnC.Modes.Core.Tests   # logic — seconds, no engine
+./scripts/lint.ps1                         # wiring — constructs every actor in the mod
+./scripts/launch.ps1                       # play-test
 ```
 
-### Fast inner loop
-
-Iterating on decision logic needs no engine at all:
-
-```powershell
-dotnet test src/AutoCnC.Modes.Core.Tests
-```
-
-Validating trait and YAML wiring runs OpenRA's own linter, which constructs every actor in the
-mod and catches unsatisfied trait dependencies the C# compiler cannot see:
-
-```powershell
-./scripts/lint.ps1
-```
-
-### Play-testing
-
-```powershell
-./scripts/launch.ps1
-```
-
-On first run OpenRA offers to download the freeware C&C assets. Start a skirmish, then drive the
-mode system from the chatbox (press `Enter`):
-
-| Command | Effect |
-|---|---|
-| `/modes` | List available modes |
-| `/mode AttackBaseMode` | Set the current selection's mode |
-| `/mode 3 AttackBaseMode` | Set control group 3's mode |
-| `/group 3` | Assign the selection to synced group 3 |
-| `/whatmode` | Report the selection's current modes |
-
-Units run `DefensiveMode` by default, so a fresh skirmish already exercises the system: build a
-few units and watch them hold ground, engage what comes to them, refuse to chase bait beyond
-their leash, and withdraw to repair when hurt. Switch a group to `AttackBaseMode` to see them
-push a base and ignore distractions.
-
-Chat commands are the input layer, so they issue orders and work correctly in multiplayer. They
-are a stand-in until a proper hotkey UI lands in Phase 1.
-
-> **Close the game before rebuilding.** `AutoCnC.Mod.dll` is loaded from `engine/bin`, and a
-> running client holds a lock on it.
-
----
-
-## Writing a mode
-
-1. Add a pure decision function in `AutoCnC.Modes.Core` and unit-test it.
-2. Add a thin `IUnitMode` wrapper in `AutoCnC.Mod/Library/` that senses and acts.
-3. Reference it by class name in YAML:
-
-```yaml
-ProgrammableController:
-    DefaultMode: DefensiveMode
-    AvailableModes: DefensiveMode, AttackBaseMode
-    TickInterval: 8
-```
-
-No registration, no factory, no switch statement — `ModeRegistry` finds it by reflection.
-
-See `docs/writing-modes.md` for the full guide.
+> **Close the game before rebuilding.** The mod assemblies load from `engine/bin`, and a running
+> client holds a lock on them.
 
 ---
 
@@ -328,15 +263,16 @@ See `docs/writing-modes.md` for the full guide.
 
 | Phase | Scope |
 |---|---|
-| **0 — Foundation** | Interfaces, controller, group manager, two reference modes ✅ |
-| **1 — Playable** | Hotkey/UI for mode assignment, harvester escort, retreat-and-repair |
-| **2 — Authoring** | In-repo mode template, headless benchmark harness, mode-vs-mode arena |
-| **3 — Ecosystem** | Hot-reload of mode assemblies, replay-driven regression tests, mode sharing |
+| **0 — Foundation** | Interfaces, executor, reference modes ✅ |
+| **1 — Authoring** | Player mode project, assignment scopes, templates ✅ |
+| **2 — Iteration** | Hot-reload without restarting, in-game mode editor, debug overlay |
+| **3 — Ecosystem** | Headless mode-vs-mode arena, replay regression tests, mode sharing |
 
-Phase 0 is verified: the mod assembly compiles against the pinned engine, 23 logic tests pass,
+Verified today: all assemblies compile against the pinned engine, 36 logic tests pass in ~30ms,
 and `--check-yaml` reports 0 errors and 0 warnings across every actor in the mod.
 
-Known gaps are listed at the end of [`docs/architecture.md`](docs/architecture.md).
+Known gaps are listed at the end of [`docs/architecture.md`](docs/architecture.md) — the main
+one being that mode changes currently need a rebuild and restart.
 
 ---
 
@@ -344,6 +280,11 @@ Known gaps are listed at the end of [`docs/architecture.md`](docs/architecture.m
 
 **GPL-3.0-or-later**, inherited from OpenRA.
 
-This is not optional. AutoC&C links against and extends GPLv3 engine code, making it a derivative work. Any distributed build must ship its complete corresponding source under GPLv3. See [`LICENSE`](LICENSE).
+This is not optional: AutoC&C links against and extends GPLv3 engine code, making it a
+derivative work. Any distributed build must ship its complete corresponding source under GPLv3.
+See [`LICENSE`](LICENSE).
 
-OpenRA is a project by [the OpenRA developers and contributors](https://github.com/OpenRA/OpenRA/graphs/contributors). AutoC&C is an independent mod and is not affiliated with or endorsed by them, nor by Electronic Arts. Command & Conquer is a trademark of Electronic Arts Inc.; this project ships no EA assets.
+OpenRA is a project by
+[the OpenRA developers and contributors](https://github.com/OpenRA/OpenRA/graphs/contributors).
+AutoC&C is an independent mod, not affiliated with or endorsed by them or by Electronic Arts.
+Command & Conquer is a trademark of Electronic Arts Inc.; this project ships no EA assets.

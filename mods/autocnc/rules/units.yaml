@@ -22,8 +22,6 @@
 		EnableStances: False
 		ScanOnIdle: False
 	ProgrammableController:
-		DefaultMode: DefensiveMode
-		AvailableModes: DefensiveMode, AttackBaseMode
 		TickInterval: 8
 		ScanRadius: 8c0
 
@@ -34,8 +32,6 @@
 		EnableStances: False
 		ScanOnIdle: False
 	ProgrammableController:
-		DefaultMode: DefensiveMode
-		AvailableModes: DefensiveMode, AttackBaseMode
 		TickInterval: 8
 		ScanRadius: 10c0
 
@@ -46,8 +42,6 @@
 		EnableStances: False
 		ScanOnIdle: False
 	ProgrammableController:
-		DefaultMode: DefensiveMode
-		AvailableModes: DefensiveMode, AttackBaseMode
 		TickInterval: 8
 		ScanRadius: 8c0
 
@@ -58,10 +52,12 @@
 # often (it has nothing useful to do between shots anyway).
 MSAM:
 	ProgrammableController:
-		DefaultMode: DefensiveMode
-		AvailableModes: DefensiveMode, AttackBaseMode
 		TickInterval: 15
 		ScanRadius: 12c0
 
-# Note: unarmed actors such as HARV never inherited the AutoTarget mixins, so they get no
-# controller and need no override here.
+# Unarmed actors never inherited the AutoTarget mixins, so they need the controller adding
+# explicitly. Harvesters are the motivating case: '/mode type harv RunHomeMode'.
+HARV:
+	ProgrammableController:
+		TickInterval: 12
+		ScanRadius: 7c0

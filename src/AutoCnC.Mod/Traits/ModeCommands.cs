@@ -9,7 +9,7 @@
  */
 #endregion
 
-using System.Collections.Generic;
+using System;
 using System.Linq;
 using AutoCnC.Mod.Modes;
 using OpenRA;
@@ -20,34 +20,25 @@ using OpenRA.Traits;
 namespace AutoCnC.Mod.Traits
 {
 	[TraitLocation(SystemActors.World)]
-	[Desc("Chatbox commands for assigning unit modes and control groups.",
-		"Intended for play-testing until a proper UI exists. Attach to the world actor.")]
+	[Desc("Chatbox commands for assigning modes. Attach this to the world actor.")]
 	public class ModeCommandsInfo : TraitInfo<ModeCommands> { }
 
 	/// <summary>
-	/// Lets a player drive the mode system from the chatbox:
-	/// <list type="bullet">
-	/// <item><c>/modes</c> — list available modes</item>
-	/// <item><c>/mode &lt;ModeName&gt;</c> — set the current selection's mode</item>
-	/// <item><c>/mode &lt;1-9&gt; &lt;ModeName&gt;</c> — set a control group's mode</item>
-	/// <item><c>/group &lt;1-9&gt;</c> — assign the selection to a synced group</item>
-	/// <item><c>/whatmode</c> — report the selection's current modes</item>
-	/// </list>
+	/// Player-facing commands for the mode system.
 	/// </summary>
 	/// <remarks>
-	/// This is the <b>input layer</b>, so unlike mode logic it may legitimately read
-	/// client-local state (<c>world.Selection</c>, <c>world.LocalPlayer</c>, the engine's
-	/// client-local <c>ControlGroups</c>). Its entire job is to convert local player intent into
-	/// a synced <see cref="Order"/>, which is then resolved identically on every client.
-	/// Nothing here touches the simulation directly.
+	/// Assignments are client-local policy, so these mutate <see cref="ModeExecutor.Assignments"/>
+	/// directly rather than issuing orders. Only the resulting unit commands travel the network.
 	/// </remarks>
 	public class ModeCommands : IChatCommand, IWorldLoaded
 	{
 		World world;
+		ModeExecutor executor;
 
 		public void WorldLoaded(World w, WorldRenderer wr)
 		{
 			world = w;
+			executor = world.WorldActor.TraitOrDefault<ModeExecutor>();
 
 			var console = world.WorldActor.TraitOrDefault<ChatCommands>();
 			if (console == null)
@@ -55,141 +46,226 @@ namespace AutoCnC.Mod.Traits
 
 			console.RegisterCommand("mode", this);
 			console.RegisterCommand("modes", this);
-			console.RegisterCommand("group", this);
+			console.RegisterCommand("assignments", this);
 			console.RegisterCommand("whatmode", this);
 		}
 
 		public void InvokeCommand(string name, string arg)
 		{
-			if (world.LocalPlayer == null)
+			if (world.LocalPlayer == null || executor == null)
 				return;
 
 			switch (name)
 			{
 				case "modes":
-					TextNotificationsManager.Debug(
-						"Available modes: " + string.Join(", ", ModeRegistry.AvailableModeNames));
+					ListModes();
 					break;
 
-				case "mode":
-					SetMode(arg);
-					break;
-
-				case "group":
-					SetGroup(arg);
+				case "assignments":
+					ShowAssignments();
 					break;
 
 				case "whatmode":
-					ReportModes();
+					ReportSelection();
+					break;
+
+				case "mode":
+					HandleMode(arg);
 					break;
 			}
 		}
 
-		void SetMode(string arg)
+		void ListModes()
 		{
-			var parts = arg.Split(' ', System.StringSplitOptions.RemoveEmptyEntries);
+			var names = ModeRegistry.AvailableModeNames.ToArray();
+			Debug(names.Length == 0
+				? "No modes found. Build the player-modes project and restart."
+				: "Modes: " + string.Join(", ", names));
+
+			foreach (var error in ModeRegistry.Errors)
+				Debug("Mode problem: " + error);
+		}
+
+		void ShowAssignments()
+		{
+			var a = executor.Assignments;
+			Debug($"all -> {a.GlobalMode ?? "<none>"}");
+
+			foreach (var kv in a.UnitTypeAssignments)
+				Debug($"type {kv.Key} -> {kv.Value}");
+
+			foreach (var kv in a.GroupAssignments)
+				Debug($"group {kv.Key} -> {kv.Value}");
+
+			var overrides = executor.LocalUnits
+				.Select(u => u.TraitOrDefault<ProgrammableController>())
+				.Count(c => c != null && !string.IsNullOrEmpty(c.ModeOverride));
+
+			if (overrides > 0)
+				Debug($"{overrides} unit(s) have a per-unit override. Use '/mode clear' to drop them.");
+		}
+
+		void ReportSelection()
+		{
+			var selection = OwnedSelection();
+			if (selection.Length == 0)
+			{
+				Debug("Nothing selected.");
+				return;
+			}
+
+			var groups = selection
+				.Select(a => a.TraitOrDefault<ProgrammableController>())
+				.Where(c => c != null)
+				.GroupBy(c => c.ActiveModeName ?? "<none>")
+				.OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase);
+
+			Debug("Selection: " + string.Join(", ", groups.Select(g => $"{g.Count()}x {g.Key}")));
+		}
+
+		void HandleMode(string arg)
+		{
+			var parts = (arg ?? string.Empty).Split(' ', StringSplitOptions.RemoveEmptyEntries);
 			if (parts.Length == 0)
 			{
-				TextNotificationsManager.Debug("Usage: /mode <ModeName>  or  /mode <1-9> <ModeName>");
+				Usage();
 				return;
 			}
 
-			IEnumerable<Actor> targets;
-			string modeName;
-
-			if (parts.Length >= 2 && int.TryParse(parts[0], out var group))
+			switch (parts[0].ToLowerInvariant())
 			{
-				modeName = parts[1];
-				targets = ActorsInControlGroup(group);
-				if (!targets.Any())
-				{
-					TextNotificationsManager.Debug($"Control group {group} is empty.");
+				case "all":
+					AssignAll(parts);
 					return;
-				}
-			}
-			else
-			{
-				modeName = parts[0];
-				targets = OwnedSelection();
-				if (!targets.Any())
-				{
-					TextNotificationsManager.Debug("Nothing selected.");
+
+				case "type":
+					AssignType(parts);
 					return;
-				}
+
+				case "group":
+					AssignGroup(parts);
+					return;
+
+				case "clear":
+					executor.ClearUnitOverrides();
+					Debug("Cleared all per-unit overrides.");
+					return;
 			}
 
-			if (!ModeRegistry.IsKnownMode(modeName))
-			{
-				TextNotificationsManager.Debug(
-					$"Unknown mode '{modeName}'. Available: {string.Join(", ", ModeRegistry.AvailableModeNames)}");
-				return;
-			}
-
-			var order = ProgrammableController.CreateSetModeOrder(targets, modeName);
-			if (order == null)
-				return;
-
-			world.IssueOrder(order);
-			TextNotificationsManager.Debug($"Set {targets.Count()} unit(s) to {modeName}.");
+			// Bare "/mode X" applies to the current selection as a per-unit override.
+			AssignSelection(parts[0]);
 		}
 
-		void SetGroup(string arg)
+		void AssignAll(string[] parts)
 		{
-			if (!int.TryParse(arg.Trim(), out var group) || group < 1 || group > 9)
+			if (parts.Length < 2)
 			{
-				TextNotificationsManager.Debug("Usage: /group <1-9>");
+				Debug("Usage: /mode all <ModeName>");
 				return;
 			}
 
-			var targets = OwnedSelection().ToArray();
-			if (targets.Length == 0)
-			{
-				TextNotificationsManager.Debug("Nothing selected.");
-				return;
-			}
-
-			var order = ProgrammableController.CreateSetGroupOrder(targets, group);
-			if (order == null)
+			var mode = Canonical(parts[1]);
+			if (mode == null)
 				return;
 
-			world.IssueOrder(order);
-			TextNotificationsManager.Debug($"Assigned {targets.Length} unit(s) to group {group}.");
+			executor.Assignments.SetAll(mode);
+			Debug($"All units -> {mode}");
 		}
 
-		void ReportModes()
+		void AssignType(string[] parts)
 		{
-			var counts = new Dictionary<string, int>();
-			foreach (var actor in OwnedSelection())
+			if (parts.Length < 3)
+			{
+				Debug("Usage: /mode type <actorType> <ModeName>   e.g. /mode type harv RunHomeMode");
+				return;
+			}
+
+			var actorType = parts[1];
+			if (!world.Map.Rules.Actors.ContainsKey(actorType.ToLowerInvariant()))
+			{
+				Debug($"Unknown actor type '{actorType}'. Select a unit and use /whatis to see its type.");
+				return;
+			}
+
+			var mode = Canonical(parts[2]);
+			if (mode == null)
+				return;
+
+			executor.Assignments.SetUnitType(actorType, mode);
+			Debug($"All '{actorType}' -> {mode}");
+		}
+
+		void AssignGroup(string[] parts)
+		{
+			if (parts.Length < 3 || !int.TryParse(parts[1], out var group))
+			{
+				Debug("Usage: /mode group <1-9> <ModeName>");
+				return;
+			}
+
+			if (!executor.Assignments.IsValidGroup(group))
+			{
+				Debug($"Group must be 1-{executor.Assignments.GroupCount}.");
+				return;
+			}
+
+			var mode = Canonical(parts[2]);
+			if (mode == null)
+				return;
+
+			executor.Assignments.SetGroup(group, mode);
+			Debug($"Group {group} -> {mode}");
+		}
+
+		void AssignSelection(string modeName)
+		{
+			var mode = Canonical(modeName);
+			if (mode == null)
+				return;
+
+			var selection = OwnedSelection();
+			if (selection.Length == 0)
+			{
+				Debug("Nothing selected. Use '/mode all', '/mode type <t>' or '/mode group <n>' instead.");
+				return;
+			}
+
+			foreach (var actor in selection)
 			{
 				var controller = actor.TraitOrDefault<ProgrammableController>();
-				var mode = controller?.ActiveModeName ?? "<none>";
-				counts[mode] = counts.GetValueOrDefault(mode) + 1;
+				if (controller != null)
+					controller.ModeOverride = mode;
 			}
 
-			if (counts.Count == 0)
-			{
-				TextNotificationsManager.Debug("Nothing selected.");
-				return;
-			}
-
-			TextNotificationsManager.Debug("Selection: " +
-				string.Join(", ", counts.OrderBy(kv => kv.Key, System.StringComparer.Ordinal)
-					.Select(kv => $"{kv.Value}x {kv.Key}")));
+			Debug($"{selection.Length} selected unit(s) -> {mode}");
 		}
 
-		IEnumerable<Actor> OwnedSelection()
+		/// <summary>Validates a mode name and returns its canonical casing, or null with a message.</summary>
+		string Canonical(string modeName)
 		{
-			return world.Selection.Actors.Where(a =>
-				a.Owner == world.LocalPlayer && !a.IsDead && a.IsInWorld &&
-				a.TraitOrDefault<ProgrammableController>() != null);
+			var canonical = ModeRegistry.CanonicalName(modeName);
+			if (canonical == null)
+				Debug($"Unknown mode '{modeName}'. Known: {string.Join(", ", ModeRegistry.AvailableModeNames)}");
+
+			return canonical;
 		}
 
-		IEnumerable<Actor> ActorsInControlGroup(int group)
+		Actor[] OwnedSelection() =>
+			world.Selection.Actors
+				.Where(a => a.Owner == world.LocalPlayer && !a.IsDead && a.IsInWorld
+					&& a.TraitOrDefault<ProgrammableController>() != null)
+				.ToArray();
+
+		void Usage()
 		{
-			// The engine's control groups are 0-indexed internally but presented as 1-9.
-			return world.ControlGroups.GetActorsInControlGroup(group - 1)
-				.Where(a => a.Owner == world.LocalPlayer && !a.IsDead && a.IsInWorld &&
-					a.TraitOrDefault<ProgrammableController>() != null);
+			Debug("/mode <ModeName>                 selected units");
+			Debug("/mode all <ModeName>             every unit");
+			Debug("/mode type <actorType> <Mode>    e.g. /mode type harv RunHomeMode");
+			Debug("/mode group <1-9> <ModeName>     e.g. /mode group 1 AttackBaseMode");
+			Debug("/mode clear                      drop per-unit overrides");
+			Debug("/modes  /assignments  /whatmode");
 		}
+
+		static void Debug(string message) => TextNotificationsManager.Debug(message);
 	}
 }

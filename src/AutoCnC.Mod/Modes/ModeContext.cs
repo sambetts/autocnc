@@ -15,27 +15,26 @@ using AutoCnC.Mod.Traits;
 using AutoCnC.Modes.Core;
 using OpenRA;
 using OpenRA.Mods.Common.Traits;
-using OpenRA.Primitives;
 using OpenRA.Support;
 using OpenRA.Traits;
 
 namespace AutoCnC.Mod.Modes
 {
 	/// <summary>
-	/// The curated, deterministic API surface a <see cref="IUnitMode"/> is given.
+	/// The API a <see cref="IUnitMode"/> is given for reading the world and commanding its unit.
 	/// </summary>
 	/// <remarks>
 	/// <para>
-	/// Two jobs. First, <b>sensing</b>: flatten the live engine world into engine-free
-	/// <see cref="ThreatSnapshot"/> values that pure decision logic can consume. Second,
-	/// <b>acting</b>: turn a <see cref="UnitDecision"/> back into queued activities.
+	/// Modes execute <b>outside the lockstep simulation</b>, on the owning player's client only.
+	/// Decisions leave as <see cref="Order"/>s, exactly like a human player's clicks, so a mode
+	/// you wrote does not need to exist on your opponent's machine.
 	/// </para>
 	/// <para>
-	/// Everything here is deliberately lockstep-safe. There is intentionally no accessor for
-	/// <c>LocalPlayer</c>, <c>Selection</c>, <c>LocalRandom</c> or <c>ScreenMap</c> — if a mode
-	/// cannot reach client-local state, it cannot desync the match.
+	/// The practical consequence for authors: the simulation's determinism rules do not apply to
+	/// your code. Floating point, LINQ, <c>System.Random</c> and wall-clock time are all fine —
+	/// none of it touches the simulation, only the orders you emit do.
 	/// </para>
-	/// <para>One instance is created per unit and reused for the unit's lifetime.</para>
+	/// <para>One instance is created per unit and reused for that unit's lifetime.</para>
 	/// </remarks>
 	public sealed class ModeContext
 	{
@@ -48,30 +47,51 @@ namespace AutoCnC.Mod.Modes
 
 		public World World { get; }
 
-		/// <summary>Synced group state. Never OpenRA's client-local <c>ControlGroups</c>.</summary>
-		public GroupManager Groups { get; }
+		/// <summary>The actor this mode is driving.</summary>
+		public Actor Self => self;
 
-		/// <summary>The only random source a mode may use: seeded from the synced lobby seed.</summary>
+		public Player Owner => self.Owner;
+
+		/// <summary>A random source. <c>System.Random</c> is equally safe here.</summary>
 		public MersenneTwister Random => World.SharedRandom;
 
 		public int WorldTick => World.WorldTick;
 
-		/// <summary>Synced control group (1-9), or 0 if unassigned.</summary>
+		/// <summary>Control group this unit belongs to (1-9), or 0 if unassigned.</summary>
 		public int GroupId => controller.GroupId;
 
+		/// <summary>Name of the mode currently running on this unit.</summary>
+		public string ModeName => controller.ActiveModeName;
+
 		/// <summary>The position this unit treats as home. Defaults to where it was created.</summary>
-		public CPos Anchor => controller.Anchor;
+		public CPos Anchor
+		{
+			get => controller.Anchor;
+			set => controller.Anchor = value;
+		}
 
 		public bool CanMove => move != null;
 		public bool HasWeapon => attackBases.Length > 0;
 		public bool IsIdle => self.IsIdle;
 
-		internal ModeContext(ProgrammableController controller, Actor self, GroupManager groups)
+		/// <summary>
+		/// Asks the executor to evaluate this unit on the next tick instead of waiting for its
+		/// interval, and to re-send its order even if the decision is unchanged.
+		/// </summary>
+		/// <remarks>
+		/// Useful from <see cref="IUnitMode.OnDamaged"/>, which fires between evaluations.
+		/// </remarks>
+		public void RequestReevaluation()
+		{
+			controller.NextEvaluationTick = 0;
+			controller.LastIssued = UnitDecision.Continue;
+		}
+
+		internal ModeContext(ProgrammableController controller, Actor self)
 		{
 			this.controller = controller;
 			this.self = self;
 			World = self.World;
-			Groups = groups;
 
 			attackBases = self.TraitsImplementing<AttackBase>().ToArray();
 			health = self.TraitOrDefault<IHealth>();
@@ -115,13 +135,17 @@ namespace AutoCnC.Mod.Modes
 		public int DistanceFromAnchorUnits =>
 			(self.CenterPosition - World.Map.CenterOfCell(controller.Anchor)).HorizontalLength;
 
+		public int DistanceTo(Actor other) =>
+			other == null ? int.MaxValue : (other.CenterPosition - self.CenterPosition).HorizontalLength;
+
+		public int DistanceTo(CPos cell) =>
+			(World.Map.CenterOfCell(cell) - self.CenterPosition).HorizontalLength;
+
 		/// <summary>
 		/// Flattens every visible enemy within <paramref name="radius"/> into engine-free snapshots.
 		/// </summary>
 		/// <remarks>
-		/// Results are sorted by <c>ActorID</c>. Spatial query order is already consistent across
-		/// clients, but sorting makes downstream tie-breaking provably stable and costs nothing at
-		/// these list sizes. The returned list is a reused buffer — do not retain it across ticks.
+		/// The returned list is a reused buffer — consume it within the tick, do not retain it.
 		/// </remarks>
 		public IReadOnlyList<ThreatSnapshot> SenseThreats(WDist radius)
 		{
@@ -139,7 +163,7 @@ namespace AutoCnC.Mod.Modes
 			return threatBuffer;
 		}
 
-		/// <summary>Enemy structures within <paramref name="radius"/>, for objective selection.</summary>
+		/// <summary>Visible enemy structures within <paramref name="radius"/>, for objective selection.</summary>
 		public IReadOnlyList<ThreatSnapshot> SenseStructures(WDist radius)
 		{
 			var results = new List<ThreatSnapshot>();
@@ -154,6 +178,14 @@ namespace AutoCnC.Mod.Modes
 
 			results.Sort(static (a, b) => a.ActorId.CompareTo(b.ActorId));
 			return results;
+		}
+
+		/// <summary>Allied actors within <paramref name="radius"/>, optionally filtered by actor type.</summary>
+		public IEnumerable<Actor> SenseAllies(WDist radius, string actorType = null)
+		{
+			return World.FindActorsInCircle(self.CenterPosition, radius)
+				.Where(a => a != self && !a.IsDead && a.IsInWorld && a.Owner.IsAlliedWith(self.Owner)
+					&& (actorType == null || string.Equals(a.Info.Name, actorType, System.StringComparison.OrdinalIgnoreCase)));
 		}
 
 		public ThreatSnapshot Snapshot(Actor actor)
@@ -185,7 +217,7 @@ namespace AutoCnC.Mod.Modes
 			if (actor.GetEnabledTargetTypes().IsEmpty)
 				return false;
 
-			// Respect fog and cloaking. Shroud is synced simulation state, so this is safe.
+			// Respect fog and cloaking, so a mode cannot cheat by seeing through the shroud.
 			return actor.CanBeViewedByPlayer(self.Owner);
 		}
 
@@ -232,19 +264,11 @@ namespace AutoCnC.Mod.Modes
 				return ThreatKind.Economy;
 
 			if (info.HasTraitInfo<MobileInfo>())
-				return info.HasTraitInfo<CargoInfo>() || !info.HasTraitInfo<ValuedInfo>()
-					? ThreatKind.Vehicle
-					: ClassifyMobile(actor);
+				return actor.GetEnabledTargetTypes().Contains("Infantry")
+					? ThreatKind.Infantry
+					: ThreatKind.Vehicle;
 
 			return ThreatKind.Unknown;
-		}
-
-		static ThreatKind ClassifyMobile(Actor actor)
-		{
-			// Infantry and vehicles both use Mobile, so fall back to the mod's own target types,
-			// which is the moddable, faction-agnostic way to tell them apart.
-			var types = actor.GetEnabledTargetTypes();
-			return types.Contains("Infantry") ? ThreatKind.Infantry : ThreatKind.Vehicle;
 		}
 
 		/// <summary>Resolves an ActorID from a decision back into a live actor, or null.</summary>
@@ -258,23 +282,24 @@ namespace AutoCnC.Mod.Modes
 		}
 
 		/// <summary>Nearest allied structure that can repair us, or null.</summary>
-		public Actor FindRepairBay()
+		public Actor FindRepairBay() => FindNearestAllied<RepairsUnits>();
+
+		/// <summary>Nearest allied refinery, or null.</summary>
+		public Actor FindRefinery() => FindNearestAllied<Refinery>();
+
+		/// <summary>Nearest allied actor with trait <typeparamref name="T"/>, or null.</summary>
+		public Actor FindNearestAllied<T>()
 		{
 			Actor best = null;
 			var bestDistance = int.MaxValue;
 
-			foreach (var candidate in World.ActorsHavingTrait<RepairsUnits>())
+			foreach (var candidate in World.ActorsHavingTrait<T>())
 			{
-				if (candidate.IsDead || !candidate.IsInWorld)
-					continue;
-
-				if (!candidate.Owner.IsAlliedWith(self.Owner))
+				if (candidate.IsDead || !candidate.IsInWorld || !candidate.Owner.IsAlliedWith(self.Owner))
 					continue;
 
 				var distance = (candidate.CenterPosition - self.CenterPosition).HorizontalLength;
-
-				// Deterministic tie-break: never let enumeration order decide.
-				if (distance < bestDistance || (distance == bestDistance && best != null && candidate.ActorID < best.ActorID))
+				if (distance < bestDistance)
 				{
 					bestDistance = distance;
 					best = candidate;
@@ -289,94 +314,76 @@ namespace AutoCnC.Mod.Modes
 		#region Acting
 
 		/// <summary>
-		/// Applies a decision to the unit. This is the single place a mode's intent becomes
-		/// engine state, which keeps activity handling consistent across every mode.
+		/// Translates a decision into the order that would carry it out, or null if the decision
+		/// needs no command.
 		/// </summary>
-		public void Apply(in UnitDecision decision)
+		/// <remarks>
+		/// Orders are not issued here. <see cref="ModeExecutor"/> compares intent against the last
+		/// command before sending, so a mode returning the same decision every tick does not flood
+		/// the order stream.
+		/// </remarks>
+		internal Order BuildOrder(in UnitDecision decision)
 		{
 			switch (decision.Action)
 			{
 				case UnitAction.Continue:
-					break;
+					return null;
 
 				case UnitAction.Hold:
-					Stop();
-					break;
+					return new Order("Stop", self, false);
 
 				case UnitAction.Attack:
 				{
 					var target = ResolveActor(decision.TargetActorId);
-					if (target != null)
-						Attack(target);
-					break;
+					if (target == null)
+						return null;
+
+					return new Order("Attack", self, Target.FromActor(target), false);
 				}
 
 				case UnitAction.ReturnToAnchor:
-					MoveTo(controller.Anchor);
-					break;
+					return MoveOrder(controller.Anchor);
 
 				case UnitAction.Retreat:
 				{
 					var bay = FindRepairBay();
-					if (bay != null)
-						MoveTo(bay.Location, 2);
-					else
-						MoveTo(controller.Anchor);
-					break;
+					return MoveOrder(bay?.Location ?? controller.Anchor);
 				}
 
 				case UnitAction.AdvanceToObjective:
 				{
 					var objective = ResolveActor(decision.TargetActorId);
-					if (objective != null)
-						AttackMoveTo(objective.Location);
-					break;
+					if (objective == null)
+						return null;
+
+					return AttackMoveOrder(objective.Location);
 				}
+
+				case UnitAction.MoveTo:
+					return MoveOrder(new CPos(decision.TargetX, decision.TargetY));
+
+				case UnitAction.AttackMoveTo:
+					return AttackMoveOrder(new CPos(decision.TargetX, decision.TargetY));
+
+				default:
+					return null;
 			}
 		}
 
-		/// <summary>
-		/// Attacks a target by queueing an attack activity directly.
-		/// </summary>
-		/// <remarks>
-		/// This mirrors the engine's own AutoTarget, which calls
-		/// <c>AttackBase.AttackTarget(...)</c> and never constructs an <see cref="Order"/>.
-		/// Trait ticks already run on every client, so no network round-trip is needed — and
-		/// issuing orders from here would flood the order stream. See docs/determinism.md.
-		/// </remarks>
-		public void Attack(Actor target, bool allowMove = true)
-		{
-			if (target == null || target.IsDead || !target.IsInWorld)
-				return;
-
-			var t = Target.FromActor(target);
-			foreach (var ab in ActiveAttackBases)
-				ab.AttackTarget(t, AttackSource.Default, false, allowMove);
-		}
-
-		public void MoveTo(CPos cell, int nearEnoughCells = 0)
+		Order MoveOrder(CPos cell)
 		{
 			if (move == null)
-				return;
+				return null;
 
-			self.QueueActivity(false, move.MoveTo(cell, nearEnoughCells));
+			return new Order("Move", self, Target.FromCell(World, cell), false);
 		}
 
-		/// <summary>Advances on a cell while still engaging targets of opportunity en route.</summary>
-		public void AttackMoveTo(CPos cell)
+		Order AttackMoveOrder(CPos cell)
 		{
 			if (move == null)
-				return;
+				return null;
 
-			var destination = cell;
-			self.QueueActivity(false, new OpenRA.Mods.Common.Activities.AttackMoveActivity(
-				self, () => move.MoveTo(destination, 1)));
-		}
-
-		public void Stop()
-		{
-			if (!self.IsIdle)
-				self.CancelActivity();
+			return new Order("AttackMove", self, Target.FromCell(World, cell), false);
 		}
 
 		#endregion

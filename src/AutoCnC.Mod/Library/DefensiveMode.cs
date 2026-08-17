@@ -21,9 +21,9 @@ namespace AutoCnC.Mod.Library
 	/// refuses to be baited beyond its leash, and withdraws for repair when badly hurt.
 	/// </summary>
 	/// <remarks>
-	/// Reference implementation of the sense/decide/act pattern. Note how little happens here:
-	/// all the actual judgement lives in <see cref="DefensiveLogic"/>, which has no engine
-	/// dependency and is unit-tested directly.
+	/// Reference implementation of the sense/decide/act pattern. Note how little happens here —
+	/// the judgement lives in <see cref="DefensiveLogic"/>, which has no engine dependency and is
+	/// unit-tested directly.
 	/// </remarks>
 	public sealed class DefensiveMode : UnitMode
 	{
@@ -32,8 +32,8 @@ namespace AutoCnC.Mod.Library
 
 		public override void OnEnter(Actor self, ModeContext ctx)
 		{
-			// Scale the leash off the unit's own reach so short-ranged units stay tighter
-			// to the anchor than artillery does.
+			// Scale the leash off the unit's own reach, so short-ranged units stay tighter to the
+			// anchor than artillery does.
 			var range = ctx.WeaponRangeUnits;
 			if (range > 0)
 				tuning = DefensiveTuning.Default with
@@ -43,9 +43,12 @@ namespace AutoCnC.Mod.Library
 				};
 
 			recovering = false;
+
+			// Guard wherever we were standing when the mode was assigned.
+			ctx.Anchor = self.Location;
 		}
 
-		public override void OnTick(Actor self, ModeContext ctx)
+		public override UnitDecision OnTick(Actor self, ModeContext ctx)
 		{
 			// --- Sense -------------------------------------------------------------
 			var state = new DefensiveState(
@@ -56,13 +59,13 @@ namespace AutoCnC.Mod.Library
 				HasWeapon: ctx.HasWeapon,
 				CanMove: ctx.CanMove,
 				RepairAvailable: ctx.FindRepairBay() != null,
-				Threats: ctx.SenseThreats(TrackedScanRadius(ctx)));
+				Threats: ctx.SenseThreats(SenseRadius(ctx)));
 
 			// --- Decide ------------------------------------------------------------
 			var decision = DefensiveLogic.Decide(state, tuning);
 
-			// Hysteresis so a unit that limps to the repair bay actually stays long enough to
-			// be repaired, instead of oscillating in and out of combat at the retreat threshold.
+			// Hysteresis, so a unit that limps to the repair bay stays long enough to actually be
+			// repaired instead of oscillating in and out of combat at the retreat threshold.
 			if (decision.Action == UnitAction.Retreat)
 				recovering = true;
 			else if (recovering && state.HealthPercent < tuning.ResumeAboveHealthPercent)
@@ -70,14 +73,14 @@ namespace AutoCnC.Mod.Library
 			else
 				recovering = false;
 
-			// --- Act ---------------------------------------------------------------
-			ctx.Apply(decision);
+			return decision;
 		}
 
 		public override void OnDamaged(Actor self, ModeContext ctx, AttackInfo e)
 		{
-			// Being shot from outside our sense radius is the one case the periodic scan
-			// cannot see. Answer it immediately rather than waiting for the next evaluation.
+			// Being shot from outside our sense radius is the one case the periodic scan cannot
+			// see. Pull the anchor toward the attacker so the next evaluation reacts, rather than
+			// issuing an order from here and fighting the executor's order suppression.
 			var attacker = e.Attacker;
 			if (attacker == null || attacker.IsDead || !attacker.IsInWorld)
 				return;
@@ -85,18 +88,14 @@ namespace AutoCnC.Mod.Library
 			if (self.Owner.RelationshipWith(attacker.Owner) != PlayerRelationship.Enemy)
 				return;
 
-			if (!ctx.IsIdle || !ctx.CanAttack(attacker))
+			if (!ctx.CanAttack(attacker))
 				return;
 
-			var snapshot = ctx.Snapshot(attacker);
-			var reachDistance = ctx.DistanceFromAnchorUnits + snapshot.DistanceUnits;
-			if (reachDistance > tuning.LeashRadiusUnits)
-				return;
-
-			ctx.Attack(attacker);
+			// Bring forward the next evaluation by clearing our record of what we last did.
+			ctx.RequestReevaluation();
 		}
 
-		WDist TrackedScanRadius(ModeContext ctx)
+		WDist SenseRadius(ModeContext ctx)
 		{
 			// Sense a little past the leash so threats are seen before they are in range.
 			var units = tuning.LeashRadiusUnits;

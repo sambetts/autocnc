@@ -13,68 +13,89 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using OpenRA;
-using OpenRA.Primitives;
-using OpenRA.Support;
-using OpenRA.Traits;
 
 namespace AutoCnC.Mod.Modes
 {
 	/// <summary>
-	/// Resolves <see cref="IUnitMode"/> implementations by name, using OpenRA's own
-	/// <see cref="ObjectCreator"/> so that modes are discovered from every loaded mod assembly.
+	/// Finds <see cref="IUnitMode"/> implementations by name across every loaded mod assembly.
 	/// </summary>
 	/// <remarks>
-	/// This is why adding a mode needs no factory, switch statement or registration call: the same
-	/// reflection mechanism the engine uses to bind YAML trait names to <c>TraitInfo</c> classes
-	/// binds mode names to <see cref="IUnitMode"/> classes.
+	/// <para>
+	/// Discovery uses OpenRA's own <c>ObjectCreator</c> — the same reflection the engine uses to
+	/// bind YAML trait names to <c>TraitInfo</c> classes. That is why player-authored modes need
+	/// no bespoke loader: build them into an assembly, list it in <c>mod.yaml</c>'s
+	/// <c>Assemblies:</c>, and they appear here automatically.
+	/// </para>
+	/// <para>Modes are addressed by their class name, e.g. <c>DefensiveMode</c>.</para>
 	/// </remarks>
 	public static class ModeRegistry
 	{
 		static readonly object SyncRoot = new();
 		static Dictionary<string, Type> modeTypes;
+		static readonly List<string> LoadErrors = [];
 
-		/// <summary>All discovered mode names. Ordered for stable error messages and UI.</summary>
+		/// <summary>All discovered mode names, ordered for stable listing.</summary>
 		public static IEnumerable<string> AvailableModeNames
 		{
 			get
 			{
 				EnsureLoaded();
-				return modeTypes.Keys.OrderBy(k => k, StringComparer.Ordinal);
+				return modeTypes.Keys.OrderBy(k => k, StringComparer.OrdinalIgnoreCase);
+			}
+		}
+
+		/// <summary>Problems found while scanning for modes, for surfacing to the player.</summary>
+		public static IReadOnlyList<string> Errors
+		{
+			get
+			{
+				EnsureLoaded();
+				return LoadErrors;
 			}
 		}
 
 		public static bool IsKnownMode(string name)
 		{
-			if (string.IsNullOrEmpty(name))
+			if (string.IsNullOrWhiteSpace(name))
 				return false;
 
 			EnsureLoaded();
 			return modeTypes.ContainsKey(name);
 		}
 
-		/// <summary>
-		/// Creates a fresh mode instance. Each unit gets its own, so modes may hold per-unit state.
-		/// </summary>
-		public static IUnitMode Create(string name)
+		/// <summary>Resolves a name case-insensitively to its canonical class name, or null.</summary>
+		public static string CanonicalName(string name)
 		{
+			if (string.IsNullOrWhiteSpace(name))
+				return null;
+
 			EnsureLoaded();
-
-			if (!modeTypes.TryGetValue(name, out var type))
-				throw new InvalidOperationException(
-					$"Unknown unit mode '{name}'. Known modes: {string.Join(", ", AvailableModeNames)}");
-
-			return (IUnitMode)Activator.CreateInstance(type);
+			return modeTypes.TryGetValue(name, out var type) ? type.Name : null;
 		}
 
 		/// <summary>
-		/// Validates a mode name at rules-load time so typos surface as a clean YAML error
-		/// rather than an exception mid-match.
+		/// Creates a fresh mode instance, or null if unknown or construction fails. Each unit gets
+		/// its own instance, so modes may hold per-unit state.
 		/// </summary>
-		public static void ValidateOrThrow(string name, string fieldName)
+		public static IUnitMode CreateOrNull(string name)
 		{
-			if (!IsKnownMode(name))
-				throw new YamlException(
-					$"{fieldName}: unknown unit mode '{name}'. Known modes: {string.Join(", ", AvailableModeNames)}");
+			if (string.IsNullOrWhiteSpace(name))
+				return null;
+
+			EnsureLoaded();
+
+			if (!modeTypes.TryGetValue(name, out var type))
+				return null;
+
+			try
+			{
+				return (IUnitMode)Activator.CreateInstance(type);
+			}
+			catch (Exception ex)
+			{
+				Log.Write("debug", $"Failed to construct unit mode '{name}': {ex}");
+				return null;
+			}
 		}
 
 		static void EnsureLoaded()
@@ -87,19 +108,25 @@ namespace AutoCnC.Mod.Modes
 				if (modeTypes != null)
 					return;
 
-				var discovered = new Dictionary<string, Type>(StringComparer.Ordinal);
+				var discovered = new Dictionary<string, Type>(StringComparer.OrdinalIgnoreCase);
+				LoadErrors.Clear();
+
 				foreach (var type in Game.ModData.ObjectCreator.GetTypesImplementing<IUnitMode>())
 				{
 					if (type.IsAbstract || type.IsInterface)
 						continue;
 
 					if (type.GetConstructor(Type.EmptyTypes) == null)
-						throw new InvalidOperationException(
-							$"Unit mode '{type.Name}' must have a public parameterless constructor.");
+					{
+						LoadErrors.Add($"{type.Name}: needs a public parameterless constructor.");
+						continue;
+					}
 
 					if (discovered.TryGetValue(type.Name, out var existing))
-						throw new InvalidOperationException(
-							$"Duplicate unit mode name '{type.Name}' ({existing.FullName} and {type.FullName}).");
+					{
+						LoadErrors.Add($"{type.Name}: duplicate name ({existing.FullName} and {type.FullName}).");
+						continue;
+					}
 
 					discovered.Add(type.Name, type);
 				}
@@ -108,7 +135,7 @@ namespace AutoCnC.Mod.Modes
 			}
 		}
 
-		/// <summary>Test/reload hook: drops the cache so the next lookup rescans assemblies.</summary>
+		/// <summary>Drops the cache so the next lookup rescans loaded assemblies.</summary>
 		public static void Invalidate()
 		{
 			lock (SyncRoot)

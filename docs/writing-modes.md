@@ -165,11 +165,32 @@ You don't call actuators; you return a decision. To nudge timing:
 /mode clear                     drop per-unit overrides
 /assignments                    what's currently assigned
 /whatmode                       what the selection is running
+/modelog                        toggle decision logging
 ```
 
-Precedence is most-specific-wins: **unit selection > group > unit type > all**. So
-`/mode all DefensiveMode` then `/mode type harv RunHomeMode` does what you'd expect, and neither
-clobbers the other. The rules are tested in `ModeAssignmentsTests`.
+Precedence is most-specific-wins: **unit selection > group > unit type > actor default > all**.
+The actor default is the `DefaultMode` declared on the actor in YAML — it's what makes an MCV
+run `BuildBaseMode` — and it sits above `all` so a blanket assignment can't stop your base
+building itself. The rules are tested in `ModeAssignmentsTests`.
+
+## Debugging a mode
+
+`/modelog` writes every issued decision to `debug.log` (in `Documents/OpenRA/Logs` or
+`%APPDATA%/OpenRA/Logs`):
+
+```
+[mode] fact#23 BuildBaseMode: Produce nuke -> StartProduction (building nuke)
+[mode] fact#23 BuildBaseMode: PlaceBuilding nuke -> PlaceBuilding (placing nuke)
+```
+
+You get the decision, the order it became, and your mode's own stated reason — which is why the
+`reason` argument on every `UnitDecision` is worth filling in properly.
+
+Two failure modes it makes obvious:
+
+- **A mode issuing the same order forever.** Usually a decision that never becomes satisfied.
+- **A mode issuing nothing.** Usually returning `Continue` when you meant to act, or the unit
+  resolving to a different mode than you expect — check `/whatmode`.
 
 ---
 

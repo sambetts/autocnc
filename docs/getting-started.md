@@ -66,8 +66,9 @@ Build complete. Next: ./scripts/launch.ps1
 AutoC&C is built on Tiberian Dawn, so on first run OpenRA offers to download the **freeware**
 C&C assets (~100MB, legally redistributed by EA). Accept, wait, and you land on the main menu.
 
-Start a skirmish. Your units are already running `DefensiveMode` — build a few and watch them
-hold ground rather than chase.
+Start a skirmish. Your MCV deploys itself and the base starts building — that's `BuildBaseMode`,
+which MCVs and construction yards run by default. Combat units run `DefensiveMode`, so they hold
+ground rather than chase.
 
 Press `Enter` to open the chatbox and try:
 
@@ -78,7 +79,7 @@ Press `Enter` to open the chatbox and try:
 You should see the shipped modes plus the templates:
 
 ```
-Modes: AttackBaseMode, DefensiveMode, HarvesterEscortMode, RunHomeMode, ScoutMode
+Modes: AttackBaseMode, BuildBaseMode, DefensiveMode, HarvesterEscortMode, RunHomeMode, ScoutMode
 ```
 
 If that list is missing your modes, jump to [Troubleshooting](#troubleshooting).
@@ -100,6 +101,7 @@ Inspect what's going on:
 
 ```
 /whatmode        what the current selection is running
+/modelog         log every decision to debug.log
 /assignments     every assignment currently in force
 /mode clear      drop per-unit overrides
 ```

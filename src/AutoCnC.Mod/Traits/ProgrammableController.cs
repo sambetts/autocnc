@@ -28,6 +28,12 @@ namespace AutoCnC.Mod.Traits
 		[Desc("Default sense radius for this unit, used by modes that do not specify one.")]
 		public readonly WDist ScanRadius = WDist.FromCells(8);
 
+		[Desc("The mode this actor type naturally runs, e.g. BuildBaseMode for an MCV.",
+			"Sits above the executor's global default in the precedence chain, so '/mode all X'",
+			"will not stop a construction yard building, but below the player's own type and",
+			"group assignments so it can still be overridden deliberately.")]
+		public readonly string DefaultMode = null;
+
 		public override object Create(ActorInitializer init) { return new ProgrammableController(init.Self, this); }
 	}
 

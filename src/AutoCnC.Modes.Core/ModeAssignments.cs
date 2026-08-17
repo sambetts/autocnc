@@ -21,14 +21,17 @@ namespace AutoCnC.Modes.Core
 		/// <summary>Every programmable unit the player owns.</summary>
 		All = 0,
 
+		/// <summary>The mode an actor type naturally runs, declared in YAML.</summary>
+		ActorDefault = 1,
+
 		/// <summary>Every unit of one actor type, e.g. all harvesters.</summary>
-		UnitType = 1,
+		UnitType = 2,
 
 		/// <summary>Every unit in one control group (1-9).</summary>
-		Group = 2,
+		Group = 3,
 
 		/// <summary>One specific unit, set by selecting it.</summary>
-		Unit = 3,
+		Unit = 4,
 	}
 
 	/// <summary>
@@ -78,7 +81,13 @@ namespace AutoCnC.Modes.Core
 		/// <param name="unitOverride">A mode set on this specific unit, or null.</param>
 		/// <param name="groupId">The unit's control group (1-9), or 0 if unassigned.</param>
 		/// <param name="actorType">The unit's actor type, e.g. "harv".</param>
-		public string Resolve(string unitOverride, int groupId, string actorType)
+		/// <param name="actorDefault">
+		/// The mode this actor type naturally runs, declared in YAML. Sits above the global
+		/// default so that <c>/mode all DefensiveMode</c> does not stop a construction yard
+		/// building, but below the player's own type and group assignments so it can still be
+		/// overridden deliberately.
+		/// </param>
+		public string Resolve(string unitOverride, int groupId, string actorType, string actorDefault = null)
 		{
 			if (!string.IsNullOrEmpty(unitOverride))
 				return unitOverride;
@@ -88,6 +97,9 @@ namespace AutoCnC.Modes.Core
 
 			if (!string.IsNullOrEmpty(actorType) && byUnitType.TryGetValue(actorType, out var typeMode) && !string.IsNullOrEmpty(typeMode))
 				return typeMode;
+
+			if (!string.IsNullOrEmpty(actorDefault))
+				return actorDefault;
 
 			return GlobalMode;
 		}

@@ -36,6 +36,18 @@ namespace AutoCnC.Modes.Core
 
 		/// <summary>Attack-move to the cell in <see cref="UnitDecision.TargetX"/>/<see cref="UnitDecision.TargetY"/>.</summary>
 		AttackMoveTo = 7,
+
+		/// <summary>Deploy this unit, e.g. an MCV unfolding into a construction yard.</summary>
+		Deploy = 8,
+
+		/// <summary>Start producing <see cref="UnitDecision.ItemName"/> from this actor's queue.</summary>
+		Produce = 9,
+
+		/// <summary>
+		/// Place the finished building <see cref="UnitDecision.ItemName"/> at
+		/// <see cref="UnitDecision.TargetX"/>/<see cref="UnitDecision.TargetY"/>.
+		/// </summary>
+		PlaceBuilding = 10,
 	}
 
 	/// <summary>
@@ -51,17 +63,21 @@ namespace AutoCnC.Modes.Core
 		uint TargetActorId,
 		int TargetX,
 		int TargetY,
+		string ItemName,
 		string Reason)
 	{
-		public static readonly UnitDecision Continue = new(UnitAction.Continue, 0, 0, 0, "no change");
+		public static readonly UnitDecision Continue = new(UnitAction.Continue, 0, 0, 0, null, "no change");
 
-		public static UnitDecision Hold(string reason) => new(UnitAction.Hold, 0, 0, 0, reason);
-		public static UnitDecision Attack(uint targetActorId, string reason) => new(UnitAction.Attack, targetActorId, 0, 0, reason);
-		public static UnitDecision ReturnToAnchor(string reason) => new(UnitAction.ReturnToAnchor, 0, 0, 0, reason);
-		public static UnitDecision Retreat(string reason) => new(UnitAction.Retreat, 0, 0, 0, reason);
-		public static UnitDecision AdvanceToObjective(uint objectiveActorId, string reason) => new(UnitAction.AdvanceToObjective, objectiveActorId, 0, 0, reason);
-		public static UnitDecision MoveTo(int x, int y, string reason) => new(UnitAction.MoveTo, 0, x, y, reason);
-		public static UnitDecision AttackMoveTo(int x, int y, string reason) => new(UnitAction.AttackMoveTo, 0, x, y, reason);
+		public static UnitDecision Hold(string reason) => new(UnitAction.Hold, 0, 0, 0, null, reason);
+		public static UnitDecision Attack(uint targetActorId, string reason) => new(UnitAction.Attack, targetActorId, 0, 0, null, reason);
+		public static UnitDecision ReturnToAnchor(string reason) => new(UnitAction.ReturnToAnchor, 0, 0, 0, null, reason);
+		public static UnitDecision Retreat(string reason) => new(UnitAction.Retreat, 0, 0, 0, null, reason);
+		public static UnitDecision AdvanceToObjective(uint objectiveActorId, string reason) => new(UnitAction.AdvanceToObjective, objectiveActorId, 0, 0, null, reason);
+		public static UnitDecision MoveTo(int x, int y, string reason) => new(UnitAction.MoveTo, 0, x, y, null, reason);
+		public static UnitDecision AttackMoveTo(int x, int y, string reason) => new(UnitAction.AttackMoveTo, 0, x, y, null, reason);
+		public static UnitDecision Deploy(string reason) => new(UnitAction.Deploy, 0, 0, 0, null, reason);
+		public static UnitDecision Produce(string itemName, string reason) => new(UnitAction.Produce, 0, 0, 0, itemName, reason);
+		public static UnitDecision PlaceBuilding(string itemName, int x, int y, string reason) => new(UnitAction.PlaceBuilding, 0, x, y, itemName, reason);
 
 		/// <summary>
 		/// True if this decision commands the same thing as <paramref name="other"/>, ignoring the
@@ -71,6 +87,7 @@ namespace AutoCnC.Modes.Core
 			Action == other.Action &&
 			TargetActorId == other.TargetActorId &&
 			TargetX == other.TargetX &&
-			TargetY == other.TargetY;
+			TargetY == other.TargetY &&
+			ItemName == other.ItemName;
 	}
 }

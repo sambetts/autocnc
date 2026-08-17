@@ -48,6 +48,7 @@ namespace AutoCnC.Mod.Traits
 			console.RegisterCommand("modes", this);
 			console.RegisterCommand("assignments", this);
 			console.RegisterCommand("whatmode", this);
+			console.RegisterCommand("modelog", this);
 		}
 
 		public void InvokeCommand(string name, string arg)
@@ -67,6 +68,13 @@ namespace AutoCnC.Mod.Traits
 
 				case "whatmode":
 					ReportSelection();
+					break;
+
+				case "modelog":
+					executor.LogDecisions = !executor.LogDecisions;
+					Debug(executor.LogDecisions
+						? "Decision logging ON. Every order your modes issue is written to debug.log."
+						: "Decision logging OFF.");
 					break;
 
 				case "mode":
@@ -263,7 +271,7 @@ namespace AutoCnC.Mod.Traits
 			Debug("/mode type <actorType> <Mode>    e.g. /mode type harv RunHomeMode");
 			Debug("/mode group <1-9> <ModeName>     e.g. /mode group 1 AttackBaseMode");
 			Debug("/mode clear                      drop per-unit overrides");
-			Debug("/modes  /assignments  /whatmode");
+			Debug("/modes  /assignments  /whatmode  /modelog");
 		}
 
 		static void Debug(string message) => TextNotificationsManager.Debug(message);

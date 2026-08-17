@@ -39,13 +39,19 @@ namespace AutoCnC.Modes.Core
 	{
 		public static UnitDecision Decide(in DefensiveState state, in DefensiveTuning tuning)
 		{
+			// 0. A unit with no weapon cannot defend anything, so this mode has nothing useful to
+			//    say about it. Bail out rather than interfering: without this, step 3 below drags
+			//    harvesters off tiberium and back to their anchor, killing the economy the moment
+			//    a player runs "/mode all DefensiveMode".
+			if (!state.HasWeapon)
+				return UnitDecision.Continue;
+
 			// 1. Self-preservation outranks everything. A dead unit guards nothing.
 			if (state.RepairAvailable && state.HealthPercent <= tuning.RetreatBelowHealthPercent)
 				return UnitDecision.Retreat($"health {state.HealthPercent}% <= {tuning.RetreatBelowHealthPercent}%");
 
 			// 2. Engage, but never chase beyond the leash: the whole point of a defensive unit
 			//    is that it cannot be baited away from what it is guarding.
-			if (state.HasWeapon)
 			{
 				var target = SelectTarget(state, tuning);
 				if (target.HasValue)

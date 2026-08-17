@@ -56,8 +56,25 @@ MSAM:
 		ScanRadius: 12c0
 
 # Unarmed actors never inherited the AutoTarget mixins, so they need the controller adding
-# explicitly. Harvesters are the motivating case: '/mode type harv RunHomeMode'.
+# explicitly.
+
+# Harvesters: the motivating case for '/mode type harv RunHomeMode'. Note that combat modes
+# no-op on weaponless units, so a blanket '/mode all DefensiveMode' will not stop them mining.
 HARV:
 	ProgrammableController:
 		TickInterval: 12
 		ScanRadius: 7c0
+
+# The MCV and the construction yard it unfolds into both run BuildBaseMode by default.
+# Without this a skirmish never starts: you spawn next to an undeployed MCV and nothing
+# produces anything. DefaultMode outranks the executor's global default, so '/mode all X'
+# will not accidentally stop the base building itself.
+MCV:
+	ProgrammableController:
+		TickInterval: 10
+		DefaultMode: BuildBaseMode
+
+FACT:
+	ProgrammableController:
+		TickInterval: 25
+		DefaultMode: BuildBaseMode

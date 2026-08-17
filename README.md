@@ -83,9 +83,15 @@ Three templates ship to start from:
 | `ScoutMode` | Per-unit state, reacting to damage between evaluations |
 | `HarvesterEscortMode` | Tracking another actor and defending it |
 
-Plus two reference modes built into the mod: **`DefensiveMode`** (holds ground, won't be baited
-past its leash, retreats to repair) and **`AttackBaseMode`** (pushes a base, only fires on what
-is already in range).
+Plus three reference modes built into the mod:
+
+- **`BuildBaseMode`** — deploys your MCV and grows the base from a build plan. MCVs and
+  construction yards run this by default, so a skirmish actually starts.
+- **`DefensiveMode`** — holds ground, won't be baited past its leash, retreats to repair.
+- **`AttackBaseMode`** — pushes a base, only fires on what is already in range.
+
+Combat modes no-op on unarmed units, so `/mode all DefensiveMode` won't stop your harvesters
+mining or your construction yard building.
 
 See [`docs/getting-started.md`](docs/getting-started.md) for the full walkthrough, or
 [`docs/writing-modes.md`](docs/writing-modes.md) for the API reference.
@@ -118,10 +124,12 @@ Press `Enter` in-game for the chatbox:
 | `/mode clear` | Drop per-unit overrides |
 | `/assignments` | What's currently assigned |
 | `/whatmode` | What the selection is running |
+| `/modelog` | Toggle decision logging to `debug.log` — your main debugging tool |
 
-Precedence is **most specific wins**: selection > group > unit type > all. So
+Precedence is **most specific wins**: selection > group > unit type > actor default > all. So
 `/mode all DefensiveMode` followed by `/mode type harv RunHomeMode` does what you'd expect, and
-neither clobbers the other.
+neither clobbers the other. The actor default is declared in YAML (it's what makes an MCV run
+`BuildBaseMode`), so `/mode all` won't accidentally stop your base building itself.
 
 ---
 

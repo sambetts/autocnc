@@ -311,6 +311,201 @@ namespace AutoCnC.Mod.Modes
 
 		#endregion
 
+		#region Base building
+
+		/// <summary>True if this actor is a building.</summary>
+		public bool IsBuilding => self.Info.HasTraitInfo<BuildingInfo>();
+
+		/// <summary>True if this unit can transform right now.</summary>
+		/// <remarks>
+		/// Careful: in Tiberian Dawn a construction yard can transform too — back into an MCV.
+		/// Use <see cref="DeploysIntoBuilding"/> if you mean "unfold into a base".
+		/// </remarks>
+		public bool CanDeploy
+		{
+			get
+			{
+				var transforms = self.TraitOrDefault<Transforms>();
+				return transforms != null && !transforms.IsTraitDisabled && !transforms.IsTraitPaused && transforms.CanDeploy();
+			}
+		}
+
+		/// <summary>
+		/// True if transforming would turn this unit into a building, e.g. an MCV unfolding into
+		/// a construction yard.
+		/// </summary>
+		/// <remarks>
+		/// This is the check that stops a construction yard packing itself back into an MCV and
+		/// deploying again forever.
+		/// </remarks>
+		public bool DeploysIntoBuilding
+		{
+			get
+			{
+				var transforms = self.TraitOrDefault<Transforms>();
+				if (transforms == null)
+					return false;
+
+				var into = transforms.Info.IntoActor;
+				if (string.IsNullOrEmpty(into) || !World.Map.Rules.Actors.TryGetValue(into.ToLowerInvariant(), out var intoInfo))
+					return false;
+
+				return intoInfo.HasTraitInfo<BuildingInfo>();
+			}
+		}
+
+		/// <summary>Current cash plus banked resources.</summary>
+		public int Cash
+		{
+			get
+			{
+				var resources = self.Owner.PlayerActor.TraitOrDefault<PlayerResources>();
+				return resources?.GetCashAndResources() ?? 0;
+			}
+		}
+
+		/// <summary>Spare power. Negative means a brownout.</summary>
+		public int PowerBalance
+		{
+			get
+			{
+				var power = self.Owner.PlayerActor.TraitOrDefault<PowerManager>();
+				return power?.ExcessPower ?? 0;
+			}
+		}
+
+		/// <summary>
+		/// The player's production queue for a category, or null.
+		/// </summary>
+		/// <remarks>
+		/// Matches on the queue's <c>Group</c> first and only then its <c>Type</c>. In Tiberian
+		/// Dawn the building queue's Type is faction-specific (<c>Building.GDI</c> /
+		/// <c>Building.Nod</c>) while its Group is plainly <c>Building</c>, so matching Type alone
+		/// silently finds nothing and no structure is ever queued.
+		/// </remarks>
+		public ProductionQueue QueueFor(string category)
+		{
+			ProductionQueue typeMatch = null;
+
+			foreach (var pair in World.ActorsWithTrait<ProductionQueue>())
+			{
+				if (pair.Actor.Owner != self.Owner || !pair.Trait.Enabled)
+					continue;
+
+				var info = pair.Trait.Info;
+				if (string.Equals(info.Group, category, System.StringComparison.OrdinalIgnoreCase))
+					return pair.Trait;
+
+				if (typeMatch == null && string.Equals(info.Type, category, System.StringComparison.OrdinalIgnoreCase))
+					typeMatch = pair.Trait;
+			}
+
+			return typeMatch;
+		}
+
+		/// <summary>Actor names this player can currently produce from a category.</summary>
+		public IReadOnlyCollection<string> BuildableItems(string category)
+		{
+			var queue = QueueFor(category);
+			if (queue == null)
+				return [];
+
+			return queue.BuildableItems().Select(a => a.Name).ToArray();
+		}
+
+		/// <summary>The item a queue is currently working on, or null if idle.</summary>
+		public string ProducingItem(string category) => QueueFor(category)?.CurrentItem()?.Item;
+
+		/// <summary>The finished building waiting to be placed, or null.</summary>
+		public string ItemReadyToPlace(string category)
+		{
+			var current = QueueFor(category)?.CurrentItem();
+			return current != null && current.Done ? current.Item : null;
+		}
+
+		/// <summary>How many of each owned building type this player has, including those queued.</summary>
+		public IReadOnlyDictionary<string, int> OwnedBuildingCounts()
+		{
+			var counts = new Dictionary<string, int>(System.StringComparer.OrdinalIgnoreCase);
+
+			foreach (var actor in World.ActorsHavingTrait<Building>())
+			{
+				if (actor.Owner != self.Owner || actor.IsDead)
+					continue;
+
+				counts.TryGetValue(actor.Info.Name, out var existing);
+				counts[actor.Info.Name] = existing + 1;
+			}
+
+			// Count anything already in the queue too, or the planner orders three refineries
+			// before the first one finishes.
+			var queue = QueueFor("Building");
+			if (queue != null)
+			{
+				foreach (var item in queue.AllQueued())
+				{
+					counts.TryGetValue(item.Item, out var existing);
+					counts[item.Item] = existing + 1;
+				}
+			}
+
+			return counts;
+		}
+
+		/// <summary>
+		/// Finds somewhere valid to put a building, searching outwards from the base centre.
+		/// </summary>
+		/// <remarks>
+		/// Mirrors how the engine's own base-builder places structures: walk an annulus of
+		/// candidate cells and take the first that passes <c>CanPlaceBuilding</c> and is close
+		/// enough to an existing base.
+		/// </remarks>
+		public CPos? FindBuildLocation(string actorType, int minRange = 2, int maxRange = 14)
+		{
+			if (!World.Map.Rules.Actors.TryGetValue(actorType.ToLowerInvariant(), out var actorInfo))
+				return null;
+
+			var buildingInfo = actorInfo.TraitInfoOrDefault<BuildingInfo>();
+			if (buildingInfo == null)
+				return null;
+
+			var center = BaseCenter;
+
+			foreach (var cell in World.Map.FindTilesInAnnulus(center, minRange, maxRange))
+			{
+				if (!World.CanPlaceBuilding(cell, actorInfo, buildingInfo, null))
+					continue;
+
+				if (!buildingInfo.IsCloseEnoughToBase(World, self.Owner, actorInfo, cell))
+					continue;
+
+				return cell;
+			}
+
+			return null;
+		}
+
+		/// <summary>The player's construction yard location, falling back to this unit's own.</summary>
+		public CPos BaseCenter
+		{
+			get
+			{
+				Actor best = null;
+				foreach (var actor in World.ActorsHavingTrait<BaseProvider>())
+				{
+					if (actor.Owner != self.Owner || actor.IsDead || !actor.IsInWorld)
+						continue;
+
+					best = actor;
+					break;
+				}
+
+				return best?.Location ?? self.Location;
+			}
+		}
+
+		#endregion
+
 		#region Acting
 
 		/// <summary>
@@ -364,6 +559,37 @@ namespace AutoCnC.Mod.Modes
 
 				case UnitAction.AttackMoveTo:
 					return AttackMoveOrder(new CPos(decision.TargetX, decision.TargetY));
+
+				case UnitAction.Deploy:
+					return new Order("DeployTransform", self, false);
+
+				case UnitAction.Produce:
+				{
+					var queue = QueueFor("Building");
+					if (queue == null || string.IsNullOrEmpty(decision.ItemName))
+						return null;
+
+					return Order.StartProduction(queue.Actor, decision.ItemName, 1);
+				}
+
+				case UnitAction.PlaceBuilding:
+				{
+					var queue = QueueFor("Building");
+					if (queue == null || string.IsNullOrEmpty(decision.ItemName))
+						return null;
+
+					// Placement is a player-scoped order, not a unit one: the subject is the
+					// player actor and the queue is identified by ExtraData. This mirrors how
+					// the engine's own base-builder issues it.
+					return new Order("PlaceBuilding", self.Owner.PlayerActor,
+						Target.FromCell(World, new CPos(decision.TargetX, decision.TargetY)), false)
+					{
+						TargetString = decision.ItemName,
+						ExtraLocation = CPos.Zero,
+						ExtraData = queue.Actor.ActorID,
+						SuppressVisualFeedback = true
+					};
+				}
 
 				default:
 					return null;

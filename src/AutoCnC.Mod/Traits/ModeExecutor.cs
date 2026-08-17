@@ -33,6 +33,9 @@ namespace AutoCnC.Mod.Traits
 		[Desc("Maximum orders emitted per tick, to keep the order stream sane with a large army.")]
 		public readonly int MaxOrdersPerTick = 20;
 
+		[Desc("Log every decision to debug.log. Can also be toggled in-game with /modelog.")]
+		public readonly bool LogDecisions = false;
+
 		public override object Create(ActorInitializer init) { return new ModeExecutor(init.World, this); }
 	}
 
@@ -61,11 +64,21 @@ namespace AutoCnC.Mod.Traits
 		/// <summary>Client-local mode assignment policy for the local player.</summary>
 		public ModeAssignments Assignments { get; }
 
+		/// <summary>
+		/// When set, every issued decision is written to debug.log. Toggle with /modelog.
+		/// </summary>
+		/// <remarks>
+		/// This is the main tool for working out why a mode is misbehaving: it shows the decision,
+		/// the order it became, and the mode's own stated reason.
+		/// </remarks>
+		public bool LogDecisions { get; set; }
+
 		public ModeExecutor(World world, ModeExecutorInfo info)
 		{
 			this.world = world;
 			this.info = info;
 			Assignments = new ModeAssignments(info.DefaultMode, info.GroupCount);
+			LogDecisions = info.LogDecisions;
 		}
 
 		void IWorldLoaded.WorldLoaded(World w, WorldRenderer wr) { }
@@ -142,6 +155,11 @@ namespace AutoCnC.Mod.Traits
 			if (order == null)
 				return;
 
+			if (LogDecisions)
+				Log.Write("debug", $"[mode] {actor.Info.Name}#{actor.ActorID} {controller.ActiveModeName}: " +
+					$"{decision.Action}{(decision.ItemName != null ? " " + decision.ItemName : "")} " +
+					$"-> {order.OrderString} ({decision.Reason})");
+
 			controller.LastIssued = decision;
 			pending.Add(order);
 		}
@@ -161,7 +179,8 @@ namespace AutoCnC.Mod.Traits
 
 		void SyncMode(Actor actor, ProgrammableController controller)
 		{
-			var resolved = Assignments.Resolve(controller.ModeOverride, controller.GroupId, actor.Info.Name);
+			var resolved = Assignments.Resolve(
+				controller.ModeOverride, controller.GroupId, actor.Info.Name, controller.Info.DefaultMode);
 
 			if (resolved != null && !ModeRegistry.IsKnownMode(resolved))
 				resolved = null;

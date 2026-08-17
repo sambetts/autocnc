@@ -16,6 +16,7 @@
 #   /mode clear                     drop per-unit overrides
 #   /assignments                    show current assignments
 #   /whatmode                       report the selection's modes
+#   /modelog                        toggle decision logging to debug.log
 
 World:
 	ModeExecutor:

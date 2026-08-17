@@ -38,6 +38,11 @@ namespace AutoCnC.Modes.Core
 	{
 		public static UnitDecision Decide(in AssaultState state, in AssaultTuning tuning)
 		{
+			// 0. An unarmed unit cannot assault anything. Leave it alone rather than marching it
+			//    into the enemy base to die. See the equivalent guard in DefensiveLogic.
+			if (!state.HasWeapon)
+				return UnitDecision.Continue;
+
 			// 1. Optional bail-out. Off by default: an assault that retreats isn't an assault.
 			if (tuning.RetreatBelowHealthPercent > 0 && state.HealthPercent <= tuning.RetreatBelowHealthPercent)
 				return UnitDecision.Retreat($"health {state.HealthPercent}% <= {tuning.RetreatBelowHealthPercent}%");
@@ -46,12 +51,11 @@ namespace AutoCnC.Modes.Core
 				return state.IsIdle ? UnitDecision.Hold("no objective assigned") : UnitDecision.Continue;
 
 			// 2. In range of the objective: hit it. The objective always wins over distractions.
-			if (state.HasWeapon && state.DistanceToObjectiveUnits <= state.WeaponRangeUnits)
+			if (state.DistanceToObjectiveUnits <= state.WeaponRangeUnits)
 				return UnitDecision.Attack(state.ObjectiveActorId, "objective in range");
 
 			// 3. Opportunistic fire only — strictly targets already inside weapon range, so
 			//    taking the shot costs us no forward progress.
-			if (state.HasWeapon)
 			{
 				var blocker = SelectBlocker(state, tuning);
 				if (blocker.HasValue)

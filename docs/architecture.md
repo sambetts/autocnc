@@ -167,7 +167,8 @@ To upgrade the engine: bump the submodule, rebuild, run the YAML lint, and fix w
 
 Tracked against the roadmap in the README:
 
-- No in-game UI for mode assignment yet; `CreateSetModeOrder` exists but nothing calls it.
+- Mode assignment is driven by chatbox commands (`ModeCommands`); there is no hotkey or panel UI
+  yet.
 - `GroupManager` does not implement `IGameSaveTraitData`, so groups and per-group modes are lost
   on save/load.
 - Infantry/vehicle classification falls back to the `Infantry` target type string, which is

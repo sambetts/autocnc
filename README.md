@@ -208,7 +208,8 @@ autocnc/
 │   │   │   └── ModeRegistry.cs          #   reflection-based mode discovery
 │   │   ├── Traits/
 │   │   │   ├── ProgrammableController.cs#   per-unit trait: ITick, INotifyCreated, INotifyDamage
-│   │   │   └── GroupManager.cs          #   world trait: SYNCED control groups 1–9
+│   │   │   ├── GroupManager.cs          #   world trait: SYNCED control groups 1–9
+│   │   │   └── ModeCommands.cs          #   chatbox commands for play-testing
 │   │   └── Library/                     #   shipped modes
 │   │       ├── DefensiveMode.cs
 │   │       └── AttackBaseMode.cs
@@ -273,6 +274,34 @@ mod and catches unsatisfied trait dependencies the C# compiler cannot see:
 ```powershell
 ./scripts/lint.ps1
 ```
+
+### Play-testing
+
+```powershell
+./scripts/launch.ps1
+```
+
+On first run OpenRA offers to download the freeware C&C assets. Start a skirmish, then drive the
+mode system from the chatbox (press `Enter`):
+
+| Command | Effect |
+|---|---|
+| `/modes` | List available modes |
+| `/mode AttackBaseMode` | Set the current selection's mode |
+| `/mode 3 AttackBaseMode` | Set control group 3's mode |
+| `/group 3` | Assign the selection to synced group 3 |
+| `/whatmode` | Report the selection's current modes |
+
+Units run `DefensiveMode` by default, so a fresh skirmish already exercises the system: build a
+few units and watch them hold ground, engage what comes to them, refuse to chase bait beyond
+their leash, and withdraw to repair when hurt. Switch a group to `AttackBaseMode` to see them
+push a base and ignore distractions.
+
+Chat commands are the input layer, so they issue orders and work correctly in multiplayer. They
+are a stand-in until a proper hotkey UI lands in Phase 1.
+
+> **Close the game before rebuilding.** `AutoCnC.Mod.dll` is loaded from `engine/bin`, and a
+> running client holds a lock on it.
 
 ---
 

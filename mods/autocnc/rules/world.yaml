@@ -5,7 +5,15 @@
 # It deliberately does not replace the engine's built-in ControlGroups trait, which stays in
 # place for the UI. That one is client-local (it reads world.Selection and filters on
 # world.LocalPlayer), so it must never drive simulation behaviour. See docs/determinism.md.
+#
+# ModeCommands adds chatbox commands for play-testing until a proper UI exists:
+#   /modes                  list available modes
+#   /mode <ModeName>        set the current selection's mode
+#   /mode <1-9> <ModeName>  set a control group's mode
+#   /group <1-9>            assign the selection to a synced group
+#   /whatmode               report the selection's current modes
 
 World:
 	GroupManager:
 		GroupCount: 9
+	ModeCommands:

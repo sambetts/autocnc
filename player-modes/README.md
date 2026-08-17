@@ -1,20 +1,31 @@
 # Your modes
 
 Every `.cs` file here is compiled into `PlayerModes.dll` and picked up by the game
-automatically. There is no registration step — add a class, rebuild, restart.
+automatically. There is no registration step — add a class, rebuild, launch.
+
+**Write your modes before the match, then play it.** Your army's behaviour is a loadout you
+commit to; the match is the test of what you wrote. Switching between modes you've already
+written is live and instant in-game — it's only loading freshly *edited* code that needs a
+relaunch.
 
 ## Write one
 
 1. Copy a template, rename the class. The class name *is* the mode name in-game.
 2. Implement `OnTick`, returning a `UnitDecision`.
-3. Build and restart:
+3. Check your logic without launching anything:
+
+   ```powershell
+   dotnet test src/AutoCnC.Modes.Core.Tests
+   ```
+
+4. Build and play:
 
    ```powershell
    ./scripts/build.ps1
    ./scripts/launch.ps1
    ```
 
-4. In-game, press `Enter` and assign it:
+5. In-game, press `Enter` and assign it:
 
    ```
    /modes                          list what's loaded

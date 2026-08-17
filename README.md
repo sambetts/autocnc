@@ -61,9 +61,16 @@ games in ways you can profile, unit-test and fix.
 Modes live in [`player-modes/`](player-modes/), a normal C# project. Open it in your IDE and you
 get IntelliSense, refactoring and a debugger — no scripting language, no interpreter.
 
+**You write your modes before the match, then commit to them.** The game is the test of what you
+wrote, not a live coding session:
+
 1. Copy a template and rename the class. **The class name is the mode name in-game.**
-2. `./scripts/build.ps1`
-3. `./scripts/launch.ps1`, then `/mode MyMode`
+2. `dotnet test src/AutoCnC.Modes.Core.Tests` — check your logic in milliseconds, no game needed
+3. `./scripts/build.ps1`
+4. `./scripts/launch.ps1`, then assign with `/mode ...` and watch it play out
+
+Switching *between* your modes is fully live — `/mode group 1 AttackBaseMode` takes effect
+within a tick, mid-battle. It's only loading newly *edited* code that needs a restart.
 
 There is no registration step. Discovery uses OpenRA's own `ObjectCreator` reflection, the same
 mechanism that binds YAML trait names to engine traits.
@@ -265,14 +272,13 @@ dotnet test src/AutoCnC.Modes.Core.Tests   # logic — seconds, no engine
 |---|---|
 | **0 — Foundation** | Interfaces, executor, reference modes ✅ |
 | **1 — Authoring** | Player mode project, assignment scopes, templates ✅ |
-| **2 — Iteration** | Hot-reload without restarting, in-game mode editor, debug overlay |
-| **3 — Ecosystem** | Headless mode-vs-mode arena, replay regression tests, mode sharing |
+| **2 — Loadouts** | Save/load named mode loadouts, pre-match assignment screen, debug overlay |
+| **3 — Ecosystem** | Standalone mode editor with hot-reload, headless mode-vs-mode arena, mode sharing |
 
 Verified today: all assemblies compile against the pinned engine, 36 logic tests pass in ~30ms,
 and `--check-yaml` reports 0 errors and 0 warnings across every actor in the mod.
 
-Known gaps are listed at the end of [`docs/architecture.md`](docs/architecture.md) — the main
-one being that mode changes currently need a rebuild and restart.
+Known gaps are listed at the end of [`docs/architecture.md`](docs/architecture.md).
 
 ---
 

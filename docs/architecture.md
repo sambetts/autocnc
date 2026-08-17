@@ -131,9 +131,24 @@ impossible.
 the same mechanism that binds YAML trait names to `TraitInfo` classes.
 
 This deliberately avoids a bespoke loader or an embedded Roslyn compiler. Players get a real
-project with real IntelliSense and a real debugger, and the game gets no new loading code. The
-cost is that picking up changes needs a rebuild and a restart; the fast feedback loop is the
-unit tests, which need neither.
+project with real IntelliSense and a real debugger, and the game gets no new loading code.
+
+### Modes are authored before the match, not during it
+
+Picking up *new or edited* mode code requires a rebuild and a restart, because .NET cannot
+replace an assembly already loaded into a process.
+
+This is a deliberate boundary rather than a limitation to engineer away. The game's premise is
+that you compose your army's behaviour up front and then commit to it: the match is the test of
+what you wrote, not a live coding session. Being able to patch a losing mode mid-battle would
+undermine that.
+
+Note this is **only** about loading new code. Switching between modes that already exist is
+fully dynamic — `SyncMode` re-resolves every tick and `ApplyMode` swaps the instance
+immediately, so `/mode group 1 AttackBaseMode` takes effect within one tick, mid-battle.
+
+A future standalone mode editor could reasonably support hot-reload for authoring, since that
+sits outside a real match. See the roadmap.
 
 ### Modes are per-unit instances
 
@@ -183,10 +198,11 @@ To upgrade: bump the submodule, rebuild, run the lint, fix what breaks.
 
 ## Known gaps
 
-- Changing a mode needs a rebuild and a game restart. Hot-reload via a collectible
-  `AssemblyLoadContext` is the obvious next step.
 - Assignment is chatbox-driven; there is no hotkey or panel UI.
-- Assignments are not persisted between matches.
+- Assignments are not persisted between matches, so a loadout must be re-entered each game.
 - Infantry/vehicle classification falls back to the `Infantry` target type string, which is
   Tiberian Dawn specific.
 - No headless benchmark harness for mode-vs-mode evaluation.
+
+Deliberately *not* gaps: needing a rebuild and restart to load edited mode code (see
+[Modes are authored before the match](#modes-are-authored-before-the-match-not-during-it)).

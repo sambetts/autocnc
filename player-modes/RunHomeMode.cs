@@ -6,6 +6,9 @@
 //
 //  Copy this file, rename the class, and it appears in-game after a rebuild.
 //  Check your work fast with:  dotnet test src/AutoCnC.Modes.Core.Tests
+//
+//  Licence: GPL-3.0-or-later, like everything that links against OpenRA. See LICENSE
+//  and NOTICE.md. Modes you write and distribute inherit the same terms.
 // ============================================================================
 
 using System.Linq;

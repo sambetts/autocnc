@@ -1,4 +1,7 @@
-# AutoC&C — world traits
+# AutoC&C — world traits.
+#
+# Copyright (c) The AutoC&C Developers and Contributors. GPL-3.0-or-later; see LICENSE.
+# See NOTICE.md for attributions.
 #
 # ModeExecutor runs unit modes for the LOCAL player only and turns their decisions into orders.
 # Mode code therefore sits outside the lockstep simulation, which is what lets players write

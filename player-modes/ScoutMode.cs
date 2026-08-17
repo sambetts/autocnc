@@ -7,6 +7,9 @@
 //  Shows two things worth copying:
 //    * per-unit state in instance fields (currentTarget)
 //    * reacting immediately to damage via OnDamaged
+//
+//  Licence: GPL-3.0-or-later, like everything that links against OpenRA. See LICENSE
+//  and NOTICE.md. Modes you write and distribute inherit the same terms.
 // ============================================================================
 
 using System;

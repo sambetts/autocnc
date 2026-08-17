@@ -1,8 +1,19 @@
+# AutoC&C mod manifest.
+#
+# Derived from OpenRA's Tiberian Dawn manifest (mods/cnc/mod.yaml), copyright (c) OpenRA
+# Developers and Contributors, used under the GNU General Public License v3 or later.
+# Upstream: https://github.com/OpenRA/OpenRA  ·  Licence: https://github.com/OpenRA/OpenRA/blob/bleed/COPYING
+#
+# Changes from upstream: mod metadata, the autocnc mod package and mod search path, the
+# AutoCnC.Mod and PlayerModes assemblies, and the autocnc rules files.
+#
+# AutoC&C is an unofficial fan project. It is not affiliated with or endorsed by the OpenRA
+# project, nor by Electronic Arts. Command & Conquer is a trademark of Electronic Arts Inc.
+# This repository distributes no game assets. See NOTICE.md.
 Metadata:
 	Title: mod-title
 	Version: {DEV_VERSION}
 	Website: https://github.com/sambetts/autocnc
-	WebIcon32: https://www.openra.net/images/icons/cnc_32x32.png
 	WindowTitle: mod-windowtitle
 
 PackageFormats: Mix

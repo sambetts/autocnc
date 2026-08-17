@@ -1,4 +1,8 @@
-# AutoC&C — unit behaviour wiring
+# AutoC&C — unit behaviour wiring.
+#
+# Copyright (c) The AutoC&C Developers and Contributors. GPL-3.0-or-later; see LICENSE.
+# Overrides trait templates defined in OpenRA's mods/cnc/rules/defaults.yaml, copyright (c)
+# OpenRA Developers and Contributors. See NOTICE.md.
 #
 # We override the AutoTarget mixin templates from cnc's defaults.yaml so that every actor which
 # would have received engine auto-targeting gets a ProgrammableController instead.

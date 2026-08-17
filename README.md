@@ -44,7 +44,7 @@ public sealed class RunHomeMode : UnitMode
 - [Repository layout](#repository-layout)
 - [Getting started](#getting-started)
 - [Roadmap](#roadmap)
-- [Licence](#licence)
+- [Licence and attribution](#licence-and-attribution)
 
 ---
 
@@ -300,15 +300,36 @@ Known gaps are listed at the end of [`docs/architecture.md`](docs/architecture.m
 
 ---
 
-## Licence
+## Licence and attribution
 
-**GPL-3.0-or-later**, inherited from OpenRA.
+**GPL-3.0-or-later**, inherited from OpenRA. See [`LICENSE`](LICENSE) for the full text and
+[`NOTICE.md`](NOTICE.md) for full attributions.
 
 This is not optional: AutoC&C links against and extends GPLv3 engine code, making it a
 derivative work. Any distributed build must ship its complete corresponding source under GPLv3.
-See [`LICENSE`](LICENSE).
 
-OpenRA is a project by
-[the OpenRA developers and contributors](https://github.com/OpenRA/OpenRA/graphs/contributors).
-AutoC&C is an independent mod, not affiliated with or endorsed by them or by Electronic Arts.
-Command & Conquer is a trademark of Electronic Arts Inc.; this project ships no EA assets.
+### OpenRA
+
+Built on [OpenRA](https://github.com/OpenRA/OpenRA) — copyright (c) OpenRA Developers and
+Contributors, licensed [GPL-3.0-or-later](https://github.com/OpenRA/OpenRA/blob/bleed/COPYING).
+See their [AUTHORS](https://github.com/OpenRA/OpenRA/blob/bleed/AUTHORS) for the people who made
+it possible.
+
+The engine is a pinned submodule, unmodified and not copied into this repository.
+`mods/autocnc/mod.yaml` is derived from OpenRA's `mods/cnc/mod.yaml` and carries an attribution
+header.
+
+AutoC&C is **not affiliated with or endorsed by the OpenRA project**. Please don't report
+AutoC&C issues to them.
+
+### Command & Conquer
+
+**Command & Conquer**, **C&C**, **Tiberian Dawn**, **GDI** and **Nod** are trademarks of
+[Electronic Arts Inc.](https://www.ea.com) Their use here is descriptive, to identify the game
+this project mods. AutoC&C is an unofficial fan project with no affiliation with, sponsorship
+by, or endorsement from EA.
+
+**No game assets are distributed in this repository.** On first launch OpenRA's own content
+installer offers to download them from a mirror of the 2007 Command & Conquer Gold freeware
+release published by EA, or to copy them from an original disc or digital install you own.
+Assets land in your local OpenRA support directory and are never committed here.

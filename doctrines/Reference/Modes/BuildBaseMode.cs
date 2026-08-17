@@ -5,7 +5,7 @@
 //  a base already exists to produce units and repair them.
 //
 //  Note it reads ctx.BuildPlan rather than hardcoding an order, so the same mode
-//  works for any module: change the plan in your IBattleModule, not here.
+//  works for any module: change the plan in your IDoctrine, not here.
 //
 //  Licence: GPL-3.0-or-later. See LICENSE and NOTICE.md.
 // ============================================================================

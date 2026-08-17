@@ -46,8 +46,8 @@ namespace AutoCnC.Platform.Traits
 
 			console.RegisterCommand("mode", this);
 			console.RegisterCommand("modes", this);
-			console.RegisterCommand("module", this);
-			console.RegisterCommand("modules", this);
+			console.RegisterCommand("doctrine", this);
+			console.RegisterCommand("doctrines", this);
 			console.RegisterCommand("assignments", this);
 			console.RegisterCommand("whatmode", this);
 			console.RegisterCommand("modelog", this);
@@ -60,12 +60,12 @@ namespace AutoCnC.Platform.Traits
 
 			switch (name)
 			{
-				case "modules":
-					ListModules();
+				case "doctrines":
+					ListDoctrines();
 					break;
 
-				case "module":
-					LoadModule(arg);
+				case "doctrine":
+					LoadDoctrine(arg);
 					break;
 
 				case "modes":
@@ -93,47 +93,47 @@ namespace AutoCnC.Platform.Traits
 			}
 		}
 
-		void ListModules()
+		void ListDoctrines()
 		{
-			var modules = ModuleLoader.Modules;
+			var modules = DoctrineLoader.Doctrines;
 			if (modules.Count == 0)
 			{
-				Debug("No battle modules installed. AutoC&C ships no strategy of its own —");
-				Debug("build one and drop it in: " + string.Join(" or ", ModuleLoader.SearchPaths));
+				Debug("No doctrines installed. AutoC&C ships no strategy of its own —");
+				Debug("build one and drop it in: " + string.Join(" or ", DoctrineLoader.SearchPaths));
 			}
 			else
 			{
 				foreach (var module in modules)
 				{
-					var active = executor.Module != null && executor.Module.Name == module.Definition.Name;
+					var active = executor.Doctrine != null && executor.Doctrine.Name == module.Definition.Name;
 					Debug($"{(active ? "* " : "  ")}{module.Definition.Name} — {module.Definition.Description}");
 				}
 
-				Debug("Load one with /module <name>.");
+				Debug("Load one with /doctrine <name>.");
 			}
 
-			foreach (var error in ModuleLoader.Errors)
+			foreach (var error in DoctrineLoader.Errors)
 				Debug("Module problem: " + error);
 		}
 
-		void LoadModule(string arg)
+		void LoadDoctrine(string arg)
 		{
 			var name = (arg ?? string.Empty).Trim();
 			if (string.IsNullOrEmpty(name))
 			{
-				Debug(executor.Module == null
-					? "No module loaded. /modules to see what's installed."
-					: $"Loaded: {executor.Module.Name} — {executor.Module.Description}");
+				Debug(executor.Doctrine == null
+					? "No module loaded. /doctrines to see what's installed."
+					: $"Loaded: {executor.Doctrine.Name} — {executor.Doctrine.Description}");
 				return;
 			}
 
-			if (!executor.LoadModule(name))
+			if (!executor.LoadDoctrine(name))
 			{
-				Debug($"No module named '{name}'. /modules to see what's installed.");
+				Debug($"No module named '{name}'. /doctrines to see what's installed.");
 				return;
 			}
 
-			var module = executor.Module;
+			var module = executor.Doctrine;
 			Debug($"Loaded {module.Name}: {module.Description}");
 			Debug($"{module.BuildPlan.Count} build steps, {module.ProductionPlan.Count} production steps, " +
 				$"{module.Modes.Count} modes. Every unit re-resolves on the next tick.");
@@ -141,16 +141,16 @@ namespace AutoCnC.Platform.Traits
 
 		void ListModes()
 		{
-			if (executor.Module == null)
+			if (executor.Doctrine == null)
 			{
-				Debug("No battle module loaded. /modules to see what's installed.");
+				Debug("No doctrine loaded. /doctrines to see what's installed.");
 				return;
 			}
 
 			var names = executor.AvailableModeNames.ToArray();
 			Debug(names.Length == 0
-				? $"Module '{executor.Module.Name}' provides no modes."
-				: $"Modes from {executor.Module.Name}: " + string.Join(", ", names));
+				? $"Module '{executor.Doctrine.Name}' provides no modes."
+				: $"Modes from {executor.Doctrine.Name}: " + string.Join(", ", names));
 		}
 
 		void ShowAssignments()

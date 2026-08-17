@@ -16,27 +16,27 @@ Everything below is a response to that tension.
 
 ## Platform and modules
 
-AutoC&C is split into a **platform** (infrastructure) and **battle modules** (strategy). The
+AutoC&C is split into a **platform** (infrastructure) and **doctrines** (strategy). The
 platform ships no strategy at all: with no module loaded, nothing deploys, builds or shoots.
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│  modules/*            BATTLE MODULES — all strategy          │
-│    IBattleModule      build plan, production plan,           │
+│  modules/*            doctrines — all strategy          │
+│    IDoctrine      build plan, production plan,           │
 │                       modes, assignments                     │
-│    → built to bin/modules, discovered by scanning            │
+│    → built to bin/doctrines, discovered by scanning            │
 └──────────────────────────────────────────────────────────────┘
                               │ loaded by reflection
 ┌──────────────────────────────────────────────────────────────┐
 │  AutoCnC.Platform     THE HOST (references OpenRA)           │
 │    ModeExecutor       client-local; runs the loaded module   │
-│    ModuleLoader       scans folders for module assemblies    │
+│    DoctrineLoader       scans folders for module assemblies    │
 │    ProgrammableController, ModeCommands                      │
 └──────────────────────────────────────────────────────────────┘
                               │
 ┌──────────────────────────────────────────────────────────────┐
 │  AutoCnC.Sdk          WHAT MODULES CODE AGAINST              │
-│    IBattleModule, IBattleModuleBuilder                       │
+│    IDoctrine, IDoctrineBuilder                       │
 │    IUnitMode, UnitMode, ModeContext                          │
 │    IUnitState, IModeHost  (so the SDK needn't know the host) │
 └──────────────────────────────────────────────────────────────┘
@@ -52,7 +52,7 @@ Modules reference the SDK and Core **as binaries**, never as projects. That is w
 live in its own repository: point `AutoCnCPath` at any AutoC&C checkout and it compiles.
 
 Modules are deliberately **not** listed in `mod.yaml`. They are player artifacts discovered by
-scanning `bin/modules` and `<SupportDir>/autocnc/modules`, so you can install several, swap
+scanning `bin/doctrines` and `<SupportDir>/autocnc/doctrines`, so you can install several, swap
 between them with `/module`, and share one without anybody editing the mod.
 
 ### What belongs where

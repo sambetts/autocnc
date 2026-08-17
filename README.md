@@ -37,8 +37,7 @@ public sealed class RunHomeMode : UnitMode
 ## Table of contents
 
 - [Why this exists](#why-this-exists)
-- [Battle modules](#battle-modules)
-- [Battle modules](#battle-modules)
+- [Doctrines](#doctrines)
 - [Assigning modes](#assigning-modes)
 - [Architectural philosophy](#architectural-philosophy)
 - [How it integrates with OpenRA](#how-it-integrates-with-openra)
@@ -60,19 +59,19 @@ games in ways you can profile, unit-test and fix.
 
 ---
 
-## Battle modules
+## Doctrines
 
 The platform contains **no strategy**. Everything about how an army fights lives in a **battle
 module** you author: the base build plan, the unit production plan, the modes, and which units
 run them. Load one and it plays; load none and nothing deploys, builds or shoots.
 
 ```csharp
-public sealed class MyModule : IBattleModule
+public sealed class MyDoctrine : IDoctrine
 {
     public string Name => "Rush";
     public string Description => "Fast barracks, early pressure.";
 
-    public void Configure(IBattleModuleBuilder b)
+    public void Configure(IDoctrineBuilder b)
     {
         b.Build("powr", "nuke").Until(2);        // base plan
         b.Build("proc").Until(2);
@@ -92,8 +91,8 @@ Candidates are alternatives for one role — `powr` or `nuke` both mean "a power
 plan works as either faction without checking.
 
 ```powershell
-cp -r modules/Reference modules/MyModule   # start from the reference module
-cd modules/MyModule && dotnet build        # builds into engine/bin/modules
+cp -r doctrines/Reference modules/MyModule   # start from the reference module
+cd modules/MyModule && dotnet build        # builds into engine/bin/doctrines
 ```
 
 Then in game: `/modules`, `/module MyModule`.
@@ -104,7 +103,7 @@ repository**: `dotnet build /p:AutoCnCPath=C:\games\autocnc`.
 **AutoC&C ships one module, `Reference`** — a balanced opening that defends its base and pushes
 with control group 1. It is both the worked example and the first opponent to beat.
 
-See [`docs/writing-modules.md`](docs/writing-modules.md).
+See [`docs/writing-doctrines.md`](docs/writing-doctrines.md).
 
 ### Your code cannot desync a match
 
@@ -215,21 +214,22 @@ autocnc/
 │
 ├── src/                             # THE PLATFORM — infrastructure, zero strategy
 │   ├── AutoCnC.Core/                #   engine-free: decisions, plans, planners
-│   ├── AutoCnC.Sdk/                 #   what modules code against: IBattleModule,
+│   ├── AutoCnC.Sdk/                 #   what modules code against: IDoctrine,
 │   │                                #   IUnitMode, ModeContext
 │   ├── AutoCnC.Platform/            #   the host: OpenRA traits, module loader, commands
 │   └── AutoCnC.Core.Tests/
 │
-├── modules/                         # BATTLE MODULES — all the strategy lives here
-│   └── Reference/                   #   ★ own solution; copy this to start your own
-│       ├── ReferenceBattleModule.cs #     plans + assignments
+├── modules/                         # doctrines — all the strategy lives here
+│   └── Reference/                   #   ★ own solution + NuGet refs; copy to start your own
+│       ├── ReferenceDoctrine.cs #     plans + assignments
 │       ├── Modes/                   #     BuildBase, TrainUnits, Defensive, AttackBase…
 │       ├── Logic/                   #     pure decision functions
 │       └── Tests/                   #     fast, no game needed
 │
 ├── mods/autocnc/                    # mod manifest and rules
 ├── docs/                            # getting-started / writing-modules / architecture
-├── scripts/                         # setup / build / launch / lint
+├── packages/                        # local NuGet feed doctrines build against
+├── scripts/                         # setup / build / launch / lint / run-doctrine
 └── AutoCnC.sln                      # the platform only
 ```
 ---
@@ -279,7 +279,7 @@ dotnet test src/AutoCnC.Modes.Core.Tests   # logic — ~20ms, no engine
 |---|---|
 | **0 — Foundation** | Interfaces, executor, reference modes ✅ |
 | **1 — Authoring** | Assignment scopes, templates, base building ✅ |
-| **2 — Modules** | Platform/module split, battle module SDK, unit production ✅ |
+| **2 — Modules** | Platform/module split, doctrine SDK, unit production ✅ |
 | **3 — Ecosystem** | Module vs module arena, replay regression tests, module sharing |
 Verified: platform and module build independently, 49 tests pass with no engine, `--check-yaml`
 reports 0 errors, and the reference module plays a full game — deploy, build, train, fight.

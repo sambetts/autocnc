@@ -72,7 +72,7 @@ HARV:
 # The MCV and the construction yard it unfolds into. Neither inherits the AutoTarget mixins, so
 # they need the controller adding explicitly.
 #
-# Note there is no mode named here. Which mode runs is the loaded battle module's decision, not
+# Note there is no mode named here. Which mode runs is the loaded doctrine's decision, not
 # the mod's: the platform ships no strategy. Role is only a hint a module can target instead of
 # hardcoding actor names.
 MCV:

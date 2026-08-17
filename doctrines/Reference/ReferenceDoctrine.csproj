@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>AutoCnC.Reference</RootNamespace>
+    <AssemblyName>AutoCnC.Reference</AssemblyName>
+    <Description>The reference AutoC&amp;C doctrine. Copy this to start your own.</Description>
+
+    <!-- Doctrines are discovered by scanning this folder; they are NOT listed in mod.yaml. -->
+    <OutputPath>$(DoctrineInstallDirectory)\</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+
+    <!--
+      Compile against the packages but copy nothing beside the built doctrine: the game already
+      has the SDK and engine loaded, and stray DLLs here would be scanned as doctrines.
+    -->
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="*.cs" />
+    <Compile Include="Modes\*.cs" />
+    <Compile Include="Logic\*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="AutoCnC.Sdk" Version="$(AutoCnCVersion)" />
+    <PackageReference Include="AutoCnC.Core" Version="$(AutoCnCVersion)" />
+  </ItemGroup>
+
+</Project>

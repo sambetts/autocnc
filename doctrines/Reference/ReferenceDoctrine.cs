@@ -1,7 +1,7 @@
 // ============================================================================
-//  ReferenceBattleModule — the module AutoC&C ships as an opponent and example.
+//  ReferenceDoctrine — the module AutoC&C ships as an opponent and example.
 //
-//  A battle module is the unit of authorship in AutoC&C. It declares EVERYTHING
+//  A doctrine is the unit of authorship in AutoC&C. It declares EVERYTHING
 //  about how an army fights:
 //
 //    * what to build      (the base construction plan)
@@ -25,13 +25,13 @@ using AutoCnC.Sdk;
 
 namespace AutoCnC.Reference
 {
-	public sealed class ReferenceBattleModule : IBattleModule
+	public sealed class ReferenceDoctrine : IDoctrine
 	{
 		public string Name => "Reference";
 
 		public string Description => "Balanced economy opening, defends its base, pushes with group 1.";
 
-		public void Configure(IBattleModuleBuilder b)
+		public void Configure(IDoctrineBuilder b)
 		{
 			// --- Base construction ------------------------------------------------
 			// Ordered. Candidates are alternatives for one role, so "powr" or "nuke"

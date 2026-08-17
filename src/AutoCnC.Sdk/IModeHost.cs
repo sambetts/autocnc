@@ -41,7 +41,7 @@ namespace AutoCnC.Sdk
 	}
 
 	/// <summary>
-	/// The loaded battle module's plans, as seen by a mode.
+	/// The loaded doctrine's plans, as seen by a mode.
 	/// </summary>
 	/// <remarks>
 	/// Plans come from the module rather than being baked into a mode, so a generic

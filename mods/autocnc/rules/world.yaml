@@ -11,7 +11,7 @@
 # client-local, which is exactly right here: mode assignment is local policy too.
 #
 # ModeCommands adds the chatbox interface:
-#   /modules                        list installed battle modules
+#   /modules                        list installed doctrines
 #   /module <name>                  load one
 #   /modes                          modes the loaded module provides
 #   /mode <ModeName>                override for the current selection

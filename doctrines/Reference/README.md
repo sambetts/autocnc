@@ -1,9 +1,9 @@
-# Reference battle module
+# Reference doctrine
 
 The module AutoC&C ships as an opponent and as a worked example. **Beating this is the goal.**
 
 It declares everything about how its army fights, in
-[`ReferenceBattleModule.cs`](ReferenceBattleModule.cs):
+[`ReferenceDoctrine.cs`](ReferenceDoctrine.cs):
 
 | | |
 |---|---|
@@ -17,7 +17,7 @@ It declares everything about how its army fights, in
 
 ```
 Reference/
-├── ReferenceBattleModule.cs   ← the entry point: plans and assignments
+├── ReferenceDoctrine.cs   ← the entry point: plans and assignments
 ├── Modes/                     ← behaviours
 │   ├── BuildBaseMode.cs       ← deploys the MCV, grows the base from ctx.BuildPlan
 │   ├── TrainUnitsMode.cs      ← trains units from ctx.ProductionPlan
@@ -33,9 +33,9 @@ Reference/
 ## Start your own
 
 ```powershell
-cp -r modules/Reference modules/MyModule
+cp -r doctrines/Reference modules/MyModule
 cd modules/MyModule
-# rename the .csproj, .sln, and the IBattleModule class + its Name
+# rename the .csproj, .sln, and the IDoctrine class + its Name
 dotnet build
 ```
 
@@ -53,7 +53,7 @@ dotnet build /p:AutoCnCPath=C:\games\autocnc
 dotnet test Tests
 ```
 
-The tests assert against the plan `ReferenceBattleModule` actually declares, so they verify the
+The tests assert against the plan `ReferenceDoctrine` actually declares, so they verify the
 real strategy rather than a copy that can drift out of date.
 
 ## Licence

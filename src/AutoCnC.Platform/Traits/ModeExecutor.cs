@@ -21,13 +21,13 @@ using OpenRA.Traits;
 namespace AutoCnC.Platform.Traits
 {
 	[TraitLocation(SystemActors.World)]
-	[Desc("Runs the loaded battle module for the local player and turns its decisions into orders.",
+	[Desc("Runs the loaded doctrine for the local player and turns its decisions into orders.",
 		"Attach this to the world actor.")]
 	public class ModeExecutorInfo : TraitInfo
 	{
-		[Desc("Battle module to load at start. Leave empty to load the only installed module,",
-			"or to wait for the player to pick one with /module.")]
-		public readonly string DefaultModule = null;
+		[Desc("Doctrine to load at start. Leave empty to load the only installed doctrine,",
+			"or to wait for the player to pick one with /Doctrine.")]
+		public readonly string DefaultDoctrine = null;
 
 		[Desc("Number of addressable control groups.")]
 		public readonly int GroupCount = 9;
@@ -42,18 +42,18 @@ namespace AutoCnC.Platform.Traits
 	}
 
 	/// <summary>
-	/// The host: runs whichever battle module is loaded, for the local player's units only.
+	/// The host: runs whichever doctrine is loaded, for the local player's units only.
 	/// </summary>
 	/// <remarks>
 	/// <para>
-	/// The platform contains <b>no strategy</b>. With no module loaded this trait does nothing at
+	/// The platform contains <b>no strategy</b>. With no Doctrine loaded this trait does nothing at
 	/// all — nothing deploys, builds or shoots. All behaviour arrives from a
-	/// <see cref="IBattleModule"/> the player authored or installed.
+	/// <see cref="IDoctrine"/> the player authored or installed.
 	/// </para>
 	/// <para>
 	/// Execution is outside the lockstep simulation: this is client-local and only ever looks at
 	/// <c>world.LocalPlayer</c>'s units, emitting <see cref="Order"/>s — the same channel a human
-	/// player's clicks use. So a module you wrote never has to exist on an opponent's machine.
+	/// player's clicks use. So a Doctrine you wrote never has to exist on an opponent's machine.
 	/// </para>
 	/// </remarks>
 	public class ModeExecutor : ITick, IWorldLoaded, IModeHost
@@ -62,20 +62,20 @@ namespace AutoCnC.Platform.Traits
 		readonly ModeExecutorInfo info;
 		readonly List<Order> pending = [];
 
-		/// <summary>The loaded module, or null if none.</summary>
-		public BattleModuleDefinition Module { get; private set; }
+		/// <summary>The loaded Doctrine, or null if none.</summary>
+		public DoctrineDefinition Doctrine { get; private set; }
 
 		/// <summary>
-		/// Live assignment state. Seeded from the module, then mutable so a player can override
+		/// Live assignment state. Seeded from the Doctrine, then mutable so a player can override
 		/// in-game without editing code.
 		/// </summary>
 		public ModeAssignments Assignments { get; private set; }
 
-		/// <summary>Base construction plan from the loaded module. Empty if none.</summary>
-		public IReadOnlyList<BuildStep> BuildPlan => Module?.BuildPlan ?? [];
+		/// <summary>Base construction plan from the loaded Doctrine. Empty if none.</summary>
+		public IReadOnlyList<BuildStep> BuildPlan => Doctrine?.BuildPlan ?? [];
 
-		/// <summary>Unit production plan from the loaded module. Empty if none.</summary>
-		public IReadOnlyList<ProductionStep> ProductionPlan => Module?.ProductionPlan ?? [];
+		/// <summary>Unit production plan from the loaded Doctrine. Empty if none.</summary>
+		public IReadOnlyList<ProductionStep> ProductionPlan => Doctrine?.ProductionPlan ?? [];
 
 		/// <summary>When set, every issued decision is written to debug.log. Toggle with /modelog.</summary>
 		public bool LogDecisions { get; set; }
@@ -90,27 +90,27 @@ namespace AutoCnC.Platform.Traits
 
 		void IWorldLoaded.WorldLoaded(World w, WorldRenderer wr)
 		{
-			// Load the configured module, or the only one installed. Anything more ambiguous is
-			// left to the player so we never silently pick a strategy for them.
-			var modules = ModuleLoader.Modules;
+			// Load the configured doctrine, or the only one installed. Anything more ambiguous is
+			// left to the player, so we never silently pick a strategy for them.
+			var doctrines = DoctrineLoader.Doctrines;
 
-			if (!string.IsNullOrEmpty(info.DefaultModule))
-				LoadModule(info.DefaultModule);
-			else if (modules.Count == 1)
-				LoadModule(modules[0].Definition.Name);
+			if (!string.IsNullOrEmpty(info.DefaultDoctrine))
+				LoadDoctrine(info.DefaultDoctrine);
+			else if (doctrines.Count == 1)
+				LoadDoctrine(doctrines[0].Definition.Name);
 		}
 
-		/// <summary>Loads a module by name. Returns false if it isn't installed.</summary>
-		public bool LoadModule(string name)
+		/// <summary>Loads a Doctrine by name. Returns false if it isn't installed.</summary>
+		public bool LoadDoctrine(string name)
 		{
-			var found = ModuleLoader.Find(name);
+			var found = DoctrineLoader.Find(name);
 			if (found == null)
 				return false;
 
-			Module = found.Definition;
+			Doctrine = found.Definition;
 			Assignments = new ModeAssignments(found.Definition.Assignments.GlobalMode, info.GroupCount);
 
-			// Copy the module's declared assignments into live, player-editable state.
+			// Copy the Doctrine's declared assignments into live, player-editable state.
 			foreach (var kv in found.Definition.Assignments.UnitTypeAssignments)
 				Assignments.SetUnitType(kv.Key, kv.Value);
 
@@ -124,13 +124,13 @@ namespace AutoCnC.Platform.Traits
 			return true;
 		}
 
-		/// <summary>Creates a mode instance from the loaded module, or null.</summary>
+		/// <summary>Creates a mode instance from the loaded Doctrine, or null.</summary>
 		public IUnitMode CreateMode(string modeName)
 		{
-			if (Module == null || string.IsNullOrEmpty(modeName))
+			if (Doctrine == null || string.IsNullOrEmpty(modeName))
 				return null;
 
-			if (!Module.Modes.TryGetValue(modeName, out var type))
+			if (!Doctrine.Modes.TryGetValue(modeName, out var type))
 				return null;
 
 			try
@@ -145,25 +145,25 @@ namespace AutoCnC.Platform.Traits
 		}
 
 		public bool IsKnownMode(string modeName) =>
-			Module != null && !string.IsNullOrEmpty(modeName) && Module.Modes.ContainsKey(modeName);
+			Doctrine != null && !string.IsNullOrEmpty(modeName) && Doctrine.Modes.ContainsKey(modeName);
 
 		public string CanonicalModeName(string modeName)
 		{
-			if (Module == null || string.IsNullOrEmpty(modeName))
+			if (Doctrine == null || string.IsNullOrEmpty(modeName))
 				return null;
 
-			return Module.Modes.TryGetValue(modeName, out var type) ? type.Name : null;
+			return Doctrine.Modes.TryGetValue(modeName, out var type) ? type.Name : null;
 		}
 
 		public IEnumerable<string> AvailableModeNames =>
-			Module == null
+			Doctrine == null
 				? Array.Empty<string>()
-				: Module.Modes.Keys.OrderBy(k => k, StringComparer.OrdinalIgnoreCase);
+				: Doctrine.Modes.Keys.OrderBy(k => k, StringComparer.OrdinalIgnoreCase);
 
 		void ITick.Tick(Actor self)
 		{
 			var player = world.LocalPlayer;
-			if (player == null || world.IsReplay || Module == null)
+			if (player == null || world.IsReplay || Doctrine == null)
 				return;
 
 			pending.Clear();
@@ -208,7 +208,7 @@ namespace AutoCnC.Platform.Traits
 			}
 			catch (Exception ex)
 			{
-				// Module code runs here. One bad mode must not take the game down.
+				// Doctrine code runs here. One bad mode must not take the game down.
 				Log.Write("debug", $"Mode '{controller.ActiveModeName}' threw on {actor.Info.Name}: {ex}");
 				TextNotificationsManager.Debug($"Mode '{controller.ActiveModeName}' threw: {ex.Message}");
 				controller.ModeOverride = null;
@@ -256,7 +256,7 @@ namespace AutoCnC.Platform.Traits
 
 		void SyncMode(Actor actor, ProgrammableController controller)
 		{
-			// Role lets a module say "whatever builds the base" without naming actor types.
+			// Role lets a Doctrine say "whatever builds the base" without naming actor types.
 			var role = controller.Info.Role;
 			var byRole = role != null ? Assignments.GetUnitType(role) : null;
 
@@ -269,7 +269,7 @@ namespace AutoCnC.Platform.Traits
 			controller.ApplyMode(resolved, this);
 		}
 
-		/// <summary>Clears every per-unit override, so the module's assignments apply again.</summary>
+		/// <summary>Clears every per-unit override, so the Doctrine's assignments apply again.</summary>
 		public void ClearUnitOverrides()
 		{
 			foreach (var pair in world.ActorsWithTrait<ProgrammableController>())

@@ -3,7 +3,7 @@
 Start to finish: install, write your first mode, and watch it fight. About 15 minutes, most of
 it downloading.
 
-If you just want the API reference, skip to [writing-modules.md](writing-modules.md).
+If you just want the API reference, skip to [writing-doctrines.md](writing-doctrines.md).
 
 ---
 
@@ -101,7 +101,7 @@ Everything happens through the chatbox. Select some units, then:
 Inspect what's going on:
 
 ```
-/modules         installed battle modules
+/modules         installed doctrines
 /module <name>   load one
 /whatmode        what the current selection is running
 /modelog         log every decision to debug.log
@@ -128,21 +128,21 @@ Switching modes is **instant and live** — it lands within one game tick, mid-b
 
 ---
 
-## 5. Write your first battle module
+## 5. Write your first doctrine
 
-The platform has no strategy of its own. All behaviour comes from a **battle module**, and
+The platform has no strategy of its own. All behaviour comes from a **doctrine**, and
 AutoC&C ships one — `Reference` — as both the example and the opponent to beat.
 
 Start your own by copying it:
 
 ```powershell
-cp -r modules/Reference modules/MyModule
+cp -r doctrines/Reference modules/MyModule
 cd modules/MyModule
-# rename ReferenceModule.csproj / .sln, and the class + Name in ReferenceBattleModule.cs
+# rename ReferenceDoctrine.csproj / .sln, and the class + Name in ReferenceDoctrine.cs
 dotnet build
 ```
 
-Open `MyModule/ReferenceBattleModule.cs` — everything about how your army fights is declared
+Open `MyModule/ReferenceDoctrine.cs` — everything about how your army fights is declared
 there:
 
 ```csharp
@@ -159,7 +159,7 @@ Rebuild, launch, then in game:
 /module MyModule      load yours
 ```
 
-Full guide: [writing-modules.md](writing-modules.md).
+Full guide: [writing-doctrines.md](writing-doctrines.md).
 
 ## 6. The iteration loop
 
@@ -174,7 +174,7 @@ dotnet test src/AutoCnC.Modes.Core.Tests     # ~20ms, no game, no engine build
 
 To make your own logic testable that way, put the judgement in a pure function in
 `src/AutoCnC.Modes.Core` and call it from `OnTick`. `DefensiveLogic` is the worked example.
-Details in [writing-modules.md](writing-modules.md).
+Details in [writing-doctrines.md](writing-doctrines.md).
 
 Full loop:
 
@@ -231,7 +231,7 @@ clicks have. You can also lower `TickInterval` for an actor in
 
 | Doc | For |
 |---|---|
-| [writing-modules.md](writing-modules.md) | Authoring battle modules: plans, modes, the full API |
+| [writing-doctrines.md](writing-doctrines.md) | Authoring doctrines: plans, modes, the full API |
 | [architecture.md](architecture.md) | How the pieces fit and why |
 | [determinism.md](determinism.md) | Why your code can't desync a multiplayer match |
-| [../modules/Reference/README.md](../modules/Reference/README.md) | The reference module, next to its code |
+| [../doctrines/Reference/README.md](../doctrines/Reference/README.md) | The reference module, next to its code |

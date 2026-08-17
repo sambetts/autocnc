@@ -70,7 +70,7 @@ namespace AutoCnC.Core
 		/// Picks the next structure to start, or null if there is nothing worth doing right now.
 		/// </summary>
 		/// <param name="state">Current base snapshot.</param>
-		/// <param name="plan">Ordered build steps, declared by the battle module.</param>
+		/// <param name="plan">Ordered build steps, declared by the doctrine.</param>
 		/// <param name="powerCandidates">
 		/// Actor names counting as power plants, used for the low-power override.
 		/// </param>

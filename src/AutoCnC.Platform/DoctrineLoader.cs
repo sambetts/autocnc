@@ -20,7 +20,7 @@ using OpenRA;
 namespace AutoCnC.Platform
 {
 	/// <summary>
-	/// Finds and loads battle modules from disk.
+	/// Finds and loads doctrines from disk.
 	/// </summary>
 	/// <remarks>
 	/// <para>
@@ -32,23 +32,23 @@ namespace AutoCnC.Platform
 	/// Scanned locations, in order:
 	/// </para>
 	/// <list type="number">
-	/// <item><c>&lt;bin&gt;/modules</c> — where the reference module builds to</item>
-	/// <item><c>^SupportDir/autocnc/modules</c> — where a player installs downloaded modules</item>
+	/// <item><c>&lt;bin&gt;/doctrines</c> — where the reference module builds to</item>
+	/// <item><c>^SupportDir/autocnc/doctrines</c> — where a player installs downloaded modules</item>
 	/// </list>
 	/// </remarks>
-	public static class ModuleLoader
+	public static class DoctrineLoader
 	{
 		static readonly object SyncRoot = new();
-		static List<LoadedModule> loaded;
+		static List<LoadedDoctrine> loaded;
 		static readonly List<string> LoadErrors = [];
 
-		public sealed class LoadedModule
+		public sealed class LoadedDoctrine
 		{
-			public IBattleModule Instance { get; }
-			public BattleModuleDefinition Definition { get; }
+			public IDoctrine Instance { get; }
+			public DoctrineDefinition Definition { get; }
 			public string SourcePath { get; }
 
-			public LoadedModule(IBattleModule instance, BattleModuleDefinition definition, string sourcePath)
+			public LoadedDoctrine(IDoctrine instance, DoctrineDefinition definition, string sourcePath)
 			{
 				Instance = instance;
 				Definition = definition;
@@ -57,7 +57,7 @@ namespace AutoCnC.Platform
 		}
 
 		/// <summary>Every module found, ordered by name.</summary>
-		public static IReadOnlyList<LoadedModule> Modules
+		public static IReadOnlyList<LoadedDoctrine> Doctrines
 		{
 			get
 			{
@@ -76,7 +76,7 @@ namespace AutoCnC.Platform
 			}
 		}
 
-		public static LoadedModule Find(string name)
+		public static LoadedDoctrine Find(string name)
 		{
 			EnsureScanned();
 			return loaded.FirstOrDefault(m =>
@@ -90,8 +90,8 @@ namespace AutoCnC.Platform
 			{
 				// Fully qualified: our own namespace is AutoCnC.Platform, which otherwise
 				// shadows OpenRA's Platform helper.
-				yield return Path.Combine(OpenRA.Platform.EngineDir, "bin", "modules");
-				yield return Path.Combine(OpenRA.Platform.SupportDir, "autocnc", "modules");
+				yield return Path.Combine(OpenRA.Platform.EngineDir, "bin", "doctrines");
+				yield return Path.Combine(OpenRA.Platform.SupportDir, "autocnc", "doctrines");
 			}
 		}
 
@@ -112,7 +112,7 @@ namespace AutoCnC.Platform
 				if (loaded != null)
 					return;
 
-				var found = new List<LoadedModule>();
+				var found = new List<LoadedDoctrine>();
 				LoadErrors.Clear();
 
 				foreach (var directory in SearchPaths)
@@ -128,7 +128,7 @@ namespace AutoCnC.Platform
 			}
 		}
 
-		static void LoadFrom(string file, List<LoadedModule> found)
+		static void LoadFrom(string file, List<LoadedDoctrine> found)
 		{
 			try
 			{
@@ -138,17 +138,17 @@ namespace AutoCnC.Platform
 
 				foreach (var type in assembly.GetTypes())
 				{
-					if (type.IsAbstract || type.IsInterface || !typeof(IBattleModule).IsAssignableFrom(type))
+					if (type.IsAbstract || type.IsInterface || !typeof(IDoctrine).IsAssignableFrom(type))
 						continue;
 
 					if (type.GetConstructor(Type.EmptyTypes) == null)
 					{
-						LoadErrors.Add($"{type.Name}: battle modules need a public parameterless constructor.");
+						LoadErrors.Add($"{type.Name}: doctrines need a public parameterless constructor.");
 						continue;
 					}
 
-					var instance = (IBattleModule)Activator.CreateInstance(type);
-					var definition = BattleModuleBuilder.Build(instance);
+					var instance = (IDoctrine)Activator.CreateInstance(type);
+					var definition = DoctrineBuilder.Build(instance);
 
 					if (string.IsNullOrWhiteSpace(definition.Name))
 					{
@@ -156,7 +156,7 @@ namespace AutoCnC.Platform
 						continue;
 					}
 
-					found.Add(new LoadedModule(instance, definition, file));
+					found.Add(new LoadedDoctrine(instance, definition, file));
 				}
 			}
 			catch (ReflectionTypeLoadException ex)
@@ -168,7 +168,7 @@ namespace AutoCnC.Platform
 			catch (Exception ex)
 			{
 				LoadErrors.Add($"{Path.GetFileName(file)}: {ex.Message}");
-				Log.Write("debug", $"Failed to load battle module '{file}': {ex}");
+				Log.Write("debug", $"Failed to load doctrine '{file}': {ex}");
 			}
 		}
 	}

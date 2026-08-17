@@ -3,10 +3,11 @@
   <PropertyGroup>
     <RootNamespace>AutoCnC.Platform</RootNamespace>
     <AssemblyName>AutoCnC.Platform</AssemblyName>
-    <Description>The AutoC&amp;C host: OpenRA traits that load and run battle modules. Contains no strategy.</Description>
+    <Description>The AutoC&amp;C host: OpenRA traits that load and run doctrines. Contains no strategy.</Description>
     <OutputPath>$(EngineBinDirectory)\</OutputPath>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <IsPackable>false</IsPackable>
   </PropertyGroup>
 
   <ItemGroup>

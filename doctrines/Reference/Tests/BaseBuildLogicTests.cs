@@ -28,7 +28,7 @@ namespace AutoCnC.Reference.Tests
 		static readonly string[] PowerCandidates = ["powr", "nuke"];
 
 		static readonly IReadOnlyList<BuildStep> Plan =
-			BattleModuleBuilder.Build(new ReferenceBattleModule()).BuildPlan;
+			DoctrineBuilder.Build(new ReferenceDoctrine()).BuildPlan;
 
 		static BasePlanState State(
 			int cash = 5000,

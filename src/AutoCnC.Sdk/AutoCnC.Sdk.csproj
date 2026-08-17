@@ -3,10 +3,13 @@
   <PropertyGroup>
     <RootNamespace>AutoCnC.Sdk</RootNamespace>
     <AssemblyName>AutoCnC.Sdk</AssemblyName>
-    <Description>The AutoC&amp;C battle module SDK: IBattleModule, IUnitMode and ModeContext.</Description>
+    <Description>The AutoC&amp;C doctrine SDK: IDoctrine, IUnitMode and ModeContext.</Description>
     <OutputPath>$(EngineBinDirectory)\</OutputPath>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <IsPackable>true</IsPackable>
+    <PackageId>AutoCnC.Sdk</PackageId>
+    <PackageDescription>Write AutoC&amp;C doctrines: IDoctrine, IUnitMode and ModeContext.</PackageDescription>
   </PropertyGroup>
 
   <ItemGroup>
@@ -23,6 +26,21 @@
       <HintPath>$(EngineBinDirectory)\OpenRA.Mods.Common.dll</HintPath>
       <Private>false</Private>
     </Reference>
+  </ItemGroup>
+
+  <!--
+    The package carries the OpenRA reference assemblies it was built against, because a doctrine
+    cannot compile without Actor/CPos/WDist and OpenRA is not published to NuGet. They are GPL,
+    which is why this package is GPL-3.0-or-later and links to the source repository.
+
+    Consumers set CopyLocalLockFileAssemblies=false (or ExcludeAssets=runtime) so these are used
+    for compilation only and never copied beside a built doctrine — the game already has them.
+  -->
+  <ItemGroup>
+    <None Include="$(EngineBinDirectory)\OpenRA.Game.dll" Pack="true" PackagePath="lib\net8.0\" Visible="false" />
+    <None Include="$(EngineBinDirectory)\OpenRA.Mods.Common.dll" Pack="true" PackagePath="lib\net8.0\" Visible="false" />
+    <None Include="$(MSBuildThisFileDirectory)..\..\LICENSE" Pack="true" PackagePath="\" Visible="false" />
+    <None Include="$(MSBuildThisFileDirectory)..\..\NOTICE.md" Pack="true" PackagePath="\" Visible="false" />
   </ItemGroup>
 
   <Target Name="VerifyEngineIsBuilt" BeforeTargets="BeforeBuild">

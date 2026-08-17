@@ -11,9 +11,25 @@
     <!-- The engine ships newer BCL facades than the net8.0 ref pack; the unification is benign. -->
     <MSBuildWarningsAsMessages>$(MSBuildWarningsAsMessages);MSB3277</MSBuildWarningsAsMessages>
 
-    <!-- Path to the pinned OpenRA submodule. Overridable so CI can point elsewhere. -->
     <EngineDirectory Condition="'$(EngineDirectory)' == ''">$(MSBuildThisFileDirectory)..\engine</EngineDirectory>
     <EngineBinDirectory>$(EngineDirectory)\bin</EngineBinDirectory>
+  </PropertyGroup>
+
+  <!--
+    NuGet metadata shared by the packable projects (Core and Sdk). These are published to a
+    LOCAL feed under packages/, not to nuget.org: the name contains an EA trademark and the
+    package would carry GPL engine binaries, so public publishing is a decision for humans.
+  -->
+  <PropertyGroup>
+    <Version>0.1.0</Version>
+    <Authors>The AutoC&amp;C Developers and Contributors</Authors>
+    <PackageLicenseExpression>GPL-3.0-or-later</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/sambetts/autocnc</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/sambetts/autocnc</RepositoryUrl>
+    <PackageOutputPath>$(MSBuildThisFileDirectory)..\packages</PackageOutputPath>
+    <IncludeBuildOutput>true</IncludeBuildOutput>
+    <IncludeSymbols>false</IncludeSymbols>
+    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
   </PropertyGroup>
 
 </Project>

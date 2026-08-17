@@ -21,24 +21,24 @@ namespace AutoCnC.Sdk
 	/// <remarks>
 	/// <para>
 	/// This is the unit of authorship in AutoC&amp;C. The platform ships no strategy of its own —
-	/// it deploys nothing, builds nothing and shoots nothing until a battle module is loaded.
+	/// it deploys nothing, builds nothing and shoots nothing until a doctrine is loaded.
 	/// A module declares everything: what to construct, what to train, which behaviours exist,
 	/// and which units run them.
 	/// </para>
 	/// <para>
-	/// Build your module against the SDK, drop the assembly into <c>bin/modules</c>, pick it
+	/// Build your module against the SDK, drop the assembly into <c>bin/doctrines</c>, pick it
 	/// in-game, and watch it play. Because assignments come from the module, there is nothing to
 	/// re-enter at the start of each match.
 	/// </para>
 	/// </remarks>
 	/// <example>
 	/// <code>
-	/// public sealed class MyModule : IBattleModule
+	/// public sealed class MyModule : IDoctrine
 	/// {
 	///     public string Name =&gt; "Rush";
 	///     public string Description =&gt; "Fast barracks, early pressure.";
 	///
-	///     public void Configure(IBattleModuleBuilder b)
+	///     public void Configure(IDoctrineBuilder b)
 	///     {
 	///         b.Build("powr", "nuke").Until(2);
 	///         b.Build("proc").Until(2);
@@ -49,7 +49,7 @@ namespace AutoCnC.Sdk
 	/// }
 	/// </code>
 	/// </example>
-	public interface IBattleModule
+	public interface IDoctrine
 	{
 		/// <summary>Short name used to select this module in-game.</summary>
 		string Name { get; }
@@ -58,11 +58,11 @@ namespace AutoCnC.Sdk
 		string Description { get; }
 
 		/// <summary>Declare the module's plans and mode assignments.</summary>
-		void Configure(IBattleModuleBuilder builder);
+		void Configure(IDoctrineBuilder builder);
 	}
 
 	/// <summary>Fluent surface a module uses to declare itself.</summary>
-	public interface IBattleModuleBuilder
+	public interface IDoctrineBuilder
 	{
 		/// <summary>
 		/// Add a structure to the base build plan. Candidates are alternatives for one role, so
@@ -92,29 +92,29 @@ namespace AutoCnC.Sdk
 	public interface IPlanStep
 	{
 		/// <summary>Keep building until this many exist. Counts anything already queued.</summary>
-		IBattleModuleBuilder Until(int count);
+		IDoctrineBuilder Until(int count);
 
 		/// <summary>Keep building these indefinitely.</summary>
-		IBattleModuleBuilder Forever();
+		IDoctrineBuilder Forever();
 	}
 
 	/// <summary>A pending mode assignment awaiting its scope.</summary>
 	public interface IAssignment
 	{
 		/// <summary>Every unit that has no more specific assignment.</summary>
-		IBattleModuleBuilder ToAll();
+		IDoctrineBuilder ToAll();
 
 		/// <summary>Every unit of this actor type, e.g. <c>harv</c>.</summary>
-		IBattleModuleBuilder ToUnitType(params string[] actorTypes);
+		IDoctrineBuilder ToUnitType(params string[] actorTypes);
 
 		/// <summary>Every unit the player puts in this control group (1-9).</summary>
-		IBattleModuleBuilder ToGroup(int group);
+		IDoctrineBuilder ToGroup(int group);
 	}
 
 	/// <summary>
 	/// What a configured module resolved to. Produced by the platform, consumed by the executor.
 	/// </summary>
-	public sealed class BattleModuleDefinition
+	public sealed class DoctrineDefinition
 	{
 		public string Name { get; }
 		public string Description { get; }
@@ -131,7 +131,7 @@ namespace AutoCnC.Sdk
 		/// <summary>Every mode type the module made available, keyed by name.</summary>
 		public IReadOnlyDictionary<string, Type> Modes { get; }
 
-		public BattleModuleDefinition(
+		public DoctrineDefinition(
 			string name,
 			string description,
 			IReadOnlyList<BuildStep> buildPlan,

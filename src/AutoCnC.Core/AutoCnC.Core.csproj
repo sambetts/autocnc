@@ -3,10 +3,13 @@
   <PropertyGroup>
     <RootNamespace>AutoCnC.Core</RootNamespace>
     <AssemblyName>AutoCnC.Core</AssemblyName>
-    <Description>Engine-free contracts and planners shared by the AutoC&amp;C platform and battle modules.</Description>
+    <Description>Engine-free contracts and planners shared by the AutoC&amp;C platform and doctrines.</Description>
     <OutputPath>$(EngineBinDirectory)\</OutputPath>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <IsPackable>true</IsPackable>
+    <PackageId>AutoCnC.Core</PackageId>
+    <PackageDescription>Engine-free contracts and planners for AutoC&amp;C doctrines.</PackageDescription>
   </PropertyGroup>
 
   <!--

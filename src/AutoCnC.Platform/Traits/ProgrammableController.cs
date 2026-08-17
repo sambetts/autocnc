@@ -17,7 +17,7 @@ using OpenRA.Traits;
 
 namespace AutoCnC.Platform.Traits
 {
-	[Desc("Marks this actor as programmable, so a battle module's mode can drive it.",
+	[Desc("Marks this actor as programmable, so a doctrine's mode can drive it.",
 		"Actors with this trait are picked up by ModeExecutor on their owner's client.")]
 	public class ProgrammableControllerInfo : ConditionalTraitInfo
 	{
@@ -28,7 +28,7 @@ namespace AutoCnC.Platform.Traits
 		[Desc("Default sense radius for this unit, used by modes that do not specify one.")]
 		public readonly WDist ScanRadius = WDist.FromCells(8);
 
-		[Desc("Role hint the loaded battle module can assign a mode to, e.g. Builder or Harvester.",
+		[Desc("Role hint the loaded doctrine can assign a mode to, e.g. Builder or Harvester.",
 			"Lets a module target 'the thing that builds' without hardcoding actor names.")]
 		public readonly string Role = null;
 
@@ -94,7 +94,7 @@ namespace AutoCnC.Platform.Traits
 
 		/// <summary>
 		/// Switches the running mode. Called by <see cref="ModeExecutor"/> when the resolved
-		/// assignment changes — including when a different battle module is loaded.
+		/// assignment changes — including when a different doctrine is loaded.
 		/// </summary>
 		internal void ApplyMode(string modeName, ModeExecutor executor)
 		{

@@ -1,6 +1,6 @@
-# Writing a battle module
+# Writing a doctrine
 
-A **battle module** is the unit of authorship in AutoC&C. It declares everything about how an
+A **doctrine** is the unit of authorship in AutoC&C. It declares everything about how an
 army fights:
 
 - **what to build** — the base construction plan
@@ -13,17 +13,17 @@ deploys, builds or shoots. Beating the reference module is the goal.
 
 ---
 
-## The shape of a module
+## The shape of a doctrine
 
 ```csharp
 using AutoCnC.Sdk;
 
-public sealed class MyModule : IBattleModule
+public sealed class MyDoctrine : IDoctrine
 {
     public string Name => "Rush";
     public string Description => "Fast barracks, early pressure.";
 
-    public void Configure(IBattleModuleBuilder b)
+    public void Configure(IDoctrineBuilder b)
     {
         b.Build("powr", "nuke").Until(2);        // base plan
         b.Build("proc").Until(2);
@@ -39,7 +39,7 @@ public sealed class MyModule : IBattleModule
 }
 ```
 
-That's a complete module. Build it, drop the DLL in, `/module Rush`, watch it play.
+That's a complete doctrine. Build it, drop the DLL in, `/module Rush`, watch it play.
 
 ### Candidates cover both factions
 
@@ -67,21 +67,48 @@ you'd expect. A player can still override anything live with `/mode`.
 ## Getting set up
 
 ```powershell
-cp -r modules/Reference modules/MyModule       # copy the reference module
-cd modules/MyModule
-# rename the .csproj, .sln, the IBattleModule class and its Name
+cp -r doctrines/Reference doctrines/MyDoctrine
+cd doctrines/MyDoctrine
+# rename the .csproj, .sln, and the IDoctrine class + its Name
 dotnet build
 ```
 
-A module builds against AutoC&C **binaries**, not projects — see `Directory.Build.props`. That
-means it can live in **its own repository**: set `AutoCnCPath` to any AutoC&C checkout.
+Or do the whole loop in one command:
 
 ```powershell
-dotnet build /p:AutoCnCPath=C:\games\autocnc
+./scripts/run-doctrine.ps1 -Doctrine MyDoctrine -Test
 ```
 
-Output goes to `<AutoCnCPath>/engine/bin/modules/`, which is one of the folders the platform
-scans. The other is `<SupportDir>/autocnc/modules/`, for modules you install rather than build.
+That tests your strategy, builds it, installs it where the platform scans, and launches the game.
+
+### A doctrine is a normal NuGet consumer
+
+```xml
+<PackageReference Include="AutoCnC.Sdk" Version="0.1.0" />
+<PackageReference Include="AutoCnC.Core" Version="0.1.0" />
+```
+
+The SDK package carries the OpenRA reference assemblies it was built against, so a doctrine
+compiles with no game installed and no path fiddling.
+
+That means **a doctrine does not have to live in this repository.** Copy the folder anywhere,
+point `nuget.config` at a folder holding the `AutoCnC.*` packages, and it builds:
+
+```xml
+<packageSources>
+  <add key="autocnc-local" value="C:\games\autocnc\packages" />
+</packageSources>
+```
+
+Set `CopyLocalLockFileAssemblies=false` (the template does) so the SDK and engine DLLs are used
+for compilation only. The game already has them loaded, and stray DLLs beside your doctrine
+would be scanned as doctrines.
+
+### Where doctrines are installed
+
+Built output goes to `DoctrineInstallDirectory`, which defaults to `engine/bin/doctrines`. The
+platform scans that plus `<SupportDir>/autocnc/doctrines`, the latter being where a player drops
+a doctrine someone shared with them.
 
 ---
 
@@ -155,10 +182,10 @@ public override UnitDecision OnTick(Actor self, ModeContext ctx)
 Then test your strategy in milliseconds, with no engine and no game:
 
 ```powershell
-dotnet test modules/MyModule/Tests
+dotnet test doctrines/MyDoctrine/Tests
 ```
 
-The reference module's tests assert against the plan its `IBattleModule` actually declares, so
+The reference module's tests assert against the plan its `IDoctrine` actually declares, so
 they verify the real shipped strategy rather than a copy that can drift.
 
 ---
@@ -195,7 +222,7 @@ they verify the real shipped strategy rather than a copy that can drift.
 | `BuildPlan`, `ProductionPlan` | **Your module's plans** — read these rather than hardcoding |
 
 `BuildBaseMode` and `TrainUnitsMode` read `ctx.BuildPlan` / `ctx.ProductionPlan`, which is why
-they work unchanged for any module: change the plan in your `IBattleModule`, not the mode.
+they work unchanged for any module: change the plan in your `IDoctrine`, not the mode.
 
 ---
 

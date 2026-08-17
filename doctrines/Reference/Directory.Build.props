@@ -1,0 +1,23 @@
+<Project>
+
+  <!--
+    A doctrine consumes AutoC&C as NuGet packages, so it does not need to sit inside the AutoC&C
+    repository. Copy this folder anywhere, point nuget.config at a folder containing the
+    AutoCnC.* packages, and it builds.
+
+    AutoCnCPath is still used to find the game for the launch script and to decide where built
+    doctrines are installed.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>12</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <MSBuildWarningsAsMessages>$(MSBuildWarningsAsMessages);MSB3277</MSBuildWarningsAsMessages>
+
+    <AutoCnCVersion Condition="'$(AutoCnCVersion)' == ''">0.1.0</AutoCnCVersion>
+    <AutoCnCPath Condition="'$(AutoCnCPath)' == ''">$(MSBuildThisFileDirectory)..\..</AutoCnCPath>
+    <DoctrineInstallDirectory Condition="'$(DoctrineInstallDirectory)' == ''">$(AutoCnCPath)\engine\bin\doctrines</DoctrineInstallDirectory>
+  </PropertyGroup>
+
+</Project>

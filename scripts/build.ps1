@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Builds the OpenRA engine, the AutoC&C platform, and any battle modules in modules/.
+    Builds the OpenRA engine, the AutoC&C platform, and any doctrines in modules/.
 
 .PARAMETER Configuration
     Build configuration. Defaults to Release.
@@ -9,14 +9,14 @@
     Skip the engine build. Use for fast iteration once the engine is already built.
 
 .PARAMETER SkipModules
-    Build only the platform, not the battle modules.
+    Build only the platform, not the doctrines.
 #>
 [CmdletBinding()]
 param(
     [ValidateSet('Debug', 'Release')]
     [string]$Configuration = 'Release',
     [switch]$SkipEngine,
-    [switch]$SkipModules
+    [switch]$SkipDoctrines
 )
 
 $ErrorActionPreference = 'Stop'
@@ -38,18 +38,23 @@ Write-Host "==> Building AutoC&C platform ($Configuration)" -ForegroundColor Cya
 dotnet build (Join-Path $repoRoot 'AutoCnC.sln') -c $Configuration -v minimal --nologo
 if ($LASTEXITCODE -ne 0) { throw "Platform build failed with exit code $LASTEXITCODE" }
 
-if (-not $SkipModules) {
-    $moduleSolutions = Get-ChildItem (Join-Path $repoRoot 'modules') -Recurse -Filter *.sln -ErrorAction SilentlyContinue
-    foreach ($solution in $moduleSolutions) {
-        Write-Host "==> Building battle module: $($solution.Directory.Name)" -ForegroundColor Cyan
+# Doctrines consume AutoC&C as NuGet packages, so pack before building them.
+Write-Host "==> Packing AutoC&C packages" -ForegroundColor Cyan
+dotnet pack (Join-Path $repoRoot 'AutoCnC.sln') -c $Configuration -v quiet --nologo
+if ($LASTEXITCODE -ne 0) { throw "Pack failed with exit code $LASTEXITCODE" }
+
+if (-not $SkipDoctrines) {
+    $doctrineSolutions = Get-ChildItem (Join-Path $repoRoot 'doctrines') -Recurse -Filter *.sln -ErrorAction SilentlyContinue
+    foreach ($solution in $doctrineSolutions) {
+        Write-Host "==> Building doctrine: $($solution.Directory.Name)" -ForegroundColor Cyan
         dotnet build $solution.FullName -c $Configuration -v minimal --nologo
-        if ($LASTEXITCODE -ne 0) { throw "Module build failed: $($solution.FullName)" }
+        if ($LASTEXITCODE -ne 0) { throw "Doctrine build failed: $($solution.FullName)" }
     }
 
-    $moduleDir = Join-Path $engineDir 'bin\modules'
-    if (Test-Path $moduleDir) {
-        $installed = Get-ChildItem $moduleDir -Filter *.dll | Select-Object -ExpandProperty BaseName
-        Write-Host "Installed modules: $($installed -join ', ')" -ForegroundColor Green
+    $doctrineDir = Join-Path $engineDir 'bin\doctrines'
+    if (Test-Path $doctrineDir) {
+        $installed = Get-ChildItem $doctrineDir -Filter *.dll | Select-Object -ExpandProperty BaseName
+        Write-Host "Installed doctrines: $($installed -join ', ')" -ForegroundColor Green
     }
 }
 

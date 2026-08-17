@@ -1,0 +1,19 @@
+<Project>
+
+  <!--
+    A battle module builds against AutoC&C BINARIES, not projects. That is what lets a module
+    live in its own repository: point AutoCnCPath at any AutoC&C checkout or install and it
+    compiles. Override it on the command line or with an environment variable.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>12</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <MSBuildWarningsAsMessages>$(MSBuildWarningsAsMessages);MSB3277</MSBuildWarningsAsMessages>
+
+    <AutoCnCPath Condition="'$(AutoCnCPath)' == ''">$(MSBuildThisFileDirectory)..\..</AutoCnCPath>
+    <AutoCnCBinDirectory>$(AutoCnCPath)\engine\bin</AutoCnCBinDirectory>
+  </PropertyGroup>
+
+</Project>

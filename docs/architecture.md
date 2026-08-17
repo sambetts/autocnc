@@ -14,39 +14,53 @@ Everything below is a response to that tension.
 
 ---
 
-## Layers
+## Platform and modules
+
+AutoC&C is split into a **platform** (infrastructure) and **battle modules** (strategy). The
+platform ships no strategy at all: with no module loaded, nothing deploys, builds or shoots.
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│  player-modes/            YOUR modes. A normal C# project.   │
-│    RunHomeMode, ScoutMode, HarvesterEscortMode  (templates)  │
-│    → builds to engine/bin/PlayerModes.dll                    │
+│  modules/*            BATTLE MODULES — all strategy          │
+│    IBattleModule      build plan, production plan,           │
+│                       modes, assignments                     │
+│    → built to bin/modules, discovered by scanning            │
 └──────────────────────────────────────────────────────────────┘
-                              │ discovered by reflection
+                              │ loaded by reflection
 ┌──────────────────────────────────────────────────────────────┐
-│  AutoCnC.Mod              (references OpenRA)                │
-│                                                              │
-│   ModeExecutor            world trait, CLIENT-LOCAL          │
-│                           runs modes, emits Orders           │
-│   ProgrammableController  per-unit marker + mode state       │
-│   ModeContext             sensing + order construction       │
-│   ModeRegistry            reflection-based discovery         │
-│   ModeCommands            chatbox assignment UI              │
-│   Library/*Mode           shipped reference modes            │
-└──────────────────────────────────────────────────────────────┘
-                              │ plain structs / strings
-┌──────────────────────────────────────────────────────────────┐
-│  AutoCnC.Modes.Core       (references NOTHING)               │
-│                                                              │
-│   DefensiveLogic, AttackBaseLogic   pure Decide() functions  │
-│   ModeAssignments                   precedence resolver      │
-│   ThreatSnapshot, UnitDecision      engine-free data         │
+│  AutoCnC.Platform     THE HOST (references OpenRA)           │
+│    ModeExecutor       client-local; runs the loaded module   │
+│    ModuleLoader       scans folders for module assemblies    │
+│    ProgrammableController, ModeCommands                      │
 └──────────────────────────────────────────────────────────────┘
                               │
 ┌──────────────────────────────────────────────────────────────┐
-│  AutoCnC.Modes.Core.Tests   36 tests, no engine build needed │
+│  AutoCnC.Sdk          WHAT MODULES CODE AGAINST              │
+│    IBattleModule, IBattleModuleBuilder                       │
+│    IUnitMode, UnitMode, ModeContext                          │
+│    IUnitState, IModeHost  (so the SDK needn't know the host) │
+└──────────────────────────────────────────────────────────────┘
+                              │
+┌──────────────────────────────────────────────────────────────┐
+│  AutoCnC.Core         ZERO DEPENDENCIES                      │
+│    UnitDecision, ThreatSnapshot, BuildStep, ProductionStep   │
+│    BaseBuildLogic, UnitProductionLogic, ModeAssignments      │
 └──────────────────────────────────────────────────────────────┘
 ```
+
+Modules reference the SDK and Core **as binaries**, never as projects. That is what lets a module
+live in its own repository: point `AutoCnCPath` at any AutoC&C checkout and it compiles.
+
+Modules are deliberately **not** listed in `mod.yaml`. They are player artifacts discovered by
+scanning `bin/modules` and `<SupportDir>/autocnc/modules`, so you can install several, swap
+between them with `/module`, and share one without anybody editing the mod.
+
+### What belongs where
+
+The dividing line is *algorithm versus plan*. Walking a build plan and picking the first unmet
+step is infrastructure, so `BaseBuildLogic` lives in Core. Deciding that power comes before a
+refinery is strategy, so the plan lives in the module. `BuildBaseMode` reads `ctx.BuildPlan`
+rather than hardcoding an order, which is why the same mode serves every module.
 
 ---
 

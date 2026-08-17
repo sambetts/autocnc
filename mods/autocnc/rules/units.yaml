@@ -69,16 +69,39 @@ HARV:
 		TickInterval: 12
 		ScanRadius: 7c0
 
-# The MCV and the construction yard it unfolds into both run BuildBaseMode by default.
-# Without this a skirmish never starts: you spawn next to an undeployed MCV and nothing
-# produces anything. DefaultMode outranks the executor's global default, so '/mode all X'
-# will not accidentally stop the base building itself.
+# The MCV and the construction yard it unfolds into. Neither inherits the AutoTarget mixins, so
+# they need the controller adding explicitly.
+#
+# Note there is no mode named here. Which mode runs is the loaded battle module's decision, not
+# the mod's: the platform ships no strategy. Role is only a hint a module can target instead of
+# hardcoding actor names.
 MCV:
 	ProgrammableController:
 		TickInterval: 10
-		DefaultMode: BuildBaseMode
+		Role: Builder
 
 FACT:
 	ProgrammableController:
 		TickInterval: 25
-		DefaultMode: BuildBaseMode
+		Role: Builder
+
+# Production buildings, so a module can drive unit training from them.
+PYLE:
+	ProgrammableController:
+		TickInterval: 25
+		Role: Producer
+
+HAND:
+	ProgrammableController:
+		TickInterval: 25
+		Role: Producer
+
+WEAP:
+	ProgrammableController:
+		TickInterval: 25
+		Role: Producer
+
+AFLD:
+	ProgrammableController:
+		TickInterval: 25
+		Role: Producer

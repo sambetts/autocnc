@@ -3,7 +3,7 @@
 Start to finish: install, write your first mode, and watch it fight. About 15 minutes, most of
 it downloading.
 
-If you just want the API reference, skip to [writing-modes.md](writing-modes.md).
+If you just want the API reference, skip to [writing-modules.md](writing-modules.md).
 
 ---
 
@@ -79,7 +79,8 @@ Press `Enter` to open the chatbox and try:
 You should see the shipped modes plus the templates:
 
 ```
-Modes: AttackBaseMode, BuildBaseMode, DefensiveMode, HarvesterEscortMode, RunHomeMode, ScoutMode
+Modes from Reference: AttackBaseMode, BuildBaseMode, DefensiveMode, HarvesterEscortMode,
+RunHomeMode, ScoutMode, TrainUnitsMode
 ```
 
 If that list is missing your modes, jump to [Troubleshooting](#troubleshooting).
@@ -100,6 +101,8 @@ Everything happens through the chatbox. Select some units, then:
 Inspect what's going on:
 
 ```
+/modules         installed battle modules
+/module <name>   load one
 /whatmode        what the current selection is running
 /modelog         log every decision to debug.log
 /assignments     every assignment currently in force
@@ -125,62 +128,38 @@ Switching modes is **instant and live** — it lands within one game tick, mid-b
 
 ---
 
-## 5. Write your first mode
+## 5. Write your first battle module
 
-Open `AutoCnC.sln` in your IDE. It contains everything, including your `PlayerModes` project.
+The platform has no strategy of its own. All behaviour comes from a **battle module**, and
+AutoC&C ships one — `Reference` — as both the example and the opponent to beat.
 
-Create `player-modes/BerserkerMode.cs`:
-
-```csharp
-using System.Linq;
-using AutoCnC.Mod.Modes;
-using AutoCnC.Modes.Core;
-using OpenRA;
-
-namespace PlayerModes
-{
-	public sealed class BerserkerMode : UnitMode
-	{
-		public override UnitDecision OnTick(Actor self, ModeContext ctx)
-		{
-			// Charge the nearest thing we can actually hurt.
-			var target = ctx.SenseThreats(new WDist(20 * 1024))
-				.Where(t => t.IsAttackable)
-				.OrderBy(t => t.DistanceUnits)
-				.FirstOrDefault();
-
-			if (target.ActorId == 0)
-				return UnitDecision.Continue;   // nothing to do; leave the unit alone
-
-			return UnitDecision.Attack(target.ActorId, "charging nearest enemy");
-		}
-	}
-}
-```
-
-That's a complete mode. The **class name is the mode name in-game** — no registration, no
-config file, no factory to update.
-
-Build and launch:
+Start your own by copying it:
 
 ```powershell
-./scripts/build.ps1 -SkipEngine
-./scripts/launch.ps1
+cp -r modules/Reference modules/MyModule
+cd modules/MyModule
+# rename ReferenceModule.csproj / .sln, and the class + Name in ReferenceBattleModule.cs
+dotnet build
 ```
 
-In game: `/modes` now lists `BerserkerMode`. Select some tanks and `/mode BerserkerMode`.
+Open `MyModule/ReferenceBattleModule.cs` — everything about how your army fights is declared
+there:
 
-### The three templates
+```csharp
+b.Build("powr", "nuke").Until(2);      // what to construct
+b.Train("Infantry", "e1").Until(10);   // what to train
+b.Assign<DefensiveMode>().ToAll();     // how units behave
+b.Assign<AttackBaseMode>().ToGroup(1);
+```
 
-Copy whichever is closest to what you want:
+Rebuild, launch, then in game:
 
-| File | Shows |
-|---|---|
-| `RunHomeMode.cs` | The simplest useful mode — flee to a refinery when threatened |
-| `ScoutMode.cs` | Per-unit state in fields, reacting to damage between evaluations |
-| `HarvesterEscortMode.cs` | Tracking another actor and defending it |
+```
+/modules              see both modules listed
+/module MyModule      load yours
+```
 
----
+Full guide: [writing-modules.md](writing-modules.md).
 
 ## 6. The iteration loop
 
@@ -195,7 +174,7 @@ dotnet test src/AutoCnC.Modes.Core.Tests     # ~20ms, no game, no engine build
 
 To make your own logic testable that way, put the judgement in a pure function in
 `src/AutoCnC.Modes.Core` and call it from `OnTick`. `DefensiveLogic` is the worked example.
-Details in [writing-modes.md](writing-modes.md).
+Details in [writing-modules.md](writing-modules.md).
 
 Full loop:
 
@@ -252,7 +231,7 @@ clicks have. You can also lower `TickInterval` for an actor in
 
 | Doc | For |
 |---|---|
-| [writing-modes.md](writing-modes.md) | Full `ModeContext` API, decision types, performance |
+| [writing-modules.md](writing-modules.md) | Authoring battle modules: plans, modes, the full API |
 | [architecture.md](architecture.md) | How the pieces fit and why |
 | [determinism.md](determinism.md) | Why your code can't desync a multiplayer match |
-| [../player-modes/README.md](../player-modes/README.md) | Quick reference next to your code |
+| [../modules/Reference/README.md](../modules/Reference/README.md) | The reference module, next to its code |

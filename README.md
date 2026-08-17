@@ -37,7 +37,8 @@ public sealed class RunHomeMode : UnitMode
 ## Table of contents
 
 - [Why this exists](#why-this-exists)
-- [Writing your own modes](#writing-your-own-modes)
+- [Battle modules](#battle-modules)
+- [Battle modules](#battle-modules)
 - [Assigning modes](#assigning-modes)
 - [Architectural philosophy](#architectural-philosophy)
 - [How it integrates with OpenRA](#how-it-integrates-with-openra)
@@ -59,59 +60,63 @@ games in ways you can profile, unit-test and fix.
 
 ---
 
-## Writing your own modes
+## Battle modules
 
-Modes live in [`player-modes/`](player-modes/), a normal C# project. Open it in your IDE and you
-get IntelliSense, refactoring and a debugger — no scripting language, no interpreter.
+The platform contains **no strategy**. Everything about how an army fights lives in a **battle
+module** you author: the base build plan, the unit production plan, the modes, and which units
+run them. Load one and it plays; load none and nothing deploys, builds or shoots.
 
-**You write your modes before the match, then commit to them.** The game is the test of what you
-wrote, not a live coding session:
+```csharp
+public sealed class MyModule : IBattleModule
+{
+    public string Name => "Rush";
+    public string Description => "Fast barracks, early pressure.";
 
-1. Copy a template and rename the class. **The class name is the mode name in-game.**
-2. `dotnet test src/AutoCnC.Modes.Core.Tests` — check your logic in milliseconds, no game needed
-3. `./scripts/build.ps1`
-4. `./scripts/launch.ps1`, then assign with `/mode ...` and watch it play out
+    public void Configure(IBattleModuleBuilder b)
+    {
+        b.Build("powr", "nuke").Until(2);        // base plan
+        b.Build("proc").Until(2);
+        b.Build("pyle", "hand").Until(1);
 
-Switching *between* your modes is fully live — `/mode group 1 AttackBaseMode` takes effect
-within a tick, mid-battle. It's only loading newly *edited* code that needs a restart.
+        b.Train("Infantry", "e1").Until(10);     // production plan
+        b.Train("Infantry", "e1", "e2").Forever();
 
-There is no registration step. Discovery uses OpenRA's own `ObjectCreator` reflection, the same
-mechanism that binds YAML trait names to engine traits.
+        b.Assign<MyDefensiveMode>().ToAll();     // behaviour
+        b.Assign<BuildBaseMode>().ToUnitType("mcv", "fact");
+        b.Assign<MyRushMode>().ToGroup(1);
+    }
+}
+```
 
-Three templates ship to start from:
+Candidates are alternatives for one role — `powr` or `nuke` both mean "a power plant" — so a
+plan works as either faction without checking.
 
-| Template | Shows |
-|---|---|
-| `RunHomeMode` | The simplest useful mode — flee to a refinery when threatened |
-| `ScoutMode` | Per-unit state, reacting to damage between evaluations |
-| `HarvesterEscortMode` | Tracking another actor and defending it |
+```powershell
+cp -r modules/Reference modules/MyModule   # start from the reference module
+cd modules/MyModule && dotnet build        # builds into engine/bin/modules
+```
 
-Plus three reference modes built into the mod:
+Then in game: `/modules`, `/module MyModule`.
 
-- **`BuildBaseMode`** — deploys your MCV and grows the base from a build plan. MCVs and
-  construction yards run this by default, so a skirmish actually starts.
-- **`DefensiveMode`** — holds ground, won't be baited past its leash, retreats to repair.
-- **`AttackBaseMode`** — pushes a base, only fires on what is already in range.
+Modules build against AutoC&C **binaries**, not projects, so a module can live in **its own
+repository**: `dotnet build /p:AutoCnCPath=C:\games\autocnc`.
 
-Combat modes no-op on unarmed units, so `/mode all DefensiveMode` won't stop your harvesters
-mining or your construction yard building.
+**AutoC&C ships one module, `Reference`** — a balanced opening that defends its base and pushes
+with control group 1. It is both the worked example and the first opponent to beat.
 
-See [`docs/getting-started.md`](docs/getting-started.md) for the full walkthrough, or
-[`docs/writing-modes.md`](docs/writing-modes.md) for the API reference.
+See [`docs/writing-modules.md`](docs/writing-modules.md).
 
-### Your code cannot desync the game
+### Your code cannot desync a match
 
-Mode code runs **outside the lockstep simulation**, on your machine only, and its output is
+Modes run **outside the lockstep simulation**, on your machine only, and their output is
 `Order`s — the same channel your mouse clicks use.
 
-That means `float`, LINQ, `System.Random` and `DateTime` are all fine in your modes, your
-opponent never needs your code, and you never execute theirs. A mode that throws is dropped for
-that unit with the error printed to chat; the match continues.
+That means `float`, LINQ, `System.Random` and `DateTime` are all fine in your module, your
+opponent never needs your code, and you never execute theirs. A module that throws is dropped
+for that unit with the error printed to chat; the match continues.
 
-The cost is ~120ms of order latency on decisions — the same latency human input already has.
+The cost is ~120ms of order latency — the same latency human input already has.
 [`docs/determinism.md`](docs/determinism.md) explains the whole thing.
-
----
 
 ## Assigning modes
 
@@ -191,7 +196,7 @@ mods/          →  YAML wiring
 All three assemblies build into `engine/bin/` and are named in `mods/autocnc/mod.yaml`:
 
 ```yaml
-Assemblies: OpenRA.Mods.Common.dll, OpenRA.Mods.Cnc.dll, AutoCnC.Mod.dll, PlayerModes.dll
+Assemblies: OpenRA.Mods.Common.dll, OpenRA.Mods.Cnc.dll, AutoCnC.Core.dll, AutoCnC.Sdk.dll, AutoCnC.Platform.dll
 ```
 
 AutoC&C derives its manifest from the shipped `cnc` (Tiberian Dawn) mod, so OpenRA offers to
@@ -206,43 +211,27 @@ Pinned to tag **`playtest-20260222`** (.NET 8, C# 12). The last *stable* tag is 
 
 ```
 autocnc/
-├── engine/                              # ← git submodule: OpenRA (never edited)
+├── engine/                          # ← git submodule: OpenRA (never edited)
 │
-├── player-modes/                        # ★ YOUR MODES — a normal C# project
-│   ├── PlayerModes.csproj               #   every .cs here is compiled automatically
-│   ├── RunHomeMode.cs                   #   templates to copy
-│   ├── ScoutMode.cs
-│   └── HarvesterEscortMode.cs
+├── src/                             # THE PLATFORM — infrastructure, zero strategy
+│   ├── AutoCnC.Core/                #   engine-free: decisions, plans, planners
+│   ├── AutoCnC.Sdk/                 #   what modules code against: IBattleModule,
+│   │                                #   IUnitMode, ModeContext
+│   ├── AutoCnC.Platform/            #   the host: OpenRA traits, module loader, commands
+│   └── AutoCnC.Core.Tests/
 │
-├── src/
-│   ├── AutoCnC.Modes.Core/              # ★ ZERO OpenRA deps — pure, testable logic
-│   │   ├── DefensiveLogic.cs            #   pure Decide() functions
-│   │   ├── AttackBaseLogic.cs
-│   │   ├── ModeAssignments.cs           #   assignment precedence resolver
-│   │   ├── Perception.cs                #   plain int structs
-│   │   └── Decisions.cs                 #   UnitDecision / UnitAction
-│   │
-│   ├── AutoCnC.Mod/                     # engine-facing assembly
-│   │   ├── Modes/
-│   │   │   ├── IUnitMode.cs             #   the mode interface
-│   │   │   ├── ModeContext.cs           #   sensing + order construction
-│   │   │   └── ModeRegistry.cs          #   reflection-based discovery
-│   │   ├── Traits/
-│   │   │   ├── ModeExecutor.cs          #   CLIENT-LOCAL: runs modes, emits Orders
-│   │   │   ├── ProgrammableController.cs#   per-unit marker + mode state
-│   │   │   └── ModeCommands.cs          #   chatbox assignment UI
-│   │   └── Library/                     #   shipped reference modes
-│   │       ├── DefensiveMode.cs
-│   │       └── AttackBaseMode.cs
-│   │
-│   └── AutoCnC.Modes.Core.Tests/        # fast tests — no engine build required
+├── modules/                         # BATTLE MODULES — all the strategy lives here
+│   └── Reference/                   #   ★ own solution; copy this to start your own
+│       ├── ReferenceBattleModule.cs #     plans + assignments
+│       ├── Modes/                   #     BuildBase, TrainUnits, Defensive, AttackBase…
+│       ├── Logic/                   #     pure decision functions
+│       └── Tests/                   #     fast, no game needed
 │
-├── mods/autocnc/                        # mod manifest and rules
-├── docs/                                # architecture / writing-modes / determinism
-├── scripts/                             # setup / build / launch / lint
-└── AutoCnC.sln
+├── mods/autocnc/                    # mod manifest and rules
+├── docs/                            # getting-started / writing-modules / architecture
+├── scripts/                         # setup / build / launch / lint
+└── AutoCnC.sln                      # the platform only
 ```
-
 ---
 
 ## Getting started
@@ -289,12 +278,11 @@ dotnet test src/AutoCnC.Modes.Core.Tests   # logic — ~20ms, no engine
 | Phase | Scope |
 |---|---|
 | **0 — Foundation** | Interfaces, executor, reference modes ✅ |
-| **1 — Authoring** | Player mode project, assignment scopes, templates ✅ |
-| **2 — Loadouts** | Save/load named mode loadouts, pre-match assignment screen, debug overlay |
-| **3 — Ecosystem** | Standalone mode editor with hot-reload, headless mode-vs-mode arena, mode sharing |
-
-Verified today: all assemblies compile against the pinned engine, 36 logic tests pass in ~30ms,
-and `--check-yaml` reports 0 errors and 0 warnings across every actor in the mod.
+| **1 — Authoring** | Assignment scopes, templates, base building ✅ |
+| **2 — Modules** | Platform/module split, battle module SDK, unit production ✅ |
+| **3 — Ecosystem** | Module vs module arena, replay regression tests, module sharing |
+Verified: platform and module build independently, 49 tests pass with no engine, `--check-yaml`
+reports 0 errors, and the reference module plays a full game — deploy, build, train, fight.
 
 Known gaps are listed at the end of [`docs/architecture.md`](docs/architecture.md).
 

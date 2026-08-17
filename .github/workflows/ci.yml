@@ -19,8 +19,8 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
-      - name: Test AutoCnC.Modes.Core
-        run: dotnet test src/AutoCnC.Modes.Core.Tests/AutoCnC.Modes.Core.Tests.csproj -c Release --nologo
+      - name: Test AutoCnC.Core
+        run: dotnet test src/AutoCnC.Core.Tests/AutoCnC.Core.Tests.csproj -c Release --nologo
 
   # Full verification: build the pinned engine, compile our traits against it, then run
   # OpenRA's own YAML linter, which constructs every actor in the mod.
@@ -46,8 +46,15 @@ jobs:
       - name: Build OpenRA engine
         run: dotnet build engine/OpenRA.sln -c Release -v minimal --nologo
 
-      - name: Build AutoC&C
+      - name: Build AutoC&C platform
         run: dotnet build AutoCnC.sln -c Release -v minimal --nologo
+
+      # Modules build against platform BINARIES, so this also proves the SDK boundary holds.
+      - name: Build reference battle module
+        run: dotnet build modules/Reference/ReferenceModule.sln -c Release -v minimal --nologo
+
+      - name: Test reference battle module
+        run: dotnet test modules/Reference/ReferenceModule.sln -c Release --nologo
 
       - name: Lint mod YAML
         env:

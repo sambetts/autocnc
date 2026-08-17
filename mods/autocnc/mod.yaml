@@ -5,7 +5,7 @@
 # Upstream: https://github.com/OpenRA/OpenRA  ·  Licence: https://github.com/OpenRA/OpenRA/blob/bleed/COPYING
 #
 # Changes from upstream: mod metadata, the autocnc mod package and mod search path, the
-# AutoCnC.Mod and PlayerModes assemblies, and the autocnc rules files.
+# AutoC&C platform assemblies, and the autocnc rules files.
 #
 # AutoC&C is an unofficial fan project. It is not affiliated with or endorsed by the OpenRA
 # project, nor by Electronic Arts. Command & Conquer is a trademark of Electronic Arts Inc.
@@ -105,7 +105,7 @@ Cursors:
 Chrome:
 	cnc|chrome.yaml
 
-Assemblies: OpenRA.Mods.Common.dll, OpenRA.Mods.Cnc.dll, AutoCnC.Mod.dll, PlayerModes.dll
+Assemblies: OpenRA.Mods.Common.dll, OpenRA.Mods.Cnc.dll, AutoCnC.Core.dll, AutoCnC.Sdk.dll, AutoCnC.Platform.dll
 
 ChromeLayout:
 	cnc|chrome/mainmenu.yaml

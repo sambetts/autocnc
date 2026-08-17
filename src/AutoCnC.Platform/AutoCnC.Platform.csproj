@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>AutoCnC.Platform</RootNamespace>
+    <AssemblyName>AutoCnC.Platform</AssemblyName>
+    <Description>The AutoC&amp;C host: OpenRA traits that load and run battle modules. Contains no strategy.</Description>
+    <OutputPath>$(EngineBinDirectory)\</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AutoCnC.Core\AutoCnC.Core.csproj" />
+    <ProjectReference Include="..\AutoCnC.Sdk\AutoCnC.Sdk.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="OpenRA.Game">
+      <HintPath>$(EngineBinDirectory)\OpenRA.Game.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="OpenRA.Mods.Common">
+      <HintPath>$(EngineBinDirectory)\OpenRA.Mods.Common.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>

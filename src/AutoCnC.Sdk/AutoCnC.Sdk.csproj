@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>AutoCnC.Sdk</RootNamespace>
+    <AssemblyName>AutoCnC.Sdk</AssemblyName>
+    <Description>The AutoC&amp;C battle module SDK: IBattleModule, IUnitMode and ModeContext.</Description>
+    <OutputPath>$(EngineBinDirectory)\</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AutoCnC.Core\AutoCnC.Core.csproj" />
+  </ItemGroup>
+
+  <!-- The SDK deliberately does not reference the platform: modules depend on this, not the host. -->
+  <ItemGroup>
+    <Reference Include="OpenRA.Game">
+      <HintPath>$(EngineBinDirectory)\OpenRA.Game.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="OpenRA.Mods.Common">
+      <HintPath>$(EngineBinDirectory)\OpenRA.Mods.Common.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <Target Name="VerifyEngineIsBuilt" BeforeTargets="BeforeBuild">
+    <Error Condition="!Exists('$(EngineBinDirectory)\OpenRA.Game.dll')"
+           Text="OpenRA engine not built. Run ./scripts/build.ps1 first. Looked in: $(EngineBinDirectory)" />
+  </Target>
+
+</Project>

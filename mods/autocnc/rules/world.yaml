@@ -11,18 +11,16 @@
 # client-local, which is exactly right here: mode assignment is local policy too.
 #
 # ModeCommands adds the chatbox interface:
-#   /modes                          list available modes
-#   /mode <ModeName>                assign to the current selection
-#   /mode all <ModeName>            assign to every unit
-#   /mode type <actorType> <Mode>   e.g. /mode type harv RunHomeMode
-#   /mode group <1-9> <ModeName>    e.g. /mode group 1 AttackBaseMode
-#   /mode clear                     drop per-unit overrides
-#   /assignments                    show current assignments
+#   /modules                        list installed battle modules
+#   /module <name>                  load one
+#   /modes                          modes the loaded module provides
+#   /mode <ModeName>                override for the current selection
+#   /mode all|type|group ...        override more broadly
+#   /assignments                    show what is assigned
 #   /whatmode                       report the selection's modes
 #   /modelog                        toggle decision logging to debug.log
 
 World:
 	ModeExecutor:
-		DefaultMode: DefensiveMode
 		GroupCount: 9
 	ModeCommands:

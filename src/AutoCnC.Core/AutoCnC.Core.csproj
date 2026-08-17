@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>AutoCnC.Core</RootNamespace>
+    <AssemblyName>AutoCnC.Core</AssemblyName>
+    <Description>Engine-free contracts and planners shared by the AutoC&amp;C platform and battle modules.</Description>
+    <OutputPath>$(EngineBinDirectory)\</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
+  <!--
+    This project must NEVER reference OpenRA. Keeping it engine-free is what makes decision
+    logic testable without booting the game, and it is enforced by the build rather than by
+    convention.
+  -->
+
+</Project>

@@ -1,0 +1,47 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>AutoCnC.Reference.Tests</RootNamespace>
+    <AssemblyName>AutoCnC.Reference.Tests</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="*.cs" />
+  </ItemGroup>
+
+  <!--
+    Tests reference the module's own pure logic plus AutoCnC.Core. No OpenRA, so your strategy
+    is testable in milliseconds without building or launching the game.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\ReferenceModule.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="AutoCnC.Core">
+      <HintPath>$(AutoCnCBinDirectory)\AutoCnC.Core.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="AutoCnC.Sdk">
+      <HintPath>$(AutoCnCBinDirectory)\AutoCnC.Sdk.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="OpenRA.Game">
+      <HintPath>$(AutoCnCBinDirectory)\OpenRA.Game.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="OpenRA.Mods.Common">
+      <HintPath>$(AutoCnCBinDirectory)\OpenRA.Mods.Common.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="NUnit" Version="4.2.2" />
+    <PackageReference Include="NUnit3TestAdapter" Version="4.6.0" />
+  </ItemGroup>
+
+</Project>

@@ -87,7 +87,8 @@ Plus two reference modes built into the mod: **`DefensiveMode`** (holds ground, 
 past its leash, retreats to repair) and **`AttackBaseMode`** (pushes a base, only fires on what
 is already in range).
 
-See [`docs/writing-modes.md`](docs/writing-modes.md).
+See [`docs/getting-started.md`](docs/getting-started.md) for the full walkthrough, or
+[`docs/writing-modes.md`](docs/writing-modes.md) for the API reference.
 
 ### Your code cannot desync the game
 
@@ -235,9 +236,14 @@ autocnc/
 
 ## Getting started
 
+**→ [`docs/getting-started.md`](docs/getting-started.md) is the full walkthrough**: install,
+write your first mode, assign it, iterate. Start there.
+
+The short version:
+
 ### Prerequisites
 
-- .NET 8 SDK or newer
+- .NET 8 SDK or newer (the **SDK**, not just the runtime — you're compiling code)
 - Git
 - An OpenRA-supported OS (Windows / Linux / macOS)
 
@@ -256,8 +262,9 @@ Cloned without `--recursive`? `git submodule update --init --depth 1`
 ### Loops
 
 ```powershell
-dotnet test src/AutoCnC.Modes.Core.Tests   # logic — seconds, no engine
+dotnet test src/AutoCnC.Modes.Core.Tests   # logic — ~20ms, no engine
 ./scripts/lint.ps1                         # wiring — constructs every actor in the mod
+./scripts/build.ps1 -SkipEngine            # recompile just your code
 ./scripts/launch.ps1                       # play-test
 ```
 

@@ -1,8 +1,11 @@
 # Writing a mode
 
+New here? Start with [getting-started.md](getting-started.md) — it walks through install,
+your first mode, and assigning it in-game. This document is the reference.
+
 A mode is a C# class that decides what one unit should do. Modes live in `player-modes/`, which
-is a normal C# project — open it in your IDE and you get IntelliSense, refactoring and a
-debugger.
+is a normal C# project — open `AutoCnC.sln` in your IDE and you get IntelliSense, refactoring
+and a debugger.
 
 Before anything else, the one rule that matters: **your code runs on your machine only and its
 output is orders.** Floats, LINQ, `System.Random` are all fine. See

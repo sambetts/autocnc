@@ -74,4 +74,6 @@ Then you can test it in milliseconds:
 dotnet test src/AutoCnC.Modes.Core.Tests
 ```
 
-`DefensiveLogic` and `AttackBaseLogic` are the worked examples. See `docs/writing-modes.md`.
+`DefensiveLogic` and `AttackBaseLogic` are the worked examples. See
+[`../docs/getting-started.md`](../docs/getting-started.md) for the full walkthrough and
+[`../docs/writing-modes.md`](../docs/writing-modes.md) for the API reference.

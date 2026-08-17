@@ -29,6 +29,9 @@ public sealed class RunHomeMode : UnitMode
 }
 ```
 
+<img width="514" height="400" alt="image" src="https://github.com/user-attachments/assets/b14b14a4-4673-4461-a746-3f66abd7f360" />
+
+
 ---
 
 ## Table of contents

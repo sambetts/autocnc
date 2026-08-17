@@ -1,0 +1,11 @@
+# AutoC&C — world traits
+#
+# GroupManager holds the SYNCED control-group state that unit behaviour is driven from.
+#
+# It deliberately does not replace the engine's built-in ControlGroups trait, which stays in
+# place for the UI. That one is client-local (it reads world.Selection and filters on
+# world.LocalPlayer), so it must never drive simulation behaviour. See docs/determinism.md.
+
+World:
+	GroupManager:
+		GroupCount: 9

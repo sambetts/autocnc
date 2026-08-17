@@ -1,0 +1,67 @@
+# AutoC&C — unit behaviour wiring
+#
+# We override the AutoTarget mixin templates from cnc's defaults.yaml so that every actor which
+# would have received engine auto-targeting gets a ProgrammableController instead.
+#
+# AutoTarget is neutered rather than deleted. Two reasons:
+#
+#  1. Several actors add their own AutoTargetPriority traits (e.g. AutoTargetPriority@Air on
+#     apc), and those declare Requires<AutoTargetInfo>. Deleting AutoTarget makes them
+#     unconstructible.
+#  2. Gating it behind a never-granted condition trips the engine's condition linter, which
+#     rejects consumed-but-never-granted conditions.
+#
+# Forcing HoldFire is fully inert and needs no conditions: AutoTarget.Damaged() returns early on
+# `Stance < ReturnFire`, and TickIdle() returns early on `Stance < Defend`. ITick only decrements
+# a scan counter. EnableStances: False stops anything changing it back at runtime.
+
+^AutoTargetGround:
+	AutoTarget:
+		InitialStance: HoldFire
+		InitialStanceAI: HoldFire
+		EnableStances: False
+		ScanOnIdle: False
+	ProgrammableController:
+		DefaultMode: DefensiveMode
+		AvailableModes: DefensiveMode, AttackBaseMode
+		TickInterval: 8
+		ScanRadius: 8c0
+
+^AutoTargetAir:
+	AutoTarget:
+		InitialStance: HoldFire
+		InitialStanceAI: HoldFire
+		EnableStances: False
+		ScanOnIdle: False
+	ProgrammableController:
+		DefaultMode: DefensiveMode
+		AvailableModes: DefensiveMode, AttackBaseMode
+		TickInterval: 8
+		ScanRadius: 10c0
+
+^AutoTargetAll:
+	AutoTarget:
+		InitialStance: HoldFire
+		InitialStanceAI: HoldFire
+		EnableStances: False
+		ScanOnIdle: False
+	ProgrammableController:
+		DefaultMode: DefensiveMode
+		AvailableModes: DefensiveMode, AttackBaseMode
+		TickInterval: 8
+		ScanRadius: 8c0
+
+# Per-actor overrides. Anything inheriting the mixins above already has a controller, so these
+# only need to state what differs.
+#
+# Artillery outranges everything it fights, so it holds a much wider tether and evaluates less
+# often (it has nothing useful to do between shots anyway).
+MSAM:
+	ProgrammableController:
+		DefaultMode: DefensiveMode
+		AvailableModes: DefensiveMode, AttackBaseMode
+		TickInterval: 15
+		ScanRadius: 12c0
+
+# Note: unarmed actors such as HARV never inherited the AutoTarget mixins, so they get no
+# controller and need no override here.

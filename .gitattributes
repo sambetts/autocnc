@@ -1,0 +1,20 @@
+# Normalise line endings in the working tree.
+* text=auto eol=lf
+
+# OpenRA round-trips mod YAML byte-for-byte in its `--check-yaml` lint (see
+# CheckRunningUpdateRule.cs) and writes with LF. CRLF here fails the lint, so pin these.
+*.yaml  text eol=lf
+*.ftl   text eol=lf
+
+*.cs      text eol=lf diff=csharp
+*.csproj  text eol=lf
+*.props   text eol=lf
+*.sln     text eol=crlf
+*.md      text eol=lf
+*.ps1     text eol=lf
+*.yml     text eol=lf
+
+*.png binary
+*.jpg binary
+*.mix binary
+*.shp binary

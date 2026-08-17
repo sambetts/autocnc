@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # Fast feedback: the pure decision logic needs no engine at all, so this job finishes in
+  # seconds and does not check out the ~58MB engine submodule.
+  logic-tests:
+    name: Mode logic tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Test AutoCnC.Modes.Core
+        run: dotnet test src/AutoCnC.Modes.Core.Tests/AutoCnC.Modes.Core.Tests.csproj -c Release --nologo
+
+  # Full verification: build the pinned engine, compile our traits against it, then run
+  # OpenRA's own YAML linter, which constructs every actor in the mod.
+  mod-build:
+    name: Engine build and mod lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', 'engine/**/*.csproj') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: Build OpenRA engine
+        run: dotnet build engine/OpenRA.sln -c Release -v minimal --nologo
+
+      - name: Build AutoC&C
+        run: dotnet build AutoCnC.sln -c Release -v minimal --nologo
+
+      - name: Lint mod YAML
+        env:
+          ENGINE_DIR: ${{ github.workspace }}/engine
+          MOD_SEARCH_PATHS: ${{ github.workspace }}/mods,${{ github.workspace }}/engine/mods
+        run: |
+          set -o pipefail
+          dotnet engine/bin/OpenRA.Utility.dll autocnc --check-yaml 2>&1 | tee lint.log
+          if grep -q '^Error' lint.log; then
+            echo "::error::YAML lint reported errors"
+            exit 1
+          fi

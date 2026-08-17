@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>AutoCnC.Mod</RootNamespace>
+    <AssemblyName>AutoCnC.Mod</AssemblyName>
+    <Description>OpenRA traits and mode library for AutoC&amp;C.</Description>
+
+    <!--
+      Output directly into the engine's bin directory. OpenRA resolves the assemblies named
+      in mod.yaml relative to that directory, so this is what makes `Assemblies:` work.
+    -->
+    <OutputPath>$(EngineBinDirectory)\</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AutoCnC.Modes.Core\AutoCnC.Modes.Core.csproj" />
+  </ItemGroup>
+
+  <!--
+    Reference the engine as prebuilt binaries rather than by ProjectReference. This is the
+    OpenRA Mod SDK convention: it keeps the submodule a black box, so bumping the engine tag
+    never drags its internal project layout into our build.
+  -->
+  <ItemGroup>
+    <Reference Include="OpenRA.Game">
+      <HintPath>$(EngineBinDirectory)\OpenRA.Game.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="OpenRA.Mods.Common">
+      <HintPath>$(EngineBinDirectory)\OpenRA.Mods.Common.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <Target Name="VerifyEngineIsBuilt" BeforeTargets="BeforeBuild">
+    <Error Condition="!Exists('$(EngineBinDirectory)\OpenRA.Game.dll')"
+           Text="OpenRA engine not built. Run ./scripts/build.ps1 (or: dotnet build engine/OpenRA.sln -c Release) first. Looked in: $(EngineBinDirectory)" />
+  </Target>
+
+</Project>

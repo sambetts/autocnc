@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>AutoCnC.Modes.Core</RootNamespace>
+    <AssemblyName>AutoCnC.Modes.Core</AssemblyName>
+    <Description>Pure, engine-free decision logic for AutoC&amp;C unit modes.</Description>
+  </PropertyGroup>
+
+  <!--
+    This project must NEVER reference OpenRA, or anything that transitively does.
+    Keeping it engine-free is what makes unit behaviour testable without booting the game,
+    and it is enforced by the build rather than by convention. See docs/architecture.md.
+  -->
+
+</Project>

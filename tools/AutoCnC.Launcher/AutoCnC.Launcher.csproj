@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Windows Forms rather than a cross-platform UI toolkit: this is a developer convenience that
+    has to build from a clean checkout with no package restore, and every part of it is a thin
+    wrapper over scripts/ that a Linux or macOS author can run directly.
+
+    It deliberately lives outside AutoCnC.sln. That solution is built by CI on Linux, where the
+    Windows Desktop targeting pack does not exist.
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <LangVersion>12</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <RootNamespace>AutoCnC.Launcher</RootNamespace>
+    <AssemblyName>AutoCnC.Launcher</AssemblyName>
+    <Description>A front end for the AutoC&amp;C authoring loop: pick your doctrine, pick an opponent, play.</Description>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+</Project>

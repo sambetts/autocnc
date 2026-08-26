@@ -10,6 +10,7 @@
 #endregion
 
 using System;
+using System.Globalization;
 using System.Linq;
 using AutoCnC.Sdk;
 using OpenRA;
@@ -51,10 +52,19 @@ namespace AutoCnC.Platform.Traits
 			console.RegisterCommand("assignments", this);
 			console.RegisterCommand("whatmode", this);
 			console.RegisterCommand("modelog", this);
+			console.RegisterCommand("speed", this);
 		}
 
 		public void InvokeCommand(string name, string arg)
 		{
+			// Answerable without a doctrine or a player: an observer watching a 20x match wants
+			// to know what it is really running at just as much as the person who launched it.
+			if (name == "speed")
+			{
+				ReportSpeed(arg);
+				return;
+			}
+
 			if (world.LocalPlayer == null || executor == null)
 				return;
 
@@ -323,6 +333,75 @@ namespace AutoCnC.Platform.Traits
 					&& a.TraitOrDefault<ProgrammableController>() != null)
 				.ToArray();
 
+		/// <summary>
+		/// Answers "am I actually watching this at 40x?", which the chosen speed alone cannot, and
+		/// sets the playback speed when watching a replay.
+		/// </summary>
+		/// <remarks>
+		/// A doctrine judged at a speed the machine never reached is a doctrine judged against the
+		/// wrong clock, so the requested and the measured speed are both reported, always.
+		/// </remarks>
+		void ReportSpeed(string arg)
+		{
+			var turbo = world.WorldActor.TraitOrDefault<TurboSpeed>();
+			if (turbo == null)
+			{
+				Debug($"{world.Timestep}ms per tick.");
+				return;
+			}
+
+			var requested = (arg ?? string.Empty).Trim();
+			if (requested.Length > 0 && !ChangeSpeed(turbo, requested))
+				return;
+
+			Debug($"Asked for {turbo.RequestedSpeed:0.#}x ({turbo.EffectiveTimestep}ms per tick).");
+
+			if (turbo.AchievedSpeed <= 0)
+				Debug("Still measuring what this machine manages.");
+			else if (turbo.IsFallingShort)
+				Debug($"Managing {turbo.AchievedSpeed:0.#}x — {turbo.ShortfallReason}.");
+			else
+				Debug($"Managing {turbo.AchievedSpeed:0.#}x.");
+		}
+
+		/// <summary>
+		/// Applies <c>/speed 2</c>, <c>/speed 0.5</c> or <c>/speed max</c> while watching a replay.
+		/// </summary>
+		/// <remarks>
+		/// Only replays can change speed: a live match's tick rate is a lobby option that every
+		/// client agreed on before the first tick, and is fixed for the duration.
+		/// </remarks>
+		bool ChangeSpeed(TurboSpeed turbo, string requested)
+		{
+			if (!world.IsReplay)
+			{
+				Debug("Speed is set in the lobby and fixed once a match starts. It can be changed while watching a replay.");
+				return false;
+			}
+
+			var multiplier = requested.Equals("max", StringComparison.OrdinalIgnoreCase)
+				? TurboSpeed.NominalTimestep
+				: ParseMultiplier(requested);
+
+			if (multiplier < 0)
+			{
+				Debug($"'{requested}' is not a speed. Try /speed 1, /speed 0.5, /speed 8 or /speed max.");
+				return false;
+			}
+
+			turbo.SetReplaySpeed(multiplier);
+			return true;
+		}
+
+		/// <summary>Accepts both <c>4</c> and <c>4x</c>, since people type both.</summary>
+		static float ParseMultiplier(string requested)
+		{
+			var value = requested.TrimEnd('x', 'X');
+			return float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed) && parsed >= 0
+				? parsed
+				: -1;
+		}
+
 		void Usage()
 		{
 			Debug("/mode <ModeName>                 selected units");
@@ -330,7 +409,7 @@ namespace AutoCnC.Platform.Traits
 			Debug("/mode type <actorType> <Mode>    e.g. /mode type harv RunHomeMode");
 			Debug("/mode group <1-9> <ModeName>     e.g. /mode group 1 AttackBaseMode");
 			Debug("/mode clear                      drop per-unit overrides");
-			Debug("/modes  /assignments  /whatmode  /modelog");
+			Debug("/modes  /assignments  /whatmode  /modelog  /speed");
 		}
 
 		static void Debug(string message) => TextNotificationsManager.Debug(message);

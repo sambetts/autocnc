@@ -90,14 +90,63 @@ namespace AutoCnC.Platform.Traits
 
 		void IWorldLoaded.WorldLoaded(World w, WorldRenderer wr)
 		{
-			// Load the configured doctrine, or the only one installed. Anything more ambiguous is
-			// left to the player, so we never silently pick a strategy for them.
+			// Proof of what actually happened, because the engine issues its own game speed order
+			// when it launches a map and the two could silently disagree. 20ms/tick is 'fastest',
+			// 40ms is 'default'.
+			if (!string.IsNullOrEmpty(LaunchOptions.GameSpeed))
+				Log.Write("debug", $"Game speed: {w.GameSpeed.Timestep}ms per tick (asked for '{LaunchOptions.GameSpeed}').");
+
+			// A doctrine named on the command line wins: the launcher has just been told, very
+			// explicitly, which code the player wants to watch fight.
+			if (LoadFromLaunchArguments())
+				return;
+
+			// Otherwise load the configured doctrine, or the only one installed. Anything more
+			// ambiguous is left to the player, so we never silently pick a strategy for them.
 			var doctrines = DoctrineLoader.Doctrines;
 
 			if (!string.IsNullOrEmpty(info.DefaultDoctrine))
 				LoadDoctrine(info.DefaultDoctrine);
 			else if (doctrines.Count == 1)
-				LoadDoctrine(doctrines[0].Definition.Name);
+				Load(doctrines[0]);
+		}
+
+		/// <summary>
+		/// Honours <c>Launch.Doctrine</c> / <c>Launch.DoctrinePath</c>. Returns false when neither
+		/// was given, so the normal selection rules apply.
+		/// </summary>
+		bool LoadFromLaunchArguments()
+		{
+			var name = LaunchOptions.Doctrine;
+			var path = LaunchOptions.DoctrinePath;
+
+			if (string.IsNullOrEmpty(name) && string.IsNullOrEmpty(path))
+				return false;
+
+			// Resolving by path as well as by name means the launcher does not have to know the
+			// doctrine's declared Name, which lives inside the assembly it was handed.
+			var resolved = name != null ? DoctrineLoader.Find(name) : null;
+			resolved ??= DoctrineLoader.FindFrom(path);
+
+			if (resolved == null)
+			{
+				// Deliberately no fallback to DefaultDoctrine or the only installed doctrine:
+				// somebody asked for specific code, and quietly playing different code instead
+				// would make a losing match impossible to trust.
+				var wanted = name ?? path;
+				Log.Write("debug", $"Launch argument asked for doctrine '{wanted}', which is not installed.");
+				TextNotificationsManager.Debug($"Could not load doctrine '{wanted}'. /doctrines lists what is installed.");
+
+				foreach (var error in DoctrineLoader.Errors)
+					TextNotificationsManager.Debug("Doctrine problem: " + error);
+
+				return true;
+			}
+
+			Load(resolved);
+			Log.Write("debug", $"Loaded doctrine '{resolved.Definition.Name}' from {resolved.SourcePath} (launch argument).");
+			TextNotificationsManager.Debug($"Doctrine loaded: {resolved.Definition.Name} — {resolved.Definition.Description}");
+			return true;
 		}
 
 		/// <summary>Loads a Doctrine by name. Returns false if it isn't installed.</summary>
@@ -107,6 +156,20 @@ namespace AutoCnC.Platform.Traits
 			if (found == null)
 				return false;
 
+			Load(found);
+			return true;
+		}
+
+		/// <summary>
+		/// Loads a specific doctrine.
+		/// </summary>
+		/// <remarks>
+		/// Taking the resolved doctrine rather than its name matters when two installed
+		/// assemblies declare the same <c>Name</c> — looking the name up again would pick
+		/// whichever was scanned first, not the one the caller had in its hand.
+		/// </remarks>
+		void Load(DoctrineLoader.LoadedDoctrine found)
+		{
 			Doctrine = found.Definition;
 			Assignments = new ModeAssignments(found.Definition.Assignments.GlobalMode, info.GroupCount);
 
@@ -120,8 +183,6 @@ namespace AutoCnC.Platform.Traits
 			// Every unit re-resolves on the next tick, so a swap takes effect mid-match.
 			foreach (var pair in world.ActorsWithTrait<ProgrammableController>())
 				pair.Trait.ModeOverride = null;
-
-			return true;
 		}
 
 		/// <summary>Creates a mode instance from the loaded Doctrine, or null.</summary>

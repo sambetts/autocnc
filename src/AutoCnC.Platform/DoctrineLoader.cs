@@ -34,6 +34,7 @@ namespace AutoCnC.Platform
 	/// <list type="number">
 	/// <item><c>&lt;bin&gt;/doctrines</c> — where the reference module builds to</item>
 	/// <item><c>^SupportDir/autocnc/doctrines</c> — where a player installs downloaded modules</item>
+	/// <item><c>Launch.DoctrinePath</c> — a specific assembly the launcher wants played</item>
 	/// </list>
 	/// </remarks>
 	public static class DoctrineLoader
@@ -83,6 +84,53 @@ namespace AutoCnC.Platform
 				string.Equals(m.Definition.Name, name, StringComparison.OrdinalIgnoreCase));
 		}
 
+		/// <summary>
+		/// The first doctrine that came from <paramref name="path"/> — either that exact assembly
+		/// or, when it is a folder, anything inside it. Used to resolve the launcher's choice
+		/// without making the player's class name and their file name agree.
+		/// </summary>
+		public static LoadedDoctrine FindFrom(string path)
+		{
+			EnsureScanned();
+
+			if (string.IsNullOrWhiteSpace(path))
+				return null;
+
+			var full = Normalise(path);
+			if (full == null)
+				return null;
+
+			var isDirectory = Directory.Exists(full);
+
+			return loaded.FirstOrDefault(m => isDirectory
+				? string.Equals(Normalise(Path.GetDirectoryName(m.SourcePath)), full, StringComparison.OrdinalIgnoreCase)
+				: string.Equals(Normalise(m.SourcePath), full, StringComparison.OrdinalIgnoreCase));
+		}
+
+		/// <summary>
+		/// A path in the one form we compare in. Returns null for anything unusable.
+		/// </summary>
+		/// <remarks>
+		/// <see cref="Path.GetFullPath"/> keeps a trailing separator while
+		/// <see cref="Path.GetDirectoryName"/> never produces one, so without trimming, a folder
+		/// the user typed with a trailing backslash would never match the folder its doctrines
+		/// were found in.
+		/// </remarks>
+		static string Normalise(string path)
+		{
+			if (string.IsNullOrWhiteSpace(path))
+				return null;
+
+			try
+			{
+				return Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+			}
+			catch (Exception)
+			{
+				return null;
+			}
+		}
+
 		/// <summary>Directories searched for module assemblies.</summary>
 		public static IEnumerable<string> SearchPaths
 		{
@@ -92,7 +140,56 @@ namespace AutoCnC.Platform
 				// shadows OpenRA's Platform helper.
 				yield return Path.Combine(OpenRA.Platform.EngineDir, "bin", "doctrines");
 				yield return Path.Combine(OpenRA.Platform.SupportDir, "autocnc", "doctrines");
+
+				// A doctrine the launcher pointed us at, played straight out of its own build
+				// output. Nothing is copied, so there is no stale installed copy to get confused
+				// by when the author rebuilds.
+				var launchPath = LaunchOptions.DoctrinePath;
+				if (!string.IsNullOrEmpty(launchPath) && Directory.Exists(launchPath))
+					yield return launchPath;
 			}
+		}
+
+		/// <summary>
+		/// Assembly files to scan, in the order they get to claim an assembly identity.
+		/// </summary>
+		/// <remarks>
+		/// <para>
+		/// <c>Launch.DoctrinePath</c> comes first, deliberately. <see cref="Assembly.LoadFrom"/>
+		/// binds by assembly <i>identity</i>, not by path: once an assembly is in the default
+		/// context, a later call naming a different file with the same identity silently hands
+		/// back the first one. Loading the launcher's choice first is therefore what makes
+		/// "play this exact build" true rather than aspirational — otherwise a same-named copy
+		/// left in <c>engine/bin/doctrines</c> would quietly win and you would play stale code.
+		/// </para>
+		/// </remarks>
+		static IEnumerable<string> CandidateFiles()
+		{
+			var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+			foreach (var file in LaunchCandidates())
+				if (seen.Add(Path.GetFullPath(file)))
+					yield return file;
+
+			foreach (var directory in SearchPaths)
+				if (Directory.Exists(directory))
+					foreach (var file in Directory.GetFiles(directory, "*.dll"))
+						if (seen.Add(Path.GetFullPath(file)))
+							yield return file;
+		}
+
+		/// <summary><c>Launch.DoctrinePath</c> as files: it may name one assembly or a folder.</summary>
+		static IEnumerable<string> LaunchCandidates()
+		{
+			var launchPath = LaunchOptions.DoctrinePath;
+			if (string.IsNullOrEmpty(launchPath))
+				yield break;
+
+			if (File.Exists(launchPath))
+				yield return launchPath;
+			else if (Directory.Exists(launchPath))
+				foreach (var file in Directory.GetFiles(launchPath, "*.dll"))
+					yield return file;
 		}
 
 		/// <summary>Drops the cache so the next access rescans. Exposed for /reloadmodules.</summary>
@@ -113,28 +210,30 @@ namespace AutoCnC.Platform
 					return;
 
 				var found = new List<LoadedDoctrine>();
+				var identities = new HashSet<Assembly>();
 				LoadErrors.Clear();
 
-				foreach (var directory in SearchPaths)
-				{
-					if (!Directory.Exists(directory))
-						continue;
-
-					foreach (var file in Directory.GetFiles(directory, "*.dll"))
-						LoadFrom(file, found);
-				}
+				foreach (var file in CandidateFiles())
+					LoadFrom(file, found, identities);
 
 				loaded = found.OrderBy(m => m.Definition.Name, StringComparer.OrdinalIgnoreCase).ToList();
 			}
 		}
 
-		static void LoadFrom(string file, List<LoadedDoctrine> found)
+		static void LoadFrom(string file, List<LoadedDoctrine> found, HashSet<Assembly> identities)
 		{
 			try
 			{
 				// LoadFrom rather than Load: dependencies (the SDK, OpenRA) are already resolved
 				// in the default context, so a module only needs to bring itself.
 				var assembly = Assembly.LoadFrom(file);
+
+				// LoadFrom binds by identity, so two files that are the same assembly hand back
+				// one instance. Registering it once — under the first path that asked for it —
+				// keeps a build installed in engine/bin/doctrines and the same build played from
+				// its own output folder from showing up as two doctrines.
+				if (!identities.Add(assembly))
+					return;
 
 				foreach (var type in assembly.GetTypes())
 				{
@@ -165,11 +264,37 @@ namespace AutoCnC.Platform
 				var detail = ex.LoaderExceptions.FirstOrDefault()?.Message ?? ex.Message;
 				LoadErrors.Add($"{Path.GetFileName(file)}: could not load types — {detail}");
 			}
+			catch (FileLoadException)
+			{
+				// Two different builds that call themselves the same assembly. .NET will not have
+				// both in one context, and the one already loaded is the one we were asked for
+				// first — which is why Launch.DoctrinePath is scanned ahead of everything else.
+				LoadErrors.Add($"{Path.GetFileName(file)}: skipped, because {AlreadyLoadedFrom(file, identities)} " +
+					"is a different build of the same assembly and got there first. " +
+					"Two builds of one doctrine cannot run at once — delete the copy you don't want.");
+			}
 			catch (Exception ex)
 			{
 				LoadErrors.Add($"{Path.GetFileName(file)}: {ex.Message}");
 				Log.Write("debug", $"Failed to load doctrine '{file}': {ex}");
 			}
+		}
+
+		/// <summary>Where the assembly that beat <paramref name="file"/> to its identity came from.</summary>
+		static string AlreadyLoadedFrom(string file, HashSet<Assembly> identities)
+		{
+			try
+			{
+				var name = AssemblyName.GetAssemblyName(file).Name;
+				var winner = identities.FirstOrDefault(a => a.GetName().Name == name);
+				if (!string.IsNullOrEmpty(winner?.Location))
+					return winner.Location;
+			}
+			catch (Exception)
+			{
+			}
+
+			return "another doctrine already loaded";
 		}
 	}
 }

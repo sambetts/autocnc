@@ -8,10 +8,19 @@
 
     AutoC&C inherits Tiberian Dawn's rules and art, so OpenRA will prompt to download the free
     C&C content on first run.
+
+.PARAMETER Map
+    Map to boot straight into, as a UID or a file name.
+
+.PARAMETER Replay
+    A recorded match (.orarep) to watch instead of playing. Every battle is recorded, so this is
+    how you go back over one you ran at 40x: replays are not tied to one frame per tick, so the
+    replay bar can scrub and fast-forward independently of the speed it was played at.
 #>
 [CmdletBinding()]
 param(
     [string]$Map,
+    [string]$Replay,
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]]$ExtraArgs
 )
@@ -38,6 +47,11 @@ $gameArgs = @(
 )
 
 if ($Map) { $gameArgs += "Launch.Map=$Map" }
+if ($Replay) {
+    if (-not (Test-Path -LiteralPath $Replay)) { throw "No such replay: $Replay" }
+    $gameArgs += "Launch.Replay=$Replay"
+    Write-Host "==> Replay: $(Split-Path -Leaf $Replay)" -ForegroundColor Cyan
+}
 if ($ExtraArgs) { $gameArgs += $ExtraArgs }
 
 Write-Host '==> Launching AutoC&C' -ForegroundColor Cyan

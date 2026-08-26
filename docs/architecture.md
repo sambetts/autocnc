@@ -32,6 +32,7 @@ platform ships no strategy at all: with no module loaded, nothing deploys, build
 │    ModeExecutor       client-local; runs the loaded module   │
 │    DoctrineLoader       scans folders for module assemblies    │
 │    ProgrammableController, ModeCommands                      │
+│    TurboSpeed, MatchTelemetry                                │
 └──────────────────────────────────────────────────────────────┘
                               │
 ┌──────────────────────────────────────────────────────────────┐
@@ -208,6 +209,37 @@ assemblies named in `mod.yaml` relative to that directory.
 
 To upgrade: bump the submodule, rebuild, run the lint, fix what breaks.
 
+### Launching straight into a battle
+
+The launcher and `run-doctrine.ps1` boot the game into a fight with no menus in between. That is
+built from three pieces, all inside our own assemblies:
+
+| Piece | Does |
+|---|---|
+| `LaunchOptions` | Re-reads the process command line for `Launch.*` arguments the engine does not know about. `Arguments` ignores keys it has no field for, so a mod can add its own without touching `LaunchArguments`. |
+| `Server.BattleSetup` | A `ServerTrait` on `IClientJoined` that seats the requested bots and applies handicaps and factions. The engine's `SkirmishLogic` only seats a bot for `ServerType.Skirmish`, and a `Launch.Map` game is `ServerType.Local`, so without this you get a map with nobody on it. |
+| `ModeExecutor.WorldLoaded` | Loads the doctrine named by `Launch.Doctrine`, or the one in the assembly at `Launch.DoctrinePath`. |
+
+| Argument | Meaning |
+|---|---|
+| `Launch.DoctrinePath` | A doctrine assembly, or folder of them, loaded in addition to the usual search paths and preferred at world load |
+| `Launch.Doctrine` | Load this doctrine by its declared `Name` |
+| `Launch.Bot` | Bot type for the opponents, e.g. `hal9001`. Absent means no battle is set up |
+| `Launch.Opponents` | How many of them, clamped to the map's free bot slots |
+| `Launch.BotHandicap` / `Launch.Handicap` | 0-95% penalty on the opponents / on you |
+| `Launch.Faction` / `Launch.BotFaction` | Faction for you / for the opponents |
+| `Launch.GameSpeed` | Tick rate for the match, e.g. `fastest` |
+
+Naming the assembly rather than the doctrine means nothing outside the doctrine has to know the
+`Name` declared inside it, and a doctrine played from its own build output cannot be shadowed by
+a stale copy in `engine/bin/doctrines`.
+
+`BattleSetup` is listed *ahead of* `LobbyCommands` in `mod.yaml`, which matters for exactly one
+reason: the engine starts a launched map by issuing a hardcoded `option gamespeed default` from
+the client, and it arrives after `IClientJoined` has run. The server stops at the first trait
+that claims a command, so being first is what lets `BattleSetup` swallow that one order and
+re-issue the speed that was actually asked for. Everything else it sees, it ignores.
+
 ---
 
 ## Known gaps
@@ -217,6 +249,10 @@ To upgrade: bump the submodule, rebuild, run the lint, fix what breaks.
 - Infantry/vehicle classification falls back to the `Infantry` target type string, which is
   Tiberian Dawn specific.
 - No headless benchmark harness for mode-vs-mode evaluation.
+- The launcher is Windows Forms, so Windows only. Everything it does is available from
+  `run-doctrine.ps1` on any platform.
+- Difficulty tops out at "the strongest bot, with you handicapped": OpenRA's handicap can only
+  weaken a player, so there is no way to make the AI itself stronger than its rules.
 
 Deliberately *not* gaps: needing a rebuild and restart to load edited mode code (see
 [Modes are authored before the match](#modes-are-authored-before-the-match-not-during-it)).

@@ -70,3 +70,18 @@ jobs:
             echo "::error::YAML lint reported errors"
             exit 1
           fi
+
+  # The launcher is a Windows Forms front end for scripts/, so it is not in AutoCnC.sln and the
+  # Linux jobs above never see it. Build it here so it cannot rot unnoticed.
+  launcher-build:
+    name: Launcher build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Build the launcher
+        run: dotnet build tools/AutoCnC.Launcher/AutoCnC.Launcher.sln -c Release -v minimal --nologo

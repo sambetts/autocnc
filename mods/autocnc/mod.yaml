@@ -197,6 +197,13 @@ LoadScreen: CncLoadScreen
 	Image3x: cnc|uibits/chrome-3x.png
 
 ServerTraits:
+	# AutoC&C: seats the test opponent asked for by Launch.Bot, so the launcher can drop straight
+	# into a battle. Does nothing without those arguments.
+	#
+	# Ahead of LobbyCommands deliberately: the server stops at the first trait that claims a
+	# command, and this one has to intercept the hardcoded "option gamespeed default" that the
+	# engine issues when it launches a map directly.
+	BattleSetup
 	LobbyCommands
 	SkirmishLogic
 	PlayerPinger
@@ -292,6 +299,29 @@ GameSpeeds:
 			Name: options-game-speed.fastest
 			Timestep: 20
 			OrderLatency: 6
+		# AutoC&C's own speeds, on top of the six the engine's mods ship. A doctrine is code under
+		# test, so the question being asked of a match is "how did that play out" rather than "can
+		# I keep up" — these get the answer in a couple of minutes instead of half an hour. The
+		# simulation is identical at every speed; only the wall-clock rate changes.
+		# OrderLatency is in frames, so it is scaled to keep the same ~120ms of network buffer the
+		# engine's speeds allow, leaving these usable in multiplayer rather than merely present.
+		# Reaching them needs the display-side cap lifted too: see the TurboSpeed trait.
+		turbo:
+			Name: options-autocnc-game-speed.turbo
+			Timestep: 8
+			OrderLatency: 15
+		ludicrous:
+			Name: options-autocnc-game-speed.ludicrous
+			Timestep: 4
+			OrderLatency: 30
+		plaid:
+			Name: options-autocnc-game-speed.plaid
+			Timestep: 2
+			OrderLatency: 60
+		maximum:
+			Name: options-autocnc-game-speed.maximum
+			Timestep: 1
+			OrderLatency: 120
 
 DiscordService:
 	ApplicationId: 699223250181292033

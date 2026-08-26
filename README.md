@@ -91,16 +91,15 @@ Candidates are alternatives for one role — `powr` or `nuke` both mean "a power
 plan works as either faction without checking.
 
 ```powershell
-cp -r doctrines/Reference modules/MyModule   # start from the reference module
-cd modules/MyModule && dotnet build        # builds into engine/bin/doctrines
+cp -r doctrines/Reference doctrines/MyRush   # start from the reference doctrine
+./scripts/launcher.ps1                       # point it at MyRush and press Launch battle
 ```
 
-Then in game: `/modules`, `/module MyModule`.
+Doctrines build against AutoC&C **binaries**, not projects, so one can live in **its own
+repository** — point the launcher at its `.csproj` (or at a `.dll` somebody sent you) wherever
+it happens to be.
 
-Modules build against AutoC&C **binaries**, not projects, so a module can live in **its own
-repository**: `dotnet build /p:AutoCnCPath=C:\games\autocnc`.
-
-**AutoC&C ships one module, `Reference`** — a balanced opening that defends its base and pushes
+**AutoC&C ships one doctrine, `Reference`** — a balanced opening that defends its base and pushes
 with control group 1. It is both the worked example and the first opponent to beat.
 
 See [`docs/writing-doctrines.md`](docs/writing-doctrines.md).
@@ -132,6 +131,7 @@ Press `Enter` in-game for the chatbox:
 | `/assignments` | What's currently assigned |
 | `/whatmode` | What the selection is running |
 | `/modelog` | Toggle decision logging to `debug.log` — your main debugging tool |
+| `/speed` | The speed you asked for, and the one your machine is managing. `/speed 0.5` while watching a replay |
 
 Precedence is **most specific wins**: selection > group > unit type > actor default > all. So
 `/mode all DefensiveMode` followed by `/mode type harv RunHomeMode` does what you'd expect, and
@@ -227,9 +227,10 @@ autocnc/
 │       └── Tests/                   #     fast, no game needed
 │
 ├── mods/autocnc/                    # mod manifest and rules
-├── docs/                            # getting-started / writing-modules / architecture
+├── docs/                            # getting-started / writing-doctrines / architecture
 ├── packages/                        # local NuGet feed doctrines build against
-├── scripts/                         # setup / build / launch / lint / run-doctrine
+├── tools/AutoCnC.Launcher/          # the battle launcher — a window over scripts/
+├── scripts/                         # setup / build / launch / lint / launcher / run-doctrine
 └── AutoCnC.sln                      # the platform only
 ```
 ---
@@ -253,19 +254,45 @@ The short version:
 git clone --recursive https://github.com/sambetts/autocnc.git
 cd autocnc
 ./scripts/setup.ps1      # fetch the engine submodule
-./scripts/build.ps1      # build engine, mod and your modes
-./scripts/launch.ps1     # play
+./scripts/build.ps1      # build engine, mod and the reference doctrine
+./scripts/launcher.ps1   # pick your code, pick an opponent, play
 ```
 
 Cloned without `--recursive`? `git submodule update --init --depth 1`
 
+### The launcher
+
+`./scripts/launcher.ps1` opens a window over the whole authoring loop: point it at your doctrine
+(a `.csproj` it builds, or a `.dll` it plays as-is), choose a map, an opponent and a game speed,
+and press **Launch battle**. The game boots straight into that fight with your doctrine already
+loaded — no menus, no lobby, no `/doctrine` to type. Its **Match** tab graphs every player's units,
+army value, buildings, base value and kills as the battle runs, so you can see the moment a
+doctrine lost rather than just the fact that it did.
+
+It runs the scripts below and shows you their output, so it never does anything you could not
+have typed yourself. Windows only; elsewhere use the command it wraps, which takes the same
+options:
+
+```powershell
+./scripts/run-doctrine.ps1 -Map tiberium-rift.oramap -Difficulty Hard -GameSpeed maximum -Test
+```
+
+Difficulty is a bot personality plus a handicap, because C&C's bots are personalities rather
+than tiers. The levels live in [`scripts/difficulties.json`](scripts/difficulties.json), which
+the launcher and the script both read. Game speed runs from `slowest` to `maximum` — 0.5x to 40x,
+and worth reaching for, since a doctrine is code you are waiting on. The simulation is identical
+at every speed, so watching a match at 40x is watching the same match; only the clock changes.
+Past `fastest` the number is a target rather than a promise, so ask for more than you expect and
+let `/speed` tell you what you actually got. Every battle is recorded, so **Watch replay** takes
+you back over the bit that mattered at a speed you can see.
+
 ### Loops
 
 ```powershell
-dotnet test src/AutoCnC.Modes.Core.Tests   # logic — ~20ms, no engine
-./scripts/lint.ps1                         # wiring — constructs every actor in the mod
-./scripts/build.ps1 -SkipEngine            # recompile just your code
-./scripts/launch.ps1                       # play-test
+dotnet test src/AutoCnC.Core.Tests   # logic — ~20ms, no engine
+./scripts/lint.ps1                   # wiring — constructs every actor in the mod
+./scripts/build.ps1 -SkipEngine      # recompile just your code
+./scripts/launcher.ps1               # play-test
 ```
 
 > **Close the game before rebuilding.** The mod assemblies load from `engine/bin`, and a running

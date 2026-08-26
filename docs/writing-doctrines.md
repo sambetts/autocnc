@@ -238,6 +238,7 @@ they work unchanged for any module: change the plan in your `IDoctrine`, not the
 /assignments                    what's assigned right now
 /whatmode                       what the selection is running
 /modelog                        log every decision to debug.log
+/speed [n]                      game speed: reports it, and sets it in a replay
 ```
 
 `/modelog` is your main debugging tool:

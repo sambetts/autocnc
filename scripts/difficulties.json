@@ -1,0 +1,56 @@
+{
+  "comment": [
+    "Difficulty levels for AutoC&C test battles.",
+    "",
+    "Tiberian Dawn's bots are personalities, not difficulty tiers, so a level is a personality",
+    "plus a handicap. OpenRA's handicap is a 0-95% penalty in 5% steps that scales a player's",
+    "firepower, durability and build speed, so handicapping the bot makes it weaker and",
+    "handicapping the human is the only way to ask for something harder than the toughest bot.",
+    "",
+    "This file is the single source of truth: scripts/run-doctrine.ps1 and the launcher both",
+    "read it, so adding a level here adds it to both."
+  ],
+  "default": "Normal",
+  "levels": [
+    {
+      "name": "Rookie",
+      "bot": "watson",
+      "botLabel": "Watson",
+      "botHandicap": 70,
+      "playerHandicap": 0,
+      "summary": "Watson at 70% handicap. Barely fights back — use it to prove a doctrine does anything at all."
+    },
+    {
+      "name": "Easy",
+      "bot": "watson",
+      "botLabel": "Watson",
+      "botHandicap": 45,
+      "playerHandicap": 0,
+      "summary": "Watson at 45% handicap. Builds a real base but loses trades, so mistakes are survivable."
+    },
+    {
+      "name": "Normal",
+      "bot": "cabal",
+      "botLabel": "Cabal",
+      "botHandicap": 20,
+      "playerHandicap": 0,
+      "summary": "Cabal at 20% handicap. A fair fight: your build order and unit mix have to be sane."
+    },
+    {
+      "name": "Hard",
+      "bot": "hal9001",
+      "botLabel": "HAL 9001",
+      "botHandicap": 0,
+      "playerHandicap": 0,
+      "summary": "HAL 9001 at full strength. Defends its base properly and punishes a slow opening."
+    },
+    {
+      "name": "Brutal",
+      "bot": "hal9001",
+      "botLabel": "HAL 9001",
+      "botHandicap": 0,
+      "playerHandicap": 25,
+      "summary": "HAL 9001 at full strength while you take a 25% handicap. The bot cannot be made stronger, so this weakens you instead."
+    }
+  ]
+}

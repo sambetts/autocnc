@@ -19,8 +19,18 @@
 #   /assignments                    show what is assigned
 #   /whatmode                       report the selection's modes
 #   /modelog                        toggle decision logging to debug.log
+#   /speed                          report the game speed asked for, and the one being managed
+#
+# TurboSpeed makes the game speeds AutoC&C adds past the engine's 'fastest' reachable: the engine
+# renders one frame per logic tick, so VSync would otherwise cap a 20x match at the refresh rate.
+#
+# MatchTelemetry records army and economy curves to a CSV for the launcher's match graph. It reads
+# every player, which a client can do because it simulates the whole world — so it is written for
+# a human to read and is deliberately not reachable from mode code. See docs/determinism.md.
 
 World:
 	ModeExecutor:
 		GroupCount: 9
 	ModeCommands:
+	TurboSpeed:
+	MatchTelemetry:

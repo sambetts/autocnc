@@ -1,10 +1,26 @@
 name: CI
 
+# Deliberately NOT run on push.
+#
+# This repository is experimental and the mod-build job below checks out a ~58MB engine submodule
+# and builds the whole of OpenRA, so a push that only moved a paragraph of documentation costs
+# minutes of queueing for nothing. Run it when it is worth running:
+#
+#   gh workflow run ci.yml          # or the Run workflow button on the Actions tab
+#
+# Opening a pull request still runs it automatically. Worth doing before anything that has to
+# work on a machine other than the one it was written on: CI has already caught a real bug here
+# that a developer machine hid, when stale DLLs in bin/ made a broken build look fine locally.
 on:
-  push:
-    branches: [main]
+  workflow_dispatch:
   pull_request:
     branches: [main]
+
+# A newer run makes an older one pointless, and queueing is what actually costs time on a small
+# repository — the shared runners are not always immediately available.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   # Fast feedback: the pure decision logic needs no engine at all, so this job finishes in

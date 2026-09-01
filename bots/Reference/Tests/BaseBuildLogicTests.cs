@@ -23,7 +23,7 @@ namespace AutoCnC.Reference.Tests
 		static readonly string[] PowerCandidates = [.. ReferencePlans.PowerPlants];
 
 		/// <summary>
-		/// The plan the shipped doctrine actually declares, so these tests verify the real
+		/// The plan the shipped opening actually declares, so these tests verify the real
 		/// strategy rather than a copy that can drift.
 		/// </summary>
 		/// <remarks>
@@ -33,7 +33,7 @@ namespace AutoCnC.Reference.Tests
 		/// CI checkout. Keeping plans as plain data is what lets strategy be tested with no
 		/// engine at all.
 		/// </remarks>
-		static readonly IReadOnlyList<BuildStep> Plan = ReferencePlans.Build;
+		static readonly IReadOnlyList<BuildStep> Plan = ReferencePlans.OpeningBuild;
 
 		static BasePlanState State(
 			int cash = 5000,

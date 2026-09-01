@@ -1,15 +1,110 @@
-# Writing a doctrine
+# Writing a battle bot
 
-A **doctrine** is the unit of authorship in AutoC&C. It declares everything about how an
-army fights:
+A **battle bot** is the unit of authorship in AutoC&C, and the thing a battle is played with. A
+bot owns several **doctrines** and decides which one the match needs.
+
+| | Answers | Lives in |
+|---|---|---|
+| **Doctrine** | *How* to fight one way, thoroughly | `Doctrines/*.cs` |
+| **Bot** | *Which* way to fight, and when | `Reassess` |
+
+A doctrine declares everything about one way of fighting:
 
 - **what to build** — the base construction plan
 - **what to train** — the unit production plan
 - **how units behave** — the modes
 - **who runs what** — the assignments
 
-The platform ships no strategy at all. Load a module and it plays; load none and nothing
-deploys, builds or shoots. Beating the reference module is the goal.
+The platform ships no strategy at all. Load a bot and it plays; load none and nothing deploys,
+builds or shoots. Beating the reference bot is the goal.
+
+**Why the split.** Plans do not survive contact. You can grow one doctrine a special case at a
+time until nobody can say what it does, or you can keep an attack doctrine confident, keep a
+defence doctrine paranoid, and let the bot change its mind. The second one stays readable.
+
+---
+
+## The shape of a bot
+
+```csharp
+using AutoCnC.Core;
+using AutoCnC.Sdk;
+
+public sealed class MyBot : BattleBot
+{
+    public override string Name => "Adaptive";
+    public override string Description => "Opens economic, turtles when hit, pushes when ahead.";
+
+    public override void Configure(IBattleBotBuilder b)
+    {
+        b.Open<OpeningDoctrine>();     // the doctrine the match starts on
+        b.Use<DefenceDoctrine>();
+        b.Use<AttackDoctrine>();
+    }
+
+    public override DoctrineDecision Reassess(in BattleState s)
+    {
+        if (s.BuildingsLost > 0)
+            return DoctrineDecision.SwitchTo("Defence", "losing buildings");
+
+        if (s.ArmyValue > 6000 && s.EnemyBaseFound)
+            return DoctrineDecision.SwitchTo("Attack", "army is worth spending");
+
+        return DoctrineDecision.Continue;
+    }
+}
+```
+
+`Reassess` is called every few seconds of game time. Naming the doctrine already running is the
+same as continuing, so a rule can state its condition without also checking what is loaded.
+
+### What a bot is allowed to know
+
+`BattleState` is everything your side can tell about the match. Your own economy and army are
+exact, because they are yours. **The enemy half is only what you can currently see** — the
+platform fills it in through the same visibility rule `ctx.SenseThreats` filters with, so a bot
+cannot switch to an attack doctrine on the strength of an army value no unit of yours has laid
+eyes on.
+
+| Field | |
+|---|---|
+| `Seconds`, `Doctrine`, `DoctrineSeconds` | Game time, what is running, and for how long |
+| `Cash`, `PowerBalance`, `Harvesters`, `Refineries` | Your economy |
+| `Units`, `ArmyValue`, `Buildings`, `BaseValue` | Your forces |
+| `UnitsLost`, `BuildingsLost`, `UnitsKilled` | What the last `WindowSeconds` cost you |
+| `EnemiesInSight`, `EnemiesNearBase`, `NearestEnemyCells` | What you can see, right now |
+| `SecondsSinceContact`, `EnemyBaseFound` | What you have learned and kept |
+
+There are a few conveniences on top — `BaseUnderAttack`, `BlindToEnemy`, `Winning` — and no
+engine types anywhere, which is the point: the deciding half of a bot is a pure function you can
+test without a game.
+
+```csharp
+[Test]
+public void LosingBuildingsSwitchesToDefence()
+{
+    var s = BattleState.Empty with { Doctrine = "Opening", BuildingsLost = 1 };
+
+    Assert.That(MyBotLogic.Decide(s).Doctrine, Is.EqualTo("Defence"));
+}
+```
+
+A match where the base starts falling over twenty minutes in takes twenty minutes to reproduce,
+and three lines to write down. See `bots/Reference/Tests/ReferenceBotLogicTests.cs`.
+
+### Switching is rate-limited for you
+
+A doctrine carries its own build plan, production plan and assignments, so changing it changes
+what the whole side is trying to do — and two rules that disagree would otherwise flip the army
+back and forth every few seconds. The platform will not act on a switch until the current
+doctrine has had `MinimumDoctrineSeconds` (30 by default). Read `DoctrineSeconds` if you want to
+be stricter still.
+
+### A lone doctrine is still a bot
+
+An assembly with `IDoctrine` types and no `IBattleBot` is played as one bot per doctrine, each
+owning that doctrine and never switching. A bot with one doctrine has nothing to decide, so it
+decides nothing.
 
 ---
 
@@ -39,7 +134,33 @@ public sealed class MyDoctrine : IDoctrine
 }
 ```
 
-That's a complete doctrine. Build it, drop the DLL in, `/module Rush`, watch it play.
+That's a complete doctrine. Put it in a bot, build it, drop the DLL in, `/bot Adaptive`, watch it
+play.
+
+### Assign to units, not to control groups
+
+A bot cannot put units in a control group — there is nobody to press the button. A doctrine a bot
+is meant to run should `ToAll()` or `ToUnitType(...)`; `ToGroup(1)` still works, and is how a
+human watching can take a hand.
+
+### Doctrines can end themselves
+
+A doctrine knows its siblings and can ask for one of them. Sometimes the unit on the ground is
+the first to know the plan is finished:
+
+```csharp
+if (ctx.SenseStructures(new WDist(10 * 1024)).Count > 0)
+    ctx.SwitchDoctrine("Opening", "scout found their base");
+```
+
+`ctx.Doctrine` is the one running, `ctx.Doctrines` lists them all. It is a request rather than a
+command: it goes through the same assessment and the same dwell time, so calling it every tick is
+harmless, and asking for the doctrine already running does nothing.
+
+**The bot outranks it.** `Reassess` is asked first and always, and a request only carries when the
+bot returns `Continue` — otherwise a mode that asked every tick could starve the bot of its own
+judgement, and the first rule to go would be the one watching the base. What that buys you is a
+doctrine that ends itself without the bot needing a rule about it at all.
 
 ### Candidates cover both factions
 
@@ -47,6 +168,12 @@ That's a complete doctrine. Build it, drop the DLL in, `/module Rush`, watch it 
 takes whichever is currently buildable, so one plan works as either faction without you checking.
 
 Same for `Train("Infantry", "e1", "e2")` and `Build("pyle", "hand")`.
+
+### Build steps are cumulative
+
+`Until(n)` means "until `n` of these exist", counting what is already standing and what is
+queued. So a doctrine whose plan extends another's picks up where that one left off, and
+switching back and forth never rebuilds anything.
 
 ### `Forever()` keeps production going
 
@@ -67,32 +194,32 @@ you'd expect. A player can still override anything live with `/mode`.
 ## Getting set up
 
 ```powershell
-cp -r doctrines/Reference doctrines/MyDoctrine
-cd doctrines/MyDoctrine
-# rename the .csproj, .sln, and the IDoctrine class + its Name
+cp -r bots/Reference bots/MyBot
+cd bots/MyBot
+# rename the .csproj, .sln, and the IBattleBot class + its Name
 dotnet build
 ```
 
 Or do the whole loop in one command:
 
 ```powershell
-./scripts/run-doctrine.ps1 -Doctrine MyDoctrine -Test
+./scripts/run-bot.ps1 -BattleBot MyBot -Test
 ```
 
 That tests your strategy, builds it, installs it where the platform scans, and launches the game.
 
-### A doctrine is a normal NuGet consumer
+### A bot is a normal NuGet consumer
 
 ```xml
 <PackageReference Include="AutoCnC.Sdk" Version="0.1.0" />
 <PackageReference Include="AutoCnC.Core" Version="0.1.0" />
 ```
 
-The SDK package carries the OpenRA reference assemblies it was built against, so a doctrine
-compiles with no game installed and no path fiddling.
+The SDK package carries the OpenRA reference assemblies it was built against, so a bot compiles
+with no game installed and no path fiddling.
 
-That means **a doctrine does not have to live in this repository.** Copy the folder anywhere,
-point `nuget.config` at a folder holding the `AutoCnC.*` packages, and it builds:
+That means **a bot does not have to live in this repository.** Copy the folder anywhere, point
+`nuget.config` at a folder holding the `AutoCnC.*` packages, and it builds:
 
 ```xml
 <packageSources>
@@ -101,14 +228,14 @@ point `nuget.config` at a folder holding the `AutoCnC.*` packages, and it builds
 ```
 
 Set `CopyLocalLockFileAssemblies=false` (the template does) so the SDK and engine DLLs are used
-for compilation only. The game already has them loaded, and stray DLLs beside your doctrine
-would be scanned as doctrines.
+for compilation only. The game already has them loaded, and stray DLLs beside your bot would be
+scanned as bots.
 
-### Where doctrines are installed
+### Where bots are installed
 
-Built output goes to `DoctrineInstallDirectory`, which defaults to `engine/bin/doctrines`. The
-platform scans that plus `<SupportDir>/autocnc/doctrines`, the latter being where a player drops
-a doctrine someone shared with them.
+Built output goes to `BattleBotInstallDirectory`, which defaults to `engine/bin/bots`. The
+platform scans that plus `<SupportDir>/autocnc/bots`, the latter being where a player drops a bot
+someone shared with them.
 
 ---
 
@@ -182,11 +309,12 @@ public override UnitDecision OnTick(Actor self, ModeContext ctx)
 Then test your strategy in milliseconds, with no engine and no game:
 
 ```powershell
-dotnet test doctrines/MyDoctrine/Tests
+dotnet test bots/MyBot/Tests
 ```
 
-The reference module's tests assert against the plan its `IDoctrine` actually declares, so
-they verify the real shipped strategy rather than a copy that can drift.
+The reference bot's tests assert against the plans its doctrines actually declare, and against
+the rules its `Reassess` actually runs, so they verify the real shipped strategy rather than a
+copy that can drift.
 
 ---
 
@@ -219,19 +347,23 @@ they verify the real shipped strategy rather than a copy that can drift.
 | `QueueStates()` | All queues, for the production planner |
 | `OwnedBuildingCounts()`, `OwnedUnitCounts()` | Counts, including queued |
 | `FindBuildLocation(actorType)` | A valid placement cell near the base |
-| `BuildPlan`, `ProductionPlan` | **Your module's plans** — read these rather than hardcoding |
+| `BuildPlan`, `ProductionPlan` | **The running doctrine's plans** — read these rather than hardcoding |
+| `Doctrine`, `Doctrines`, `SwitchDoctrine(name, why)` | The doctrine you are part of, its siblings, and asking for one |
 
 `BuildBaseMode` and `TrainUnitsMode` read `ctx.BuildPlan` / `ctx.ProductionPlan`, which is why
-they work unchanged for any module: change the plan in your `IDoctrine`, not the mode.
+they work unchanged for any doctrine: change the plan in your `IDoctrine`, not the mode.
 
 ---
 
 ## In-game commands
 
 ```
-/modules                        installed modules; * marks the loaded one
-/module <name>                  load one (takes effect on the next tick)
-/modes                          modes the loaded module provides
+/bots                           installed battle bots; * marks the loaded one
+/bot <name>                     load one
+/doctrines                      the doctrines the loaded bot owns; * marks the running one
+/doctrine <name>                run one by hand; the bot may still change its mind
+/why                            what the bot is running, and what it is looking at
+/modes                          modes the running doctrine provides
 /mode <ModeName>                override for the current selection
 /mode all|type|group <...>      override more broadly
 /mode clear                     drop per-unit overrides
@@ -250,6 +382,22 @@ they work unchanged for any module: change the plan in your `IDoctrine`, not the
 
 You get the decision, the order it became, and your own stated reason — which is why filling in
 the `reason` argument properly pays off.
+
+`/modelog` says what your code *did*. The **battle log** says what it had to go on: the launcher's
+output window records every event your side could react to — an enemy coming into view, a hit
+taken, a unit lost, a kill — each one naming the players on both ends of it, and filtered by the
+same visibility rule `ctx.SenseThreats` uses.
+
+```
+461,spotted,Watson,orca,841,Commander,,,64,52,kind=Aircraft frombase=15
+463,attacked,Commander,e1,437,Watson,orca,841,78,54,damage=121 health=97
+907,lost,Commander,nuke,342,Watson,orca,841,83,48,
+```
+
+Read the two together and a bad mode gives itself away: a `spotted` row at `frombase=4` two
+minutes before the first `attacked` row, with no `/modelog` line in between, is a scout your
+modes had every chance to react to and did not. See
+[getting-started.md](getting-started.md#what-your-code-knew-at-the-time).
 
 ---
 

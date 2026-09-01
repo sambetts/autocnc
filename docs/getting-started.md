@@ -3,7 +3,7 @@
 Start to finish: install, write your first mode, and watch it fight. About 15 minutes, most of
 it downloading.
 
-If you just want the API reference, skip to [writing-doctrines.md](writing-doctrines.md).
+If you just want the API reference, skip to [writing-bots.md](writing-bots.md).
 
 ---
 
@@ -65,13 +65,18 @@ Build complete. Next: ./scripts/launch.ps1
 
 That opens the **battle launcher** (Windows). Point it at your battle code, choose a map and an
 opponent, and press **Launch battle** — it builds what needs building, starts the game, seats
-the AI and loads your doctrine before the first tick.
+the AI and loads your bot before the first tick.
+
+The launcher window itself is only for setting a battle up. When one starts, two more windows
+open beside it — the **results** graphs and the **output** log — the way a debugger's windows
+appear when you run rather than sitting empty while you edit. They stay up when the game exits,
+because everything you want to ask about a match you ask afterwards.
 
 On Linux and macOS, or if you would rather stay in the terminal, the launcher is a front end for
 one command that takes exactly the same options:
 
 ```powershell
-./scripts/run-doctrine.ps1 -Map tiberium-rift.oramap -Difficulty Normal
+./scripts/run-bot.ps1 -Map tiberium-rift.oramap -Difficulty Normal
 ```
 
 Prefer to start at the menu instead?
@@ -120,14 +125,14 @@ launcher and the script both read, so adding one there adds it to both:
 Override any of it when you need something specific:
 
 ```powershell
-./scripts/run-doctrine.ps1 -Map tiberium-rift.oramap -Bot hal9001 -BotHandicap 40 -Opponents 2
+./scripts/run-bot.ps1 -Map tiberium-rift.oramap -Bot hal9001 -BotHandicap 40 -Opponents 2
 ```
 
 ### How fast it runs
 
 `-GameSpeed` (the **Speed** dropdown in the launcher) sets the tick rate for the match. It is a
 real iteration tool rather than a comfort setting, and it changes nothing but the clock: the
-simulation at 20x is the same simulation, tick for tick, as the one at 1x. A doctrine that wins at
+simulation at 20x is the same simulation, tick for tick, as the one at 1x. A bot that wins at
 `maximum` wins at `default`.
 
 | Speed | Per tick | Multiplier | |
@@ -140,8 +145,8 @@ simulation at 20x is the same simulation, tick for tick, as the one at 1x. A doc
 | `maximum` | 1ms | 40x | the engine's ceiling: timesteps are whole milliseconds |
 
 ```powershell
-./scripts/run-doctrine.ps1 -Map tiberium-rift.oramap -GameSpeed maximum
-./scripts/run-doctrine.ps1 -Map tiberium-rift.oramap -Opponents 0 -GameSpeed slowest   # no enemy, watch the build
+./scripts/run-bot.ps1 -Map tiberium-rift.oramap -GameSpeed maximum
+./scripts/run-bot.ps1 -Map tiberium-rift.oramap -Opponents 0 -GameSpeed slowest   # no enemy, watch the build
 ```
 
 **Ask for more than you expect to get.** Past `fastest` the setting is a target, not a promise —
@@ -152,8 +157,8 @@ numbers, and `debug.log` records them every ten seconds:
 Turbo: asked for 40x, getting 32.4x — the machine is the limit here, not the setting.
 ```
 
-That distinction matters: a doctrine you think you watched at 40x, but actually watched at 4x, is
-a doctrine you have timed against the wrong clock. Measured on one desktop, a 1v1 with a full
+That distinction matters: a bot you think you watched at 40x, but actually watched at 4x, is a
+bot you have timed against the wrong clock. Measured on one desktop, a 1v1 with a full
 army on both sides:
 
 | Asked for | Got | Why |
@@ -183,8 +188,9 @@ and on a machine quicker than this one it would land nearer 40x.
 
 Watching at 20x tells you who won. It does not tell you *when* it was lost, and that is usually
 the question. So every match records one row per player per second of game time to a CSV, and the
-launcher graphs it live on the **Match** tab: units, army value, buildings, base value and kills,
-one line per player in that player's colour.
+launcher graphs it live in the **results window** it opens when the battle starts: units, army
+value, buildings, base value and kills, one line per player in that player's colour, with the
+final numbers and the result underneath.
 
 ```
 seconds,player,faction,bot,colour,units,army,buildings,basevalue,assets,cash,killed,lost,buildingskilled,buildingslost,state
@@ -193,7 +199,7 @@ seconds,player,faction,bot,colour,units,army,buildings,basevalue,assets,cash,kil
 ```
 
 The curves say things a match never quite does. An army count that climbs steadily to 60 and then
-falls off a cliff at 9:30 is a doctrine that fought the wrong fight once, not a doctrine that
+falls off a cliff at 9:30 is a bot that fought the wrong fight once, not one that
 builds badly. A cash column that keeps rising while the unit count sits still is a production plan
 that has stopped spending. A base value that flattens while the opponent's keeps climbing is an
 economy that stopped expanding three minutes before anyone shot at it. A kill line that stays flat
@@ -209,16 +215,67 @@ the previous one is kept alongside it as `.csv.1`. Both are ordinary CSV with a 
 anything that reads a spreadsheet will plot them too.
 
 ```powershell
-./scripts/run-doctrine.ps1 -Map tiberium-rift.oramap -Telemetry C:\tmp\run-14.csv   # keep this one
-./scripts/run-doctrine.ps1 -Map tiberium-rift.oramap -Telemetry none                # record nothing
+./scripts/run-bot.ps1 -Map tiberium-rift.oramap -Telemetry C:\tmp\run-14.csv   # keep this one
+./scripts/run-bot.ps1 -Map tiberium-rift.oramap -Telemetry none                # record nothing
 ```
 
 **What this is, and what it is not.** A client simulates the whole world, so the process running
 your match knows everything about everyone — fog hides actors from the *player*, not from the
 program. That is why this record is written for a human to read and is not reachable from mode
-code: a doctrine that wants to know about the enemy goes through `ModeContext`, which filters by
+code: a mode that wants to know about the enemy goes through `ModeContext`, which filters by
 visibility. For the same reason, when there is a human opponent only your own side is recorded.
 See [determinism](determinism.md).
+
+### What your code knew at the time
+
+The graph says *when* it went wrong. The **battle log** says what your bot had to work with
+at that moment, which is the part you can act on — and it is the other half of the launcher's
+output window.
+
+It opens by naming everybody in the match, then records one row per event, from your side's point
+of view only:
+
+```
+seconds,event,player,actor,actorid,otherplayer,otheractor,otheractorid,x,y,detail
+0,player,Commander,,,,,,,,faction=nod bot=0 colour=C82020 side=you
+0,player,Watson,,,,,,,,faction=gdi bot=1 colour=18F26F side=enemy
+461,spotted,Watson,orca,841,Commander,,,64,52,kind=Aircraft frombase=15
+463,attacked,Commander,e1,437,Watson,orca,841,78,54,damage=121 health=97
+471,attacked,Commander,e1,437,Watson,orca,841,78,54,damage=547 hits=8 health=86
+892,killed,Watson,jeep,806,Commander,e1,437,73,46,
+907,lost,Commander,nuke,342,Watson,orca,841,83,48,
+956,over,Commander,,,,,,,,result=Lost
+```
+
+Every row names both sides: `player` owns `actor`, `otherplayer` owns `otheractor`, and the two
+IDs are the engine's own, so "spotted, then hit by, then lost to" is one story about one enemy
+rather than three rows that happen to share a unit name.
+
+| Event | Means |
+|---|---|
+| `player` | Somebody in this match: faction, colour, bot or not, and which one is you |
+| `spotted` | An enemy came into view. `frombase` is how many cells from your construction yard |
+| `attacked` | Something of yours took damage. Repeat hits on the same unit are counted into `hits` rather than written out one by one |
+| `lost` | You lost an actor, and to what |
+| `killed` | You destroyed an enemy you could see, and with what |
+| `built` | An actor of yours entered the world |
+| `over` | The result |
+
+**The constraint is the point.** Everything here is something your code was in a position to react
+to, and that is not a second opinion about what "in a position" means: sightings are filtered by
+`ModeContext.IsVisibleEnemy`, the same predicate `ctx.SenseThreats` uses, and damage arrives on
+the same notification `IUnitMode.OnDamaged` gets. Reading a bot's decisions against an
+omniscient feed teaches you nothing, because the decisions were not made with one. If a line is in
+this file, a mode could have responded to it.
+
+That makes it the material for the next version: an enemy `spotted` at `frombase=4` two minutes
+before the first `attacked` row is a scout your modes ignored; a run of `lost` rows with no
+`killed` between them is an attack mode walking into something it should have sensed.
+
+```powershell
+./scripts/run-bot.ps1 -Map tiberium-rift.oramap -BattleLog C:\tmp\battle-14.csv
+./scripts/run-bot.ps1 -Map tiberium-rift.oramap -BattleLog none
+```
 
 ### Watching it back
 
@@ -272,8 +329,10 @@ Everything happens through the chatbox. Select some units, then:
 Inspect what's going on:
 
 ```
-/doctrines       installed doctrines, with the loaded one marked
-/doctrine <name> load one
+/bots            installed battle bots, with the loaded one marked
+/bot <name>      load one
+/doctrines       the doctrines the loaded bot owns, with the running one marked
+/why             what the bot is running, and what it is looking at
 /whatmode        what the current selection is running
 /modelog         log every decision to debug.log
 /speed [n]       the speed you are getting; in a replay, /speed 0.5 sets it
@@ -300,40 +359,56 @@ Switching modes is **instant and live** — it lands within one game tick, mid-b
 
 ---
 
-## 5. Write your first doctrine
+## 5. Write your first battle bot
 
-The platform has no strategy of its own. All behaviour comes from a **doctrine**, and
-AutoC&C ships one — `Reference` — as both the example and the opponent to beat.
+The platform has no strategy of its own. All behaviour comes from a **battle bot**, and AutoC&C
+ships one — `Reference` — as both the example and the opponent to beat.
+
+A bot owns several **doctrines** and decides between them as the match turns. The reference bot
+has four: `Opening`, `Scout`, `Defence` and `Attack`.
 
 Start your own by copying it:
 
 ```powershell
-cp -r doctrines/Reference doctrines/MyRush
-cd doctrines/MyRush
-# rename ReferenceDoctrine.csproj / .sln, and the class + Name in ReferenceDoctrine.cs
+cp -r bots/Reference bots/MyRush
+cd bots/MyRush
+# rename ReferenceBot.csproj / .sln, and the class + Name in ReferenceBot.cs
 dotnet build
 ```
 
-Open `MyRush/ReferenceDoctrine.cs` — everything about how your army fights is declared
-there:
+Open `MyRush/Doctrines/` — everything about how your army fights one way is declared there:
 
 ```csharp
 b.Build("powr", "nuke").Until(2);      // what to construct
 b.Train("Infantry", "e1").Until(10);   // what to train
 b.Assign<DefensiveMode>().ToAll();     // how units behave
-b.Assign<AttackBaseMode>().ToGroup(1);
 ```
 
-Point the launcher at `doctrines/MyRush/ReferenceDoctrine.csproj` and press **Launch battle**.
-It is loaded before the first tick, so there is nothing to type — but if you want to check, or
-to swap doctrines mid-session:
+And `MyRush/Logic/ReferenceBotLogic.cs` decides which of them is the right one:
 
-```
-/doctrines              see what's installed, with the loaded one marked
-/doctrine MyRush        load a different one
+```csharp
+if (s.BuildingsLost > 0)
+    return DoctrineDecision.SwitchTo("Defence", "losing buildings");
 ```
 
-Full guide: [writing-doctrines.md](writing-doctrines.md).
+That rule is a pure function of what your side can see, so you can test it without a game:
+
+```powershell
+dotnet test bots/MyRush/Tests
+```
+
+Point the launcher at `bots/MyRush/ReferenceBot.csproj` and press **Launch battle**. It is loaded
+before the first tick, so there is nothing to type — but if you want to check, or to take a hand:
+
+```
+/bots                   see what's installed, with the loaded one marked
+/bot MyRush             load a different one
+/doctrines              the doctrines your bot owns, with the running one marked
+/why                    what it is running, and what it is looking at
+/doctrine Attack        run one by hand; the bot may still change its mind
+```
+
+Full guide: [writing-bots.md](writing-bots.md).
 
 ## 6. The iteration loop
 
@@ -348,21 +423,21 @@ dotnet test src/AutoCnC.Modes.Core.Tests     # ~20ms, no game, no engine build
 
 To make your own logic testable that way, put the judgement in a pure function in
 `src/AutoCnC.Modes.Core` and call it from `OnTick`. `DefensiveLogic` is the worked example.
-Details in [writing-doctrines.md](writing-doctrines.md).
+Details in [writing-bots.md](writing-bots.md).
 
 Full loop:
 
 ```powershell
-# 1. edit your doctrine's *.cs in your IDE
+# 1. edit your bot's *.cs in your IDE
 dotnet test src/AutoCnC.Core.Tests         # 2. check the logic
 ./scripts/launcher.ps1                     # 3. press Launch battle  (close the game first!)
 ```
 
-**Launch battle** builds your doctrine and starts the game in one step, and runs its tests on
+**Launch battle** builds your bot and starts the game in one step, and runs its tests on
 the way past if you tick **Run its tests first**. From a terminal that whole loop is one line:
 
 ```powershell
-./scripts/run-doctrine.ps1 -Test -Map tiberium-rift.oramap -Difficulty Hard
+./scripts/run-bot.ps1 -Test -Map tiberium-rift.oramap -Difficulty Hard
 ```
 
 And if you touch the mod's YAML or traits, validate the wiring:
@@ -411,7 +486,7 @@ clicks have. You can also lower `TickInterval` for an actor in
 
 | Doc | For |
 |---|---|
-| [writing-doctrines.md](writing-doctrines.md) | Authoring doctrines: plans, modes, the full API |
+| [writing-bots.md](writing-bots.md) | Authoring bots and doctrines: switching, plans, modes, the full API |
 | [architecture.md](architecture.md) | How the pieces fit and why |
 | [determinism.md](determinism.md) | Why your code can't desync a multiplayer match |
-| [../doctrines/Reference/README.md](../doctrines/Reference/README.md) | The reference module, next to its code |
+| [../bots/Reference/README.md](../bots/Reference/README.md) | The reference bot, next to its code |

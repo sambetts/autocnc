@@ -47,8 +47,11 @@ namespace AutoCnC.Platform.Traits
 
 			console.RegisterCommand("mode", this);
 			console.RegisterCommand("modes", this);
+			console.RegisterCommand("bot", this);
+			console.RegisterCommand("bots", this);
 			console.RegisterCommand("doctrine", this);
 			console.RegisterCommand("doctrines", this);
+			console.RegisterCommand("why", this);
 			console.RegisterCommand("assignments", this);
 			console.RegisterCommand("whatmode", this);
 			console.RegisterCommand("modelog", this);
@@ -70,12 +73,24 @@ namespace AutoCnC.Platform.Traits
 
 			switch (name)
 			{
+				case "bots":
+					ListBots();
+					break;
+
+				case "bot":
+					LoadBot(arg);
+					break;
+
 				case "doctrines":
 					ListDoctrines();
 					break;
 
 				case "doctrine":
-					LoadDoctrine(arg);
+					ForceDoctrine(arg);
+					break;
+
+				case "why":
+					ExplainDoctrine();
 					break;
 
 				case "modes":
@@ -103,63 +118,145 @@ namespace AutoCnC.Platform.Traits
 			}
 		}
 
-		void ListDoctrines()
+		void ListBots()
 		{
-			var modules = DoctrineLoader.Doctrines;
-			if (modules.Count == 0)
+			var bots = BattleBotLoader.Bots;
+			if (bots.Count == 0)
 			{
-				Debug("No doctrines installed. AutoC&C ships no strategy of its own —");
-				Debug("build one and drop it in: " + string.Join(" or ", DoctrineLoader.SearchPaths));
+				Debug("No battle bots installed. AutoC&C ships no strategy of its own —");
+				Debug("build one and drop it in: " + string.Join(" or ", BattleBotLoader.SearchPaths));
 			}
 			else
 			{
-				foreach (var module in modules)
+				foreach (var bot in bots)
 				{
-					var active = executor.Doctrine != null && executor.Doctrine.Name == module.Definition.Name;
-					Debug($"{(active ? "* " : "  ")}{module.Definition.Name} — {module.Definition.Description}");
+					var active = executor.Bot != null && executor.Bot.Name == bot.Definition.Name;
+					Debug($"{(active ? "* " : "  ")}{bot.Definition.Name} — {bot.Definition.Description}");
+					Debug($"    {bot.Definition.DoctrineNames.Count} doctrine(s): " +
+						string.Join(", ", bot.Definition.DoctrineNames));
 				}
 
-				Debug("Load one with /doctrine <name>.");
+				Debug("Load one with /bot <name>.");
 			}
 
-			foreach (var error in DoctrineLoader.Errors)
-				Debug("Module problem: " + error);
+			foreach (var error in BattleBotLoader.Errors)
+				Debug("Battle bot problem: " + error);
 		}
 
-		void LoadDoctrine(string arg)
+		void LoadBot(string arg)
 		{
 			var name = (arg ?? string.Empty).Trim();
 			if (string.IsNullOrEmpty(name))
 			{
-				Debug(executor.Doctrine == null
-					? "No module loaded. /doctrines to see what's installed."
-					: $"Loaded: {executor.Doctrine.Name} — {executor.Doctrine.Description}");
+				Debug(executor.Bot == null
+					? "No battle bot loaded. /bots to see what's installed."
+					: $"Loaded: {executor.Bot.Name} — {executor.Bot.Description}");
 				return;
 			}
 
-			if (!executor.LoadDoctrine(name))
+			if (!executor.LoadBattleBot(name))
 			{
-				Debug($"No module named '{name}'. /doctrines to see what's installed.");
+				Debug($"No battle bot named '{name}'. /bots to see what's installed.");
 				return;
 			}
 
-			var module = executor.Doctrine;
-			Debug($"Loaded {module.Name}: {module.Description}");
-			Debug($"{module.BuildPlan.Count} build steps, {module.ProductionPlan.Count} production steps, " +
-				$"{module.Modes.Count} modes. Every unit re-resolves on the next tick.");
+			var bot = executor.Bot;
+			Debug($"Loaded {bot.Name}: {bot.Description}");
+			Debug($"Opening on {bot.Opening}. Doctrines: {string.Join(", ", bot.DoctrineNames)}.");
+		}
+
+		/// <summary>The doctrines the loaded bot owns, with the running one marked.</summary>
+		void ListDoctrines()
+		{
+			if (executor.Bot == null)
+			{
+				Debug("No battle bot loaded. /bots to see what's installed.");
+				return;
+			}
+
+			foreach (var name in executor.Bot.DoctrineNames)
+			{
+				var doctrine = executor.Bot.Find(name);
+				var active = executor.Doctrine != null && executor.Doctrine.Name == name;
+				Debug($"{(active ? "* " : "  ")}{name} — {doctrine.Description}");
+			}
+
+			Debug($"{executor.Bot.Name} decides between them. /doctrine <name> overrides it by hand.");
+		}
+
+		/// <summary>
+		/// Switches doctrine by hand.
+		/// </summary>
+		/// <remarks>
+		/// The bot is still running and may well change its mind at the next assessment, which is
+		/// the honest behaviour: this is a way to see a doctrine play, not a way to take the wheel.
+		/// </remarks>
+		void ForceDoctrine(string arg)
+		{
+			var name = (arg ?? string.Empty).Trim();
+
+			if (executor.Bot == null)
+			{
+				Debug("No battle bot loaded. /bots to see what's installed.");
+				return;
+			}
+
+			if (string.IsNullOrEmpty(name))
+			{
+				Debug(executor.Doctrine == null
+					? "No doctrine running. /doctrines to see what this bot has."
+					: $"Running: {executor.Doctrine.Name} — {executor.Doctrine.Description}");
+				return;
+			}
+
+			if (!executor.ForceDoctrine(name, "asked for by hand"))
+			{
+				Debug($"{executor.Bot.Name} has no doctrine named '{name}'. /doctrines lists them.");
+				return;
+			}
+
+			var doctrine = executor.Doctrine;
+			Debug($"Switched to {doctrine.Name}: {doctrine.Description}");
+			Debug($"{doctrine.BuildPlan.Count} build steps, {doctrine.ProductionPlan.Count} production steps, " +
+				$"{doctrine.Modes.Count} modes. Every unit re-resolves on the next tick.");
+			Debug($"{executor.Bot.Name} is still deciding, and may switch back.");
+		}
+
+		/// <summary>Why the bot is running what it is running, and what it is looking at.</summary>
+		void ExplainDoctrine()
+		{
+			if (executor.Bot == null || executor.Doctrine == null)
+			{
+				Debug("No battle bot loaded. /bots to see what's installed.");
+				return;
+			}
+
+			var s = executor.LastAssessment;
+
+			Debug($"{executor.Bot.Name} is running {executor.Doctrine.Name}" +
+				(string.IsNullOrEmpty(executor.DoctrineReason) ? " (its opening)." : $" because {executor.DoctrineReason}."));
+
+			Debug($"For {s.DoctrineSeconds}s. Army {s.ArmyValue} in {s.Units} units, {s.Buildings} buildings, {s.Cash} cash.");
+			Debug($"Last {s.WindowSeconds}s: lost {s.UnitsLost} units and {s.BuildingsLost} buildings, killed {s.UnitsKilled}.");
+
+			Debug(s.EnemiesInSight == 0
+				? s.EnemyBaseFound
+					? $"No enemy in sight; their base was found {s.SecondsSinceContact}s ago."
+					: "No enemy in sight, and their base has never been found."
+				: $"{s.EnemiesInSight} enemy in sight, {s.EnemiesNearBase} near your base, nearest {s.NearestEnemyCells} cells away.");
 		}
 
 		void ListModes()
 		{
 			if (executor.Doctrine == null)
 			{
-				Debug("No doctrine loaded. /doctrines to see what's installed.");
+				Debug("No doctrine running. /bots to see what's installed.");
 				return;
 			}
 
 			var names = executor.AvailableModeNames.ToArray();
 			Debug(names.Length == 0
-				? $"Module '{executor.Doctrine.Name}' provides no modes."
+				? $"Doctrine '{executor.Doctrine.Name}' provides no modes."
 				: $"Modes from {executor.Doctrine.Name}: " + string.Join(", ", names));
 		}
 

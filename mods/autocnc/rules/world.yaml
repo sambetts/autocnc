@@ -3,17 +3,23 @@
 # Copyright (c) The AutoC&C Developers and Contributors. GPL-3.0-or-later; see LICENSE.
 # See NOTICE.md for attributions.
 #
-# ModeExecutor runs unit modes for the LOCAL player only and turns their decisions into orders.
-# Mode code therefore sits outside the lockstep simulation, which is what lets players write
-# their own modes without every opponent needing the same code. See docs/determinism.md.
+# ModeExecutor runs the loaded BATTLE BOT for the LOCAL player only. A bot owns several doctrines
+# — an opening, a turtle, a push, a scouting run — and decides between them as the match turns;
+# the doctrine that wins that argument supplies the build plan, the production plan and the mode
+# assignments, and its modes are what turn into orders. Both halves are client-local, which is
+# what lets players write their own without every opponent needing the same code.
+# See docs/determinism.md.
 #
 # Control group membership comes from OpenRA's built-in ControlGroups trait. That trait is
 # client-local, which is exactly right here: mode assignment is local policy too.
 #
 # ModeCommands adds the chatbox interface:
-#   /modules                        list installed doctrines
-#   /module <name>                  load one
-#   /modes                          modes the loaded module provides
+#   /bots                           list installed battle bots
+#   /bot <name>                     load one
+#   /doctrines                      the doctrines the loaded bot owns
+#   /doctrine <name>                run one by hand; the bot may still change its mind
+#   /why                            what the bot is running, and what it is looking at
+#   /modes                          modes the running doctrine provides
 #   /mode <ModeName>                override for the current selection
 #   /mode all|type|group ...        override more broadly
 #   /assignments                    show what is assigned
@@ -26,7 +32,14 @@
 #
 # MatchTelemetry records army and economy curves to a CSV for the launcher's match graph. It reads
 # every player, which a client can do because it simulates the whole world — so it is written for
-# a human to read and is deliberately not reachable from mode code. See docs/determinism.md.
+# a human to read and is deliberately not reachable from bot or mode code. See docs/determinism.md.
+#
+# BattleLog is the opposite, and the pair is the point: it records only what the local player's
+# code was in a position to react to — enemies coming into view, hits taken, units lost and
+# killed, and every doctrine the bot switched to and why — using the same visibility rule
+# ctx.SenseThreats filters with. Read the graph to see how a bot did; read the log to see what it
+# knew when it decided. ReportsToBattleLog is the player-actor half of it, because the engine
+# delivers damage and death notifications to the damaged actor's owner rather than to the world.
 
 World:
 	ModeExecutor:
@@ -34,3 +47,7 @@ World:
 	ModeCommands:
 	TurboSpeed:
 	MatchTelemetry:
+	BattleLog:
+
+Player:
+	ReportsToBattleLog:

@@ -21,12 +21,12 @@ namespace AutoCnC.Launcher
 	/// <remarks>
 	/// Stored in the user profile rather than the repository: it is a personal working state,
 	/// and a checkout shared by two people should not have one of them overwriting the other's
-	/// doctrine path.
+	/// battle bot path.
 	/// </remarks>
 	public sealed class LauncherSettings
 	{
 		public string RepositoryRoot { get; set; }
-		public string DoctrinePath { get; set; }
+		public string BattleBotPath { get; set; }
 		public string Map { get; set; }
 		public string Difficulty { get; set; }
 		public string GameSpeed { get; set; }

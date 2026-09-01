@@ -14,54 +14,78 @@ Everything below is a response to that tension.
 
 ---
 
-## Platform and modules
+## Platform and battle bots
 
-AutoC&C is split into a **platform** (infrastructure) and **doctrines** (strategy). The
-platform ships no strategy at all: with no module loaded, nothing deploys, builds or shoots.
+AutoC&C is split into a **platform** (infrastructure) and **battle bots** (strategy). The
+platform ships no strategy at all: with no bot loaded, nothing deploys, builds or shoots.
+
+A bot owns several **doctrines** — complete, self-contained ways of fighting — and decides which
+one the match needs. A doctrine answers *how* to fight one way; the bot answers *which* way, and
+when.
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│  modules/*            doctrines — all strategy          │
-│    IDoctrine      build plan, production plan,           │
-│                       modes, assignments                     │
-│    → built to bin/doctrines, discovered by scanning            │
+│  bots/*               battle bots — all strategy             │
+│    IBattleBot           which doctrine, and when             │
+│      IDoctrine          build plan, production plan,         │
+│                         modes, assignments                   │
+│    → built to bin/bots, discovered by scanning               │
 └──────────────────────────────────────────────────────────────┘
                               │ loaded by reflection
 ┌──────────────────────────────────────────────────────────────┐
 │  AutoCnC.Platform     THE HOST (references OpenRA)           │
-│    ModeExecutor       client-local; runs the loaded module   │
-│    DoctrineLoader       scans folders for module assemblies    │
+│    ModeExecutor       client-local; runs the loaded bot      │
+│    BattleBotLoader    scans folders for bot assemblies       │
+│    BattleAssessor     builds BattleState, fog respected      │
 │    ProgrammableController, ModeCommands                      │
-│    TurboSpeed, MatchTelemetry                                │
+│    TurboSpeed, MatchTelemetry, BattleLog                     │
 └──────────────────────────────────────────────────────────────┘
                               │
 ┌──────────────────────────────────────────────────────────────┐
-│  AutoCnC.Sdk          WHAT MODULES CODE AGAINST              │
-│    IDoctrine, IDoctrineBuilder                       │
+│  AutoCnC.Sdk          WHAT BOTS CODE AGAINST                 │
+│    IBattleBot, IBattleBotBuilder, BattleBot                  │
+│    IDoctrine, IDoctrineBuilder                               │
 │    IUnitMode, UnitMode, ModeContext                          │
 │    IUnitState, IModeHost  (so the SDK needn't know the host) │
 └──────────────────────────────────────────────────────────────┘
                               │
 ┌──────────────────────────────────────────────────────────────┐
 │  AutoCnC.Core         ZERO DEPENDENCIES                      │
-│    UnitDecision, ThreatSnapshot, BuildStep, ProductionStep   │
+│    UnitDecision, DoctrineDecision, BattleState               │
+│    ThreatSnapshot, BuildStep, ProductionStep                 │
 │    BaseBuildLogic, UnitProductionLogic, ModeAssignments      │
 └──────────────────────────────────────────────────────────────┘
 ```
 
-Modules reference the SDK and Core **as binaries**, never as projects. That is what lets a module
-live in its own repository: point `AutoCnCPath` at any AutoC&C checkout and it compiles.
+Bots reference the SDK and Core **as binaries**, never as projects. That is what lets a bot live
+in its own repository: point `AutoCnCPath` at any AutoC&C checkout and it compiles.
 
-Modules are deliberately **not** listed in `mod.yaml`. They are player artifacts discovered by
-scanning `bin/doctrines` and `<SupportDir>/autocnc/doctrines`, so you can install several, swap
-between them with `/module`, and share one without anybody editing the mod.
+Bots are deliberately **not** listed in `mod.yaml`. They are player artifacts discovered by
+scanning `bin/bots` and `<SupportDir>/autocnc/bots`, so you can install several, swap between
+them with `/bot`, and share one without anybody editing the mod.
+
+An assembly with `IDoctrine` types and no `IBattleBot` is read as one bot per doctrine. That is
+the degenerate case of the model rather than a compatibility shim: a bot with one doctrine has
+nothing to decide, so it decides nothing.
 
 ### What belongs where
 
 The dividing line is *algorithm versus plan*. Walking a build plan and picking the first unmet
 step is infrastructure, so `BaseBuildLogic` lives in Core. Deciding that power comes before a
-refinery is strategy, so the plan lives in the module. `BuildBaseMode` reads `ctx.BuildPlan`
-rather than hardcoding an order, which is why the same mode serves every module.
+refinery is strategy, so the plan lives in the doctrine. `BuildBaseMode` reads `ctx.BuildPlan`
+rather than hardcoding an order, which is why the same mode serves every doctrine.
+
+The same line runs one level up. Sampling the world into a `BattleState` and rate-limiting
+switches is infrastructure, so `BattleAssessor` and the dwell time live in the platform. Deciding
+that two refineries is enough to spare a jeep is strategy, so it lives in the bot.
+
+### What a bot is allowed to know
+
+`BattleState` is built by `BattleAssessor`, and its enemy half goes through
+`ModeContext.IsVisibleEnemy` — the same predicate `ctx.SenseThreats` filters with. A client
+simulates the whole world, so this filtering has to be deliberate: without it a bot could switch
+to an attack doctrine on the strength of an army value no unit of yours has ever seen. Your own
+economy and forces are read exactly, because they are yours.
 
 ---
 
@@ -211,28 +235,28 @@ To upgrade: bump the submodule, rebuild, run the lint, fix what breaks.
 
 ### Launching straight into a battle
 
-The launcher and `run-doctrine.ps1` boot the game into a fight with no menus in between. That is
+The launcher and `run-bot.ps1` boot the game into a fight with no menus in between. That is
 built from three pieces, all inside our own assemblies:
 
 | Piece | Does |
 |---|---|
 | `LaunchOptions` | Re-reads the process command line for `Launch.*` arguments the engine does not know about. `Arguments` ignores keys it has no field for, so a mod can add its own without touching `LaunchArguments`. |
 | `Server.BattleSetup` | A `ServerTrait` on `IClientJoined` that seats the requested bots and applies handicaps and factions. The engine's `SkirmishLogic` only seats a bot for `ServerType.Skirmish`, and a `Launch.Map` game is `ServerType.Local`, so without this you get a map with nobody on it. |
-| `ModeExecutor.WorldLoaded` | Loads the doctrine named by `Launch.Doctrine`, or the one in the assembly at `Launch.DoctrinePath`. |
+| `ModeExecutor.WorldLoaded` | Loads the battle bot named by `Launch.BattleBot`, or the one in the assembly at `Launch.BattleBotPath`. |
 
 | Argument | Meaning |
 |---|---|
-| `Launch.DoctrinePath` | A doctrine assembly, or folder of them, loaded in addition to the usual search paths and preferred at world load |
-| `Launch.Doctrine` | Load this doctrine by its declared `Name` |
+| `Launch.BattleBotPath` | A bot assembly, or folder of them, loaded in addition to the usual search paths and preferred at world load |
+| `Launch.BattleBot` | Load this bot by its declared `Name`. `Launch.Doctrine` / `Launch.DoctrinePath` are still accepted for both |
 | `Launch.Bot` | Bot type for the opponents, e.g. `hal9001`. Absent means no battle is set up |
 | `Launch.Opponents` | How many of them, clamped to the map's free bot slots |
 | `Launch.BotHandicap` / `Launch.Handicap` | 0-95% penalty on the opponents / on you |
 | `Launch.Faction` / `Launch.BotFaction` | Faction for you / for the opponents |
 | `Launch.GameSpeed` | Tick rate for the match, e.g. `fastest` |
 
-Naming the assembly rather than the doctrine means nothing outside the doctrine has to know the
-`Name` declared inside it, and a doctrine played from its own build output cannot be shadowed by
-a stale copy in `engine/bin/doctrines`.
+Naming the assembly rather than the bot means nothing outside the bot has to know the `Name`
+declared inside it, and a bot played from its own build output cannot be shadowed by a stale copy
+in `engine/bin/bots`.
 
 `BattleSetup` is listed *ahead of* `LobbyCommands` in `mod.yaml`, which matters for exactly one
 reason: the engine starts a launched map by issuing a hardcoded `option gamespeed default` from
@@ -250,7 +274,7 @@ re-issue the speed that was actually asked for. Everything else it sees, it igno
   Tiberian Dawn specific.
 - No headless benchmark harness for mode-vs-mode evaluation.
 - The launcher is Windows Forms, so Windows only. Everything it does is available from
-  `run-doctrine.ps1` on any platform.
+  `run-bot.ps1` on any platform.
 - Difficulty tops out at "the strongest bot, with you handicapped": OpenRA's handicap can only
   weaken a player, so there is no way to make the AI itself stronger than its rules.
 

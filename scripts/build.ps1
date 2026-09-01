@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Builds the OpenRA engine, the AutoC&C platform, and any doctrines in modules/.
+    Builds the OpenRA engine, the AutoC&C platform, and any battle bots in bots/.
 
 .PARAMETER Configuration
     Build configuration. Defaults to Release.
@@ -8,15 +8,16 @@
 .PARAMETER SkipEngine
     Skip the engine build. Use for fast iteration once the engine is already built.
 
-.PARAMETER SkipModules
-    Build only the platform, not the doctrines.
+.PARAMETER SkipBots
+    Build only the platform, not the battle bots. -SkipDoctrines still works.
 #>
 [CmdletBinding()]
 param(
     [ValidateSet('Debug', 'Release')]
     [string]$Configuration = 'Release',
     [switch]$SkipEngine,
-    [switch]$SkipDoctrines
+    [Alias('SkipDoctrines')]
+    [switch]$SkipBots
 )
 
 $ErrorActionPreference = 'Stop'
@@ -33,28 +34,47 @@ if (-not $SkipEngine) {
     if ($LASTEXITCODE -ne 0) { throw "Engine build failed with exit code $LASTEXITCODE" }
 }
 
-# The platform must build first: modules compile against its binaries, not its projects.
+# The platform must build first: bots compile against its binaries, not its projects.
 Write-Host "==> Building AutoC&C platform ($Configuration)" -ForegroundColor Cyan
 dotnet build (Join-Path $repoRoot 'AutoCnC.sln') -c $Configuration -v minimal --nologo
 if ($LASTEXITCODE -ne 0) { throw "Platform build failed with exit code $LASTEXITCODE" }
 
-# Doctrines consume AutoC&C as NuGet packages, so pack before building them.
+# Battle bots consume AutoC&C as NuGet packages, so pack before building them.
 Write-Host "==> Packing AutoC&C packages" -ForegroundColor Cyan
 dotnet pack (Join-Path $repoRoot 'AutoCnC.sln') -c $Configuration -v quiet --nologo
 if ($LASTEXITCODE -ne 0) { throw "Pack failed with exit code $LASTEXITCODE" }
 
-if (-not $SkipDoctrines) {
-    $doctrineSolutions = Get-ChildItem (Join-Path $repoRoot 'doctrines') -Recurse -Filter *.sln -ErrorAction SilentlyContinue
-    foreach ($solution in $doctrineSolutions) {
-        Write-Host "==> Building doctrine: $($solution.Directory.Name)" -ForegroundColor Cyan
+<#
+    Drops the locally packed AutoC&C packages out of NuGet's global cache.
+
+    A local pack keeps its version number, and NuGet keys its cache on id and version alone — so
+    the second time you build a bot it silently reuses the copy it extracted the first time, and
+    compiles against an SDK from whenever that was. The symptom is a bot that will not see a type
+    you just added, which reads as a mistake in the bot.
+#>
+function Remove-CachedPackages {
+    $cache = if ($env:NUGET_PACKAGES) { $env:NUGET_PACKAGES } else { Join-Path $HOME '.nuget/packages' }
+
+    foreach ($id in 'autocnc.core', 'autocnc.sdk') {
+        $extracted = Join-Path $cache $id
+        if (Test-Path $extracted) { Remove-Item $extracted -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+}
+
+Remove-CachedPackages
+
+if (-not $SkipBots) {
+    $botSolutions = Get-ChildItem (Join-Path $repoRoot 'bots') -Recurse -Filter *.sln -ErrorAction SilentlyContinue
+    foreach ($solution in $botSolutions) {
+        Write-Host "==> Building battle bot: $($solution.Directory.Name)" -ForegroundColor Cyan
         dotnet build $solution.FullName -c $Configuration -v minimal --nologo
-        if ($LASTEXITCODE -ne 0) { throw "Doctrine build failed: $($solution.FullName)" }
+        if ($LASTEXITCODE -ne 0) { throw "Battle bot build failed: $($solution.FullName)" }
     }
 
-    $doctrineDir = Join-Path $engineDir 'bin\doctrines'
-    if (Test-Path $doctrineDir) {
-        $installed = Get-ChildItem $doctrineDir -Filter *.dll | Select-Object -ExpandProperty BaseName
-        Write-Host "Installed doctrines: $($installed -join ', ')" -ForegroundColor Green
+    $botDir = Join-Path $engineDir 'bin\bots'
+    if (Test-Path $botDir) {
+        $installed = Get-ChildItem $botDir -Filter *.dll | Select-Object -ExpandProperty BaseName
+        Write-Host "Installed battle bots: $($installed -join ', ')" -ForegroundColor Green
     }
 }
 

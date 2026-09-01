@@ -65,15 +65,15 @@ jobs:
       - name: Build AutoC&C platform
         run: dotnet build AutoCnC.sln -c Release -v minimal --nologo
 
-      # Doctrines consume AutoC&C via NuGet, so this also proves the packaged SDK works.
+      # Battle bots consume AutoC&C via NuGet, so this also proves the packaged SDK works.
       - name: Pack AutoC&C packages
         run: dotnet pack AutoCnC.sln -c Release -v minimal --nologo
 
-      - name: Build reference doctrine
-        run: dotnet build doctrines/Reference/ReferenceDoctrine.sln -c Release -v minimal --nologo
+      - name: Build reference battle bot
+        run: dotnet build bots/Reference/ReferenceBot.sln -c Release -v minimal --nologo
 
-      - name: Test reference doctrine
-        run: dotnet test doctrines/Reference/ReferenceDoctrine.sln -c Release --nologo
+      - name: Test reference battle bot
+        run: dotnet test bots/Reference/ReferenceBot.sln -c Release --nologo
 
       - name: Lint mod YAML
         env:

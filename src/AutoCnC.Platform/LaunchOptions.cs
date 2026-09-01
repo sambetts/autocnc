@@ -30,6 +30,12 @@ namespace AutoCnC.Platform
 	/// <see cref="Server.BattleSetup"/> on the (in-process) server — hence a static that both can
 	/// reach rather than a value passed down a call chain.
 	/// </para>
+	/// <para>
+	/// <c>Launch.Doctrine</c> and <c>Launch.DoctrinePath</c> are still accepted for
+	/// <see cref="BattleBot"/> and <see cref="BattleBotPath"/>. A battle used to be played with a
+	/// doctrine rather than a bot, and a command line somebody has in their shell history should
+	/// not stop working over a rename.
+	/// </para>
 	/// </remarks>
 	public static class LaunchOptions
 	{
@@ -56,15 +62,15 @@ namespace AutoCnC.Platform
 			}
 		}
 
-		/// <summary>Name of the doctrine to load once the world is up. Optional.</summary>
-		public static string Doctrine => Value("Launch.Doctrine");
+		/// <summary>Name of the battle bot to load once the world is up. Optional.</summary>
+		public static string BattleBot => Value("Launch.BattleBot") ?? Value("Launch.Doctrine");
 
 		/// <summary>
-		/// A doctrine assembly, or a folder of them, to load in addition to the usual search
+		/// A battle bot assembly, or a folder of them, to load in addition to the usual search
 		/// paths. Lets the launcher play a build straight out of its own output folder instead of
 		/// copying it into the engine.
 		/// </summary>
-		public static string DoctrinePath => Value("Launch.DoctrinePath");
+		public static string BattleBotPath => Value("Launch.BattleBotPath") ?? Value("Launch.DoctrinePath");
 
 		/// <summary>Bot type for the test opponent, e.g. <c>hal9001</c>. Blank means no auto battle.</summary>
 		public static string Bot => Value("Launch.Bot");
@@ -94,6 +100,13 @@ namespace AutoCnC.Platform
 		/// The launcher names a file per run so it never graphs a previous match by mistake.
 		/// </summary>
 		public static string Telemetry => Value("Launch.Telemetry");
+
+		/// <summary>
+		/// Where to write the battle log — what your side saw, took and did. Blank leaves the
+		/// trait's own setting alone; the launcher names a file per run so the window it opens is
+		/// showing the battle it just started.
+		/// </summary>
+		public static string BattleLog => Value("Launch.BattleLog");
 
 		/// <summary>
 		/// The engine's own map argument. We only read it to recognise the battle this process

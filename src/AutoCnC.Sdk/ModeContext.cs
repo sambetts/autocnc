@@ -67,11 +67,34 @@ namespace AutoCnC.Sdk
 			set => state.Anchor = value;
 		}
 
-		/// <summary>The loaded module's base construction plan.</summary>
+		/// <summary>The loaded doctrine's base construction plan.</summary>
 		public IReadOnlyList<BuildStep> BuildPlan => host.BuildPlan;
 
-		/// <summary>The loaded module's unit production plan.</summary>
+		/// <summary>The loaded doctrine's unit production plan.</summary>
 		public IReadOnlyList<ProductionStep> ProductionPlan => host.ProductionPlan;
+
+		/// <summary>The doctrine this mode is part of.</summary>
+		public string Doctrine => host.ActiveDoctrine;
+
+		/// <summary>
+		/// The other doctrines the bot could be running instead, this one included.
+		/// </summary>
+		/// <remarks>
+		/// A doctrine is a plan among siblings rather than the whole of a strategy, and sometimes
+		/// the unit on the ground is the first to know the plan is finished — a scout that has
+		/// found the enemy base has answered the only question its doctrine existed to ask.
+		/// </remarks>
+		public IReadOnlyList<string> Doctrines => host.DoctrineNames;
+
+		/// <summary>
+		/// Ask the bot to change doctrine, and say why.
+		/// </summary>
+		/// <remarks>
+		/// A request, not a command: it is applied at the next assessment and still subject to the
+		/// bot's minimum dwell time, so calling this every tick is harmless. The reason reaches
+		/// the battle log, where it sits next to what happened afterwards.
+		/// </remarks>
+		public void SwitchDoctrine(string doctrine, string reason) => host.RequestDoctrine(doctrine, reason);
 
 		public bool CanMove => move != null;
 		public bool HasWeapon => attackBases.Length > 0;
@@ -197,12 +220,24 @@ namespace AutoCnC.Sdk
 				CanHitUs: CanHitUs(actor));
 		}
 
-		bool IsHostileAndVisible(Actor actor)
+		bool IsHostileAndVisible(Actor actor) => actor != self && IsVisibleEnemy(self.Owner, actor);
+
+		/// <summary>
+		/// True if <paramref name="actor"/> is an enemy of <paramref name="viewer"/> that the
+		/// viewer can see right now.
+		/// </summary>
+		/// <remarks>
+		/// The single definition of "an enemy your code knows about". Fog and cloaking are
+		/// respected here, so a mode cannot cheat by seeing through the shroud — and the battle
+		/// log records a sighting at exactly the moment a mode could first have reacted to it,
+		/// rather than at some slightly different moment its own copy of this rule decided on.
+		/// </remarks>
+		public static bool IsVisibleEnemy(Player viewer, Actor actor)
 		{
-			if (actor == null || actor == self || actor.IsDead || !actor.IsInWorld)
+			if (viewer == null || actor == null || actor.IsDead || !actor.IsInWorld)
 				return false;
 
-			if (self.Owner.RelationshipWith(actor.Owner) != PlayerRelationship.Enemy)
+			if (viewer.RelationshipWith(actor.Owner) != PlayerRelationship.Enemy)
 				return false;
 
 			if (actor.Info.HasTraitInfo<HuskInfo>())
@@ -211,8 +246,7 @@ namespace AutoCnC.Sdk
 			if (actor.GetEnabledTargetTypes().IsEmpty)
 				return false;
 
-			// Respect fog and cloaking, so a mode cannot cheat by seeing through the shroud.
-			return actor.CanBeViewedByPlayer(self.Owner);
+			return actor.CanBeViewedByPlayer(viewer);
 		}
 
 		/// <summary>True if any of this unit's enabled armaments can engage the target.</summary>
@@ -236,7 +270,8 @@ namespace AutoCnC.Sdk
 			return false;
 		}
 
-		static ThreatKind Classify(Actor actor)
+		/// <summary>What kind of thing an actor is, as a mode sees it.</summary>
+		public static ThreatKind Classify(Actor actor)
 		{
 			var info = actor.Info;
 

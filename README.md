@@ -37,7 +37,7 @@ public sealed class RunHomeMode : UnitMode
 ## Table of contents
 
 - [Why this exists](#why-this-exists)
-- [Doctrines](#doctrines)
+- [Battle bots](#battle-bots)
 - [Assigning modes](#assigning-modes)
 - [Architectural philosophy](#architectural-philosophy)
 - [How it integrates with OpenRA](#how-it-integrates-with-openra)
@@ -59,30 +59,73 @@ games in ways you can profile, unit-test and fix.
 
 ---
 
-## Doctrines
+## Battle bots
 
 The platform contains **no strategy**. Everything about how an army fights lives in a **battle
-module** you author: the base build plan, the unit production plan, the modes, and which units
-run them. Load one and it plays; load none and nothing deploys, builds or shoots.
+bot** you author. Load one and it plays; load none and nothing deploys, builds or shoots.
+
+A bot owns several **doctrines** — complete, self-contained ways of fighting, each with its own
+build plan, production plan and mode assignments — and decides which one the match needs:
 
 ```csharp
-public sealed class MyDoctrine : IDoctrine
+public sealed class MyBot : BattleBot
 {
-    public string Name => "Rush";
-    public string Description => "Fast barracks, early pressure.";
+    public override string Name => "Adaptive";
+    public override string Description => "Opens economic, turtles when hit, pushes when ahead.";
+
+    public override void Configure(IBattleBotBuilder b)
+    {
+        b.Open<OpeningDoctrine>();     // the doctrine the match starts on
+        b.Use<DefenceDoctrine>();
+        b.Use<AttackDoctrine>();
+    }
+
+    public override DoctrineDecision Reassess(in BattleState s)
+    {
+        if (s.BuildingsLost > 0)
+            return DoctrineDecision.SwitchTo("Defence", "losing buildings");
+
+        if (s.ArmyValue > 6000 && s.EnemyBaseFound)
+            return DoctrineDecision.SwitchTo("Attack", "army is worth spending");
+
+        return DoctrineDecision.Continue;
+    }
+}
+```
+
+**Why the split.** Plans do not survive contact. You can grow one doctrine a special case at a
+time until nobody can say what it does, or you can keep an attack doctrine confident, keep a
+defence doctrine paranoid, and let the bot change its mind. Each doctrine is then a plan you can
+read in one sitting.
+
+`BattleState` is only what your side can tell. Your own economy and army are exact; **the enemy
+half is only what you can currently see**, filtered by the same visibility rule
+`ctx.SenseThreats` uses. A bot cannot attack on the strength of an army value no unit of yours
+has laid eyes on.
+
+Doctrines know their siblings, so a unit that has learned something can end its own doctrine:
+
+```csharp
+ctx.SwitchDoctrine("Opening", "scout found their base");
+```
+
+A doctrine itself declares plans and behaviour:
+
+```csharp
+public sealed class AttackDoctrine : IDoctrine
+{
+    public string Name => "Attack";
+    public string Description => "Push: tech, more production, everything goes to their base.";
 
     public void Configure(IDoctrineBuilder b)
     {
         b.Build("powr", "nuke").Until(2);        // base plan
-        b.Build("proc").Until(2);
-        b.Build("pyle", "hand").Until(1);
+        b.Build("weap", "afld").Until(2);
 
-        b.Train("Infantry", "e1").Until(10);     // production plan
-        b.Train("Infantry", "e1", "e2").Forever();
+        b.Train("Vehicle", "mtnk", "ltnk").Forever();   // production plan
 
-        b.Assign<MyDefensiveMode>().ToAll();     // behaviour
+        b.Assign<AttackBaseMode>().ToAll();      // behaviour
         b.Assign<BuildBaseMode>().ToUnitType("mcv", "fact");
-        b.Assign<MyRushMode>().ToGroup(1);
     }
 }
 ```
@@ -91,26 +134,27 @@ Candidates are alternatives for one role — `powr` or `nuke` both mean "a power
 plan works as either faction without checking.
 
 ```powershell
-cp -r doctrines/Reference doctrines/MyRush   # start from the reference doctrine
-./scripts/launcher.ps1                       # point it at MyRush and press Launch battle
+cp -r bots/Reference bots/MyBot   # start from the reference bot
+./scripts/launcher.ps1            # point it at MyBot and press Launch battle
 ```
 
-Doctrines build against AutoC&C **binaries**, not projects, so one can live in **its own
-repository** — point the launcher at its `.csproj` (or at a `.dll` somebody sent you) wherever
-it happens to be.
+Bots build against AutoC&C **binaries**, not projects, so one can live in **its own repository**
+— point the launcher at its `.csproj` (or at a `.dll` somebody sent you) wherever it happens to
+be. An assembly with doctrines but no bot is played as one bot per doctrine, so a lone doctrine
+is still a thing you can put in a battle.
 
-**AutoC&C ships one doctrine, `Reference`** — a balanced opening that defends its base and pushes
-with control group 1. It is both the worked example and the first opponent to beat.
+**AutoC&C ships one bot, `Reference`** — it opens economic, scouts when it can afford to, turtles
+when hit and pushes when ahead. It is both the worked example and the first opponent to beat.
 
-See [`docs/writing-doctrines.md`](docs/writing-doctrines.md).
+See [`docs/writing-bots.md`](docs/writing-bots.md).
 
 ### Your code cannot desync a match
 
 Modes run **outside the lockstep simulation**, on your machine only, and their output is
 `Order`s — the same channel your mouse clicks use.
 
-That means `float`, LINQ, `System.Random` and `DateTime` are all fine in your module, your
-opponent never needs your code, and you never execute theirs. A module that throws is dropped
+That means `float`, LINQ, `System.Random` and `DateTime` are all fine in your bot, your
+opponent never needs your code, and you never execute theirs. A mode that throws is dropped
 for that unit with the error printed to chat; the match continues.
 
 The cost is ~120ms of order latency — the same latency human input already has.
@@ -213,24 +257,25 @@ autocnc/
 ├── engine/                          # ← git submodule: OpenRA (never edited)
 │
 ├── src/                             # THE PLATFORM — infrastructure, zero strategy
-│   ├── AutoCnC.Core/                #   engine-free: decisions, plans, planners
-│   ├── AutoCnC.Sdk/                 #   what modules code against: IDoctrine,
+│   ├── AutoCnC.Core/                #   engine-free: decisions, plans, planners, BattleState
+│   ├── AutoCnC.Sdk/                 #   what bots code against: IBattleBot, IDoctrine,
 │   │                                #   IUnitMode, ModeContext
-│   ├── AutoCnC.Platform/            #   the host: OpenRA traits, module loader, commands
+│   ├── AutoCnC.Platform/            #   the host: OpenRA traits, bot loader, commands
 │   └── AutoCnC.Core.Tests/
 │
-├── modules/                         # doctrines — all the strategy lives here
+├── bots/                            # battle bots — all the strategy lives here
 │   └── Reference/                   #   ★ own solution + NuGet refs; copy to start your own
-│       ├── ReferenceDoctrine.cs #     plans + assignments
+│       ├── ReferenceBot.cs          #     which doctrine, and when
+│       ├── Doctrines/               #     Opening, Scout, Defence, Attack
 │       ├── Modes/                   #     BuildBase, TrainUnits, Defensive, AttackBase…
 │       ├── Logic/                   #     pure decision functions
 │       └── Tests/                   #     fast, no game needed
 │
 ├── mods/autocnc/                    # mod manifest and rules
-├── docs/                            # getting-started / writing-doctrines / architecture
-├── packages/                        # local NuGet feed doctrines build against
+├── docs/                            # getting-started / writing-bots / architecture
+├── packages/                        # local NuGet feed bots build against
 ├── tools/AutoCnC.Launcher/          # the battle launcher — a window over scripts/
-├── scripts/                         # setup / build / launch / lint / launcher / run-doctrine
+├── scripts/                         # setup / build / launch / lint / launcher / run-bot
 └── AutoCnC.sln                      # the platform only
 ```
 ---
@@ -254,7 +299,7 @@ The short version:
 git clone --recursive https://github.com/sambetts/autocnc.git
 cd autocnc
 ./scripts/setup.ps1      # fetch the engine submodule
-./scripts/build.ps1      # build engine, mod and the reference doctrine
+./scripts/build.ps1      # build engine, mod and the reference bot
 ./scripts/launcher.ps1   # pick your code, pick an opponent, play
 ```
 
@@ -262,25 +307,37 @@ Cloned without `--recursive`? `git submodule update --init --depth 1`
 
 ### The launcher
 
-`./scripts/launcher.ps1` opens a window over the whole authoring loop: point it at your doctrine
+`./scripts/launcher.ps1` opens a window over the whole authoring loop: point it at your battle bot
 (a `.csproj` it builds, or a `.dll` it plays as-is), choose a map, an opponent and a game speed,
-and press **Launch battle**. The game boots straight into that fight with your doctrine already
-loaded — no menus, no lobby, no `/doctrine` to type. Its **Match** tab graphs every player's units,
-army value, buildings, base value and kills as the battle runs, so you can see the moment a
-doctrine lost rather than just the fact that it did.
+and press **Launch battle**. The game boots straight into that fight with your bot already
+loaded — no menus, no lobby, no `/bot` to type.
+
+Launching a battle changes the UI, the way an IDE changes when it starts debugging: the launcher
+window is only for setting a fight up, so when one starts two more windows open beside it and stay
+up afterwards for as long as you want to read them.
+
+- **Results** graphs every player's units, army value, buildings, base value and kills as the
+  battle runs, so you can see the moment a bot lost rather than just the fact that it did,
+  with the final numbers and the result underneath.
+- **Output** carries the **battle log**: who is playing, and then every event your side could
+  actually react to — an enemy coming into view, a hit taken, a unit lost, a kill — each one
+  naming the players on both ends of it. It is filtered by the same visibility rule
+  `ctx.SenseThreats` uses, so it is a record of what your code *knew*, not of what was true. The
+  graph tells you when it went wrong; the log tells you what your bot had to work with at the
+  time, which is the half you can do something about.
 
 It runs the scripts below and shows you their output, so it never does anything you could not
 have typed yourself. Windows only; elsewhere use the command it wraps, which takes the same
 options:
 
 ```powershell
-./scripts/run-doctrine.ps1 -Map tiberium-rift.oramap -Difficulty Hard -GameSpeed maximum -Test
+./scripts/run-bot.ps1 -Map tiberium-rift.oramap -Difficulty Hard -GameSpeed maximum -Test
 ```
 
 Difficulty is a bot personality plus a handicap, because C&C's bots are personalities rather
 than tiers. The levels live in [`scripts/difficulties.json`](scripts/difficulties.json), which
 the launcher and the script both read. Game speed runs from `slowest` to `maximum` — 0.5x to 40x,
-and worth reaching for, since a doctrine is code you are waiting on. The simulation is identical
+and worth reaching for, since a bot is code you are waiting on. The simulation is identical
 at every speed, so watching a match at 40x is watching the same match; only the clock changes.
 Past `fastest` the number is a target rather than a promise, so ask for more than you expect and
 let `/speed` tell you what you actually got. Every battle is recorded, so **Watch replay** takes
@@ -306,10 +363,13 @@ dotnet test src/AutoCnC.Core.Tests   # logic — ~20ms, no engine
 |---|---|
 | **0 — Foundation** | Interfaces, executor, reference modes ✅ |
 | **1 — Authoring** | Assignment scopes, templates, base building ✅ |
-| **2 — Modules** | Platform/module split, doctrine SDK, unit production ✅ |
-| **3 — Ecosystem** | Module vs module arena, replay regression tests, module sharing |
-Verified: platform and module build independently, 49 tests pass with no engine, `--check-yaml`
-reports 0 errors, and the reference module plays a full game — deploy, build, train, fight.
+| **2 — Doctrines** | Platform/strategy split, doctrine SDK, unit production ✅ |
+| **3 — Battle bots** | Several doctrines per bot, switching on what the side can see ✅ |
+| **4 — Ecosystem** | Bot vs bot arena, replay regression tests, bot sharing |
+
+Verified: platform and bot build independently, 66 tests pass with no engine, `--check-yaml`
+reports 0 errors, and the reference bot plays a full game — deploying, building, scouting,
+pushing, and turtling when its base is hit.
 
 Known gaps are listed at the end of [`docs/architecture.md`](docs/architecture.md).
 

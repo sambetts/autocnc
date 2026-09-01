@@ -41,16 +41,32 @@ namespace AutoCnC.Sdk
 	}
 
 	/// <summary>
-	/// The loaded doctrine's plans, as seen by a mode.
+	/// The loaded doctrine's plans, and the bot it belongs to, as seen by a mode.
 	/// </summary>
 	/// <remarks>
-	/// Plans come from the module rather than being baked into a mode, so a generic
-	/// <c>BuildBaseMode</c> can be reused across modules with different build orders.
+	/// Plans come from the doctrine rather than being baked into a mode, so a generic
+	/// <c>BuildBaseMode</c> can be reused across doctrines with different build orders.
 	/// </remarks>
 	public interface IModeHost
 	{
 		IReadOnlyList<BuildStep> BuildPlan { get; }
 
 		IReadOnlyList<ProductionStep> ProductionPlan { get; }
+
+		/// <summary>The doctrine running right now, or null if none is loaded.</summary>
+		string ActiveDoctrine { get; }
+
+		/// <summary>Every doctrine the loaded bot owns, in the order it declared them.</summary>
+		IReadOnlyList<string> DoctrineNames { get; }
+
+		/// <summary>
+		/// Ask for a different doctrine. Honoured at the next assessment, or refused.
+		/// </summary>
+		/// <remarks>
+		/// A request rather than a command: the platform still applies the bot's minimum dwell
+		/// time, so a mode cannot make the army thrash by asking every tick, and a name that is
+		/// not in the bot is ignored rather than fatal.
+		/// </remarks>
+		void RequestDoctrine(string doctrine, string reason);
 	}
 }

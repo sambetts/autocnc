@@ -25,6 +25,9 @@ namespace AutoCnC.Reference.Modes
 	{
 		const int FleeRadius = 6 * 1024;
 
+		/// <summary>How far out a structure counts as "found their base".</summary>
+		const int SightRadius = 10 * 1024;
+
 		// One mode instance per unit, so instance fields are safe per-unit memory.
 		// (A static field would be shared by every unit — don't do that.)
 		CPos currentTarget;
@@ -40,6 +43,14 @@ namespace AutoCnC.Reference.Modes
 
 		public override UnitDecision OnTick(Actor self, ModeContext ctx)
 		{
+			// The question this scout was sent to answer. Saying so here rather than leaving it to
+			// the bot is what lets a doctrine end itself: this works even for a bot with no rule
+			// about scouting at all, because the request carries whenever the bot has no opinion.
+			// A bot that does have one — like ReferenceBot — reaches the same conclusion, and its
+			// reason is the one that ends up in the battle log.
+			if (ctx.SenseStructures(new WDist(SightRadius)).Count > 0)
+				ctx.SwitchDoctrine(ReferenceDoctrines.Opening, "scout found their base");
+
 			// Scouts are fragile: break off from anything that can shoot us.
 			var threat = ctx.SenseThreats(new WDist(FleeRadius)).FirstOrDefault(t => t.CanHitUs);
 			if (threat.CanHitUs)

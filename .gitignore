@@ -1,6 +1,6 @@
 ## Build output
 packages/
-engine/bin/doctrines/
+engine/bin/bots/
 bin/
 obj/
 [Dd]ebug/

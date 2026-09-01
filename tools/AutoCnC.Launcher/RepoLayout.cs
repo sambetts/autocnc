@@ -30,12 +30,12 @@ namespace AutoCnC.Launcher
 		public string EngineDir => Path.Combine(Root, "engine");
 		public string EngineBinDir => Path.Combine(EngineDir, "bin");
 
-		public string RunDoctrineScript => Path.Combine(ScriptsDir, "run-doctrine.ps1");
+		public string RunBotScript => Path.Combine(ScriptsDir, "run-bot.ps1");
 		public string LaunchScript => Path.Combine(ScriptsDir, "launch.ps1");
 		public string BuildScript => Path.Combine(ScriptsDir, "build.ps1");
 		public string DifficultiesFile => Path.Combine(ScriptsDir, "difficulties.json");
 
-		public string ReferenceDoctrine => Path.Combine(Root, "doctrines", "Reference", "ReferenceDoctrine.csproj");
+		public string ReferenceBot => Path.Combine(Root, "bots", "Reference", "ReferenceBot.csproj");
 
 		/// <summary>The engine is a submodule, so a fresh clone may not have fetched it yet.</summary>
 		public bool EngineFetched => File.Exists(Path.Combine(EngineDir, "OpenRA.sln"));
@@ -46,7 +46,7 @@ namespace AutoCnC.Launcher
 		public static bool LooksLikeRoot(string directory) =>
 			!string.IsNullOrWhiteSpace(directory)
 			&& File.Exists(Path.Combine(directory, "AutoCnC.sln"))
-			&& File.Exists(Path.Combine(directory, "scripts", "run-doctrine.ps1"));
+			&& File.Exists(Path.Combine(directory, "scripts", "run-bot.ps1"));
 
 		public static RepoLayout For(string directory) =>
 			LooksLikeRoot(directory) ? new RepoLayout(Path.GetFullPath(directory)) : null;

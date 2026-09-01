@@ -48,13 +48,18 @@ namespace AutoCnC.Launcher
 		readonly ScriptRunner runner = new();
 		readonly Queue<ScriptJob> queue = new();
 		readonly MatchLog matchLog = new();
+		readonly BattleEventLog battleLog = new();
+
+		/// <summary>Script output produced before there was a window to put it in.</summary>
+		readonly List<string> pendingOutput = [];
 
 		RepoLayout repo;
 		bool stopRequested;
-		bool matchTabShown;
+		bool battleRunning;
+		bool battleFinished;
 
 		TextBox repositoryBox;
-		TextBox doctrineBox;
+		TextBox botBox;
 		CheckBox runTestsBox;
 		ComboBox mapBox;
 		ComboBox difficultyBox;
@@ -68,15 +73,14 @@ namespace AutoCnC.Launcher
 		Button platformButton;
 		Button stopButton;
 		Button replayButton;
-		TextBox outputBox;
-		TabControl resultsTabs;
-		TabPage matchTab;
-		MatchChart unitsChart;
-		MatchChart armyChart;
-		MatchChart buildingsChart;
-		MatchChart baseChart;
-		MatchChart killsChart;
-		MatchChart[] charts = [];
+		GroupBox botGroup;
+		GroupBox battleGroup;
+		Panel battleBanner;
+		Label battleBannerText;
+		TableLayoutPanel root;
+		StatusStrip status;
+		ResultsWindow resultsWindow;
+		OutputWindow outputWindow;
 		Timer matchTimer;
 		ToolStripStatusLabel statusLabel;
 
@@ -84,9 +88,7 @@ namespace AutoCnC.Launcher
 		{
 			Text = "AutoC&C — Battle Launcher";
 			Font = SystemFonts.MessageBoxFont;
-			MinimumSize = new Size(760, 680);
-			Size = new Size(900, 900);
-			StartPosition = FormStartPosition.CenterScreen;
+			StartPosition = FormStartPosition.Manual;
 
 			BuildLayout();
 
@@ -116,13 +118,24 @@ namespace AutoCnC.Launcher
 		// -------------------------------------------------------------------
 		// Layout
 		// -------------------------------------------------------------------
+
+		/// <summary>
+		/// This window is where a battle is set up, and nothing else.
+		/// </summary>
+		/// <remarks>
+		/// What a battle produced — the graphs and the log — lives in windows of its own that
+		/// appear when one starts, the way a debugger's windows appear when you run rather than
+		/// sitting empty in the editor all day. It keeps this window to the size of the question
+		/// it actually asks, and it means the results are still there, at whatever size you gave
+		/// them, while you set the next fight up.
+		/// </remarks>
 		void BuildLayout()
 		{
-			var root = new TableLayoutPanel
+			root = new TableLayoutPanel
 			{
 				Dock = DockStyle.Fill,
 				ColumnCount = 1,
-				RowCount = 5,
+				RowCount = 6,
 				Padding = new Padding(10)
 			};
 
@@ -130,38 +143,80 @@ namespace AutoCnC.Launcher
 			root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 			root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 			root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+			root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+			// The slack lives in a row of its own so that everything else keeps the height it asked
+			// for. A banner that appears and disappears must not be able to squeeze the row below
+			// it out of the window.
 			root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 			root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
-			root.Controls.Add(BuildDoctrineGroup(), 0, 0);
+			root.Controls.Add(BuildBotGroup(), 0, 0);
 			root.Controls.Add(BuildBattleGroup(), 0, 1);
 			root.Controls.Add(BuildActionRow(), 0, 2);
-			root.Controls.Add(BuildOutputGroup(), 0, 3);
+			root.Controls.Add(BuildBattleBanner(), 0, 3);
+			root.Controls.Add(BuildRepositoryRow(), 0, 5);
 
 			var status = new StatusStrip();
 			statusLabel = new ToolStripStatusLabel("Starting up…") { Spring = true, TextAlign = ContentAlignment.MiddleLeft };
 			status.Items.Add(statusLabel);
 
+			// Polled rather than watched: FileSystemWatcher does not raise for every appended line
+			// on every filesystem, and half a second is well under the eye's patience anyway.
+			matchTimer = new Timer { Interval = 500 };
+			matchTimer.Tick += (_, _) => PollBattle(finished: false);
+
 			Controls.Add(root);
 			Controls.Add(status);
+			this.status = status;
 		}
 
-		Control BuildDoctrineGroup()
+		/// <summary>
+		/// Sizes the window to what it is actually holding, and puts it out of the way of the
+		/// windows a battle will open to the right of it.
+		/// </summary>
+		/// <remarks>
+		/// Measured rather than declared. The tallest things in here are paragraphs of hint text
+		/// and a list of game speeds, both of which are as tall as the system font makes them — so
+		/// a size that fits at 100% clips at 150%, and what it clips is the bottom row.
+		/// </remarks>
+		void FitToContent()
+		{
+			var chrome = Size - ClientSize;
+			var content = root.PreferredSize;
+
+			// Room for the battle banner, which only appears once something has been launched. It
+			// is not part of the measurement because a hidden control has no preferred size, and
+			// it must not push the row below it out of the window when it arrives.
+			var banner = 3 * Font.Height + 24;
+
+			MinimumSize = new Size(
+				content.Width + chrome.Width,
+				content.Height + status.Height + chrome.Height + banner);
+
+			Size = MinimumSize;
+
+			// Left of centre, because a battle claims the space to the right of this window.
+			var area = Screen.FromControl(this).WorkingArea;
+			Location = new Point(area.Left + 24, area.Top + Math.Max(0, (area.Height - Height) / 2));
+		}
+
+		Control BuildBotGroup()
 		{
 			var grid = Grid(3);
 
-			doctrineBox = new TextBox { Dock = DockStyle.Fill };
-			doctrineBox.TextChanged += (_, _) => UpdateEnabledState();
+			botBox = new TextBox { Dock = DockStyle.Fill };
+			botBox.TextChanged += (_, _) => UpdateEnabledState();
 
-			grid.Controls.Add(Caption("Doctrine:"), 0, 0);
-			grid.Controls.Add(doctrineBox, 1, 0);
-			grid.Controls.Add(SmallButton("Browse…", BrowseDoctrine), 2, 0);
+			grid.Controls.Add(Caption("Battle bot:"), 0, 0);
+			grid.Controls.Add(botBox, 1, 0);
+			grid.Controls.Add(SmallButton("Browse…", BrowseBot), 2, 0);
 
 			var hint = new Label
 			{
 				AutoSize = true,
 				ForeColor = SystemColors.GrayText,
-				Text = "A doctrine project (.csproj) is built before it plays. A prebuilt .dll is played as it is."
+				Text = "A bot project (.csproj) is built before it plays. A prebuilt .dll is played as it is."
 			};
 
 			var options = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, Margin = new Padding(0) };
@@ -169,7 +224,7 @@ namespace AutoCnC.Launcher
 
 			var useReference = new LinkLabel
 			{
-				Text = "Use the reference doctrine",
+				Text = "Use the reference bot",
 				AutoSize = true,
 				Margin = new Padding(16, 4, 0, 0)
 			};
@@ -177,7 +232,7 @@ namespace AutoCnC.Launcher
 			useReference.LinkClicked += (_, _) =>
 			{
 				if (repo != null)
-					doctrineBox.Text = repo.ReferenceDoctrine;
+					botBox.Text = repo.ReferenceBot;
 			};
 
 			options.Controls.Add(runTestsBox);
@@ -190,7 +245,8 @@ namespace AutoCnC.Launcher
 			grid.Controls.Add(hint, 1, 2);
 			grid.SetColumnSpan(hint, 2);
 
-			return Group("Your battle code", grid);
+			botGroup = Group("Your battle code", grid);
+			return botGroup;
 		}
 
 		Control BuildBattleGroup()
@@ -247,7 +303,8 @@ namespace AutoCnC.Launcher
 			grid.Controls.Add(Caption("Speed:"), 0, 5);
 			grid.Controls.Add(speedBox, 1, 5);
 
-			return Group("The battle", grid);
+			battleGroup = Group("The battle", grid);
+			return battleGroup;
 		}
 
 		Control BuildActionRow()
@@ -287,112 +344,125 @@ namespace AutoCnC.Launcher
 			return row;
 		}
 
-		Control BuildOutputGroup()
+		/// <summary>
+		/// What this window has to say while a battle is somewhere else.
+		/// </summary>
+		/// <remarks>
+		/// It is not decoration. Two windows appearing on a second monitor is easy to miss, and a
+		/// launcher that looks idle while a game is running is a launcher somebody launches twice.
+		/// </remarks>
+		Control BuildBattleBanner()
 		{
-			outputBox = new TextBox
+			battleBannerText = new Label
 			{
-				Dock = DockStyle.Fill,
-				Multiline = true,
-				ReadOnly = true,
-				ScrollBars = ScrollBars.Vertical,
-				WordWrap = false,
-				BackColor = Color.FromArgb(30, 30, 30),
-				ForeColor = Color.Gainsboro,
-				Font = new Font(FontFamily.GenericMonospace, 8.5f)
+				AutoSize = true,
+				MaximumSize = new Size(560, 0),
+				Margin = new Padding(3, 4, 3, 6)
 			};
 
-			resultsTabs = new TabControl { Dock = DockStyle.Fill };
+			var results = new LinkLabel { Text = "Results", AutoSize = true, Margin = new Padding(3, 0, 14, 3) };
+			results.LinkClicked += (_, _) => ShowResultsWindow();
 
-			var outputTab = new TabPage("Output") { Padding = new Padding(2) };
-			outputTab.Controls.Add(outputBox);
+			var output = new LinkLabel { Text = "Output", AutoSize = true, Margin = new Padding(3, 0, 3, 3) };
+			output.LinkClicked += (_, _) => ShowOutputWindow();
 
-			matchTab = new TabPage("Match") { Padding = new Padding(2), BackColor = Color.FromArgb(30, 30, 30) };
-			matchTab.Controls.Add(BuildMatchCharts());
+			var links = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0) };
+			links.Controls.Add(results);
+			links.Controls.Add(output);
 
-			resultsTabs.TabPages.Add(outputTab);
-			resultsTabs.TabPages.Add(matchTab);
+			var stack = new FlowLayoutPanel
+			{
+				FlowDirection = FlowDirection.TopDown,
+				AutoSize = true,
+				AutoSizeMode = AutoSizeMode.GrowAndShrink,
+				Dock = DockStyle.Fill,
+				Margin = new Padding(0)
+			};
 
-			var group = Group("Results", resultsTabs);
-			group.Dock = DockStyle.Fill;
+			stack.Controls.Add(battleBannerText);
+			stack.Controls.Add(links);
 
-			var repositoryRow = Grid(3);
-			repositoryBox = new TextBox { Dock = DockStyle.Fill };
-			repositoryRow.Controls.Add(Caption("Repository:"), 0, 0);
-			repositoryRow.Controls.Add(repositoryBox, 1, 0);
-			repositoryRow.Controls.Add(SmallButton("Browse…", BrowseRepository), 2, 0);
+			// A coloured edge rather than a tinted panel: on the default Windows theme a panel a
+			// few shades off the form background is indistinguishable from it, which for the one
+			// control that says "a game is running" is the wrong way to be subtle.
+			var accent = new Panel { Dock = DockStyle.Left, Width = 4, BackColor = Color.FromArgb(0, 120, 212) };
 
-			var stack = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2 };
-			stack.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-			stack.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-			stack.Controls.Add(group, 0, 0);
-			stack.Controls.Add(repositoryRow, 0, 1);
+			battleBanner = new Panel
+			{
+				Dock = DockStyle.Fill,
+				AutoSize = true,
+				AutoSizeMode = AutoSizeMode.GrowAndShrink,
+				Padding = new Padding(12, 8, 10, 8),
+				Margin = new Padding(0, 4, 0, 4),
+				Visible = false,
+				BackColor = Color.FromArgb(232, 240, 250)
+			};
 
-			return stack;
+			battleBanner.Controls.Add(stack);
+			battleBanner.Controls.Add(accent);
+			return battleBanner;
 		}
 
-		/// <summary>
-		/// The questions a doctrine has to answer, laid out so you can see them at once: is it
-		/// building an army, is that army worth anything, is the base growing behind it, and is any
-		/// of it killing the other side. The crossings between the graphs are the interesting part,
-		/// so they share a time axis rather than hiding behind tabs.
-		/// </summary>
-		Control BuildMatchCharts()
+		Control BuildRepositoryRow()
 		{
-			unitsChart = new MatchChart("Units", s => s.Units) { Dock = DockStyle.Fill, Log = matchLog };
-			armyChart = new MatchChart("Army value", s => s.Army) { Dock = DockStyle.Fill, Log = matchLog };
-			buildingsChart = new MatchChart("Buildings", s => s.Buildings) { Dock = DockStyle.Fill, Log = matchLog };
-			baseChart = new MatchChart("Base value", s => s.BaseValue) { Dock = DockStyle.Fill, Log = matchLog };
-			killsChart = new MatchChart("Kills", s => s.Killed) { Dock = DockStyle.Fill, Log = matchLog };
-
-			charts = [unitsChart, armyChart, buildingsChart, baseChart, killsChart];
-
-			var stack = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 3 };
-			stack.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-			stack.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-			for (var i = 0; i < 3; i++)
-				stack.RowStyles.Add(new RowStyle(SizeType.Percent, 100f / 3));
-
-			stack.Controls.Add(unitsChart, 0, 0);
-			stack.Controls.Add(armyChart, 1, 0);
-			stack.Controls.Add(buildingsChart, 0, 1);
-			stack.Controls.Add(baseChart, 1, 1);
-
-			// Kills is the one that reads as a score line, so it gets the full width underneath.
-			stack.Controls.Add(killsChart, 0, 2);
-			stack.SetColumnSpan(killsChart, 2);
-
-			// Polled rather than watched: FileSystemWatcher does not raise for every appended line
-			// on every filesystem, and half a second is well under the eye's patience anyway.
-			matchTimer = new Timer { Interval = 500 };
-			matchTimer.Tick += (_, _) => RefreshMatch();
-
-			return stack;
+			var row = Grid(3);
+			repositoryBox = new TextBox { Dock = DockStyle.Fill };
+			row.Controls.Add(Caption("Repository:"), 0, 0);
+			row.Controls.Add(repositoryBox, 1, 0);
+			row.Controls.Add(SmallButton("Browse…", BrowseRepository), 2, 0);
+			return row;
 		}
 
 		/// <summary>Where the launcher asks the game to record the match it is about to start.</summary>
-		static string TelemetryPath => Path.Combine(
-			Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-			"OpenRA", "Logs", "autocnc-launcher.csv");
+		static string TelemetryPath => LogPath("autocnc-launcher.csv");
 
-		void RedrawCharts()
+		/// <summary>Where the launcher asks the game to record what your side saw and did.</summary>
+		static string BattleLogPath => LogPath("autocnc-launcher-battle.csv");
+
+		static string LogPath(string file) => Path.Combine(
+			Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "OpenRA", "Logs", file);
+
+		// -------------------------------------------------------------------
+		// The battle windows
+		// -------------------------------------------------------------------
+
+		/// <summary>
+		/// Brings up the graphs, creating them if this is the first battle or you closed them.
+		/// </summary>
+		/// <remarks>
+		/// Recreated rather than hidden, because a window you closed is one you decided you were
+		/// finished with — reopening it full of the last match would be answering a question
+		/// nobody asked.
+		/// </remarks>
+		ResultsWindow ShowResultsWindow()
 		{
-			foreach (var chart in charts)
-				chart.Invalidate();
+			if (resultsWindow == null || resultsWindow.IsDisposed)
+			{
+				resultsWindow = new ResultsWindow(matchLog);
+				resultsWindow.FormClosed += (_, _) => resultsWindow = null;
+			}
+
+			resultsWindow.Show(this, 0f, 0.55f);
+			resultsWindow.Redraw(battleFinished);
+			return resultsWindow;
 		}
 
-		void RefreshMatch()
+		OutputWindow ShowOutputWindow()
 		{
-			if (!matchLog.Refresh())
-				return;
-
-			RedrawCharts();
-
-			// Bring the graph forward once, when the first rows say the battle is actually running.
-			if (!matchTabShown && !matchLog.IsEmpty)
+			if (outputWindow == null || outputWindow.IsDisposed)
 			{
-				matchTabShown = true;
-				resultsTabs.SelectedTab = matchTab;
+				outputWindow = new OutputWindow(battleLog);
+				outputWindow.FormClosed += (_, _) => outputWindow = null;
+
+				foreach (var line in pendingOutput)
+					outputWindow.AppendBuildOutput(line);
+
+				pendingOutput.Clear();
 			}
+
+			outputWindow.Show(this, 0.55f, 0.45f);
+			outputWindow.ShowBattle(battleFinished);
+			return outputWindow;
 		}
 
 		static TableLayoutPanel Grid(int columns)
@@ -446,7 +516,7 @@ namespace AutoCnC.Launcher
 			repositoryBox.Text = repo?.Root ?? string.Empty;
 			repositoryBox.TextChanged += (_, _) => RepositoryChanged();
 
-			doctrineBox.Text = settings.DoctrinePath ?? repo?.ReferenceDoctrine ?? string.Empty;
+			botBox.Text = settings.BattleBotPath ?? repo?.ReferenceBot ?? string.Empty;
 			runTestsBox.Checked = settings.RunTests;
 			opponentsBox.Value = Math.Clamp(settings.Opponents, opponentsBox.Minimum, opponentsBox.Maximum);
 			Select(factionBox, settings.Faction);
@@ -456,6 +526,7 @@ namespace AutoCnC.Launcher
 			LoadSpeeds();
 			LoadMaps();
 			UpdateEnabledState();
+			FitToContent();
 		}
 
 		void LoadSpeeds()
@@ -586,10 +657,10 @@ namespace AutoCnC.Launcher
 				return;
 
 			var busy = runner.IsRunning;
-			var ready = !busy && repo != null && DoctrineExists() && mapBox.SelectedItem is MapInfo;
+			var ready = !busy && repo != null && BotExists() && mapBox.SelectedItem is MapInfo;
 
 			launchButton.Enabled = ready;
-			buildButton.Enabled = !busy && repo != null && DoctrineExists();
+			buildButton.Enabled = !busy && repo != null && BotExists();
 			platformButton.Enabled = !busy && repo != null;
 			stopButton.Enabled = busy;
 
@@ -599,6 +670,13 @@ namespace AutoCnC.Launcher
 			// Tests come from a project's Tests folder, so a prebuilt assembly has none to run.
 			runTestsBox.Enabled = !busy && !IsPrebuilt();
 
+			// Setting up the next battle while one is running would be editing a form whose Launch
+			// button is already unavailable — the greying out is what says so.
+			botGroup.Enabled = !battleRunning;
+			battleGroup.Enabled = !battleRunning;
+
+			UpdateBattleBanner();
+
 			if (busy)
 				return;
 
@@ -606,34 +684,47 @@ namespace AutoCnC.Launcher
 				Status("Point me at your AutoC&C checkout to get started.");
 			else if (!repo.EngineFetched)
 				Status("The engine submodule is missing. Run ./scripts/setup.ps1 in the repository first.");
-			else if (!DoctrineExists())
-				Status("Choose the doctrine project or assembly you want to play.");
+			else if (!BotExists())
+				Status("Choose the battle bot project or assembly you want to play.");
 			else
 				Status(repo.EngineBuilt ? "Ready." : "Ready — the engine is not built yet, so the first launch will take a few minutes.");
 		}
 
-		bool DoctrineExists()
+		void UpdateBattleBanner()
 		{
-			var path = doctrineBox.Text.Trim();
+			battleBanner.Visible = battleRunning || battleFinished;
+			if (!battleBanner.Visible)
+				return;
+
+			Text = battleRunning ? "AutoC&C — Battle Launcher (battle running)" : "AutoC&C — Battle Launcher";
+
+			battleBannerText.Text = battleRunning
+				? "Battle in progress. The results and output windows are following it; this one waits until it is over."
+				: "The last battle is finished. Its results and output are still open — close them when you are done reading.";
+		}
+
+		bool BotExists()
+		{
+			var path = botBox.Text.Trim();
 			return path.Length > 0 && (File.Exists(path) || Directory.Exists(path));
 		}
 
 		bool IsPrebuilt() =>
-			doctrineBox.Text.Trim().EndsWith(".dll", StringComparison.OrdinalIgnoreCase);
+			botBox.Text.Trim().EndsWith(".dll", StringComparison.OrdinalIgnoreCase);
 
 		// -------------------------------------------------------------------
 		// Browsing
 		// -------------------------------------------------------------------
-		void BrowseDoctrine(object sender, EventArgs e)
+		void BrowseBot(object sender, EventArgs e)
 		{
 			using var dialog = new OpenFileDialog
 			{
-				Title = "Select your doctrine",
-				Filter = "Doctrine project or assembly (*.csproj;*.dll)|*.csproj;*.dll|Doctrine project (*.csproj)|*.csproj|Built doctrine (*.dll)|*.dll|All files (*.*)|*.*",
+				Title = "Select your battle bot",
+				Filter = "Battle bot project or assembly (*.csproj;*.dll)|*.csproj;*.dll|Project (*.csproj)|*.csproj|Built bot (*.dll)|*.dll|All files (*.*)|*.*",
 				CheckFileExists = true
 			};
 
-			var current = doctrineBox.Text.Trim();
+			var current = botBox.Text.Trim();
 			if (current.Length > 0)
 			{
 				var directory = File.Exists(current) ? Path.GetDirectoryName(current) : current;
@@ -642,7 +733,7 @@ namespace AutoCnC.Launcher
 			}
 
 			if (dialog.ShowDialog(this) == DialogResult.OK)
-				doctrineBox.Text = dialog.FileName;
+				botBox.Text = dialog.FileName;
 		}
 
 		void BrowseRepository(object sender, EventArgs e)
@@ -658,7 +749,7 @@ namespace AutoCnC.Launcher
 			if (!RepoLayout.LooksLikeRoot(dialog.SelectedPath))
 			{
 				MessageBox.Show(this,
-					"That folder does not look like an AutoC&C checkout — it has no AutoCnC.sln and no scripts/run-doctrine.ps1.",
+					"That folder does not look like an AutoC&C checkout — it has no AutoCnC.sln and no scripts/run-bot.ps1.",
 					"AutoC&C", MessageBoxButtons.OK, MessageBoxIcon.Warning);
 				return;
 			}
@@ -716,7 +807,7 @@ namespace AutoCnC.Launcher
 				return;
 
 			Save();
-			outputBox.Clear();
+			ClearOutput();
 			queue.Clear();
 
 			queue.Enqueue(new ScriptJob
@@ -746,7 +837,7 @@ namespace AutoCnC.Launcher
 		// -------------------------------------------------------------------
 		void Launch(bool play)
 		{
-			if (repo == null || !DoctrineExists())
+			if (repo == null || !BotExists())
 				return;
 
 			if (!repo.EngineFetched)
@@ -758,11 +849,11 @@ namespace AutoCnC.Launcher
 			}
 
 			Save();
-			outputBox.Clear();
+			ClearOutput();
 			queue.Clear();
 
 			if (play)
-				StartWatchingMatch();
+				StartWatchingBattle();
 
 			// The engine is a several-minute build, so only do it when it genuinely is not there.
 			if (!repo.EngineBuilt)
@@ -770,27 +861,27 @@ namespace AutoCnC.Launcher
 				{
 					Title = "Building the engine — this one takes a few minutes",
 					ScriptPath = repo.BuildScript,
-					Arguments = ["-SkipDoctrines"]
+					Arguments = ["-SkipBots"]
 				});
 
 			queue.Enqueue(new ScriptJob
 			{
-				Title = play ? "Building your doctrine and starting the battle" : "Building your doctrine",
-				ScriptPath = repo.RunDoctrineScript,
-				Arguments = RunDoctrineArguments(play)
+				Title = play ? "Building your bot and starting the battle" : "Building your bot",
+				ScriptPath = repo.RunBotScript,
+				Arguments = RunBotArguments(play)
 			});
 
 			RunNext();
 		}
 
-		IReadOnlyList<string> RunDoctrineArguments(bool play)
+		IReadOnlyList<string> RunBotArguments(bool play)
 		{
 			var map = (MapInfo)mapBox.SelectedItem;
 			var difficulty = difficultyBox.SelectedItem as DifficultyLevel;
 
 			var arguments = new List<string>
 			{
-				"-Doctrine", doctrineBox.Text.Trim(),
+				"-BattleBot", botBox.Text.Trim(),
 				"-Opponents", ((int)opponentsBox.Value).ToString(),
 				"-Faction", ((FactionChoice)factionBox.SelectedItem).Value,
 				"-BotFaction", ((FactionChoice)botFactionBox.SelectedItem).Value
@@ -806,7 +897,7 @@ namespace AutoCnC.Launcher
 				arguments.AddRange(["-GameSpeed", speed.Id]);
 
 			if (play)
-				arguments.AddRange(["-Telemetry", TelemetryPath]);
+				arguments.AddRange(["-Telemetry", TelemetryPath, "-BattleLog", BattleLogPath]);
 
 			if (runTestsBox.Checked && !IsPrebuilt())
 				arguments.Add("-Test");
@@ -818,40 +909,62 @@ namespace AutoCnC.Launcher
 		}
 
 		/// <summary>
-		/// Clears the previous match out of the way and starts polling for the new one.
+		/// Clears the previous battle out of the way, opens the windows for the new one and starts
+		/// polling.
 		/// </summary>
 		/// <remarks>
-		/// The old file is deleted rather than left to be overwritten so that a battle that never
-		/// gets as far as starting — a doctrine that fails to build, say — shows an empty graph
-		/// instead of the last match's, which would be a quietly misleading thing to look at.
+		/// The old files are deleted rather than left to be overwritten so that a battle which
+		/// never gets as far as starting — a bot that fails to build, say — shows an empty
+		/// graph and an empty log instead of the last one's, which would be a quietly misleading
+		/// thing to look at.
 		/// </remarks>
-		void StartWatchingMatch()
+		void StartWatchingBattle()
 		{
-			matchTabShown = false;
+			battleRunning = true;
+			battleFinished = false;
 
-			try
+			foreach (var path in new[] { TelemetryPath, BattleLogPath })
 			{
-				if (File.Exists(TelemetryPath))
-					File.Delete(TelemetryPath);
-			}
-			catch (IOException)
-			{
-				// Still held by a match that is on its way out. The game truncates it anyway.
+				try
+				{
+					if (File.Exists(path))
+						File.Delete(path);
+				}
+				catch (IOException)
+				{
+					// Still held by a match that is on its way out. The game truncates it anyway.
+				}
 			}
 
 			matchLog.Watch(TelemetryPath);
-			RedrawCharts();
+			battleLog.Watch(BattleLogPath);
+
+			ShowResultsWindow();
+			ShowOutputWindow().ClearBattle();
+
 			matchTimer.Start();
 		}
 
-		/// <summary>Stops polling, after one last read so the end of the match is on the graph.</summary>
-		void StopWatchingMatch()
+		/// <summary>Stops polling, after one last read so the end of the battle is on both windows.</summary>
+		void StopWatchingBattle()
 		{
-			if (!matchTimer.Enabled)
+			if (!battleRunning)
 				return;
 
+			battleRunning = false;
+			battleFinished = true;
 			matchTimer.Stop();
-			RefreshMatch();
+			PollBattle(finished: true);
+		}
+
+		/// <summary>Reads whatever the running game has written since last time.</summary>
+		void PollBattle(bool finished)
+		{
+			if ((matchLog.Refresh() || finished) && resultsWindow != null)
+				resultsWindow.Redraw(finished);
+
+			if ((battleLog.Refresh() || finished) && outputWindow != null)
+				outputWindow.ShowBattle(finished);
 		}
 
 		void RebuildPlatform()
@@ -860,12 +973,12 @@ namespace AutoCnC.Launcher
 				return;
 
 			Save();
-			outputBox.Clear();
+			ClearOutput();
 			queue.Clear();
 
 			queue.Enqueue(new ScriptJob
 			{
-				Title = "Rebuilding the platform and doctrines",
+				Title = "Rebuilding the platform and bots",
 				ScriptPath = repo.BuildScript,
 				Arguments = ["-SkipEngine"]
 			});
@@ -877,8 +990,8 @@ namespace AutoCnC.Launcher
 		{
 			if (queue.Count == 0)
 			{
-				// The last job has finished, so the match — if there was one — is over.
-				StopWatchingMatch();
+				// The last job has finished, so the battle — if there was one — is over.
+				StopWatchingBattle();
 				Status("Done.");
 				UpdateEnabledState();
 				return;
@@ -908,7 +1021,7 @@ namespace AutoCnC.Launcher
 			{
 				// Killing the process tree gives us whatever exit code Windows felt like, so the
 				// only honest thing to report is that you asked for it to stop.
-				StopWatchingMatch();
+				StopWatchingBattle();
 				Append("=== Stopped ===");
 				Status("Stopped.");
 				stopRequested = false;
@@ -918,10 +1031,11 @@ namespace AutoCnC.Launcher
 
 			if (exitCode != 0)
 			{
-				StopWatchingMatch();
+				StopWatchingBattle();
 				Append($"=== Finished with exit code {exitCode} ===");
-				Status($"Stopped with exit code {exitCode}. See the output above.");
+				Status($"Stopped with exit code {exitCode}. See the output window.");
 				queue.Clear();
+				ShowOutputWindow();
 				UpdateEnabledState();
 				return;
 			}
@@ -941,9 +1055,29 @@ namespace AutoCnC.Launcher
 		// -------------------------------------------------------------------
 		// Output
 		// -------------------------------------------------------------------
+
+		/// <summary>
+		/// Starts a fresh transcript, in the output window if there is one.
+		/// </summary>
+		/// <remarks>
+		/// The window is opened for a build as well as for a battle, because a build that failed
+		/// has to say so somewhere — and putting its output anywhere else would mean two places to
+		/// look for the same kind of answer.
+		/// </remarks>
+		void ClearOutput()
+		{
+			pendingOutput.Clear();
+			ShowOutputWindow().ClearBuildOutput();
+		}
+
 		void Append(string line)
 		{
-			outputBox.AppendText(line + Environment.NewLine);
+			// Scripts can write before the window exists, and before it exists again after being
+			// closed; nothing said should be lost because of when it was said.
+			if (outputWindow != null)
+				outputWindow.AppendBuildOutput(line);
+			else
+				pendingOutput.Add(line);
 		}
 
 		void Status(string message)
@@ -954,7 +1088,7 @@ namespace AutoCnC.Launcher
 		void Save()
 		{
 			settings.RepositoryRoot = repo?.Root;
-			settings.DoctrinePath = doctrineBox.Text.Trim();
+			settings.BattleBotPath = botBox.Text.Trim();
 			settings.Map = (mapBox.SelectedItem as MapInfo)?.Id;
 			settings.Difficulty = (difficultyBox.SelectedItem as DifficultyLevel)?.Name;
 			settings.GameSpeed = (speedBox.SelectedItem as GameSpeedInfo)?.Id;

@@ -1,47 +1,60 @@
-# Reference doctrine
+# Reference battle bot
 
-The module AutoC&C ships as an opponent and as a worked example. **Beating this is the goal.**
+The bot AutoC&C ships as an opponent and as a worked example. **Beating this is the goal.**
 
-It declares everything about how its army fights, in
-[`ReferenceDoctrine.cs`](ReferenceDoctrine.cs):
+A **battle bot** owns several **doctrines** — complete ways of fighting — and decides which one
+the match needs. This one has four, and moves between them as the battle turns.
 
-| | |
-|---|---|
-| Base plan | Power, refinery, barracks, war factory, defence, tech |
-| Production | Early infantry and scouts, then tanks, then replacements forever |
-| Behaviour | Defend by default, build with the MCV, train from production buildings, harvesters flee |
-| Group 1 | Switches to attacking the enemy base |
-| Group 2 | Escorts harvesters |
+| Doctrine | For | Switches to it when |
+|---|---|---|
+| `Opening` | An economy, and enough army not to die | Where every match starts, and where the others fall back to |
+| `Scout` | Finding out where the enemy lives | Two refineries up and their base still unknown |
+| `Defence` | Static defence, cheap bodies, everything home | A building is lost, or three enemies reach the base |
+| `Attack` | Tech, more production, the whole army pushes | Army worth 6000 and their base is known |
+
+The rules are in [`Logic/ReferenceBotLogic.cs`](Logic/ReferenceBotLogic.cs) — a pure function of
+`BattleState`, so the interesting half of the bot is tested without a game running. The wiring is
+in [`ReferenceBot.cs`](ReferenceBot.cs).
+
+`ScoutMode` ends its own doctrine: the moment it sees an enemy structure it calls
+`ctx.SwitchDoctrine`, rather than waiting for the bot's next assessment to notice.
 
 ## Layout
 
 ```
 Reference/
-├── ReferenceDoctrine.cs   ← the entry point: plans and assignments
-├── Modes/                     ← behaviours
-│   ├── BuildBaseMode.cs       ← deploys the MCV, grows the base from ctx.BuildPlan
-│   ├── TrainUnitsMode.cs      ← trains units from ctx.ProductionPlan
-│   ├── DefensiveMode.cs       ← holds ground, won't be baited, retreats to repair
-│   ├── AttackBaseMode.cs      ← pushes a base, never chases
-│   ├── RunHomeMode.cs         ← flees to a refinery when threatened
-│   ├── HarvesterEscortMode.cs ← guards a harvester
-│   └── ScoutMode.cs           ← wanders, runs from anything armed
-├── Logic/                     ← pure decision functions, no engine
-└── Tests/                     ← fast tests, no game needed
+├── ReferenceBot.cs              ← the bot: which doctrines, and Reassess
+├── Doctrines/                   ← four ways of fighting, all sharing the modes below
+│   ├── ReferenceDoctrineBase.cs ←   the wiring every doctrine needs
+│   ├── OpeningDoctrine.cs
+│   ├── ScoutDoctrine.cs
+│   ├── DefenceDoctrine.cs
+│   └── AttackDoctrine.cs
+├── Plans.cs                     ← what each doctrine builds and trains, as plain data
+├── Modes/                       ← behaviours
+│   ├── BuildBaseMode.cs         ←   deploys the MCV, grows the base from ctx.BuildPlan
+│   ├── TrainUnitsMode.cs        ←   trains units from ctx.ProductionPlan
+│   ├── DefensiveMode.cs         ←   holds ground, won't be baited, retreats to repair
+│   ├── AttackBaseMode.cs        ←   pushes a base, never chases
+│   ├── RunHomeMode.cs           ←   flees to a refinery when threatened
+│   ├── HarvesterEscortMode.cs   ←   guards a harvester
+│   └── ScoutMode.cs             ←   wanders, runs from anything armed
+├── Logic/                       ← pure decision functions, no engine
+└── Tests/                       ← fast tests, no game needed
 ```
 
 ## Start your own
 
 ```powershell
-cp -r doctrines/Reference modules/MyModule
-cd modules/MyModule
-# rename the .csproj, .sln, and the IDoctrine class + its Name
+cp -r bots/Reference bots/MyBot
+cd bots/MyBot
+# rename the .csproj, .sln, and the IBattleBot class + its Name
 dotnet build
 ```
 
-Then in game: `/modules` to see it, `/module MyModule` to load it.
+Then in game: `/bots` to see it, `/bot MyBot` to load it, `/why` to ask what it is thinking.
 
-A module builds against AutoC&C **binaries**, so it can live in its own repository:
+A bot builds against AutoC&C **binaries**, so it can live in its own repository:
 
 ```powershell
 dotnet build /p:AutoCnCPath=C:\games\autocnc
@@ -53,10 +66,10 @@ dotnet build /p:AutoCnCPath=C:\games\autocnc
 dotnet test Tests
 ```
 
-The tests assert against the plan `ReferenceDoctrine` actually declares, so they verify the
-real strategy rather than a copy that can drift out of date.
+The tests assert against the plans the doctrines actually declare and the rules `Reassess`
+actually runs, so they verify the real strategy rather than a copy that can drift out of date.
 
 ## Licence
 
 GPL-3.0-or-later, like everything that links against OpenRA. See the repository `LICENSE` and
-`NOTICE.md`. Modules you write and distribute inherit the same terms.
+`NOTICE.md`. Bots you write and distribute inherit the same terms.

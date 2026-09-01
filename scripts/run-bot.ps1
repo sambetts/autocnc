@@ -1,21 +1,22 @@
 <#
 .SYNOPSIS
-    Compiles a doctrine and launches AutoC&C straight into a battle with it loaded.
+    Compiles a battle bot and launches AutoC&C straight into a battle with it loaded.
 
 .DESCRIPTION
-    The full authoring loop in one command: build the doctrine, install it where the platform
-    scans, and start a game running it against a test AI.
+    The full authoring loop in one command: build the bot, install it where the platform scans,
+    and start a game running it against a test AI.
 
-    Because doctrines consume AutoC&C as NuGet packages, the doctrine does not have to live in
-    this repository — pass a path to one anywhere on disk. You can also pass a prebuilt .dll,
-    which is played straight out of its own folder with nothing copied anywhere.
+    Because bots consume AutoC&C as NuGet packages, a bot does not have to live in this
+    repository — pass a path to one anywhere on disk. You can also pass a prebuilt .dll, which is
+    played straight out of its own folder with nothing copied anywhere.
 
     Pass -Map to skip the menus entirely: the game boots into that map, seats the requested AI
-    opponent and loads your doctrine before the first tick.
+    opponent and loads your bot before the first tick.
 
-.PARAMETER Doctrine
-    One of: a doctrine folder name under doctrines/, a path to a doctrine project or folder, or
-    a path to an already-built doctrine .dll. Defaults to the reference doctrine.
+.PARAMETER BattleBot
+    One of: a bot folder name under bots/, a path to a bot project or folder, or a path to an
+    already-built bot .dll. Defaults to the reference bot. -Doctrine still works: an assembly
+    with doctrines but no bot is played as one bot per doctrine.
 
 .PARAMETER Map
     Map to launch straight into, as a UID or a file name such as tiberium-rift.oramap.
@@ -46,7 +47,7 @@
 .PARAMETER GameSpeed
     How fast the match runs: slowest, slower, default, fast, faster, fastest, turbo (5x),
     ludicrous (10x), plaid (20x) or maximum (40x). These come from the GameSpeeds block in
-    mods/autocnc/mod.yaml. Handy for watching a doctrine's early game in slow motion, or for
+    mods/autocnc/mod.yaml. Handy for watching a bot's early game in slow motion, or for
     finding out how a whole match went while you make a cup of tea. The simulation is identical
     at every speed; only the wall-clock rate changes.
 
@@ -60,33 +61,40 @@
     autocnc-telemetry.csv in the OpenRA logs folder; the launcher passes a path of its own so it
     can graph the run it just started. Pass 'none' to record nothing.
 
+.PARAMETER BattleLog
+    Where the match writes the battle log: the players in the game, every event your side could
+    actually react to — enemies coming into view, hits taken, units lost and killed — and every
+    doctrine the bot switched to and why.
+    Defaults to autocnc-battle.csv in the OpenRA logs folder. Pass 'none' to record nothing.
+
 .PARAMETER Test
-    Run the doctrine's unit tests first and stop if they fail.
+    Run the bot's unit tests first and stop if they fail.
 
 .PARAMETER NoLaunch
     Build and install only; don't start the game.
 
 .EXAMPLE
-    ./scripts/run-doctrine.ps1
-    Build the reference doctrine and play it from the menu.
+    ./scripts/run-bot.ps1
+    Build the reference bot and play it from the menu.
 
 .EXAMPLE
-    ./scripts/run-doctrine.ps1 -Map tiberium-rift.oramap -Difficulty Hard
+    ./scripts/run-bot.ps1 -Map tiberium-rift.oramap -Difficulty Hard
     Drop straight into a fight against HAL 9001.
 
 .EXAMPLE
-    ./scripts/run-doctrine.ps1 -Map tiberium-rift.oramap -GameSpeed maximum
+    ./scripts/run-bot.ps1 -Map tiberium-rift.oramap -GameSpeed maximum
     Same fight as fast as the machine will go, for when you want the outcome rather than the
     spectacle. It is recorded either way, so ./scripts/launch.ps1 -Replay can show you the part
     that mattered afterwards.
 
 .EXAMPLE
-    ./scripts/run-doctrine.ps1 -Doctrine C:\code\my-doctrine\bin\Release\MyRush.dll -Map tiberium-rift.oramap
-    Play a doctrine somebody sent you, without building anything.
+    ./scripts/run-bot.ps1 -BattleBot C:\code\my-bot\bin\Release\MyBot.dll -Map tiberium-rift.oramap
+    Play a bot somebody sent you, without building anything.
 #>
 [CmdletBinding()]
 param(
-    [string]$Doctrine = 'Reference',
+    [Alias('Doctrine')]
+    [string]$BattleBot = 'Reference',
     [string]$Map,
     [string]$Difficulty,
     [int]$Opponents = 1,
@@ -98,6 +106,7 @@ param(
     [ValidateSet('slowest', 'slower', 'default', 'fast', 'faster', 'fastest', 'turbo', 'ludicrous', 'plaid', 'maximum')]
     [string]$GameSpeed,
     [string]$Telemetry,
+    [string]$BattleLog,
     [switch]$Test,
     [switch]$NoLaunch,
     [ValidateSet('Debug', 'Release')]
@@ -108,10 +117,10 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $engineDir = Join-Path $repoRoot 'engine'
 $binDir = Join-Path $engineDir 'bin'
-$doctrineDir = Join-Path $binDir 'doctrines'
+$botDir = Join-Path $binDir 'bots'
 
 # ---------------------------------------------------------------------------
-# 1. Locate the doctrine
+# 1. Locate the battle bot
 # ---------------------------------------------------------------------------
 
 <#
@@ -119,7 +128,7 @@ $doctrineDir = Join-Path $binDir 'doctrines'
       Project  — build it, then play whatever the build produced
       Assembly — a prebuilt .dll, or a folder of them, played where it already sits
 #>
-function Resolve-DoctrineSource([string]$nameOrPath) {
+function Resolve-BotSource([string]$nameOrPath) {
     function New-ProjectSource($project) {
         [pscustomobject]@{ Kind = 'Project'; Project = $project; Path = $project.FullName }
     }
@@ -135,29 +144,29 @@ function Resolve-DoctrineSource([string]$nameOrPath) {
             switch ($item.Extension) {
                 '.dll' { return New-AssemblySource $item }
                 '.csproj' { return New-ProjectSource $item }
-                default { throw "'$nameOrPath' is neither a doctrine project (.csproj) nor a built doctrine (.dll)." }
+                default { throw "'$nameOrPath' is neither a bot project (.csproj) nor a built bot (.dll)." }
             }
         }
 
-        # A doctrine folder also contains a Tests project; we want the doctrine itself.
+        # A bot folder also contains a Tests project; we want the bot itself.
         $project = Get-ChildItem $item.FullName -Filter *.csproj |
             Where-Object { $_.Name -notmatch '\.Tests\.csproj$' } | Select-Object -First 1
 
         if ($project) { return New-ProjectSource $project }
         if (Get-ChildItem $item.FullName -Filter *.dll) { return New-AssemblySource $item }
 
-        throw "'$nameOrPath' contains no doctrine project or assembly."
+        throw "'$nameOrPath' contains no bot project or assembly."
     }
 
-    $folder = Join-Path $repoRoot "doctrines\$nameOrPath"
-    if (Test-Path $folder) { return Resolve-DoctrineSource $folder }
+    $folder = Join-Path $repoRoot "bots\$nameOrPath"
+    if (Test-Path $folder) { return Resolve-BotSource $folder }
 
-    $available = (Get-ChildItem (Join-Path $repoRoot 'doctrines') -Directory -ErrorAction SilentlyContinue).Name
-    throw "Doctrine '$nameOrPath' not found. Available: $($available -join ', '). You can also pass a path to a project or a .dll."
+    $available = (Get-ChildItem (Join-Path $repoRoot 'bots') -Directory -ErrorAction SilentlyContinue).Name
+    throw "Battle bot '$nameOrPath' not found. Available: $($available -join ', '). You can also pass a path to a project or a .dll."
 }
 
-$source = Resolve-DoctrineSource $Doctrine
-Write-Host "==> Doctrine: $(Split-Path -Leaf $source.Path)" -ForegroundColor Cyan
+$source = Resolve-BotSource $BattleBot
+Write-Host "==> Battle bot: $(Split-Path -Leaf $source.Path)" -ForegroundColor Cyan
 Write-Host "    $($source.Path)" -ForegroundColor DarkGray
 
 # ---------------------------------------------------------------------------
@@ -165,21 +174,30 @@ Write-Host "    $($source.Path)" -ForegroundColor DarkGray
 # ---------------------------------------------------------------------------
 if (-not (Test-Path (Join-Path $binDir 'AutoCnC.Platform.dll'))) {
     Write-Host '==> Platform not built; building it first' -ForegroundColor Cyan
-    & (Join-Path $PSScriptRoot 'build.ps1') -Configuration $Configuration -SkipDoctrines
+    & (Join-Path $PSScriptRoot 'build.ps1') -Configuration $Configuration -SkipBots
     if ($LASTEXITCODE -ne 0) { throw 'Platform build failed.' }
 }
 
 if ($source.Kind -eq 'Project') {
     $packages = Join-Path $repoRoot 'packages'
     if (-not (Test-Path (Join-Path $packages 'AutoCnC.Sdk.*.nupkg'))) {
-        Write-Host '==> Packing the AutoC&C SDK so doctrines can reference it' -ForegroundColor Cyan
+        Write-Host '==> Packing the AutoC&C SDK so bots can reference it' -ForegroundColor Cyan
         dotnet pack (Join-Path $repoRoot 'AutoCnC.sln') -c $Configuration -v quiet --nologo
         if ($LASTEXITCODE -ne 0) { throw 'Pack failed.' }
+    }
+
+    # A local pack keeps its version number, and NuGet keys its cache on id and version alone —
+    # so without this a bot silently compiles against whichever SDK was extracted first, which is
+    # the opposite of what a script called "run the code I just wrote" should do.
+    $cache = if ($env:NUGET_PACKAGES) { $env:NUGET_PACKAGES } else { Join-Path $HOME '.nuget/packages' }
+    foreach ($id in 'autocnc.core', 'autocnc.sdk') {
+        $extracted = Join-Path $cache $id
+        if (Test-Path $extracted) { Remove-Item $extracted -Recurse -Force -ErrorAction SilentlyContinue }
     }
 }
 
 # ---------------------------------------------------------------------------
-# 3. Optionally test the doctrine's strategy — no game needed
+# 3. Optionally test the bot's strategy — no game needed
 # ---------------------------------------------------------------------------
 if ($Test) {
     if ($source.Kind -ne 'Project') { throw 'A prebuilt .dll has no tests to run; drop -Test, or pass the project instead.' }
@@ -188,7 +206,7 @@ if ($Test) {
     foreach ($testProject in $tests) {
         Write-Host "==> Testing $($testProject.BaseName)" -ForegroundColor Cyan
         dotnet test $testProject.FullName -c $Configuration --nologo -v quiet
-        if ($LASTEXITCODE -ne 0) { throw 'Doctrine tests failed. Fix them before playing.' }
+        if ($LASTEXITCODE -ne 0) { throw 'Bot tests failed. Fix them before playing.' }
     }
 }
 
@@ -196,24 +214,24 @@ if ($Test) {
 # 4. Build and install
 # ---------------------------------------------------------------------------
 
-# Where the game should load the doctrine from. Naming the exact assembly rather than a doctrine
-# name means nothing has to know the Name the author declared inside it, and a doctrine played
-# from its own build output cannot be shadowed by a stale installed copy.
-$doctrinePath = $source.Path
+# Where the game should load the bot from. Naming the exact assembly rather than a bot name
+# means nothing has to know the Name the author declared inside it, and a bot played from its
+# own build output cannot be shadowed by a stale installed copy.
+$botPath = $source.Path
 
 if ($source.Kind -eq 'Project') {
     Write-Host "==> Building $($source.Project.BaseName)" -ForegroundColor Cyan
     dotnet build $source.Project.FullName -c $Configuration -v quiet --nologo `
-        /p:AutoCnCPath="$repoRoot" /p:DoctrineInstallDirectory="$doctrineDir"
-    if ($LASTEXITCODE -ne 0) { throw 'Doctrine build failed.' }
+        /p:AutoCnCPath="$repoRoot" /p:BattleBotInstallDirectory="$botDir"
+    if ($LASTEXITCODE -ne 0) { throw 'Battle bot build failed.' }
 
     # AssemblyName need not match the project file name, so ask MSBuild where the build landed.
-    $doctrinePath = (dotnet msbuild $source.Project.FullName -getProperty:TargetPath -nologo `
-            -p:Configuration=$Configuration -p:AutoCnCPath="$repoRoot" -p:DoctrineInstallDirectory="$doctrineDir").Trim()
+    $botPath = (dotnet msbuild $source.Project.FullName -getProperty:TargetPath -nologo `
+            -p:Configuration=$Configuration -p:AutoCnCPath="$repoRoot" -p:BattleBotInstallDirectory="$botDir").Trim()
 
-    if (-not (Test-Path -LiteralPath $doctrinePath)) { throw "The build reported '$doctrinePath', which does not exist." }
+    if (-not (Test-Path -LiteralPath $botPath)) { throw "The build reported '$botPath', which does not exist." }
 
-    Write-Host "    Installed: $(Split-Path -Leaf $doctrinePath)" -ForegroundColor Green
+    Write-Host "    Installed: $(Split-Path -Leaf $botPath)" -ForegroundColor Green
 }
 else {
     Write-Host '    Prebuilt, so it is loaded where it is and nothing is copied.' -ForegroundColor DarkGray
@@ -253,6 +271,11 @@ if ($Telemetry) {
     Write-Host "==> Telemetry: $Telemetry" -ForegroundColor Cyan
 }
 
+if ($BattleLog) {
+    $battleArgs += "Launch.BattleLog=$BattleLog"
+    Write-Host "==> Battle log: $BattleLog" -ForegroundColor Cyan
+}
+
 if ($Map -and $Opponents -gt 0) {
     $level = Resolve-Difficulty $Difficulty
 
@@ -284,7 +307,7 @@ $gameArgs = @(
     "Engine.EngineDir=$engineDir",
     "Engine.ModSearchPaths=$(Join-Path $repoRoot 'mods'),$(Join-Path $engineDir 'mods')",
     'Game.Mod=autocnc',
-    "Launch.DoctrinePath=$doctrinePath"
+    "Launch.BattleBotPath=$botPath"
 )
 
 if ($Map) { $gameArgs += "Launch.Map=$Map" }
@@ -292,7 +315,7 @@ $gameArgs += $battleArgs
 
 Write-Host '==> Launching' -ForegroundColor Cyan
 if (-not $Map) {
-    Write-Host '    No -Map, so you land on the menu. /doctrines to check yours loaded, /modelog to trace decisions.' -ForegroundColor DarkGray
+    Write-Host '    No -Map, so you land on the menu. /bots to check yours loaded, /modelog to trace decisions.' -ForegroundColor DarkGray
 }
 
 & dotnet @gameArgs

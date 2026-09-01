@@ -18,7 +18,7 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <RootNamespace>AutoCnC.Launcher</RootNamespace>
     <AssemblyName>AutoCnC.Launcher</AssemblyName>
-    <Description>A front end for the AutoC&amp;C authoring loop: pick your doctrine, pick an opponent, play.</Description>
+    <Description>A front end for the AutoC&amp;C authoring loop: pick your battle bot, pick an opponent, play.</Description>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
   </PropertyGroup>

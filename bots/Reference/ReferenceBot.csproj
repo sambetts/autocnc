@@ -3,15 +3,15 @@
   <PropertyGroup>
     <RootNamespace>AutoCnC.Reference</RootNamespace>
     <AssemblyName>AutoCnC.Reference</AssemblyName>
-    <Description>The reference AutoC&amp;C doctrine. Copy this to start your own.</Description>
+    <Description>The reference AutoC&amp;C battle bot. Copy this to start your own.</Description>
 
-    <!-- Doctrines are discovered by scanning this folder; they are NOT listed in mod.yaml. -->
-    <OutputPath>$(DoctrineInstallDirectory)\</OutputPath>
+    <!-- Bots are discovered by scanning this folder; they are NOT listed in mod.yaml. -->
+    <OutputPath>$(BattleBotInstallDirectory)\</OutputPath>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
 
     <!--
-      Compile against the packages but copy nothing beside the built doctrine: the game already
-      has the SDK and engine loaded, and stray DLLs here would be scanned as doctrines.
+      Compile against the packages but copy nothing beside the built bot: the game already has
+      the SDK and engine loaded, and stray DLLs here would be scanned as bots.
     -->
     <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <Compile Include="*.cs" />
+    <Compile Include="Doctrines\*.cs" />
     <Compile Include="Modes\*.cs" />
     <Compile Include="Logic\*.cs" />
   </ItemGroup>

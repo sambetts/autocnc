@@ -35,6 +35,7 @@ namespace AutoCnC.Launcher
 		public string Faction { get; set; } = "Random";
 		public string BotFaction { get; set; } = "Random";
 		public bool RunTests { get; set; }
+		public bool ContinuousImprovement { get; set; }
 		public string LastTrainingRunDirectory { get; set; }
 		public string AgentCommand { get; set; } = "copilot";
 		public string[] AgentArguments { get; set; } = TrainingAgent.DefaultArguments;

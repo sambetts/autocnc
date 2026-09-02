@@ -318,8 +318,9 @@ window is only for setting a fight up, so when one starts two more windows open 
 up afterwards for as long as you want to read them.
 
 - **Results** graphs every player's units, army value, buildings, base value and kills as the
-  battle runs, so you can see the moment a bot lost rather than just the fact that it did,
-  with the final numbers and the result underneath.
+  battle runs, so you can see the moment a bot lost rather than just the fact that it did.
+  **History & trends** plots those final KPIs across every iteration and colors battle duration by
+  win or loss, so faster wins and slower losses are visible. Select any battle to inspect it.
 - **Output** carries the **battle log**: who is playing, and then every event your side could
   actually react to — an enemy coming into view, a hit taken, a unit lost, a kill — each one
   naming the players on both ends of it. It is filtered by the same visibility rule
@@ -333,18 +334,24 @@ snapshot of the actors and weapons from OpenRA's resolved ruleset. The decision 
 other records by writing each bot assessment and each mode decision that actually became an order.
 
 Improvement is optional. Edit normally with **Open code**, or press **Analyze & improve** after a
-fight. The launcher snapshots the bot source, invokes a configurable local coding-agent command
-(GitHub Copilot CLI by default), gives it only the bot and that run's evidence, then independently
-tests, builds, and deploys the result. **Agent workspace** opens a dedicated window with live
-colored terminal progress plus the exact prompt, game guide, resolved unit/weapon stats, fight
-manifest, and changed files;
+fight. In manual mode, the selected battle also accepts your assessment of why it won or lost; that
+assessment is stored with the run and added to its next agent prompt. The launcher snapshots the bot
+source, invokes a configurable local coding-agent command (GitHub Copilot CLI by default), gives it
+only the bot and that run's evidence, then independently tests, builds, and deploys the result.
+**Agent workspace** opens a dedicated window with live colored terminal progress plus the exact
+prompt, game guide, resolved unit/weapon stats, fight manifest, and changed files;
 **Restore previous iteration** puts the exact pre-agent source back.
 
+Check **Continuous improvement** before starting to repeat Fight -> analyze and improve -> Fight
+until **Stop**. Continuous mode cannot pause for a player assessment; it automatically adopts a
+valid next-round prompt from the agent and stops on any failed battle, agent run, test, or build.
+
 Resolved rules and fight JSON use lazy, collapsible trees rather than raw text. At the end of an
-improvement the agent drafts an entirely new prompt template in **Next prompt***. The player can
-edit and approve it; that template replaces the previous one next round, with fresh paths, fight,
-result, and evidence inserted through required placeholders. Long-running launcher work also
-shows an indeterminate progress bar on its Windows taskbar icon.
+improvement the agent drafts an entirely new prompt template in **Next prompt***. In manual mode the
+player can edit and approve it; continuous mode accepts a valid template automatically. That
+template replaces the previous one next round, with fresh paths, fight, result, and evidence
+inserted through required placeholders. Long-running launcher work also shows an indeterminate
+progress bar on its Windows taskbar icon.
 
 It runs the scripts below and shows you their output, so it never does anything you could not
 have typed yourself. Windows only; elsewhere use the command it wraps, which takes the same

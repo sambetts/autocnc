@@ -259,6 +259,8 @@ The launcher preserves every fight as a unique training run under
 
 That is enough to correlate cause and effect without giving strategy code omniscient information
 during the match. `decisions.jsonl` is diagnostic output written by the host; a bot cannot read it.
+The Results window can save the player's assessment of why an individual battle won or lost in
+`manifest.json` and `fight.json`; `{result}` includes it when that battle is sent to an agent.
 
 `game-rules.json` is generated from `ModData.DefaultRules` after OpenRA has merged the inherited
 Tiberian Dawn YAML with AutoC&C overrides. It is a snapshot of the actual engine build, not a
@@ -280,6 +282,16 @@ The approved template replaces the previous one and is rendered with fresh run v
 required placeholders such as `{workspace}`, `{telemetry}`, `{result}`, and
 `{nextPromptContract}`. The initial template lives at `docs/agent-prompt-template.md`; an approved
 replacement is saved in the player's launcher settings.
+
+**History & trends** reads every compatible run for the selected bot. It compares the final units,
+army value, buildings, base value, and kills for the local side against the opponents' total, plus
+an outcome-colored duration line that makes faster wins and slower losses visible.
+
+Checking **Continuous improvement** starts a stateful Fight -> improve -> Fight loop. Every cycle
+still has its own source revision, evidence, reversible snapshot, independent verification, and
+result. A valid agent-authored next prompt is accepted automatically; any battle, agent, test, or
+build failure stops the loop. Player assessments are disabled because continuous mode does not
+pause after a battle.
 
 The agent command is provider-neutral and configurable as one argument per line. It supports
 `{prompt}`, `{promptFile}`, `{project}`, `{workspace}`, `{evidence}`, and `{run}` placeholders.

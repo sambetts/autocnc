@@ -465,28 +465,37 @@ you tick **Run its tests first**. From a terminal that whole loop is one line:
 ```
 
 Every launcher fight is durable under `%LOCALAPPDATA%\AutoCnC\TrainingRuns`: manifest, telemetry,
-battle log, decision trace, replay, and result. After it ends there are two equally supported
-paths:
+battle log, decision trace, replay, and result. **History & trends** selects any saved battle and
+plots final units, army value, buildings, base value, kills, and outcome-colored duration across
+iterations. After a fight ends there are two equally supported paths:
 
 1. **Open code** — make the next change yourself, deploy, and fight again.
 2. **Analyze & improve** — let a configured local coding agent inspect that evidence and edit the
    bot. GitHub Copilot CLI is the default, but **Agent settings** accepts any executable and
    argument list using `{prompt}` or `{promptFile}`.
 
-The AI path is not an unattended loop. The launcher snapshots source first, the wrapper reruns
-tests and deploys after the agent exits, and **Agent workspace** opens a dedicated Improvement
-window that streams its colored terminal progress. The same window exposes the exact prompt,
-shared game guide, fight manifest, changed files, and `game-rules.json`—a generated snapshot of
-units, health, armor, movement, build data, armaments, range, reload, projectile, damage, and armor
-modifiers from OpenRA's resolved runtime rules. Use **Restore previous iteration** to put the exact
-pre-agent source back. You decide when the next fight runs.
+In manual mode, select the finished battle in Results and save your assessment of why it won or
+lost before choosing **Analyze & improve**. The assessment becomes part of that run's fight manifest
+and agent prompt.
+
+The launcher snapshots source first, the wrapper reruns tests and deploys after the agent exits,
+and **Agent workspace** opens a dedicated Improvement window that streams its colored terminal
+progress. The same window exposes the exact prompt, shared game guide, fight manifest, changed
+files, and `game-rules.json`—a generated snapshot of units, health, armor, movement, build data,
+armaments, range, reload, projectile, damage, and armor modifiers from OpenRA's resolved runtime
+rules. Use **Restore previous iteration** to put the exact pre-agent source back.
+
+For an unattended loop, check **Continuous improvement** before starting. It repeats Fight ->
+analyze and improve -> Fight until **Stop**, automatically accepting each valid next-round prompt.
+Player assessments are disabled because the loop does not pause between stages. A failed game,
+agent command, test, or build stops the loop instead of advancing with an unverified bot.
 
 Fight and rules JSON are shown as collapsible trees. When the run finishes, the agent drafts an
-entire replacement prompt template in **Next prompt***. Edit and approve it to make it the prompt
-used for the next round; the launcher inserts that round's paths, evidence, result, and source
-revision through required placeholders. This replaces rather than appends, so the prompt can get
-more focused without growing indefinitely. While a build, fight, or improvement is running, the
-launcher taskbar icon shows indeterminate progress.
+entire replacement prompt template in **Next prompt***. Edit and approve it in manual mode, or let
+continuous mode accept a valid template automatically. The launcher inserts that round's paths,
+evidence, result, and source revision through required placeholders. This replaces rather than
+appends, so the prompt can get more focused without growing indefinitely. While a build, fight, or
+improvement is running, the launcher taskbar icon shows indeterminate progress.
 
 And if you touch the mod's YAML or traits, validate the wiring:
 

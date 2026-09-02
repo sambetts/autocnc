@@ -277,7 +277,9 @@ authoring actions with an explicit message.
 Each fight gets a unique directory outside the source tree. Its manifest records the battle
 configuration and source revision; the game writes telemetry, the visibility-filtered battle log,
 and a decision trace there; the launcher copies the finished replay and result into the same run.
-This avoids the old fixed-path/one-deep-rotation limit and makes iterations comparable.
+Completed manifests are reduced to chronological local-versus-opponent KPI samples for the Results
+window's iteration charts. The duration series colors each point by outcome. This avoids the old
+fixed-path/one-deep-rotation limit and makes iterations directly comparable.
 
 The three runtime records have intentionally different trust boundaries:
 
@@ -299,13 +301,20 @@ remain outside its allowed paths. The wrapper independently runs the bot tests a
 build; the launcher streams the raw ANSI terminal output as colored UTF-8 spans into a dedicated
 Improvement window and exposes the exact prompt, guide, resolved rules, fight manifest, and
 file-level change set in adjacent tabs. Plain build logs use the same stream with styling removed.
-It can restore the pre-agent snapshot. There is no unattended infinite loop: the user reviews one
-iteration and chooses when to fight again.
+It can restore the pre-agent snapshot. In manual mode the player can persist a bounded assessment
+on a completed run; regenerating agent context includes that assessment in both `fight.json` and
+the rendered `{result}`.
+
+Continuous mode is a small explicit state machine over the existing script queue: Fighting ->
+Improving -> Fighting. It creates a fresh durable run and source snapshot on every pass,
+automatically accepts only a valid complete next-round prompt, and stops on user request or any
+non-zero game, agent, test, or build exit. It deliberately has no player-assessment pause.
 
 The JSON views parse lazily into collapsible trees, so the resolved rules snapshot is not expanded
 into thousands of controls up front. After coding, the agent returns a complete replacement prompt
 template between machine-readable marker lines. The player can edit and approve it in
-**Next prompt***. Approval replaces the saved template; required placeholders preserve fresh
+**Next prompt*** in manual mode; continuous mode applies the same validation before accepting it
+automatically. Approval replaces the saved template; required placeholders preserve fresh
 workspace, evidence, result, and recursive next-template contract values without accumulating
 additive guidance. `docs/agent-prompt-template.md` is the repository default, while an approved
 replacement is user state. Script queue activity is mirrored to Windows taskbar indeterminate

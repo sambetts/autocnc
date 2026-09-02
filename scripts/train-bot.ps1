@@ -111,6 +111,11 @@ if (-not (Test-Path -LiteralPath $promptFile)) {
     } else {
         'no final score was recorded'
     }
+    $playerFeedback = if ($result.PlayerFeedback) {
+        "Player assessment of why the battle was won or lost:`n$($result.PlayerFeedback)"
+    } else {
+        'No player assessment was provided.'
+    }
 
     $nextPromptContract = @"
 ## Create the complete prompt for the next round
@@ -129,7 +134,8 @@ AUTOCNC_NEXT_PROMPT_BEGIN
 <complete replacement prompt template>
 AUTOCNC_NEXT_PROMPT_END
 
-The player will review and edit it before it is saved.
+In manual mode the player will review and edit it before it is saved. Continuous improvement may
+accept a valid template automatically.
 "@
 
     $promptReplacements = [ordered]@{
@@ -142,7 +148,7 @@ The player will review and edit it before it is saved.
         '{decisionTrace}' = (Join-Path $evidence 'decisions.jsonl')
         '{replay}' = (Join-Path $evidence 'replay.orarep')
         '{battle}' = "map=$($battle.Map), difficulty=$($battle.Difficulty), opponents=$($battle.Opponents), faction=$($battle.Faction), opponent faction=$($battle.BotFaction), speed=$($battle.GameSpeed)"
-        '{result}' = "$($result.Outcome) after $($result.DurationSeconds) game seconds; $score"
+        '{result}' = "$($result.Outcome) after $($result.DurationSeconds) game seconds; $score`n$playerFeedback"
         '{sourceRevision}' = [string]$manifest.SourceRevision
         '{nextPromptContract}' = $nextPromptContract
     }

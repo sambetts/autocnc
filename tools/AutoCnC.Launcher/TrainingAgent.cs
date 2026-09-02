@@ -216,6 +216,10 @@ namespace AutoCnC.Launcher
 				? string.Join("; ", result.Players.Select(p =>
 					$"{p.Name}: {p.Outcome ?? "undecided"}, army={p.ArmyValue}, buildings={p.Buildings}, killed={p.Killed}, lost={p.Lost}, cash={p.Cash}"))
 				: "no final score was recorded";
+			var playerFeedback = string.IsNullOrWhiteSpace(result?.PlayerFeedback)
+				? "No player assessment was provided."
+				: "Player assessment of why the battle was won or lost:" + Environment.NewLine +
+					result.PlayerFeedback.Trim();
 
 			var replacements = new Dictionary<string, string>(StringComparer.Ordinal)
 			{
@@ -229,7 +233,8 @@ namespace AutoCnC.Launcher
 				["{replay}"] = File.Exists(run.ReplayPath) ? run.ReplayPath : "not captured",
 				["{battle}"] = $"map={battle?.Map}, difficulty={battle?.Difficulty}, opponents={battle?.Opponents}, " +
 					$"faction={battle?.Faction}, opponent faction={battle?.BotFaction}, speed={battle?.GameSpeed}",
-				["{result}"] = $"{result?.Outcome ?? "unknown"} after {result?.DurationSeconds ?? 0} game seconds; {score}",
+				["{result}"] = $"{result?.Outcome ?? "unknown"} after {result?.DurationSeconds ?? 0} game seconds; {score}" +
+					Environment.NewLine + playerFeedback,
 				["{sourceRevision}"] = run.Manifest.SourceRevision,
 				["{nextPromptContract}"] = NextPromptContract()
 			};
@@ -261,7 +266,8 @@ namespace AutoCnC.Launcher
 			<complete replacement prompt template>
 			{{NextPromptEnd}}
 
-			The player will review and edit it before it is saved.
+			In manual mode the player will review and edit it before it is saved. Continuous
+			improvement may accept a valid template automatically.
 			""";
 	}
 }

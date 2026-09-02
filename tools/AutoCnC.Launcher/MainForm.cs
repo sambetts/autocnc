@@ -50,6 +50,7 @@ namespace AutoCnC.Launcher
 		readonly MatchLog matchLog = new();
 		readonly BattleEventLog battleLog = new();
 		readonly TaskbarProgress taskbarProgress = new();
+		readonly ContinuousTrainingLoop continuousLoop = new();
 
 		/// <summary>Script output produced before there was a window to put it in.</summary>
 		readonly List<string> pendingOutput = [];
@@ -58,6 +59,8 @@ namespace AutoCnC.Launcher
 		ScriptJob activeJob;
 		TrainingRun activeRun;
 		TrainingRun lastRun;
+		TrainingHistory loadedHistory = TrainingHistory.Empty;
+		string loadedHistoryBot;
 		DateTime battleStartedUtc;
 		string replayBeforeBattle;
 		bool stopRequested;
@@ -80,12 +83,14 @@ namespace AutoCnC.Launcher
 		Button platformButton;
 		Button newBotButton;
 		Button openCodeButton;
+		Button historyButton;
 		Button improveButton;
 		Button reviewButton;
 		Button restoreButton;
 		Button runFolderButton;
 		Button stopButton;
 		Button replayButton;
+		CheckBox continuousBox;
 		GroupBox botGroup;
 		GroupBox battleGroup;
 		GroupBox trainingGroup;
@@ -227,7 +232,12 @@ namespace AutoCnC.Launcher
 			var grid = Grid(3);
 
 			botBox = new TextBox { Dock = DockStyle.Fill };
-			botBox.TextChanged += (_, _) => UpdateEnabledState();
+			botBox.TextChanged += (_, _) =>
+			{
+				UpdateEnabledState();
+				if (resultsWindow != null)
+					RefreshResultsHistory(reload: true);
+			};
 
 			grid.Controls.Add(Caption("Battle bot:"), 0, 0);
 			grid.Controls.Add(botBox, 1, 0);
@@ -375,8 +385,11 @@ namespace AutoCnC.Launcher
 			openCodeButton = new Button { Text = "Open code", AutoSize = true, Padding = new Padding(8, 3, 8, 3) };
 			openCodeButton.Click += (_, _) => OpenCode();
 
+			historyButton = new Button { Text = "History && trends", AutoSize = true, Padding = new Padding(8, 3, 8, 3) };
+			historyButton.Click += (_, _) => ShowResultsWindow(reloadHistory: true);
+
 			improveButton = new Button { Text = "Analyze && improve", AutoSize = true, Padding = new Padding(8, 3, 8, 3) };
-			improveButton.Click += (_, _) => ImproveBot();
+			improveButton.Click += (_, _) => { ImproveBot(); };
 
 			reviewButton = new Button { Text = "Agent workspace", AutoSize = true, Padding = new Padding(8, 3, 8, 3) };
 			reviewButton.Click += (_, _) => ReviewImprovement();
@@ -390,11 +403,28 @@ namespace AutoCnC.Launcher
 			var configure = new LinkLabel { Text = "Agent settings", AutoSize = true, Margin = new Padding(14, 8, 0, 0) };
 			configure.LinkClicked += (_, _) => ConfigureAgent();
 
+			continuousBox = new CheckBox
+			{
+				Text = "Continuous improvement",
+				AutoSize = true,
+				Margin = new Padding(14, 7, 0, 0)
+			};
+			continuousBox.CheckedChanged += (_, _) =>
+			{
+				settings.ContinuousImprovement = continuousBox.Checked;
+				settings.Save();
+				UpdateEnabledState();
+				if (resultsWindow != null)
+					RefreshResultsHistory();
+			};
+
 			actions.Controls.Add(openCodeButton);
+			actions.Controls.Add(historyButton);
 			actions.Controls.Add(improveButton);
 			actions.Controls.Add(reviewButton);
 			actions.Controls.Add(restoreButton);
 			actions.Controls.Add(runFolderButton);
+			actions.Controls.Add(continuousBox);
 			actions.Controls.Add(configure);
 
 			var hint = new Label
@@ -403,7 +433,8 @@ namespace AutoCnC.Launcher
 				MaximumSize = new Size(680, 0),
 				ForeColor = SystemColors.GrayText,
 				Margin = new Padding(3, 7, 3, 0),
-				Text = "Agent workspace opens a dedicated window with the exact prompt, rules, and fight inputs. Analyze & improve streams colored progress there; edits remain reviewable and reversible."
+				Text = "Continuous improvement repeats Fight -> analyze and improve -> Fight until Stop. " +
+					"History & trends compares every iteration; player assessments can be added to finished battles in manual mode."
 			};
 
 			var stack = new FlowLayoutPanel
@@ -507,17 +538,65 @@ namespace AutoCnC.Launcher
 		/// finished with — reopening it full of the last match would be answering a question
 		/// nobody asked.
 		/// </remarks>
-		ResultsWindow ShowResultsWindow()
+		ResultsWindow ShowResultsWindow(bool reloadHistory = false)
 		{
 			if (resultsWindow == null || resultsWindow.IsDisposed)
 			{
 				resultsWindow = new ResultsWindow(matchLog);
 				resultsWindow.FormClosed += (_, _) => resultsWindow = null;
+				resultsWindow.PlayerFeedbackSaved += SavePlayerFeedback;
 			}
 
+			RefreshResultsHistory(reloadHistory);
 			resultsWindow.Show(this, 0f, 0.55f);
 			resultsWindow.Redraw(battleFinished);
 			return resultsWindow;
+		}
+
+		void RefreshResultsHistory(bool reload = false)
+		{
+			if (resultsWindow == null || resultsWindow.IsDisposed)
+				return;
+
+			try
+			{
+				var selectedBot = BotExists()
+					? BotWorkspace.ResolveProject(botBox.Text.Trim()) ?? Path.GetFullPath(botBox.Text.Trim())
+					: null;
+				if (selectedBot == null)
+				{
+					loadedHistory = TrainingHistory.Empty;
+					loadedHistoryBot = null;
+				}
+				else if (reload || !SamePath(selectedBot, loadedHistoryBot))
+				{
+					loadedHistory = TrainingHistory.Load(botBox.Text.Trim());
+					loadedHistoryBot = selectedBot;
+				}
+
+				var current = activeRun ?? (LastRunMatchesSelectedBot() ? lastRun : null);
+				loadedHistory = loadedHistory.WithRun(current);
+				resultsWindow.SetHistory(loadedHistory, current,
+					continuousBox.Checked || continuousLoop.IsRunning);
+			}
+			catch (IOException ex)
+			{
+				Append($"Could not read training history: {ex.Message}");
+				loadedHistoryBot = null;
+				var current = activeRun ?? (LastRunMatchesSelectedBot() ? lastRun : null);
+				loadedHistory = TrainingHistory.Empty.WithRun(current);
+				resultsWindow.SetHistory(loadedHistory, current,
+					continuousBox.Checked || continuousLoop.IsRunning);
+			}
+			catch (UnauthorizedAccessException ex)
+			{
+				Append($"Could not read training history: {ex.Message}");
+				loadedHistoryBot = null;
+				var current = activeRun ?? (LastRunMatchesSelectedBot() ? lastRun : null);
+				loadedHistory = TrainingHistory.Empty.WithRun(current);
+				resultsWindow.SetHistory(loadedHistory, current,
+					continuousBox.Checked || continuousLoop.IsRunning);
+			}
 		}
 
 		OutputWindow ShowOutputWindow()
@@ -616,6 +695,7 @@ namespace AutoCnC.Launcher
 			botBox.Text = rememberedBot ?? repo?.ReferenceBot ?? string.Empty;
 			LoadLastTrainingRun();
 			runTestsBox.Checked = settings.RunTests;
+			continuousBox.Checked = settings.ContinuousImprovement;
 			opponentsBox.Value = Math.Clamp(settings.Opponents, opponentsBox.Minimum, opponentsBox.Maximum);
 			Select(factionBox, settings.Faction);
 			Select(botFactionBox, settings.BotFaction);
@@ -776,6 +856,7 @@ namespace AutoCnC.Launcher
 			var compatible = repo?.SupportsTraining == true;
 			var ready = !busy && compatible && BotExists() && mapBox.SelectedItem is MapInfo;
 			var editable = BotExists() && BotWorkspace.ResolveProject(botBox.Text.Trim()) != null;
+			var continuousReady = compatible && editable && continuousBox.Checked;
 			var agent = lastRun?.Manifest.Agent;
 			var lastRunMatches = LastRunMatchesSelectedBot();
 			var canRetryImprovement = agent == null || agent.ChangeCount == 0 || agent.RestoredUtc != null;
@@ -785,6 +866,9 @@ namespace AutoCnC.Launcher
 			platformButton.Enabled = !busy && repo != null;
 			newBotButton.Enabled = !busy && compatible && File.Exists(repo.NewBotScript);
 			openCodeButton.Enabled = !busy && editable;
+			historyButton.Enabled = BotExists();
+			continuousBox.Enabled = !busy && compatible && editable;
+			launchButton.Text = continuousReady ? "Start continuous training" : "Fight";
 			improveButton.Enabled = !busy && compatible && File.Exists(repo.TrainBotScript) &&
 				lastRunMatches && lastRun?.IsEditable == true &&
 				lastRun.Manifest.CompletedUtc != null && canRetryImprovement &&
@@ -805,11 +889,12 @@ namespace AutoCnC.Launcher
 			// Tests come from a project's Tests folder, so a prebuilt assembly has none to run.
 			runTestsBox.Enabled = !busy && !IsPrebuilt();
 
-			// Setting up the next battle while one is running would be editing a form whose Launch
-			// button is already unavailable — the greying out is what says so.
-			botGroup.Enabled = !battleRunning;
-			battleGroup.Enabled = !battleRunning;
-			trainingGroup.Enabled = !battleRunning;
+			// Continuous training must keep the bot and battle configuration stable between its
+			// fight and improvement stages. Stop is outside these groups and remains available.
+			var cycleLocked = battleRunning || continuousLoop.IsRunning;
+			botGroup.Enabled = !cycleLocked;
+			battleGroup.Enabled = !cycleLocked;
+			trainingGroup.Enabled = !cycleLocked;
 
 			UpdateBattleBanner();
 
@@ -843,8 +928,12 @@ namespace AutoCnC.Launcher
 			Text = battleRunning ? "AutoC&C — Battle Launcher (battle running)" : "AutoC&C — Battle Launcher";
 
 			battleBannerText.Text = battleRunning
-				? "Battle in progress. The results and output windows are following it; this one waits until it is over."
-				: "The last battle is finished. Its results and output are still open — close them when you are done reading.";
+				? continuousLoop.IsRunning
+					? "Continuous training is fighting this iteration. Results and output are following it; Stop ends the loop."
+					: "Battle in progress. The results and output windows are following it; this one waits until it is over."
+				: continuousLoop.Stage == ContinuousTrainingStage.Improving
+					? "Continuous training is improving the bot from the finished battle. The next fight starts automatically."
+					: "The last battle is finished. Its results and output are still open - close them when you are done reading.";
 		}
 
 		bool BotExists()
@@ -1018,6 +1107,47 @@ namespace AutoCnC.Launcher
 				OpenFolder(lastRun.RunDirectory, "No training run yet");
 		}
 
+		void SavePlayerFeedback(TrainingRun run, string feedback)
+		{
+			if (run == null || continuousBox.Checked || continuousLoop.IsRunning)
+				return;
+
+			try
+			{
+				run.SetPlayerFeedback(feedback);
+				if (lastRun != null && SamePath(run.RunDirectory, lastRun.RunDirectory))
+					lastRun = run;
+
+				if (run.IsEditable &&
+					File.Exists(run.BattleLogPath) &&
+					File.Exists(run.TelemetryPath) &&
+					File.Exists(run.DecisionTracePath))
+					EnsureAgentContext(run);
+
+				resultsWindow?.MarkFeedbackSaved(run);
+			}
+			catch (ArgumentException ex)
+			{
+				MessageBox.Show(resultsWindow, ex.Message, "AutoC&C",
+					MessageBoxButtons.OK, MessageBoxIcon.Warning);
+			}
+			catch (InvalidOperationException ex)
+			{
+				MessageBox.Show(resultsWindow, ex.Message, "AutoC&C",
+					MessageBoxButtons.OK, MessageBoxIcon.Warning);
+			}
+			catch (IOException ex)
+			{
+				MessageBox.Show(resultsWindow, $"Could not save the battle assessment: {ex.Message}", "AutoC&C",
+					MessageBoxButtons.OK, MessageBoxIcon.Error);
+			}
+			catch (UnauthorizedAccessException ex)
+			{
+				MessageBox.Show(resultsWindow, $"Could not save the battle assessment: {ex.Message}", "AutoC&C",
+					MessageBoxButtons.OK, MessageBoxIcon.Error);
+			}
+		}
+
 		void ConfigureAgent()
 		{
 			using var dialog = new AgentSettingsDialog(settings.AgentCommand, settings.AgentArguments);
@@ -1128,27 +1258,36 @@ namespace AutoCnC.Launcher
 		// -------------------------------------------------------------------
 		// Running things
 		// -------------------------------------------------------------------
-		void Launch(bool play)
+		bool Launch(bool play, bool continuousContinuation = false)
 		{
 			if (repo == null || !BotExists())
-				return;
+			{
+				if (continuousContinuation)
+					ReportAutomationFailure("The selected battle bot is no longer available.",
+						MessageBoxIcon.Error, automatic: true);
+				return false;
+			}
 
 			if (!repo.SupportsTraining)
 			{
-				MessageBox.Show(this,
+				ReportAutomationFailure(
 					$"The selected checkout uses authoring API {repo.AuthoringApiVersion}, but this launcher needs {RepoLayout.RequiredAuthoringApiVersion}. " +
 					"Select the repository that this launcher was built from.",
-					"AutoC&C", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-				return;
+					MessageBoxIcon.Warning, continuousContinuation);
+				return false;
 			}
 
 			if (!repo.EngineFetched)
 			{
-				MessageBox.Show(this,
+				ReportAutomationFailure(
 					"The OpenRA engine submodule has not been fetched. Run ./scripts/setup.ps1 in the repository, then try again.",
-					"AutoC&C", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-				return;
+					MessageBoxIcon.Warning, continuousContinuation);
+				return false;
 			}
+
+			if (play && !continuousContinuation)
+				continuousLoop.Begin(continuousBox.Checked &&
+					BotWorkspace.ResolveProject(botBox.Text.Trim()) != null);
 
 			Save();
 			ClearOutput();
@@ -1162,15 +1301,17 @@ namespace AutoCnC.Launcher
 				}
 				catch (IOException ex)
 				{
-					MessageBox.Show(this, $"Could not create the training run: {ex.Message}", "AutoC&C",
-						MessageBoxButtons.OK, MessageBoxIcon.Error);
-					return;
+					continuousLoop.Stop();
+					ReportAutomationFailure($"Could not create the training run: {ex.Message}",
+						MessageBoxIcon.Error, continuousContinuation);
+					return false;
 				}
 				catch (UnauthorizedAccessException ex)
 				{
-					MessageBox.Show(this, $"Could not create the training run: {ex.Message}", "AutoC&C",
-						MessageBoxButtons.OK, MessageBoxIcon.Error);
-					return;
+					continuousLoop.Stop();
+					ReportAutomationFailure($"Could not create the training run: {ex.Message}",
+						MessageBoxIcon.Error, continuousContinuation);
+					return false;
 				}
 			}
 
@@ -1191,6 +1332,7 @@ namespace AutoCnC.Launcher
 			});
 
 			RunNext();
+			return true;
 		}
 
 		IReadOnlyList<string> RunBotArguments(bool play)
@@ -1327,6 +1469,8 @@ namespace AutoCnC.Launcher
 				lastRun = finishedRun;
 				settings.LastTrainingRunDirectory = finishedRun.RunDirectory;
 				settings.Save();
+				if (resultsWindow != null)
+					RefreshResultsHistory();
 			}
 		}
 
@@ -1340,14 +1484,20 @@ namespace AutoCnC.Launcher
 				outputWindow.ShowBattle(finished);
 		}
 
-		void ImproveBot()
+		bool ImproveBot(bool automatic = false)
 		{
 			var previousAgent = lastRun?.Manifest.Agent;
 			var canRetry = previousAgent == null || previousAgent.ChangeCount == 0 ||
 				previousAgent.RestoredUtc != null;
 			if (repo == null || !LastRunMatchesSelectedBot() ||
 				lastRun?.IsEditable != true || !canRetry)
-				return;
+			{
+				if (automatic)
+					ReportAutomationFailure(
+						"The finished battle is not eligible for another agent improvement.",
+						MessageBoxIcon.Error, automatic: true);
+				return false;
+			}
 
 			try
 			{
@@ -1363,20 +1513,20 @@ namespace AutoCnC.Launcher
 			}
 			catch (InvalidOperationException ex)
 			{
-				MessageBox.Show(this, ex.Message, "AutoC&C", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-				return;
+				ReportAutomationFailure(ex.Message, MessageBoxIcon.Warning, automatic);
+				return false;
 			}
 			catch (IOException ex)
 			{
-				MessageBox.Show(this, $"Could not prepare the improvement: {ex.Message}", "AutoC&C",
-					MessageBoxButtons.OK, MessageBoxIcon.Error);
-				return;
+				ReportAutomationFailure($"Could not prepare the improvement: {ex.Message}",
+					MessageBoxIcon.Error, automatic);
+				return false;
 			}
 			catch (UnauthorizedAccessException ex)
 			{
-				MessageBox.Show(this, $"Could not prepare the improvement: {ex.Message}", "AutoC&C",
-					MessageBoxButtons.OK, MessageBoxIcon.Error);
-				return;
+				ReportAutomationFailure($"Could not prepare the improvement: {ex.Message}",
+					MessageBoxIcon.Error, automatic);
+				return false;
 			}
 
 			Save();
@@ -1398,6 +1548,19 @@ namespace AutoCnC.Launcher
 			});
 
 			RunNext();
+			return true;
+		}
+
+		void ReportAutomationFailure(string message, MessageBoxIcon icon, bool automatic)
+		{
+			if (automatic)
+			{
+				Append("Continuous improvement stopped: " + message);
+				ShowOutputWindow();
+				return;
+			}
+
+			MessageBox.Show(this, message, "AutoC&C", MessageBoxButtons.OK, icon);
 		}
 
 		void FinishImprovement(int exitCode)
@@ -1430,6 +1593,35 @@ namespace AutoCnC.Launcher
 				AppendImprovementOutput($"Could not record the agent's changes: {ex.Message}");
 				lastRun.AgentFinished(exitCode, 0, suggestedNextPrompt);
 			}
+
+			if (exitCode == 0 && continuousLoop.Stage == ContinuousTrainingStage.Improving)
+				AcceptContinuousPrompt(lastRun, suggestedNextPrompt);
+
+			if (resultsWindow != null)
+				RefreshResultsHistory();
+		}
+
+		void AcceptContinuousPrompt(TrainingRun run, string promptTemplate)
+		{
+			if (string.IsNullOrWhiteSpace(promptTemplate))
+			{
+				AppendImprovementOutput("The agent returned no next-round prompt; continuing with the current prompt.");
+				return;
+			}
+
+			if (!TrainingAgent.ValidatePromptTemplate(promptTemplate, out var error))
+			{
+				AppendImprovementOutput("The agent's next-round prompt was invalid; continuing with the current prompt. " + error);
+				return;
+			}
+
+			var approved = promptTemplate.Trim();
+			settings.AgentPromptTemplate = approved;
+			settings.AgentPromptGuidance = null;
+			run.AcceptSuggestedNextPrompt(approved);
+			settings.Save();
+			improvementWindow?.MarkNextPromptSaved();
+			AppendImprovementOutput("The next-round prompt was accepted automatically for continuous improvement.");
 		}
 
 		void ReviewImprovement()
@@ -1587,8 +1779,38 @@ namespace AutoCnC.Launcher
 		{
 			if (queue.Count == 0)
 			{
-				// The last job has finished, so the battle — if there was one — is over.
-				StopWatchingBattle("finished");
+				var completedBattle = battleRunning;
+				if (completedBattle)
+					StopWatchingBattle("finished");
+
+				if (completedBattle &&
+					continuousLoop.BattleCompleted() == ContinuousTrainingAction.Improve)
+				{
+					Status("Battle saved. Starting continuous improvement...");
+					if (!ImproveBot(automatic: true))
+					{
+						continuousLoop.Stop();
+						Status("Continuous improvement stopped before the agent could start.");
+						UpdateEnabledState();
+					}
+
+					return;
+				}
+
+				if (!completedBattle &&
+					continuousLoop.ImprovementCompleted() == ContinuousTrainingAction.Fight)
+				{
+					Status("Improvement deployed. Starting the next fight...");
+					if (!Launch(play: true, continuousContinuation: true))
+					{
+						continuousLoop.Stop();
+						Status("Continuous improvement stopped before the next fight could start.");
+						UpdateEnabledState();
+					}
+
+					return;
+				}
+
 				Status("Done.");
 				UpdateEnabledState();
 				return;
@@ -1611,6 +1833,7 @@ namespace AutoCnC.Launcher
 				activeJob = null;
 				InvokeJobCompleted(job, -1);
 				StopWatchingBattle("failed");
+				continuousLoop.Stop();
 			}
 			catch (InvalidOperationException ex)
 			{
@@ -1620,6 +1843,7 @@ namespace AutoCnC.Launcher
 				activeJob = null;
 				InvokeJobCompleted(job, -1);
 				StopWatchingBattle("failed");
+				continuousLoop.Stop();
 			}
 
 			UpdateEnabledState();
@@ -1637,6 +1861,7 @@ namespace AutoCnC.Launcher
 				RouteJobOutput(completed, "=== Stopped ===");
 				InvokeJobCompleted(completed, exitCode);
 				StopWatchingBattle("stopped");
+				continuousLoop.Stop();
 				Status("Stopped.");
 				stopRequested = false;
 				UpdateEnabledState();
@@ -1648,6 +1873,7 @@ namespace AutoCnC.Launcher
 				RouteJobOutput(completed, $"=== Finished with exit code {exitCode} ===");
 				InvokeJobCompleted(completed, exitCode);
 				StopWatchingBattle("failed");
+				continuousLoop.Stop();
 				Status($"Stopped with exit code {exitCode}. See the {(completed?.Output == null ? "output" : "improvement")} window.");
 				queue.Clear();
 				if (completed?.Output == null)
@@ -1694,6 +1920,7 @@ namespace AutoCnC.Launcher
 		void StopEverything()
 		{
 			stopRequested = true;
+			continuousLoop.Stop();
 			queue.Clear();
 			runner.Stop();
 			Status("Stopping…");
@@ -1763,6 +1990,7 @@ namespace AutoCnC.Launcher
 			settings.Faction = ((FactionChoice)factionBox.SelectedItem).Value;
 			settings.BotFaction = ((FactionChoice)botFactionBox.SelectedItem).Value;
 			settings.RunTests = runTestsBox.Checked;
+			settings.ContinuousImprovement = continuousBox.Checked;
 			settings.LastTrainingRunDirectory = lastRun?.RunDirectory;
 			settings.Save();
 		}
@@ -1788,6 +2016,7 @@ namespace AutoCnC.Launcher
 				activeJob = null;
 				closing = true;
 				stopRequested = true;
+				continuousLoop.Stop();
 				runner.Stop();
 				InvokeJobCompleted(stoppedJob, -1);
 				StopWatchingBattle("stopped");

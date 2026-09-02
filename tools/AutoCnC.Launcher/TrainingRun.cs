@@ -45,6 +45,7 @@ namespace AutoCnC.Launcher
 		public int DurationSeconds { get; set; }
 		public string LocalPlayer { get; set; }
 		public string Outcome { get; set; }
+		public string PlayerFeedback { get; set; }
 		public List<TrainingPlayerResult> Players { get; set; } = [];
 	}
 
@@ -62,7 +63,7 @@ namespace AutoCnC.Launcher
 
 	public sealed class TrainingRunManifest
 	{
-		public int SchemaVersion { get; set; } = 2;
+		public int SchemaVersion { get; set; } = 3;
 		public string Id { get; set; }
 		public string Status { get; set; }
 		public DateTime CreatedUtc { get; set; }
@@ -83,6 +84,8 @@ namespace AutoCnC.Launcher
 	public sealed class TrainingRun
 	{
 		static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+
+		public const int MaxPlayerFeedbackLength = 4000;
 
 		public TrainingRunManifest Manifest { get; }
 		public string RunDirectory { get; }
@@ -123,10 +126,7 @@ namespace AutoCnC.Launcher
 			var project = BotWorkspace.ResolveProject(fullBotPath);
 			var sourceRoot = BotWorkspace.ResolveRoot(fullBotPath);
 			var id = $"{DateTime.UtcNow:yyyyMMdd-HHmmss-fff}-{Guid.NewGuid():N}"[..39];
-			var botName = project != null
-				? Path.GetFileNameWithoutExtension(project)
-				: Path.GetFileNameWithoutExtension(fullBotPath.TrimEnd(Path.DirectorySeparatorChar));
-			var directory = Path.Combine(runsRoot ?? DefaultRoot, SafeSegment(botName), id);
+			var directory = Path.Combine(RunsDirectoryForBot(fullBotPath, runsRoot), id);
 
 			Directory.CreateDirectory(directory);
 
@@ -206,6 +206,21 @@ namespace AutoCnC.Launcher
 			Manifest.CompletedUtc = DateTime.UtcNow;
 			Manifest.Result = result;
 			Save();
+		}
+
+		public void SetPlayerFeedback(string feedback)
+		{
+			if (Manifest.Result == null || Manifest.CompletedUtc == null)
+				throw new InvalidOperationException("Player feedback can only be saved for a completed battle.");
+
+			var value = feedback?.Trim();
+			if (value?.Length > MaxPlayerFeedbackLength)
+				throw new ArgumentException(
+					$"Player feedback cannot exceed {MaxPlayerFeedbackLength:N0} characters.", nameof(feedback));
+
+			Manifest.Result.PlayerFeedback = string.IsNullOrEmpty(value) ? null : value;
+			Save();
+			ExportFightManifest();
 		}
 
 		public void CaptureReplay(string source)
@@ -288,6 +303,16 @@ namespace AutoCnC.Launcher
 			var temporary = ManifestPath + ".tmp";
 			File.WriteAllText(temporary, JsonSerializer.Serialize(Manifest, JsonOptions));
 			File.Move(temporary, ManifestPath, true);
+		}
+
+		internal static string RunsDirectoryForBot(string botPath, string runsRoot = null)
+		{
+			var fullBotPath = Path.GetFullPath(botPath);
+			var project = BotWorkspace.ResolveProject(fullBotPath);
+			var botName = project != null
+				? Path.GetFileNameWithoutExtension(project)
+				: Path.GetFileNameWithoutExtension(fullBotPath.TrimEnd(Path.DirectorySeparatorChar));
+			return Path.Combine(runsRoot ?? DefaultRoot, SafeSegment(botName));
 		}
 
 		static string SafeSegment(string value)

@@ -205,6 +205,56 @@ namespace AutoCnC.Launcher.Tests
 		}
 
 		[Test]
+		public void PlayerFeedbackIsDurableAndIncludedInAgentEvidence()
+		{
+			var run = NewRun();
+			Complete(run, "Lost", 185, army: 1200, opponentArmy: 4100);
+
+			run.SetPlayerFeedback("I expanded too late and never recovered map control.");
+			Assert.That(File.ReadAllText(run.FightManifestPath), Does.Contain("never recovered map control"));
+			TrainingAgent.PrepareContext(run, gameGuide, gameRules, promptTemplate);
+
+			var loaded = TrainingRun.Load(run.RunDirectory);
+			Assert.That(loaded.Manifest.Result.PlayerFeedback,
+				Is.EqualTo("I expanded too late and never recovered map control."));
+			Assert.That(File.ReadAllText(run.PromptPath), Does.Contain("I expanded too late"));
+			Assert.That(() => run.SetPlayerFeedback(new string('x', TrainingRun.MaxPlayerFeedbackLength + 1)),
+				Throws.ArgumentException);
+		}
+
+		[Test]
+		public void HistoryKeepsOnlyTheSelectedBotAndBuildsChronologicalKpis()
+		{
+			var later = NewRun();
+			Complete(later, "Won", 140, army: 5200, opponentArmy: 900);
+			later.Manifest.CreatedUtc = new DateTime(2026, 2, 2, 0, 0, 0, DateTimeKind.Utc);
+			later.Save();
+
+			var earlier = NewRun();
+			Complete(earlier, "Lost", 240, army: 1800, opponentArmy: 3600, opponents: 2);
+			earlier.Manifest.CreatedUtc = new DateTime(2026, 2, 1, 0, 0, 0, DateTimeKind.Utc);
+			earlier.Save();
+
+			var otherWorkspace = Path.Combine(root, "Other");
+			Directory.CreateDirectory(otherWorkspace);
+			var otherProject = Path.Combine(otherWorkspace, "MyBot.csproj");
+			File.WriteAllText(otherProject, "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+			var other = TrainingRun.Create(otherProject, new TrainingBattleConfiguration(), runs);
+			Complete(other, "Won", 10, army: 9999, opponentArmy: 0);
+
+			var history = TrainingHistory.Load(project, runs);
+
+			Assert.That(history.Runs.Select(run => run.Manifest.Id),
+				Is.EqualTo(new[] { earlier.Manifest.Id, later.Manifest.Id }));
+			Assert.That(history.Iterations.Select(iteration => iteration.Number), Is.EqualTo(new[] { 1, 2 }));
+			Assert.That(history.Iterations[0].Outcome, Is.EqualTo("Lost"));
+			Assert.That(history.Iterations[0].DurationSeconds, Is.EqualTo(240));
+			Assert.That(history.Iterations[0].LocalPlayer.ArmyValue, Is.EqualTo(1800));
+			Assert.That(history.Iterations[0].Opponents.ArmyValue, Is.EqualTo(7200));
+			Assert.That(history.Iterations[1].Outcome, Is.EqualTo("Won"));
+		}
+
+		[Test]
 		public void PreviousCopilotDefaultsUpgradeToColoredProgressOutput()
 		{
 			var previous = new[]
@@ -236,6 +286,46 @@ namespace AutoCnC.Launcher.Tests
 				BotFaction = "nod",
 				GameSpeed = "maximum"
 			}, runs);
+
+		static void Complete(TrainingRun run, string outcome, int duration, int army,
+			int opponentArmy, int opponents = 1)
+		{
+			run.Manifest.Status = "finished";
+			run.Manifest.CompletedUtc = DateTime.UtcNow;
+			run.Manifest.Result = new TrainingBattleResult
+			{
+				DurationSeconds = duration,
+				LocalPlayer = "You",
+				Outcome = outcome,
+				Players =
+				[
+					new TrainingPlayerResult
+					{
+						Name = "You",
+						Outcome = outcome,
+						Units = army / 100,
+						ArmyValue = army,
+						Buildings = 4,
+						BaseValue = army / 2,
+						Killed = army / 200,
+						Lost = opponentArmy / 300
+					},
+					.. Enumerable.Range(1, opponents).Select(index => new TrainingPlayerResult
+					{
+						Name = "Opponent " + index,
+						IsBot = true,
+						Outcome = outcome == "Won" ? "Lost" : "Won",
+						Units = opponentArmy / 100,
+						ArmyValue = opponentArmy,
+						Buildings = 5,
+						BaseValue = opponentArmy / 2,
+						Killed = opponentArmy / 200,
+						Lost = army / 300
+					})
+				]
+			};
+			run.Save();
+		}
 
 		static void CreateCheckout(string checkout, string authoringApi)
 		{

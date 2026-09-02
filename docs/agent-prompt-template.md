@@ -29,7 +29,7 @@ Treat the guide as authoritative for game mechanics, fair information access, an
 
 Fight configuration: {battle}
 
-Result: {result}
+Result and player assessment, when one was provided: {result}
 
 Source revision before the fight: `{sourceRevision}`
 

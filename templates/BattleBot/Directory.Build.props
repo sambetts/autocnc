@@ -1,0 +1,16 @@
+<Project>
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>12</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <MSBuildWarningsAsMessages>$(MSBuildWarningsAsMessages);MSB3277</MSBuildWarningsAsMessages>
+
+    <AutoCnCVersion Condition="'$(AutoCnCVersion)' == ''">__AUTOCNC_VERSION__</AutoCnCVersion>
+    <AutoCnCPath Condition="'$(AutoCnCPath)' == ''">__AUTOCNC_REPOSITORY_PATH_XML__</AutoCnCPath>
+    <BattleBotInstallDirectory Condition="'$(BattleBotInstallDirectory)' == ''">$(AutoCnCPath)\engine\bin\bots</BattleBotInstallDirectory>
+  </PropertyGroup>
+
+</Project>

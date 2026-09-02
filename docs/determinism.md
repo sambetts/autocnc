@@ -103,7 +103,7 @@ fields — because everything it stores (assigned mode, group, anchor) is client
 Two clients disagreeing about a unit's mode changes only which orders each player's own client
 chooses to emit.
 
-**2. `AutoCnC.Modes.Core`, for testability rather than sync.** The pure decision layer is kept
+**2. `AutoCnC.Core`, for testability rather than sync.** The pure decision layer is kept
 integer-only and side-effect free so it can be tested without an engine, and so identical inputs
 always produce identical outputs. That is a *testing* property now, not a networking one.
 

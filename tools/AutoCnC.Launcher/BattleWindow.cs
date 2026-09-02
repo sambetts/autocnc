@@ -33,10 +33,10 @@ namespace AutoCnC.Launcher
 	/// </remarks>
 	public abstract class BattleWindow : Form
 	{
-		protected static readonly Color Paper = Color.FromArgb(30, 30, 30);
-		protected static readonly Color Ink = Color.Gainsboro;
-		protected static readonly Color Faded = Color.FromArgb(150, 150, 150);
-		protected static readonly Color Rule = Color.FromArgb(58, 58, 58);
+		internal static readonly Color Paper = Color.FromArgb(30, 30, 30);
+		internal static readonly Color Ink = Color.Gainsboro;
+		internal static readonly Color Faded = Color.FromArgb(150, 150, 150);
+		internal static readonly Color Rule = Color.FromArgb(58, 58, 58);
 
 		bool placed;
 

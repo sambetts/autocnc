@@ -134,8 +134,8 @@ Candidates are alternatives for one role — `powr` or `nuke` both mean "a power
 plan works as either faction without checking.
 
 ```powershell
-cp -r bots/Reference bots/MyBot   # start from the reference bot
-./scripts/launcher.ps1            # point it at MyBot and press Launch battle
+./scripts/new-bot.ps1 -Name MyBot # create a standalone solution, project, mode and tests
+./scripts/launcher.ps1            # select MyBot, deploy it, and fight
 ```
 
 Bots build against AutoC&C **binaries**, not projects, so one can live in **its own repository**
@@ -212,7 +212,7 @@ OpenRA reference at all** — enforced by the project file, not by convention. S
 is testable in milliseconds:
 
 ```powershell
-dotnet test src/AutoCnC.Modes.Core.Tests   # 36 tests, ~30ms, no engine build
+dotnet test src/AutoCnC.Core.Tests         # milliseconds, no engine build
 ```
 
 A folder convention is a comment. A missing assembly reference is a compiler error.
@@ -307,10 +307,11 @@ Cloned without `--recursive`? `git submodule update --init --depth 1`
 
 ### The launcher
 
-`./scripts/launcher.ps1` opens a window over the whole authoring loop: point it at your battle bot
-(a `.csproj` it builds, or a `.dll` it plays as-is), choose a map, an opponent and a game speed,
-and press **Launch battle**. The game boots straight into that fight with your bot already
-loaded — no menus, no lobby, no `/bot` to type.
+`./scripts/launcher.ps1` opens a window over the whole authoring loop. **New bot** creates a
+standalone C# solution with the AutoC&C dependencies, a starter doctrine and mode, and tests.
+**Open code** hands that solution to your configured editor, **Deploy bot** builds and installs it,
+and **Fight** boots straight into the selected match with the bot loaded — no menus, lobby, or
+`/bot` command.
 
 Launching a battle changes the UI, the way an IDE changes when it starts debugging: the launcher
 window is only for setting a fight up, so when one starts two more windows open beside it and stay
@@ -325,6 +326,25 @@ up afterwards for as long as you want to read them.
   `ctx.SenseThreats` uses, so it is a record of what your code *knew*, not of what was true. The
   graph tells you when it went wrong; the log tells you what your bot had to work with at the
   time, which is the half you can do something about.
+
+Every fight is preserved under `%LOCALAPPDATA%\AutoCnC\TrainingRuns`: its setup, source revision,
+telemetry, battle log, structured decision trace, result, replay, agent guide, and a generated JSON
+snapshot of the actors and weapons from OpenRA's resolved ruleset. The decision trace connects the
+other records by writing each bot assessment and each mode decision that actually became an order.
+
+Improvement is optional. Edit normally with **Open code**, or press **Analyze & improve** after a
+fight. The launcher snapshots the bot source, invokes a configurable local coding-agent command
+(GitHub Copilot CLI by default), gives it only the bot and that run's evidence, then independently
+tests, builds, and deploys the result. **Agent workspace** opens a dedicated window with live
+colored terminal progress plus the exact prompt, game guide, resolved unit/weapon stats, fight
+manifest, and changed files;
+**Restore previous iteration** puts the exact pre-agent source back.
+
+Resolved rules and fight JSON use lazy, collapsible trees rather than raw text. At the end of an
+improvement the agent drafts an entirely new prompt template in **Next prompt***. The player can
+edit and approve it; that template replaces the previous one next round, with fresh paths, fight,
+result, and evidence inserted through required placeholders. Long-running launcher work also
+shows an indeterminate progress bar on its Windows taskbar icon.
 
 It runs the scripts below and shows you their output, so it never does anything you could not
 have typed yourself. Windows only; elsewhere use the command it wraps, which takes the same
@@ -365,9 +385,10 @@ dotnet test src/AutoCnC.Core.Tests   # logic — ~20ms, no engine
 | **1 — Authoring** | Assignment scopes, templates, base building ✅ |
 | **2 — Doctrines** | Platform/strategy split, doctrine SDK, unit production ✅ |
 | **3 — Battle bots** | Several doctrines per bot, switching on what the side can see ✅ |
-| **4 — Ecosystem** | Bot vs bot arena, replay regression tests, bot sharing |
+| **4 — Training** | Bot scaffolding, durable fight evidence, optional reversible coding-agent improvements ✅ |
+| **5 — Ecosystem** | Bot vs bot arena, replay regression tests, bot sharing |
 
-Verified: platform and bot build independently, 66 tests pass with no engine, `--check-yaml`
+Verified: platform and bot build independently, the repository test suites pass, `--check-yaml`
 reports 0 errors, and the reference bot plays a full game — deploying, building, scouting,
 pushing, and turtling when its base is hit.
 

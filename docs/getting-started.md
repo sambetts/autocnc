@@ -63,9 +63,10 @@ Build complete. Next: ./scripts/launch.ps1
 ./scripts/launcher.ps1
 ```
 
-That opens the **battle launcher** (Windows). Point it at your battle code, choose a map and an
-opponent, and press **Launch battle** — it builds what needs building, starts the game, seats
-the AI and loads your bot before the first tick.
+That opens the **battle launcher** (Windows). Press **New bot…** to create a standalone C#
+solution with a starter doctrine, mode, pure logic, and tests. **Open code** opens that solution
+for normal manual editing, **Deploy bot** builds and installs it, and **Fight** starts the game,
+seats the AI, and loads your bot before the first tick.
 
 The launcher window itself is only for setting a battle up. When one starts, two more windows
 open beside it — the **results** graphs and the **output** log — the way a debugger's windows
@@ -209,10 +210,10 @@ Buildings and base value are counted from the world rather than read off the eng
 which have no structures-only equivalent — its "assets" lumps buildings in with harvesters and
 everything else. `assets` is recorded too, so the difference is there if you want it.
 
-The file lands in the OpenRA logs folder as `autocnc-telemetry.csv` (the launcher points its runs
-at `autocnc-launcher.csv` so a failed build never leaves you looking at the previous match), and
-the previous one is kept alongside it as `.csv.1`. Both are ordinary CSV with a named header, so
-anything that reads a spreadsheet will plot them too.
+The command-line default lands in the OpenRA logs folder as `autocnc-telemetry.csv`, with the
+previous one kept alongside it as `.csv.1`. The launcher instead gives every fight its own
+training-run directory, so no result is overwritten. Both are ordinary CSV with a named header,
+so anything that reads a spreadsheet will plot them too.
 
 ```powershell
 ./scripts/run-bot.ps1 -Map tiberium-rift.oramap -Telemetry C:\tmp\run-14.csv   # keep this one
@@ -275,6 +276,27 @@ before the first `attacked` row is a scout your modes ignored; a run of `lost` r
 ```powershell
 ./scripts/run-bot.ps1 -Map tiberium-rift.oramap -BattleLog C:\tmp\battle-14.csv
 ./scripts/run-bot.ps1 -Map tiberium-rift.oramap -BattleLog none
+```
+
+### Why it made those decisions
+
+The battle log says what the bot knew, but not what it decided. Launcher fights therefore also
+write `evidence/decisions.jsonl` in their run directory, a structured trace with:
+
+- every `BattleState` assessment;
+- the bot's doctrine decision and any mode-requested switch;
+- whether a switch continued, was rate-limited, failed validation, or applied;
+- every unit decision that actually became an engine order.
+
+It is the bridge between evidence and result. If `battle.csv` says an enemy was spotted at the
+base, `evidence/decisions.jsonl` says which doctrine assessment followed and whether individual units
+issued attacks, held, or went somewhere else. This is after-match diagnostic output only; bot
+code cannot read it.
+
+From the command line, opt in with:
+
+```powershell
+./scripts/run-bot.ps1 -Map tiberium-rift.oramap -DecisionTrace C:\tmp\decisions-14.jsonl
 ```
 
 ### Watching it back
@@ -367,14 +389,16 @@ ships one — `Reference` — as both the example and the opponent to beat.
 A bot owns several **doctrines** and decides between them as the match turns. The reference bot
 has four: `Opening`, `Scout`, `Defence` and `Attack`.
 
-Start your own by copying it:
+Create your own from the small starter template:
 
 ```powershell
-cp -r bots/Reference bots/MyRush
+./scripts/new-bot.ps1 -Name MyRush
 cd bots/MyRush
-# rename ReferenceBot.csproj / .sln, and the class + Name in ReferenceBot.cs
-dotnet build
+dotnet test .\Tests\MyRush.Tests.csproj
 ```
+
+The launcher's **New bot…** button performs the same operation and selects the new project.
+Unlike copying `Reference`, the generated bot does not inherit an already-developed strategy.
 
 Open `MyRush/Doctrines/` — everything about how your army fights one way is declared there:
 
@@ -384,11 +408,11 @@ b.Train("Infantry", "e1").Until(10);   // what to train
 b.Assign<DefensiveMode>().ToAll();     // how units behave
 ```
 
-And `MyRush/Logic/ReferenceBotLogic.cs` decides which of them is the right one:
+And `MyRush/Logic/StarterLogic.cs` keeps combat decisions pure and testable:
 
 ```csharp
-if (s.BuildingsLost > 0)
-    return DoctrineDecision.SwitchTo("Defence", "losing buildings");
+if (!state.HasWeapon)
+    return UnitDecision.Continue;
 ```
 
 That rule is a pure function of what your side can see, so you can test it without a game:
@@ -397,7 +421,7 @@ That rule is a pure function of what your side can see, so you can test it witho
 dotnet test bots/MyRush/Tests
 ```
 
-Point the launcher at `bots/MyRush/ReferenceBot.csproj` and press **Launch battle**. It is loaded
+Point the launcher at `bots/MyRush/MyRush.csproj` and press **Fight**. It is loaded
 before the first tick, so there is nothing to type — but if you want to check, or to take a hand:
 
 ```
@@ -413,32 +437,56 @@ Full guide: [writing-bots.md](writing-bots.md).
 ## 6. The iteration loop
 
 **Write your modes before the match, then commit to them.** The battle is the test of what you
-wrote, not a live coding session — so there's no mid-match code editing by design.
+wrote, not a live coding session — so there is no mid-match code editing by design.
 
 That makes the fast feedback loop the tests, not the game:
 
 ```powershell
-dotnet test src/AutoCnC.Modes.Core.Tests     # ~20ms, no game, no engine build
+dotnet test src/AutoCnC.Core.Tests           # milliseconds, no game, no engine build
 ```
 
-To make your own logic testable that way, put the judgement in a pure function in
-`src/AutoCnC.Modes.Core` and call it from `OnTick`. `DefensiveLogic` is the worked example.
-Details in [writing-bots.md](writing-bots.md).
+To make your own logic testable that way, put the judgement in a pure function under your bot's
+`Logic/` folder and call it from `OnTick`. `StarterLogic` and the reference bot's logic classes
+are worked examples. Details are in [writing-bots.md](writing-bots.md).
 
 Full loop:
 
 ```powershell
 # 1. edit your bot's *.cs in your IDE
-dotnet test src/AutoCnC.Core.Tests         # 2. check the logic
-./scripts/launcher.ps1                     # 3. press Launch battle  (close the game first!)
+dotnet test bots/MyRush/Tests              # 2. check the logic
+./scripts/launcher.ps1                     # 3. Deploy bot, then Fight
 ```
 
-**Launch battle** builds your bot and starts the game in one step, and runs its tests on
-the way past if you tick **Run its tests first**. From a terminal that whole loop is one line:
+**Fight** builds your bot and starts the game in one step, and runs its tests on the way past if
+you tick **Run its tests first**. From a terminal that whole loop is one line:
 
 ```powershell
 ./scripts/run-bot.ps1 -Test -Map tiberium-rift.oramap -Difficulty Hard
 ```
+
+Every launcher fight is durable under `%LOCALAPPDATA%\AutoCnC\TrainingRuns`: manifest, telemetry,
+battle log, decision trace, replay, and result. After it ends there are two equally supported
+paths:
+
+1. **Open code** — make the next change yourself, deploy, and fight again.
+2. **Analyze & improve** — let a configured local coding agent inspect that evidence and edit the
+   bot. GitHub Copilot CLI is the default, but **Agent settings** accepts any executable and
+   argument list using `{prompt}` or `{promptFile}`.
+
+The AI path is not an unattended loop. The launcher snapshots source first, the wrapper reruns
+tests and deploys after the agent exits, and **Agent workspace** opens a dedicated Improvement
+window that streams its colored terminal progress. The same window exposes the exact prompt,
+shared game guide, fight manifest, changed files, and `game-rules.json`—a generated snapshot of
+units, health, armor, movement, build data, armaments, range, reload, projectile, damage, and armor
+modifiers from OpenRA's resolved runtime rules. Use **Restore previous iteration** to put the exact
+pre-agent source back. You decide when the next fight runs.
+
+Fight and rules JSON are shown as collapsible trees. When the run finishes, the agent drafts an
+entire replacement prompt template in **Next prompt***. Edit and approve it to make it the prompt
+used for the next round; the launcher inserts that round's paths, evidence, result, and source
+revision through required placeholders. This replaces rather than appends, so the prompt can get
+more focused without growing indefinitely. While a build, fight, or improvement is running, the
+launcher taskbar icon shows indeterminate progress.
 
 And if you touch the mod's YAML or traits, validate the wiring:
 

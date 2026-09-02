@@ -49,12 +49,19 @@ namespace AutoCnC.Launcher
 		readonly Queue<ScriptJob> queue = new();
 		readonly MatchLog matchLog = new();
 		readonly BattleEventLog battleLog = new();
+		readonly TaskbarProgress taskbarProgress = new();
 
 		/// <summary>Script output produced before there was a window to put it in.</summary>
 		readonly List<string> pendingOutput = [];
 
 		RepoLayout repo;
+		ScriptJob activeJob;
+		TrainingRun activeRun;
+		TrainingRun lastRun;
+		DateTime battleStartedUtc;
+		string replayBeforeBattle;
 		bool stopRequested;
+		bool closing;
 		bool battleRunning;
 		bool battleFinished;
 
@@ -71,16 +78,24 @@ namespace AutoCnC.Launcher
 		Button launchButton;
 		Button buildButton;
 		Button platformButton;
+		Button newBotButton;
+		Button openCodeButton;
+		Button improveButton;
+		Button reviewButton;
+		Button restoreButton;
+		Button runFolderButton;
 		Button stopButton;
 		Button replayButton;
 		GroupBox botGroup;
 		GroupBox battleGroup;
+		GroupBox trainingGroup;
 		Panel battleBanner;
 		Label battleBannerText;
 		TableLayoutPanel root;
 		StatusStrip status;
 		ResultsWindow resultsWindow;
 		OutputWindow outputWindow;
+		ImprovementWindow improvementWindow;
 		Timer matchTimer;
 		ToolStripStatusLabel statusLabel;
 
@@ -94,7 +109,11 @@ namespace AutoCnC.Launcher
 
 			// Both fire on a background thread, and a script can still be writing while the
 			// window is going away.
-			runner.Output += line => Post(() => Append(line));
+			runner.Output += line =>
+			{
+				var job = activeJob;
+				Post(() => RouteJobOutput(job, line));
+			};
 			runner.Finished += code => Post(() => JobFinished(code));
 		}
 
@@ -135,11 +154,12 @@ namespace AutoCnC.Launcher
 			{
 				Dock = DockStyle.Fill,
 				ColumnCount = 1,
-				RowCount = 6,
+				RowCount = 7,
 				Padding = new Padding(10)
 			};
 
 			root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+			root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 			root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 			root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 			root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -154,8 +174,9 @@ namespace AutoCnC.Launcher
 			root.Controls.Add(BuildBotGroup(), 0, 0);
 			root.Controls.Add(BuildBattleGroup(), 0, 1);
 			root.Controls.Add(BuildActionRow(), 0, 2);
-			root.Controls.Add(BuildBattleBanner(), 0, 3);
-			root.Controls.Add(BuildRepositoryRow(), 0, 5);
+			root.Controls.Add(BuildTrainingGroup(), 0, 3);
+			root.Controls.Add(BuildBattleBanner(), 0, 4);
+			root.Controls.Add(BuildRepositoryRow(), 0, 6);
 
 			var status = new StatusStrip();
 			statusLabel = new ToolStripStatusLabel("Starting up…") { Spring = true, TextAlign = ContentAlignment.MiddleLeft };
@@ -221,6 +242,8 @@ namespace AutoCnC.Launcher
 
 			var options = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, Margin = new Padding(0) };
 			runTestsBox = new CheckBox { Text = "Run its tests first", AutoSize = true };
+			newBotButton = SmallButton("New bot…", NewBot);
+			newBotButton.Margin = new Padding(16, 0, 0, 0);
 
 			var useReference = new LinkLabel
 			{
@@ -236,6 +259,7 @@ namespace AutoCnC.Launcher
 			};
 
 			options.Controls.Add(runTestsBox);
+			options.Controls.Add(newBotButton);
 			options.Controls.Add(useReference);
 
 			grid.Controls.Add(new Label { Text = string.Empty, AutoSize = true }, 0, 1);
@@ -311,10 +335,10 @@ namespace AutoCnC.Launcher
 		{
 			var row = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, Margin = new Padding(0, 6, 0, 6) };
 
-			launchButton = new Button { Text = "Launch battle", AutoSize = true, Padding = new Padding(12, 4, 12, 4) };
+			launchButton = new Button { Text = "Fight", AutoSize = true, Padding = new Padding(12, 4, 12, 4) };
 			launchButton.Click += (_, _) => Launch(play: true);
 
-			buildButton = new Button { Text = "Build only", AutoSize = true, Padding = new Padding(8, 4, 8, 4) };
+			buildButton = new Button { Text = "Deploy bot", AutoSize = true, Padding = new Padding(8, 4, 8, 4) };
 			buildButton.Click += (_, _) => Launch(play: false);
 
 			platformButton = new Button { Text = "Rebuild platform", AutoSize = true, Padding = new Padding(8, 4, 8, 4) };
@@ -344,6 +368,60 @@ namespace AutoCnC.Launcher
 			return row;
 		}
 
+		Control BuildTrainingGroup()
+		{
+			var actions = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, Margin = new Padding(0) };
+
+			openCodeButton = new Button { Text = "Open code", AutoSize = true, Padding = new Padding(8, 3, 8, 3) };
+			openCodeButton.Click += (_, _) => OpenCode();
+
+			improveButton = new Button { Text = "Analyze && improve", AutoSize = true, Padding = new Padding(8, 3, 8, 3) };
+			improveButton.Click += (_, _) => ImproveBot();
+
+			reviewButton = new Button { Text = "Agent workspace", AutoSize = true, Padding = new Padding(8, 3, 8, 3) };
+			reviewButton.Click += (_, _) => ReviewImprovement();
+
+			restoreButton = new Button { Text = "Restore previous iteration", AutoSize = true, Padding = new Padding(8, 3, 8, 3) };
+			restoreButton.Click += (_, _) => RestoreIteration();
+
+			runFolderButton = new Button { Text = "Open run", AutoSize = true, Padding = new Padding(8, 3, 8, 3) };
+			runFolderButton.Click += (_, _) => OpenTrainingRun();
+
+			var configure = new LinkLabel { Text = "Agent settings", AutoSize = true, Margin = new Padding(14, 8, 0, 0) };
+			configure.LinkClicked += (_, _) => ConfigureAgent();
+
+			actions.Controls.Add(openCodeButton);
+			actions.Controls.Add(improveButton);
+			actions.Controls.Add(reviewButton);
+			actions.Controls.Add(restoreButton);
+			actions.Controls.Add(runFolderButton);
+			actions.Controls.Add(configure);
+
+			var hint = new Label
+			{
+				AutoSize = true,
+				MaximumSize = new Size(680, 0),
+				ForeColor = SystemColors.GrayText,
+				Margin = new Padding(3, 7, 3, 0),
+				Text = "Agent workspace opens a dedicated window with the exact prompt, rules, and fight inputs. Analyze & improve streams colored progress there; edits remain reviewable and reversible."
+			};
+
+			var stack = new FlowLayoutPanel
+			{
+				AutoSize = true,
+				AutoSizeMode = AutoSizeMode.GrowAndShrink,
+				FlowDirection = FlowDirection.TopDown,
+				Dock = DockStyle.Fill,
+				Margin = new Padding(0),
+				WrapContents = false
+			};
+			stack.Controls.Add(actions);
+			stack.Controls.Add(hint);
+
+			trainingGroup = Group("Train the bot", stack);
+			return trainingGroup;
+		}
+
 		/// <summary>
 		/// What this window has to say while a battle is somewhere else.
 		/// </summary>
@@ -366,9 +444,13 @@ namespace AutoCnC.Launcher
 			var output = new LinkLabel { Text = "Output", AutoSize = true, Margin = new Padding(3, 0, 3, 3) };
 			output.LinkClicked += (_, _) => ShowOutputWindow();
 
+			var improvement = new LinkLabel { Text = "Improvement", AutoSize = true, Margin = new Padding(14, 0, 3, 3) };
+			improvement.LinkClicked += (_, _) => ShowImprovementWindow();
+
 			var links = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0) };
 			links.Controls.Add(results);
 			links.Controls.Add(output);
+			links.Controls.Add(improvement);
 
 			var stack = new FlowLayoutPanel
 			{
@@ -413,15 +495,6 @@ namespace AutoCnC.Launcher
 			return row;
 		}
 
-		/// <summary>Where the launcher asks the game to record the match it is about to start.</summary>
-		static string TelemetryPath => LogPath("autocnc-launcher.csv");
-
-		/// <summary>Where the launcher asks the game to record what your side saw and did.</summary>
-		static string BattleLogPath => LogPath("autocnc-launcher-battle.csv");
-
-		static string LogPath(string file) => Path.Combine(
-			Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "OpenRA", "Logs", file);
-
 		// -------------------------------------------------------------------
 		// The battle windows
 		// -------------------------------------------------------------------
@@ -463,6 +536,24 @@ namespace AutoCnC.Launcher
 			outputWindow.Show(this, 0.55f, 0.45f);
 			outputWindow.ShowBattle(battleFinished);
 			return outputWindow;
+		}
+
+		ImprovementWindow ShowImprovementWindow()
+		{
+			var created = false;
+			if (improvementWindow == null || improvementWindow.IsDisposed)
+			{
+				created = true;
+				improvementWindow = new ImprovementWindow();
+				improvementWindow.FormClosed += (_, _) => improvementWindow = null;
+				improvementWindow.NextPromptAccepted += AcceptNextPrompt;
+			}
+
+			improvementWindow.Show(this, 0.05f, 0.9f);
+			if (created && lastRun != null &&
+				(lastRun.Manifest.Agent != null || File.Exists(lastRun.PromptPath)))
+				improvementWindow.ShowAgentRun(lastRun);
+			return improvementWindow;
 		}
 
 		static TableLayoutPanel Grid(int columns)
@@ -516,7 +607,14 @@ namespace AutoCnC.Launcher
 			repositoryBox.Text = repo?.Root ?? string.Empty;
 			repositoryBox.TextChanged += (_, _) => RepositoryChanged();
 
-			botBox.Text = settings.BattleBotPath ?? repo?.ReferenceBot ?? string.Empty;
+			var rememberedBot = settings.BattleBotPath;
+			if (repo != null &&
+				!SamePath(repo.Root, settings.RepositoryRoot) &&
+				IsUnder(rememberedBot, settings.RepositoryRoot))
+				rememberedBot = null;
+
+			botBox.Text = rememberedBot ?? repo?.ReferenceBot ?? string.Empty;
+			LoadLastTrainingRun();
 			runTestsBox.Checked = settings.RunTests;
 			opponentsBox.Value = Math.Clamp(settings.Opponents, opponentsBox.Minimum, opponentsBox.Maximum);
 			Select(factionBox, settings.Faction);
@@ -527,6 +625,22 @@ namespace AutoCnC.Launcher
 			LoadMaps();
 			UpdateEnabledState();
 			FitToContent();
+		}
+
+		void LoadLastTrainingRun()
+		{
+			try
+			{
+				lastRun = TrainingRun.Load(settings.LastTrainingRunDirectory);
+			}
+			catch (IOException ex)
+			{
+				Append($"Could not read the last training run: {ex.Message}");
+			}
+			catch (System.Text.Json.JsonException ex)
+			{
+				Append($"Could not read the last training run: {ex.Message}");
+			}
 		}
 
 		void LoadSpeeds()
@@ -657,11 +771,32 @@ namespace AutoCnC.Launcher
 				return;
 
 			var busy = runner.IsRunning;
-			var ready = !busy && repo != null && BotExists() && mapBox.SelectedItem is MapInfo;
+			if (IsHandleCreated)
+				taskbarProgress.SetBusy(Handle, busy);
+			var compatible = repo?.SupportsTraining == true;
+			var ready = !busy && compatible && BotExists() && mapBox.SelectedItem is MapInfo;
+			var editable = BotExists() && BotWorkspace.ResolveProject(botBox.Text.Trim()) != null;
+			var agent = lastRun?.Manifest.Agent;
+			var lastRunMatches = LastRunMatchesSelectedBot();
+			var canRetryImprovement = agent == null || agent.ChangeCount == 0 || agent.RestoredUtc != null;
 
 			launchButton.Enabled = ready;
-			buildButton.Enabled = !busy && repo != null && BotExists();
+			buildButton.Enabled = !busy && compatible && BotExists();
 			platformButton.Enabled = !busy && repo != null;
+			newBotButton.Enabled = !busy && compatible && File.Exists(repo.NewBotScript);
+			openCodeButton.Enabled = !busy && editable;
+			improveButton.Enabled = !busy && compatible && File.Exists(repo.TrainBotScript) &&
+				lastRunMatches && lastRun?.IsEditable == true &&
+				lastRun.Manifest.CompletedUtc != null && canRetryImprovement &&
+				File.Exists(lastRun.BattleLogPath) &&
+				File.Exists(lastRun.TelemetryPath) &&
+				File.Exists(lastRun.DecisionTracePath);
+			reviewButton.Enabled = compatible && lastRunMatches &&
+				lastRun?.IsEditable == true && lastRun.Manifest.CompletedUtc != null;
+			restoreButton.Enabled = !busy && lastRunMatches && lastRun != null &&
+				agent?.ChangeCount > 0 && agent.RestoredUtc == null &&
+				File.Exists(lastRun.SnapshotManifestPath);
+			runFolderButton.Enabled = !busy && lastRun != null && Directory.Exists(lastRun.RunDirectory);
 			stopButton.Enabled = busy;
 
 			// A replay is only complete once the game that recorded it has exited.
@@ -674,6 +809,7 @@ namespace AutoCnC.Launcher
 			// button is already unavailable — the greying out is what says so.
 			botGroup.Enabled = !battleRunning;
 			battleGroup.Enabled = !battleRunning;
+			trainingGroup.Enabled = !battleRunning;
 
 			UpdateBattleBanner();
 
@@ -682,10 +818,18 @@ namespace AutoCnC.Launcher
 
 			if (repo == null)
 				Status("Point me at your AutoC&C checkout to get started.");
+			else if (!repo.SupportsTraining)
+				Status($"This checkout uses authoring API {repo.AuthoringApiVersion}; the launcher needs {RepoLayout.RequiredAuthoringApiVersion}. Select the checkout that built this launcher.");
 			else if (!repo.EngineFetched)
 				Status("The engine submodule is missing. Run ./scripts/setup.ps1 in the repository first.");
 			else if (!BotExists())
 				Status("Choose the battle bot project or assembly you want to play.");
+			else if (lastRunMatches && lastRun?.Manifest.Status == "finished" && lastRun.IsEditable)
+				Status("Fight saved. Edit manually, or analyze and improve it with the configured agent.");
+			else if (lastRun?.Manifest.Status == "improved")
+				Status("Improvement verified and deployed. Fight again to measure it.");
+			else if (lastRun?.Manifest.Status == "restored")
+				Status("The previous source iteration has been restored.");
 			else
 				Status(repo.EngineBuilt ? "Ready." : "Ready — the engine is not built yet, so the first launch will take a few minutes.");
 		}
@@ -712,6 +856,64 @@ namespace AutoCnC.Launcher
 		bool IsPrebuilt() =>
 			botBox.Text.Trim().EndsWith(".dll", StringComparison.OrdinalIgnoreCase);
 
+		static bool SamePath(string first, string second)
+		{
+			if (string.IsNullOrWhiteSpace(first) || string.IsNullOrWhiteSpace(second))
+				return false;
+
+			try
+			{
+				return string.Equals(
+					Path.TrimEndingDirectorySeparator(Path.GetFullPath(first)),
+					Path.TrimEndingDirectorySeparator(Path.GetFullPath(second)),
+					StringComparison.OrdinalIgnoreCase);
+			}
+			catch (ArgumentException)
+			{
+				return false;
+			}
+			catch (NotSupportedException)
+			{
+				return false;
+			}
+		}
+
+		static bool IsUnder(string path, string root)
+		{
+			if (string.IsNullOrWhiteSpace(path) || string.IsNullOrWhiteSpace(root))
+				return false;
+
+			try
+			{
+				var fullRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
+				var fullPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+				return string.Equals(fullPath, fullRoot, StringComparison.OrdinalIgnoreCase) ||
+					fullPath.StartsWith(fullRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+			}
+			catch (ArgumentException)
+			{
+				return false;
+			}
+			catch (NotSupportedException)
+			{
+				return false;
+			}
+		}
+
+		bool LastRunMatchesSelectedBot()
+		{
+			if (lastRun == null || !BotExists())
+				return false;
+
+			var selectedProject = BotWorkspace.ResolveProject(botBox.Text.Trim());
+			if (selectedProject != null && lastRun.Manifest.BotProject != null)
+				return string.Equals(Path.GetFullPath(selectedProject),
+					Path.GetFullPath(lastRun.Manifest.BotProject), StringComparison.OrdinalIgnoreCase);
+
+			return string.Equals(Path.GetFullPath(botBox.Text.Trim()),
+				Path.GetFullPath(lastRun.Manifest.BotPath), StringComparison.OrdinalIgnoreCase);
+		}
+
 		// -------------------------------------------------------------------
 		// Browsing
 		// -------------------------------------------------------------------
@@ -734,6 +936,97 @@ namespace AutoCnC.Launcher
 
 			if (dialog.ShowDialog(this) == DialogResult.OK)
 				botBox.Text = dialog.FileName;
+		}
+
+		void NewBot(object sender, EventArgs e)
+		{
+			if (repo == null || !File.Exists(repo.NewBotScript))
+				return;
+
+			using var dialog = new NewBotDialog(Path.Combine(repo.Root, "bots"));
+			if (dialog.ShowDialog(this) != DialogResult.OK)
+				return;
+
+			Save();
+			ClearOutput();
+			queue.Clear();
+
+			var arguments = new List<string>
+			{
+				"-Name", dialog.BotName,
+				"-OutputDirectory", dialog.OutputDirectory
+			};
+			if (!repo.PackagesBuilt)
+				arguments.Add("-NoBuild");
+
+			queue.Enqueue(new ScriptJob
+			{
+				Title = $"Creating battle bot {dialog.BotName}",
+				ScriptPath = repo.NewBotScript,
+				Arguments = arguments,
+				Completed = FinishBotCreation
+			});
+
+			RunNext();
+		}
+
+		void FinishBotCreation(int exitCode)
+		{
+			if (exitCode != 0)
+				return;
+
+			const string Prefix = "AUTOCNC_BOT_PROJECT=";
+			var line = runner.LastOutput.LastOrDefault(output =>
+				output.StartsWith(Prefix, StringComparison.OrdinalIgnoreCase));
+			var project = line?[Prefix.Length..].Trim();
+
+			if (string.IsNullOrEmpty(project) || !File.Exists(project))
+			{
+				Append("The bot was created, but the script did not report its project path.");
+				return;
+			}
+
+			botBox.Text = project;
+			Save();
+			Status("Bot created and selected. Open its code or fight the starter bot.");
+		}
+
+		void OpenCode()
+		{
+			var project = BotWorkspace.ResolveProject(botBox.Text.Trim());
+			if (project == null)
+				return;
+
+			var directory = Path.GetDirectoryName(project);
+			var solution = Directory.EnumerateFiles(directory, "*.sln", SearchOption.TopDirectoryOnly)
+				.OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+				.FirstOrDefault();
+			try
+			{
+				Process.Start(new ProcessStartInfo(solution ?? project) { UseShellExecute = true });
+			}
+			catch (System.ComponentModel.Win32Exception ex)
+			{
+				MessageBox.Show(this, $"Windows could not open the bot solution: {ex.Message}", "AutoC&C",
+					MessageBoxButtons.OK, MessageBoxIcon.Error);
+			}
+		}
+
+		void OpenTrainingRun()
+		{
+			if (lastRun != null)
+				OpenFolder(lastRun.RunDirectory, "No training run yet");
+		}
+
+		void ConfigureAgent()
+		{
+			using var dialog = new AgentSettingsDialog(settings.AgentCommand, settings.AgentArguments);
+			if (dialog.ShowDialog(this) != DialogResult.OK)
+				return;
+
+			settings.AgentCommand = dialog.AgentCommand;
+			settings.AgentArguments = dialog.AgentArguments;
+			settings.Save();
 		}
 
 		void BrowseRepository(object sender, EventArgs e)
@@ -840,6 +1133,15 @@ namespace AutoCnC.Launcher
 			if (repo == null || !BotExists())
 				return;
 
+			if (!repo.SupportsTraining)
+			{
+				MessageBox.Show(this,
+					$"The selected checkout uses authoring API {repo.AuthoringApiVersion}, but this launcher needs {RepoLayout.RequiredAuthoringApiVersion}. " +
+					"Select the repository that this launcher was built from.",
+					"AutoC&C", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+				return;
+			}
+
 			if (!repo.EngineFetched)
 			{
 				MessageBox.Show(this,
@@ -853,7 +1155,24 @@ namespace AutoCnC.Launcher
 			queue.Clear();
 
 			if (play)
-				StartWatchingBattle();
+			{
+				try
+				{
+					StartWatchingBattle();
+				}
+				catch (IOException ex)
+				{
+					MessageBox.Show(this, $"Could not create the training run: {ex.Message}", "AutoC&C",
+						MessageBoxButtons.OK, MessageBoxIcon.Error);
+					return;
+				}
+				catch (UnauthorizedAccessException ex)
+				{
+					MessageBox.Show(this, $"Could not create the training run: {ex.Message}", "AutoC&C",
+						MessageBoxButtons.OK, MessageBoxIcon.Error);
+					return;
+				}
+			}
 
 			// The engine is a several-minute build, so only do it when it genuinely is not there.
 			if (!repo.EngineBuilt)
@@ -897,7 +1216,17 @@ namespace AutoCnC.Launcher
 				arguments.AddRange(["-GameSpeed", speed.Id]);
 
 			if (play)
-				arguments.AddRange(["-Telemetry", TelemetryPath, "-BattleLog", BattleLogPath]);
+			{
+				if (activeRun == null)
+					throw new InvalidOperationException("A fight must have a training run before it can launch.");
+
+				arguments.AddRange(
+				[
+					"-Telemetry", activeRun.TelemetryPath,
+					"-BattleLog", activeRun.BattleLogPath,
+					"-DecisionTrace", activeRun.DecisionTracePath
+				]);
+			}
 
 			if (runTestsBox.Checked && !IsPrebuilt())
 				arguments.Add("-Test");
@@ -920,24 +1249,30 @@ namespace AutoCnC.Launcher
 		/// </remarks>
 		void StartWatchingBattle()
 		{
+			var map = (MapInfo)mapBox.SelectedItem;
+			var difficulty = difficultyBox.SelectedItem as DifficultyLevel;
+			var speed = speedBox.SelectedItem as GameSpeedInfo;
+
+			activeRun = TrainingRun.Create(botBox.Text.Trim(), new TrainingBattleConfiguration
+			{
+				Map = map?.Id,
+				Difficulty = difficulty?.Name,
+				Opponents = (int)opponentsBox.Value,
+				Faction = ((FactionChoice)factionBox.SelectedItem).Value,
+				BotFaction = ((FactionChoice)botFactionBox.SelectedItem).Value,
+				GameSpeed = speed?.Id
+			});
+			lastRun = activeRun;
+			settings.LastTrainingRunDirectory = activeRun.RunDirectory;
+			settings.Save();
+			battleStartedUtc = DateTime.UtcNow;
+			replayBeforeBattle = NewestReplay()?.FullName;
+
 			battleRunning = true;
 			battleFinished = false;
 
-			foreach (var path in new[] { TelemetryPath, BattleLogPath })
-			{
-				try
-				{
-					if (File.Exists(path))
-						File.Delete(path);
-				}
-				catch (IOException)
-				{
-					// Still held by a match that is on its way out. The game truncates it anyway.
-				}
-			}
-
-			matchLog.Watch(TelemetryPath);
-			battleLog.Watch(BattleLogPath);
+			matchLog.Watch(activeRun.TelemetryPath);
+			battleLog.Watch(activeRun.BattleLogPath);
 
 			ShowResultsWindow();
 			ShowOutputWindow().ClearBattle();
@@ -946,7 +1281,7 @@ namespace AutoCnC.Launcher
 		}
 
 		/// <summary>Stops polling, after one last read so the end of the battle is on both windows.</summary>
-		void StopWatchingBattle()
+		void StopWatchingBattle(string status)
 		{
 			if (!battleRunning)
 				return;
@@ -955,6 +1290,44 @@ namespace AutoCnC.Launcher
 			battleFinished = true;
 			matchTimer.Stop();
 			PollBattle(finished: true);
+
+			var finishedRun = activeRun;
+			activeRun = null;
+			if (finishedRun != null)
+			{
+				try
+				{
+					finishedRun.Finish(status, matchLog, battleLog);
+
+					var replay = NewestReplay();
+					var isNew = replay != null &&
+						(!string.Equals(replay.FullName, replayBeforeBattle, StringComparison.OrdinalIgnoreCase) ||
+							replay.LastWriteTimeUtc >= battleStartedUtc.AddSeconds(-2));
+					finishedRun.CaptureReplay(isNew ? replay.FullName : null);
+
+					if (finishedRun.IsEditable &&
+						File.Exists(finishedRun.BattleLogPath) &&
+						File.Exists(finishedRun.TelemetryPath) &&
+						File.Exists(finishedRun.DecisionTracePath))
+						EnsureAgentContext(finishedRun);
+				}
+				catch (IOException ex)
+				{
+					Append($"Could not finish the training run: {ex.Message}");
+				}
+				catch (UnauthorizedAccessException ex)
+				{
+					Append($"Could not finish the training run: {ex.Message}");
+				}
+				catch (InvalidOperationException ex)
+				{
+					Append($"Could not prepare the agent inputs: {ex.Message}");
+				}
+
+				lastRun = finishedRun;
+				settings.LastTrainingRunDirectory = finishedRun.RunDirectory;
+				settings.Save();
+			}
 		}
 
 		/// <summary>Reads whatever the running game has written since last time.</summary>
@@ -965,6 +1338,230 @@ namespace AutoCnC.Launcher
 
 			if ((battleLog.Refresh() || finished) && outputWindow != null)
 				outputWindow.ShowBattle(finished);
+		}
+
+		void ImproveBot()
+		{
+			var previousAgent = lastRun?.Manifest.Agent;
+			var canRetry = previousAgent == null || previousAgent.ChangeCount == 0 ||
+				previousAgent.RestoredUtc != null;
+			if (repo == null || !LastRunMatchesSelectedBot() ||
+				lastRun?.IsEditable != true || !canRetry)
+				return;
+
+			try
+			{
+				if (!File.Exists(lastRun.SnapshotManifestPath))
+					WorkspaceSnapshot.Capture(lastRun);
+
+				if (!File.Exists(lastRun.GameRulesPath))
+					AgentRulesExporter.Export(repo, lastRun.GameRulesPath);
+
+				TrainingAgent.Prepare(lastRun, repo.AgentGameGuide, lastRun.GameRulesPath,
+					CurrentPromptTemplate(), settings.AgentCommand, settings.AgentArguments);
+				lastRun.AgentStarted(settings.AgentCommand);
+			}
+			catch (InvalidOperationException ex)
+			{
+				MessageBox.Show(this, ex.Message, "AutoC&C", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+				return;
+			}
+			catch (IOException ex)
+			{
+				MessageBox.Show(this, $"Could not prepare the improvement: {ex.Message}", "AutoC&C",
+					MessageBoxButtons.OK, MessageBoxIcon.Error);
+				return;
+			}
+			catch (UnauthorizedAccessException ex)
+			{
+				MessageBox.Show(this, $"Could not prepare the improvement: {ex.Message}", "AutoC&C",
+					MessageBoxButtons.OK, MessageBoxIcon.Error);
+				return;
+			}
+
+			Save();
+			ShowImprovementWindow().StartAgentRun(lastRun);
+			queue.Clear();
+			queue.Enqueue(new ScriptJob
+			{
+				Title = "Analyzing the fight and improving the bot",
+				ScriptPath = repo.TrainBotScript,
+				Arguments =
+				[
+					"-BattleBot", lastRun.Manifest.BotProject,
+					"-RunDirectory", lastRun.RunDirectory,
+					"-AgentConfiguration", lastRun.AgentConfigurationPath
+				],
+				PreserveColor = true,
+				Output = AppendImprovementOutput,
+				Completed = FinishImprovement
+			});
+
+			RunNext();
+		}
+
+		void FinishImprovement(int exitCode)
+		{
+			if (lastRun == null)
+				return;
+
+			var suggestedNextPrompt = exitCode == 0
+				? TrainingAgent.FindSuggestedNextPrompt(runner.LastOutput)
+				: null;
+			try
+			{
+				var changes = WorkspaceSnapshot.Compare(lastRun);
+				lastRun.AgentFinished(exitCode, changes.Count, suggestedNextPrompt);
+				if (!closing && improvementWindow != null)
+					improvementWindow.CompleteAgentRun(lastRun);
+			}
+			catch (InvalidDataException ex)
+			{
+				AppendImprovementOutput($"Could not record the agent's changes: {ex.Message}");
+				lastRun.AgentFinished(exitCode, 0, suggestedNextPrompt);
+			}
+			catch (IOException ex)
+			{
+				AppendImprovementOutput($"Could not record the agent's changes: {ex.Message}");
+				lastRun.AgentFinished(exitCode, 0, suggestedNextPrompt);
+			}
+			catch (System.Text.Json.JsonException ex)
+			{
+				AppendImprovementOutput($"Could not record the agent's changes: {ex.Message}");
+				lastRun.AgentFinished(exitCode, 0, suggestedNextPrompt);
+			}
+		}
+
+		void ReviewImprovement()
+		{
+			if (repo == null || lastRun?.IsEditable != true)
+				return;
+
+			try
+			{
+				if (!File.Exists(lastRun.PromptPath) ||
+					!File.Exists(lastRun.GameGuidePath) ||
+					!File.Exists(lastRun.GameRulesPath) ||
+					!File.Exists(lastRun.FightManifestPath))
+					EnsureAgentContext(lastRun);
+
+				ShowImprovementWindow().ShowAgentRun(lastRun,
+					promptFirst: lastRun.Manifest.Agent == null);
+			}
+			catch (IOException ex)
+			{
+				MessageBox.Show(this, $"Could not prepare the agent workspace: {ex.Message}", "AutoC&C",
+					MessageBoxButtons.OK, MessageBoxIcon.Error);
+			}
+			catch (UnauthorizedAccessException ex)
+			{
+				MessageBox.Show(this, $"Could not prepare the agent workspace: {ex.Message}", "AutoC&C",
+					MessageBoxButtons.OK, MessageBoxIcon.Error);
+			}
+			catch (InvalidOperationException ex)
+			{
+				MessageBox.Show(this, ex.Message, "AutoC&C",
+					MessageBoxButtons.OK, MessageBoxIcon.Warning);
+			}
+		}
+
+		void EnsureAgentContext(TrainingRun run)
+		{
+			if (!File.Exists(run.GameRulesPath))
+				AgentRulesExporter.Export(repo, run.GameRulesPath);
+
+			TrainingAgent.PrepareContext(run, repo.AgentGameGuide, run.GameRulesPath,
+				CurrentPromptTemplate());
+		}
+
+		string CurrentPromptTemplate()
+		{
+			if (!string.IsNullOrWhiteSpace(settings.AgentPromptTemplate))
+				return settings.AgentPromptTemplate;
+
+			if (!File.Exists(repo.AgentPromptTemplate))
+				throw new FileNotFoundException("The default agent prompt template is missing.",
+					repo.AgentPromptTemplate);
+
+			var template = File.ReadAllText(repo.AgentPromptTemplate);
+			if (settings.AgentPromptGuidance is { Length: > 0 })
+			{
+				var legacy = "## Player guidance migrated from earlier runs" +
+					Environment.NewLine + Environment.NewLine +
+					string.Join(Environment.NewLine, settings.AgentPromptGuidance
+						.Where(g => !string.IsNullOrWhiteSpace(g))
+						.Select(g => "- " + g.Trim())) +
+					Environment.NewLine + Environment.NewLine +
+					"{nextPromptContract}";
+				template = template.Replace("{nextPromptContract}", legacy,
+					StringComparison.Ordinal);
+			}
+
+			settings.AgentPromptTemplate = template;
+			settings.AgentPromptGuidance = null;
+			settings.Save();
+			return template;
+		}
+
+		void AcceptNextPrompt(TrainingRun run, string promptTemplate)
+		{
+			if (run == null)
+				return;
+
+			if (!TrainingAgent.ValidatePromptTemplate(promptTemplate, out var error))
+			{
+				MessageBox.Show(improvementWindow,
+					"The proposed next prompt cannot be saved yet. " + error,
+					"AutoC&C", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+				return;
+			}
+
+			var approved = promptTemplate.Trim();
+			settings.AgentPromptTemplate = approved;
+			settings.AgentPromptGuidance = null;
+			if (run.Manifest.Agent != null)
+				run.AcceptSuggestedNextPrompt(approved);
+			settings.Save();
+			improvementWindow?.MarkNextPromptSaved();
+		}
+
+		void RestoreIteration()
+		{
+			if (lastRun == null || !LastRunMatchesSelectedBot() ||
+				lastRun.Manifest.Agent?.ChangeCount <= 0)
+				return;
+
+			var answer = MessageBox.Show(this,
+				"Restore every source file to the snapshot taken immediately before the improvement agent ran?",
+				"Restore previous iteration", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+			if (answer != DialogResult.Yes)
+				return;
+
+			try
+			{
+				WorkspaceSnapshot.Restore(lastRun);
+				ShowImprovementWindow().ShowAgentRun(lastRun);
+				Status("The previous source iteration has been restored.");
+				UpdateEnabledState();
+			}
+			catch (InvalidDataException ex)
+			{
+				MessageBox.Show(this, ex.Message, "AutoC&C", MessageBoxButtons.OK, MessageBoxIcon.Error);
+			}
+			catch (IOException ex)
+			{
+				MessageBox.Show(this, $"Could not restore the source snapshot: {ex.Message}", "AutoC&C",
+					MessageBoxButtons.OK, MessageBoxIcon.Error);
+			}
+			catch (UnauthorizedAccessException ex)
+			{
+				MessageBox.Show(this, $"Could not restore the source snapshot: {ex.Message}", "AutoC&C",
+					MessageBoxButtons.OK, MessageBoxIcon.Error);
+			}
+			catch (InvalidOperationException ex)
+			{
+				MessageBox.Show(this, ex.Message, "AutoC&C", MessageBoxButtons.OK, MessageBoxIcon.Error);
+			}
 		}
 
 		void RebuildPlatform()
@@ -991,25 +1588,38 @@ namespace AutoCnC.Launcher
 			if (queue.Count == 0)
 			{
 				// The last job has finished, so the battle — if there was one — is over.
-				StopWatchingBattle();
+				StopWatchingBattle("finished");
 				Status("Done.");
 				UpdateEnabledState();
 				return;
 			}
 
 			var job = queue.Dequeue();
-			Append($"=== {job.Title} ===");
+			activeJob = job;
+			RouteJobOutput(job, $"=== {job.Title} ===");
 			Status(job.Title + "…");
 
 			try
 			{
 				runner.Start(job, repo.Root);
 			}
-			catch (Exception ex)
+			catch (System.ComponentModel.Win32Exception ex)
 			{
-				Append($"Could not start PowerShell: {ex.Message}");
+				RouteJobOutput(job, $"Could not start PowerShell: {ex.Message}");
 				Status("Failed to start.");
 				queue.Clear();
+				activeJob = null;
+				InvokeJobCompleted(job, -1);
+				StopWatchingBattle("failed");
+			}
+			catch (InvalidOperationException ex)
+			{
+				RouteJobOutput(job, $"Could not start PowerShell: {ex.Message}");
+				Status("Failed to start.");
+				queue.Clear();
+				activeJob = null;
+				InvokeJobCompleted(job, -1);
+				StopWatchingBattle("failed");
 			}
 
 			UpdateEnabledState();
@@ -1017,12 +1627,16 @@ namespace AutoCnC.Launcher
 
 		void JobFinished(int exitCode)
 		{
+			var completed = activeJob;
+			activeJob = null;
+
 			if (stopRequested)
 			{
 				// Killing the process tree gives us whatever exit code Windows felt like, so the
 				// only honest thing to report is that you asked for it to stop.
-				StopWatchingBattle();
-				Append("=== Stopped ===");
+				RouteJobOutput(completed, "=== Stopped ===");
+				InvokeJobCompleted(completed, exitCode);
+				StopWatchingBattle("stopped");
 				Status("Stopped.");
 				stopRequested = false;
 				UpdateEnabledState();
@@ -1031,17 +1645,50 @@ namespace AutoCnC.Launcher
 
 			if (exitCode != 0)
 			{
-				StopWatchingBattle();
-				Append($"=== Finished with exit code {exitCode} ===");
-				Status($"Stopped with exit code {exitCode}. See the output window.");
+				RouteJobOutput(completed, $"=== Finished with exit code {exitCode} ===");
+				InvokeJobCompleted(completed, exitCode);
+				StopWatchingBattle("failed");
+				Status($"Stopped with exit code {exitCode}. See the {(completed?.Output == null ? "output" : "improvement")} window.");
 				queue.Clear();
-				ShowOutputWindow();
+				if (completed?.Output == null)
+					ShowOutputWindow();
+				else if (improvementWindow == null && lastRun != null)
+					ShowImprovementWindow().ShowAgentRun(lastRun);
 				UpdateEnabledState();
 				return;
 			}
 
-			Append("=== Finished ===");
+			RouteJobOutput(completed, "=== Finished ===");
+			InvokeJobCompleted(completed, exitCode);
 			RunNext();
+		}
+
+		void InvokeJobCompleted(ScriptJob job, int exitCode)
+		{
+			try
+			{
+				job?.Completed?.Invoke(exitCode);
+			}
+			catch (InvalidDataException ex)
+			{
+				RouteJobOutput(job, $"Could not finish processing '{job?.Title}': {ex.Message}");
+			}
+			catch (IOException ex)
+			{
+				RouteJobOutput(job, $"Could not finish processing '{job?.Title}': {ex.Message}");
+			}
+			catch (UnauthorizedAccessException ex)
+			{
+				RouteJobOutput(job, $"Could not finish processing '{job?.Title}': {ex.Message}");
+			}
+			catch (System.Text.Json.JsonException ex)
+			{
+				RouteJobOutput(job, $"Could not finish processing '{job?.Title}': {ex.Message}");
+			}
+			catch (InvalidOperationException ex)
+			{
+				RouteJobOutput(job, $"Could not finish processing '{job?.Title}': {ex.Message}");
+			}
 		}
 
 		void StopEverything()
@@ -1070,6 +1717,26 @@ namespace AutoCnC.Launcher
 			ShowOutputWindow().ClearBuildOutput();
 		}
 
+		void RouteJobOutput(ScriptJob job, string line) =>
+			RouteJobOutput(job, TerminalLine.Plain(line));
+
+		void RouteJobOutput(ScriptJob job, TerminalLine line)
+		{
+			if (job?.Output != null)
+				job.Output(line);
+			else
+				Append(line.PlainText);
+		}
+
+		void AppendImprovementOutput(string line) =>
+			AppendImprovementOutput(TerminalLine.Plain(line));
+
+		void AppendImprovementOutput(TerminalLine line)
+		{
+			if (improvementWindow != null && !improvementWindow.IsDisposed)
+				improvementWindow.AppendAgentOutput(line);
+		}
+
 		void Append(string line)
 		{
 			// Scripts can write before the window exists, and before it exists again after being
@@ -1096,6 +1763,7 @@ namespace AutoCnC.Launcher
 			settings.Faction = ((FactionChoice)factionBox.SelectedItem).Value;
 			settings.BotFaction = ((FactionChoice)botFactionBox.SelectedItem).Value;
 			settings.RunTests = runTestsBox.Checked;
+			settings.LastTrainingRunDirectory = lastRun?.RunDirectory;
 			settings.Save();
 		}
 
@@ -1116,10 +1784,27 @@ namespace AutoCnC.Launcher
 				}
 
 				queue.Clear();
+				var stoppedJob = activeJob;
+				activeJob = null;
+				closing = true;
+				stopRequested = true;
 				runner.Stop();
+				InvokeJobCompleted(stoppedJob, -1);
+				StopWatchingBattle("stopped");
 			}
 
+			if (IsHandleCreated)
+				taskbarProgress.SetBusy(Handle, busy: false);
+
 			base.OnFormClosing(e);
+		}
+
+		protected override void Dispose(bool disposing)
+		{
+			if (disposing)
+				taskbarProgress.Dispose();
+
+			base.Dispose(disposing);
 		}
 	}
 }

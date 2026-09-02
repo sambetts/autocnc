@@ -13,6 +13,8 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Text;
+using System.Text.Json;
 
 namespace AutoCnC.Launcher
 {
@@ -22,6 +24,9 @@ namespace AutoCnC.Launcher
 		public string Title { get; init; }
 		public string ScriptPath { get; init; }
 		public IReadOnlyList<string> Arguments { get; init; } = [];
+		public bool PreserveColor { get; init; }
+		public Action<TerminalLine> Output { get; init; }
+		public Action<int> Completed { get; init; }
 	}
 
 	/// <summary>
@@ -36,16 +41,42 @@ namespace AutoCnC.Launcher
 	{
 		/// <summary>How long a closing game gets to write its replay out before it is killed.</summary>
 		const int CloseTimeout = 8000;
+		static readonly string EncodedRunner = Convert.ToBase64String(Encoding.Unicode.GetBytes(
+			"$utf8 = New-Object System.Text.UTF8Encoding $false\n" +
+			"$OutputEncoding = [Console]::OutputEncoding = $utf8\n" +
+			"if (Get-Variable PSStyle -ErrorAction SilentlyContinue) {\n" +
+			"    $PSStyle.OutputRendering = if ($env:AUTOCNC_PRESERVE_COLOR -eq '1') { 'Ansi' } else { 'PlainText' }\n" +
+			"}\n" +
+			"$job = @((ConvertFrom-Json -InputObject $env:AUTOCNC_SCRIPT_JOB))\n" +
+			"$script = [string]$job[0]\n" +
+			"$command = Get-Command -Name $script -CommandType ExternalScript\n" +
+			"$parameters = @{}\n" +
+			"for ($i = 1; $i -lt $job.Count; $i++) {\n" +
+			"    $name = ([string]$job[$i]).TrimStart('-')\n" +
+			"    $metadata = $command.Parameters[$name]\n" +
+			"    if ($null -eq $metadata) { throw \"Unknown parameter '-$name' for $script.\" }\n" +
+			"    if ($metadata.ParameterType -eq [System.Management.Automation.SwitchParameter]) {\n" +
+			"        $parameters[$name] = $true\n" +
+			"    } else {\n" +
+			"        if (++$i -ge $job.Count) { throw \"Parameter '-$name' needs a value.\" }\n" +
+			"        $parameters[$name] = [string]$job[$i]\n" +
+			"    }\n" +
+			"}\n" +
+			"& $command @parameters\n"));
 
+		readonly object outputLock = new();
+		readonly List<string> currentOutput = [];
+		readonly TerminalTextParser terminalParser = new();
 		Process process;
 
 		/// <summary>Every line of output, in order, from both stdout and stderr.</summary>
-		public event Action<string> Output;
+		public event Action<TerminalLine> Output;
 
 		/// <summary>Raised when the script finishes, with its exit code.</summary>
 		public event Action<int> Finished;
 
 		public bool IsRunning => process != null;
+		public IReadOnlyList<string> LastOutput { get; private set; } = [];
 
 		public void Start(ScriptJob job, string workingDirectory)
 		{
@@ -59,8 +90,23 @@ namespace AutoCnC.Launcher
 				UseShellExecute = false,
 				CreateNoWindow = true,
 				RedirectStandardOutput = true,
-				RedirectStandardError = true
+				RedirectStandardError = true,
+				StandardOutputEncoding = Encoding.UTF8,
+				StandardErrorEncoding = Encoding.UTF8
 			};
+			if (job.PreserveColor)
+			{
+				startInfo.Environment.Remove("NO_COLOR");
+				startInfo.Environment["AUTOCNC_PRESERVE_COLOR"] = "1";
+				startInfo.Environment["CLICOLOR_FORCE"] = "1";
+				startInfo.Environment["FORCE_COLOR"] = "1";
+			}
+			else
+			{
+				startInfo.Environment["NO_COLOR"] = "1";
+				startInfo.Environment.Remove("CLICOLOR_FORCE");
+				startInfo.Environment.Remove("FORCE_COLOR");
+			}
 
 			// -NonInteractive so a script that decides to prompt fails fast instead of hanging
 			// behind a window nobody can see.
@@ -68,32 +114,78 @@ namespace AutoCnC.Launcher
 			startInfo.ArgumentList.Add("-NonInteractive");
 			startInfo.ArgumentList.Add("-ExecutionPolicy");
 			startInfo.ArgumentList.Add("Bypass");
-			startInfo.ArgumentList.Add("-File");
-			startInfo.ArgumentList.Add(job.ScriptPath);
+			startInfo.ArgumentList.Add("-OutputFormat");
+			startInfo.ArgumentList.Add("Text");
+			startInfo.ArgumentList.Add("-EncodedCommand");
+			startInfo.ArgumentList.Add(EncodedRunner);
 
-			foreach (var argument in job.Arguments)
-				startInfo.ArgumentList.Add(argument);
+			var invocation = new List<string> { job.ScriptPath };
+			invocation.AddRange(job.Arguments);
+			startInfo.Environment["AUTOCNC_SCRIPT_JOB"] = JsonSerializer.Serialize(invocation);
 
-			process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
-			process.OutputDataReceived += (_, e) => Emit(e.Data);
-			process.ErrorDataReceived += (_, e) => Emit(e.Data);
-			process.Exited += (_, _) =>
+			lock (outputLock)
 			{
-				var exited = process;
+				currentOutput.Clear();
+				LastOutput = [];
+				terminalParser.Reset();
+			}
 
+			var started = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
+			process = started;
+			started.OutputDataReceived += (_, e) => Emit(e.Data);
+			started.ErrorDataReceived += (_, e) => Emit(e.Data);
+			started.Exited += (_, _) =>
+			{
 				// The asynchronous readers can still have buffered lines at this point; the
 				// parameterless wait is what flushes them, so nothing is lost off the end.
-				exited.WaitForExit();
+				started.WaitForExit();
 
-				var code = exited.ExitCode;
-				exited.Dispose();
-				process = null;
+				var code = started.ExitCode;
+				lock (outputLock)
+					LastOutput = currentOutput.ToArray();
+
+				if (ReferenceEquals(process, started))
+					process = null;
+				started.Dispose();
 				Finished?.Invoke(code);
 			};
 
-			process.Start();
-			process.BeginOutputReadLine();
-			process.BeginErrorReadLine();
+			try
+			{
+				started.Start();
+				started.BeginOutputReadLine();
+				started.BeginErrorReadLine();
+			}
+			catch (System.ComponentModel.Win32Exception)
+			{
+				CleanupFailedStart(started);
+				throw;
+			}
+			catch (InvalidOperationException)
+			{
+				CleanupFailedStart(started);
+				throw;
+			}
+		}
+
+		void CleanupFailedStart(Process started)
+		{
+			if (ReferenceEquals(process, started))
+				process = null;
+
+			try
+			{
+				if (!started.HasExited)
+					started.Kill(entireProcessTree: true);
+			}
+			catch (InvalidOperationException)
+			{
+			}
+			catch (System.ComponentModel.Win32Exception)
+			{
+			}
+
+			started.Dispose();
 		}
 
 		/// <summary>
@@ -119,7 +211,11 @@ namespace AutoCnC.Launcher
 
 				running.Kill(entireProcessTree: true);
 			}
-			catch (Exception)
+			catch (InvalidOperationException)
+			{
+				// It exited on its own between the check and the kill. Nothing to do.
+			}
+			catch (System.ComponentModel.Win32Exception)
 			{
 				// It exited on its own between the check and the kill. Nothing to do.
 			}
@@ -128,7 +224,16 @@ namespace AutoCnC.Launcher
 		void Emit(string line)
 		{
 			if (line != null)
-				Output?.Invoke(line);
+			{
+				TerminalLine parsed;
+				lock (outputLock)
+				{
+					parsed = terminalParser.ParseLine(line);
+					currentOutput.Add(parsed.PlainText);
+				}
+
+				Output?.Invoke(parsed);
+			}
 		}
 
 		/// <summary>

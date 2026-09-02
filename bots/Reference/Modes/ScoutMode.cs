@@ -48,8 +48,18 @@ namespace AutoCnC.Reference.Modes
 			// about scouting at all, because the request carries whenever the bot has no opinion.
 			// A bot that does have one — like ReferenceBot — reaches the same conclusion, and its
 			// reason is the one that ends up in the battle log.
-			if (ctx.SenseStructures(new WDist(SightRadius)).Count > 0)
+			var structures = ctx.SenseStructures(new WDist(SightRadius));
+			if (structures.Count > 0)
+			{
+				// Remember where, not just that. The push that this discovery unlocks starts at
+				// home, where nothing enemy is visible, so a bare "found it" leaves the army with
+				// nowhere to march.
+				var found = ctx.ResolveActor(structures[0].ActorId);
+				if (found != null)
+					EnemyBaseSightings.Record(self.Owner, found.Location);
+
 				ctx.SwitchDoctrine(ReferenceDoctrines.Opening, "scout found their base");
+			}
 
 			// Scouts are fragile: break off from anything that can shoot us.
 			var threat = ctx.SenseThreats(new WDist(FleeRadius)).FirstOrDefault(t => t.CanHitUs);

@@ -24,10 +24,27 @@ namespace AutoCnC.Reference.Modes
 	/// The defining rule is that this mode <b>never chases</b>: it only fires on what is already
 	/// inside its weapon range, so a single enemy scout cannot peel an assault force off its
 	/// objective. That is the deliberate inverse of AutoTarget's behaviour.
+	/// <para>
+	/// Objectives are sensed, and sensing is limited to what is visible now and near this unit.
+	/// A push that starts at home therefore begins with nothing to attack, so it marches on the
+	/// last place this side saw an enemy structure until something comes into view.
+	/// </para>
 	/// </remarks>
 	public sealed class AttackBaseMode : UnitMode
 	{
 		static readonly WDist ObjectiveSearchRadius = WDist.FromCells(40);
+
+		/// <summary>
+		/// How close counts as "standing on the remembered spot".
+		/// </summary>
+		/// <remarks>
+		/// Deliberately far tighter than the objective search radius. Sensing shows only what is
+		/// visible, and a unit forty cells away can see none of it — so treating that as "arrived
+		/// and found nothing" would throw away a perfectly good sighting on behalf of the whole
+		/// army. Standing on it and still seeing nothing is evidence; being in the same postcode
+		/// is not.
+		/// </remarks>
+		static readonly WDist ArrivedRadius = WDist.FromCells(5);
 
 		AssaultTuning tuning = AssaultTuning.Default;
 		uint objectiveId;
@@ -47,9 +64,14 @@ namespace AutoCnC.Reference.Modes
 				// Objective destroyed or never chosen: pick the next one. Deliberately sticky, so
 				// the force commits instead of re-evaluating every tick and drifting between
 				// buildings.
-				objectiveId = AttackBaseLogic.SelectObjective(ctx.SenseStructures(ObjectiveSearchRadius)) ?? 0;
+				var visible = ctx.SenseStructures(ObjectiveSearchRadius);
+				objectiveId = AttackBaseLogic.SelectObjective(visible) ?? 0;
 				objective = ctx.ResolveActor(objectiveId);
 			}
+
+			// Anything we can see is worth remembering for the units that cannot.
+			if (objective != null)
+				EnemyBaseSightings.Record(self.Owner, objective.Location);
 
 			var weaponRange = ctx.WeaponRangeUnits;
 			var state = new AssaultState(
@@ -64,7 +86,27 @@ namespace AutoCnC.Reference.Modes
 				Threats: ctx.SenseThreats(new WDist(weaponRange > 0 ? weaponRange : 1024)));
 
 			// --- Decide ------------------------------------------------------------
-			return AttackBaseLogic.Decide(state, tuning);
+			return AttackBaseLogic.Decide(state, tuning, objective != null ? ApproachOrders.None : Approach(self, ctx));
+		}
+
+		/// <summary>
+		/// Where to march with nothing in sight, and the housekeeping that keeps that honest.
+		/// </summary>
+		static ApproachOrders Approach(Actor self, ModeContext ctx)
+		{
+			if (!EnemyBaseSightings.TryGetLastKnown(self.Owner, out var cell))
+				return ApproachOrders.None;
+
+			// Arrived, and there is nothing here after all: the sighting is stale, so drop it
+			// rather than hold the whole push in front of an empty crater.
+			var distance = ctx.DistanceTo(cell);
+			if (distance <= ArrivedRadius.Length)
+			{
+				EnemyBaseSightings.Forget(self.Owner);
+				return ApproachOrders.None;
+			}
+
+			return new ApproachOrders(true, cell.X, cell.Y, distance);
 		}
 
 		public override void OnDamaged(Actor self, ModeContext ctx, AttackInfo e)

@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>__AUTOCNC_BOT_ROOT_NAMESPACE__</RootNamespace>
+    <AssemblyName>__AUTOCNC_BOT_ROOT_NAMESPACE__</AssemblyName>
+    <Description>An AutoC&amp;C battle bot.</Description>
+
+    <OutputPath>$(BattleBotInstallDirectory)\</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="*.cs" />
+    <Compile Include="Doctrines\*.cs" />
+    <Compile Include="Logic\*.cs" />
+    <Compile Include="Modes\*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="AutoCnC.Sdk" Version="$(AutoCnCVersion)" />
+    <PackageReference Include="AutoCnC.Core" Version="$(AutoCnCVersion)" />
+  </ItemGroup>
+
+</Project>

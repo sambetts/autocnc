@@ -67,6 +67,10 @@
     doctrine the bot switched to and why.
     Defaults to autocnc-battle.csv in the OpenRA logs folder. Pass 'none' to record nothing.
 
+.PARAMETER DecisionTrace
+    Where the match writes newline-delimited JSON connecting battle assessments and issued mode
+    decisions to their outcomes. Disabled unless a path is supplied.
+
 .PARAMETER Test
     Run the bot's unit tests first and stop if they fail.
 
@@ -107,6 +111,7 @@ param(
     [string]$GameSpeed,
     [string]$Telemetry,
     [string]$BattleLog,
+    [string]$DecisionTrace,
     [switch]$Test,
     [switch]$NoLaunch,
     [ValidateSet('Debug', 'Release')]
@@ -274,6 +279,11 @@ if ($Telemetry) {
 if ($BattleLog) {
     $battleArgs += "Launch.BattleLog=$BattleLog"
     Write-Host "==> Battle log: $BattleLog" -ForegroundColor Cyan
+}
+
+if ($DecisionTrace) {
+    $battleArgs += "Launch.DecisionTrace=$DecisionTrace"
+    Write-Host "==> Decision trace: $DecisionTrace" -ForegroundColor Cyan
 }
 
 if ($Map -and $Opponents -gt 0) {

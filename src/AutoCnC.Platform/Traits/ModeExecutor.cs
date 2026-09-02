@@ -76,7 +76,7 @@ namespace AutoCnC.Platform.Traits
 	/// player's clicks use. So a bot you wrote never has to exist on an opponent's machine.
 	/// </para>
 	/// </remarks>
-	public class ModeExecutor : ITick, IWorldLoaded, IModeHost
+	public class ModeExecutor : ITick, IWorldLoaded, IGameOver, IModeHost
 	{
 		readonly World world;
 		readonly ModeExecutorInfo info;
@@ -84,6 +84,7 @@ namespace AutoCnC.Platform.Traits
 
 		BattleAssessor assessor;
 		BattleLog battleLog;
+		DecisionTrace decisionTrace;
 
 		/// <summary>What a mode asked for, waiting for the next assessment to accept or refuse it.</summary>
 		DoctrineDecision requested;
@@ -168,6 +169,7 @@ namespace AutoCnC.Platform.Traits
 				Log.Write("debug", $"Game speed: {w.GameSpeed.Timestep}ms per tick (asked for '{LaunchOptions.GameSpeed}').");
 
 			battleLog = w.WorldActor.TraitOrDefault<BattleLog>();
+			decisionTrace = DecisionTrace.Open(LaunchOptions.DecisionTrace);
 
 			if (w.LocalPlayer != null)
 				assessor = new BattleAssessor(w, w.LocalPlayer, info.AssessWindow, info.BaseRadius);
@@ -250,6 +252,7 @@ namespace AutoCnC.Platform.Traits
 			brain = found.Instance;
 			requested = DoctrineDecision.Continue;
 
+			decisionTrace?.BotLoaded(GameSeconds, Bot.Name, found.SourcePath);
 			ApplyDoctrine(Bot.Find(Bot.Opening), reason: null);
 		}
 
@@ -284,6 +287,8 @@ namespace AutoCnC.Platform.Traits
 			foreach (var pair in world.ActorsWithTrait<ProgrammableController>())
 				pair.Trait.ModeOverride = null;
 
+			decisionTrace?.DoctrineChanged(GameSeconds, previous, doctrine.Name, reason);
+
 			if (previous == null || previous == doctrine.Name)
 				return;
 
@@ -314,13 +319,13 @@ namespace AutoCnC.Platform.Traits
 			var asked = requested;
 			requested = DoctrineDecision.Continue;
 
-			var decision = DoctrineDecision.Continue;
+			var botDecision = DoctrineDecision.Continue;
 
 			if (brain != null)
 			{
 				try
 				{
-					decision = brain.Reassess(LastAssessment);
+					botDecision = brain.Reassess(LastAssessment);
 				}
 				catch (Exception ex)
 				{
@@ -328,29 +333,45 @@ namespace AutoCnC.Platform.Traits
 					// than taking the match down with it.
 					Log.Write("debug", $"Battle bot '{Bot.Name}' threw while reassessing: {ex}");
 					TextNotificationsManager.Debug($"Battle bot '{Bot.Name}' threw: {ex.Message}. Keeping {Doctrine?.Name}.");
+					decisionTrace?.Error(GameSeconds, "bot", Bot.Name, ex);
+					decisionTrace?.Assessment(GameSeconds, LastAssessment, DoctrineDecision.Continue,
+						asked, DoctrineDecision.Continue, "bot-error");
 					brain = null;
 					return;
 				}
 			}
 
-			if (!decision.WantsChange)
-				decision = asked;
+			var decision = botDecision.WantsChange ? botDecision : asked;
 
 			// Naming the doctrine already running is the same as continuing, so a rule can state
 			// its condition without also checking what is loaded.
-			if (!decision.WantsChange || string.Equals(decision.Doctrine, Doctrine?.Name, StringComparison.OrdinalIgnoreCase))
+			if (!decision.WantsChange)
+			{
+				decisionTrace?.Assessment(GameSeconds, LastAssessment, botDecision, asked, decision, "continue");
 				return;
+			}
+
+			if (string.Equals(decision.Doctrine, Doctrine?.Name, StringComparison.OrdinalIgnoreCase))
+			{
+				decisionTrace?.Assessment(GameSeconds, LastAssessment, botDecision, asked, decision, "already-active");
+				return;
+			}
 
 			if (LastAssessment.DoctrineSeconds < info.MinimumDoctrineSeconds)
+			{
+				decisionTrace?.Assessment(GameSeconds, LastAssessment, botDecision, asked, decision, "minimum-dwell");
 				return;
+			}
 
 			var wanted = Bot.Find(decision.Doctrine);
 			if (wanted == null)
 			{
 				Log.Write("debug", $"[bot] {Bot.Name} asked for doctrine '{decision.Doctrine}', which it does not own.");
+				decisionTrace?.Assessment(GameSeconds, LastAssessment, botDecision, asked, decision, "unknown-doctrine");
 				return;
 			}
 
+			decisionTrace?.Assessment(GameSeconds, LastAssessment, botDecision, asked, decision, "switch");
 			ApplyDoctrine(wanted, decision.Reason);
 		}
 
@@ -461,6 +482,7 @@ namespace AutoCnC.Platform.Traits
 				// Doctrine code runs here. One bad mode must not take the game down.
 				Log.Write("debug", $"Mode '{controller.ActiveModeName}' threw on {actor.Info.Name}: {ex}");
 				TextNotificationsManager.Debug($"Mode '{controller.ActiveModeName}' threw: {ex.Message}");
+				decisionTrace?.Error(GameSeconds, "mode", controller.ActiveModeName, ex);
 				controller.ModeOverride = null;
 				controller.ApplyMode(null, this);
 				return;
@@ -493,8 +515,17 @@ namespace AutoCnC.Platform.Traits
 					$"{decision.Action}{(decision.ItemName != null ? " " + decision.ItemName : "")} " +
 					$"-> {order.OrderString} ({decision.Reason})");
 
+			decisionTrace?.UnitDecisionIssued(GameSeconds, actor.Info.Name, actor.ActorID,
+				controller.ActiveModeName, decision, order.OrderString);
 			controller.LastIssued = decision;
 			pending.Add(order);
+		}
+
+		void IGameOver.GameOver(World w)
+		{
+			decisionTrace?.Complete(GameSeconds, w.LocalPlayer?.WinState.ToString());
+			decisionTrace?.Dispose();
+			decisionTrace = null;
 		}
 
 		/// <summary>Mirrors the engine's client-local control groups onto the controller.</summary>

@@ -75,6 +75,14 @@ jobs:
       - name: Test reference battle bot
         run: dotnet test bots/Reference/ReferenceBot.sln -c Release --nologo
 
+      - name: Export resolved agent rules
+        env:
+          ENGINE_DIR: ${{ github.workspace }}/engine
+          MOD_SEARCH_PATHS: ${{ github.workspace }}/mods,${{ github.workspace }}/engine/mods
+        run: |
+          dotnet engine/bin/OpenRA.Utility.dll autocnc --export-agent-rules "$RUNNER_TEMP/game-rules.json"
+          test -s "$RUNNER_TEMP/game-rules.json"
+
       - name: Lint mod YAML
         env:
           ENGINE_DIR: ${{ github.workspace }}/engine
@@ -101,3 +109,6 @@ jobs:
 
       - name: Build the launcher
         run: dotnet build tools/AutoCnC.Launcher/AutoCnC.Launcher.sln -c Release -v minimal --nologo
+
+      - name: Test launcher workflow
+        run: dotnet test tools/AutoCnC.Launcher/AutoCnC.Launcher.sln -c Release --no-build --nologo

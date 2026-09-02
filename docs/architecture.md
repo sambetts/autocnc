@@ -38,7 +38,7 @@ when.
 │    BattleBotLoader    scans folders for bot assemblies       │
 │    BattleAssessor     builds BattleState, fog respected      │
 │    ProgrammableController, ModeCommands                      │
-│    TurboSpeed, MatchTelemetry, BattleLog                     │
+│    TurboSpeed, MatchTelemetry, BattleLog, DecisionTrace      │
 └──────────────────────────────────────────────────────────────┘
                               │
 ┌──────────────────────────────────────────────────────────────┐
@@ -147,7 +147,7 @@ are directly testable.
 
 ## Key decisions
 
-### `AutoCnC.Modes.Core` references nothing
+### `AutoCnC.Core` references nothing
 
 A folder convention is a comment; a missing assembly reference is a compiler error. Because the
 core cannot reach `Actor` or `World`, its logic is necessarily pure — and pure logic tests in
@@ -186,8 +186,8 @@ Note this is **only** about loading new code. Switching between modes that alrea
 fully dynamic — `SyncMode` re-resolves every tick and `ApplyMode` swaps the instance
 immediately, so `/mode group 1 AttackBaseMode` takes effect within one tick, mid-battle.
 
-A future standalone mode editor could reasonably support hot-reload for authoring, since that
-sits outside a real match. See the roadmap.
+The launcher now opens the bot's real solution for edits between matches and owns the
+build/restart loop. It deliberately does not hot-reload a running match.
 
 ### Modes are per-unit instances
 
@@ -213,7 +213,7 @@ condition linter. Forcing `HoldFire` is inert — `Damaged()` returns early belo
 
 | Layer | How it is verified | Cost |
 |---|---|---|
-| `AutoCnC.Modes.Core` | 36 NUnit tests, no engine | ~30ms |
+| `AutoCnC.Core` | NUnit tests, no engine | milliseconds |
 | Trait/YAML wiring | `./scripts/lint.ps1` — constructs every actor | ~1 min |
 | Engine integration | Compile against pinned engine binaries | seconds |
 
@@ -253,10 +253,63 @@ built from three pieces, all inside our own assemblies:
 | `Launch.BotHandicap` / `Launch.Handicap` | 0-95% penalty on the opponents / on you |
 | `Launch.Faction` / `Launch.BotFaction` | Faction for you / for the opponents |
 | `Launch.GameSpeed` | Tick rate for the match, e.g. `fastest` |
+| `Launch.DecisionTrace` | Optional JSONL path for assessments and issued mode decisions |
 
 Naming the assembly rather than the bot means nothing outside the bot has to know the `Name`
 declared inside it, and a bot played from its own build output cannot be shadowed by a stale copy
 in `engine/bin/bots`.
+
+### Authoring and training flow
+
+The launcher remains a front end over scripts rather than a second build system:
+
+```
+New bot        -> scripts/new-bot.ps1 -> standalone solution + package references + tests
+Deploy / Fight -> scripts/run-bot.ps1 -> test, build, install, optionally launch
+Improve        -> scripts/train-bot.ps1 -> local coding agent -> test, build, install
+```
+
+`scripts/authoring-api.version` is the compatibility contract between that UI and those scripts.
+A launcher ignores a stale remembered checkout when its authoring API is too old and instead uses
+the compatible checkout it was launched from; selecting an incompatible checkout disables
+authoring actions with an explicit message.
+
+Each fight gets a unique directory outside the source tree. Its manifest records the battle
+configuration and source revision; the game writes telemetry, the visibility-filtered battle log,
+and a decision trace there; the launcher copies the finished replay and result into the same run.
+This avoids the old fixed-path/one-deep-rotation limit and makes iterations comparable.
+
+The three runtime records have intentionally different trust boundaries:
+
+- telemetry is omniscient and for after-match evaluation only;
+- the battle log is restricted to what the side could observe;
+- the decision trace records the bot's assessments and orders, but is write-only to bot code.
+
+Agent context adds two generated resources. `game-guide.md` is the shared explanation of mechanics,
+SDK semantics, and improvement constraints. `game-rules.json` is exported by
+`--export-agent-rules` directly from OpenRA's `ModData.DefaultRules`, after manifest inheritance
+and AutoC&C overrides have resolved. It is therefore a snapshot of the source of truth rather than
+a parallel unit-stats model.
+
+AI improvement is explicit and optional. Before invoking a configured local command, the launcher
+snapshots the workspace while excluding git metadata and generated output. The command runs from
+the bot workspace with an evidence-grounded prompt. The default Copilot configuration grants
+access to the run's `evidence/` directory, while the source snapshot and authoritative run state
+remain outside its allowed paths. The wrapper independently runs the bot tests and deployment
+build; the launcher streams the raw ANSI terminal output as colored UTF-8 spans into a dedicated
+Improvement window and exposes the exact prompt, guide, resolved rules, fight manifest, and
+file-level change set in adjacent tabs. Plain build logs use the same stream with styling removed.
+It can restore the pre-agent snapshot. There is no unattended infinite loop: the user reviews one
+iteration and chooses when to fight again.
+
+The JSON views parse lazily into collapsible trees, so the resolved rules snapshot is not expanded
+into thousands of controls up front. After coding, the agent returns a complete replacement prompt
+template between machine-readable marker lines. The player can edit and approve it in
+**Next prompt***. Approval replaces the saved template; required placeholders preserve fresh
+workspace, evidence, result, and recursive next-template contract values without accumulating
+additive guidance. `docs/agent-prompt-template.md` is the repository default, while an approved
+replacement is user state. Script queue activity is mirrored to Windows taskbar indeterminate
+progress and cleared on every terminal state.
 
 `BattleSetup` is listed *ahead of* `LobbyCommands` in `mod.yaml`, which matters for exactly one
 reason: the engine starts a launched map by issuing a hardcoded `option gamespeed default` from

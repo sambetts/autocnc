@@ -51,6 +51,11 @@ namespace AutoCnC.Reference
 		];
 
 		/// <summary>The opening: an economy, and enough of an army not to die to a rush.</summary>
+		/// <remarks>
+		/// The tower step is a <c>Support</c>-queue structure, not a <c>Building</c> one. It only
+		/// builds because <see cref="Modes.BuildBaseMode"/> drives every queue the yard owns; a
+		/// yard driving only <c>Building</c> skips it in silence.
+		/// </remarks>
 		public static IReadOnlyList<BuildStep> OpeningBuild { get; } =
 		[
 			.. Economy,
@@ -88,13 +93,32 @@ namespace AutoCnC.Reference
 		/// Turtling: static defence first, then bodies. Cheap infantry rather than tanks, because
 		/// what is needed is guns in the base now rather than better guns in a minute.
 		/// </summary>
+		/// <remarks>
+		/// The headquarters is here for what it unlocks rather than for itself: the anti-air
+		/// tower below and the tanks in <see cref="DefenceTrain"/> both need it, and a doctrine
+		/// that only ever turtles would otherwise never reach either.
+		/// <para>
+		/// Anti-air is not optional for this bot. Nothing it fields can shoot back at aircraft —
+		/// the minigunner's rifle, the grenadier's grenade, the tank's cannon and the guard
+		/// tower's gun are all ground-only — so a single helicopter farms it for free. That is
+		/// not a hypothetical: helicopters accounted for 28 of the 126 units lost on
+		/// badland-ridges, every one of them unanswered.
+		/// </para>
+		/// </remarks>
 		public static IReadOnlyList<BuildStep> DefenceBuild { get; } =
 		[
 			.. Economy,
 			new(["gtwr", "gun"], 4),
+			new(["hq"], 1),                    // tech, for the two steps that need it
+			new(["atwr", "sam"], 2),           // the only thing here that can hit aircraft
 			new(["powr", "nuke"], 4),
 			new(["gtwr", "gun"], 6),
 		];
+
+		/// <summary>Structures this bot builds from the yard's Support queue rather than Building.</summary>
+		/// <remarks>Used by tests to prove every defence step is reachable from some driven queue.</remarks>
+		public static IReadOnlyList<string> SupportQueueStructures { get; } =
+			["gtwr", "gun", "atwr", "sam"];
 
 		public static IReadOnlyList<ProductionStep> DefenceTrain { get; } =
 		[

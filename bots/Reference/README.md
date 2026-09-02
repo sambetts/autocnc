@@ -8,7 +8,7 @@ the match needs. This one has four, and moves between them as the battle turns.
 | Doctrine | For | Switches to it when |
 |---|---|---|
 | `Opening` | An economy, and enough army not to die | Where every match starts, and where the others fall back to |
-| `Scout` | Finding out where the enemy lives | Two refineries up and their base still unknown |
+| `Scout` | Finding out where the enemy lives | Two refineries up and their base still unknown — or a push that has seen nothing at all for five minutes, which means the base it knew is gone |
 | `Defence` | Static defence, cheap bodies, everything home | A building is lost, or enough enemies reach the base — three for a side with nothing to spend, and a quarter of our own unit count for one that has an army and a target |
 | `Attack` | Tech, more production, the whole army pushes | Army worth 6000 and their base is known, including straight out of a siege that has lifted |
 
@@ -21,6 +21,15 @@ in [`ReferenceBot.cs`](ReferenceBot.cs).
 *where*, because sensing only ever returns what is visible right now: an army starting a push from
 its own base can see nothing at all, so `AttackBaseMode` marches on the last remembered sighting
 until a real objective comes into view.
+
+`AttackBaseMode` ends its own doctrine the same way, for the opposite reason. A push that has
+levelled everything it remembers has *no* target, and forgetting the stale sighting is not enough
+on its own: only a unit that can already see an enemy structure ever records a new one, so an army
+left with nowhere to march stops moving, and a stopped army never sees anything to record. Both
+halves of that loop are closed — the mode asks for `Scout` on arriving to find nothing, and the
+bot's rule 4 reaches the same conclusion from `SecondsSinceContact` as a backstop. The threshold
+sits above a real approach march (245s on badland-ridges) so it rescues a stalled push without
+cancelling a marching one.
 
 `BuildBaseMode` drives **every** construction queue the yard owns, not just `Building`. In
 Tiberian Dawn the economy and the tech come from `Building` while every defensive structure —

@@ -92,10 +92,26 @@ namespace AutoCnC.Reference.Modes
 		/// <summary>
 		/// Where to march with nothing in sight, and the housekeeping that keeps that honest.
 		/// </summary>
+		/// <remarks>
+		/// A push that has run out of target ends its own doctrine, exactly as
+		/// <see cref="ScoutMode"/> ends its own the moment it has an answer. Forgetting a stale
+		/// sighting on its own is not enough: only a unit that can already see an enemy structure
+		/// ever records a new one, so an army left with nowhere to march stops moving, and a
+		/// stopped army never sees anything to record. Asking for the doctrine whose job is
+		/// finding a target is the way out of that.
+		/// <para>
+		/// The bot's own assessment still wins where it has an opinion — this carries in the
+		/// window where it has none, and <c>ReferenceBotLogic</c> rule 4 reaches the same
+		/// conclusion from <c>SecondsSinceContact</c> shortly afterwards either way.
+		/// </para>
+		/// </remarks>
 		static ApproachOrders Approach(Actor self, ModeContext ctx)
 		{
 			if (!EnemyBaseSightings.TryGetLastKnown(self.Owner, out var cell))
+			{
+				ctx.SwitchDoctrine(ReferenceDoctrines.Scout, "nothing left to attack, going looking");
 				return ApproachOrders.None;
+			}
 
 			// Arrived, and there is nothing here after all: the sighting is stale, so drop it
 			// rather than hold the whole push in front of an empty crater.
@@ -103,6 +119,7 @@ namespace AutoCnC.Reference.Modes
 			if (distance <= ArrivedRadius.Length)
 			{
 				EnemyBaseSightings.Forget(self.Owner);
+				ctx.SwitchDoctrine(ReferenceDoctrines.Scout, "their base is not there any more, going looking");
 				return ApproachOrders.None;
 			}
 

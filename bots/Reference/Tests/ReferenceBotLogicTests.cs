@@ -35,7 +35,9 @@ namespace AutoCnC.Reference.Tests
 			int buildingsLost = 0,
 			int enemiesNearBase = 0,
 			bool enemyBaseFound = false,
-			int windowSeconds = 60)
+			int windowSeconds = 60,
+			int enemiesInSight = 0,
+			int secondsSinceContact = 0)
 			=> BattleState.Empty with
 			{
 				Doctrine = doctrine,
@@ -47,6 +49,8 @@ namespace AutoCnC.Reference.Tests
 				EnemiesNearBase = enemiesNearBase,
 				EnemyBaseFound = enemyBaseFound,
 				WindowSeconds = windowSeconds,
+				EnemiesInSight = enemiesInSight,
+				SecondsSinceContact = secondsSinceContact,
 			};
 
 		static ReferenceBotTuning Tuning => ReferenceBotTuning.Default;
@@ -381,7 +385,185 @@ namespace AutoCnC.Reference.Tests
 		/// <summary>How long the host makes a doctrine run before it will honour a switch.</summary>
 		const int MinimumDwellSeconds = 30;
 
-		// --- Rules 3 and 6: scouting -------------------------------------------
+		// --- Rule 4: a push that has run out of enemy --------------------------
+
+		/// <summary>
+		/// The longest a legitimate approach march went without seeing anything on
+		/// badland-ridges: the winning push left home at 420s and reached their base at 665s.
+		/// </summary>
+		const int ObservedApproachMarchSeconds = 245;
+
+		[Test]
+		public void APushThatCanNoLongerFindThemGoesLookingAgain()
+		{
+			// The whole match, in one assertion. The bot levelled their base by 720s, dropped the
+			// sighting on arriving to find nothing, and then had no rule that could ever send it
+			// looking again: AttackBaseMode issued its last order at 719s, every assessment from
+			// 900s to 1500s reported no kills, and a 115-unit army stood still while the other
+			// side rebuilt from three buildings to twenty and won.
+			var decision = ReferenceBotLogic.Decide(State(
+				doctrine: ReferenceDoctrines.Attack,
+				armyValue: 21900,
+				units: 115,
+				refineries: 3,
+				enemyBaseFound: true,
+				enemiesInSight: 0,
+				secondsSinceContact: Tuning.LostContactSeconds));
+
+			Assert.That(decision.Doctrine, Is.EqualTo(ReferenceDoctrines.Scout));
+			Assert.That(decision.Reason, Does.Contain("finding them again"));
+		}
+
+		[Test]
+		public void AnApproachMarchIsNotMistakenForLosingThem()
+		{
+			// An army crossing the map sees nothing the whole way. Calling that "we have lost
+			// them" would cancel every push before it arrived — including the one that took
+			// eleven buildings off them in this match.
+			var decision = ReferenceBotLogic.Decide(State(
+				doctrine: ReferenceDoctrines.Attack,
+				armyValue: Tuning.AttackArmyValue,
+				units: 75,
+				enemyBaseFound: true,
+				secondsSinceContact: ObservedApproachMarchSeconds));
+
+			Assert.That(decision.Doctrine, Is.EqualTo(ReferenceDoctrines.Attack));
+		}
+
+		[Test]
+		public void TheContactThresholdClearsARealApproachMarch()
+		{
+			Assert.That(Tuning.LostContactSeconds, Is.GreaterThan(ObservedApproachMarchSeconds),
+				"a threshold under the observed march time cancels pushes instead of rescuing them");
+		}
+
+		[Test]
+		public void SomethingInSightIsNotLostContactHoweverStaleTheClock()
+		{
+			// Being able to see them is the definition of not having lost them.
+			var decision = ReferenceBotLogic.Decide(State(
+				doctrine: ReferenceDoctrines.Attack,
+				armyValue: Tuning.AttackArmyValue,
+				units: 50,
+				enemyBaseFound: true,
+				enemiesInSight: 4,
+				secondsSinceContact: Tuning.LostContactSeconds * 10));
+
+			Assert.That(decision.Doctrine, Is.EqualTo(ReferenceDoctrines.Attack));
+		}
+
+		[Test]
+		public void NeverHavingSeenThemIsNotLosingThem()
+		{
+			// A negative clock means "no contact ever", which is rule 8's job, not rule 4's.
+			Assert.That(
+				ReferenceBotLogic.LostContact(State(secondsSinceContact: -1), Tuning),
+				Is.False);
+		}
+
+		[Test]
+		public void TheSearchIsNotCalledOffJustBecauseWeOnceFoundThem()
+		{
+			// Rule 5 ends scouting on EnemyBaseFound, and that flag never goes back to false. If
+			// it outranked rule 4 the bot would bounce Scout -> Opening -> Attack -> Scout every
+			// rate-limit window instead of actually looking.
+			var decision = ReferenceBotLogic.Decide(State(
+				doctrine: ReferenceDoctrines.Scout,
+				armyValue: 21900,
+				units: 115,
+				refineries: 3,
+				enemyBaseFound: true,
+				secondsSinceContact: Tuning.LostContactSeconds * 2));
+
+			Assert.That(decision.Doctrine, Is.EqualTo(ReferenceDoctrines.Scout));
+		}
+
+		[Test]
+		public void FindingThemAgainEndsTheSearchAndRestartsThePush()
+		{
+			// The scout sees something, the clock resets, and rule 5 hands back to Opening — from
+			// where rule 6 sends the army back out with a fresh sighting to march on.
+			var found = ReferenceBotLogic.Decide(State(
+				doctrine: ReferenceDoctrines.Scout,
+				armyValue: 21900,
+				units: 115,
+				refineries: 3,
+				enemyBaseFound: true,
+				enemiesInSight: 2,
+				secondsSinceContact: 0));
+
+			Assert.That(found.Doctrine, Is.EqualTo(ReferenceDoctrines.Opening));
+
+			var next = ReferenceBotLogic.Decide(State(
+				doctrine: ReferenceDoctrines.Opening,
+				armyValue: 21900,
+				units: 115,
+				refineries: 3,
+				enemyBaseFound: true,
+				enemiesInSight: 2,
+				secondsSinceContact: 0));
+
+			Assert.That(next.Doctrine, Is.EqualTo(ReferenceDoctrines.Attack));
+		}
+
+		[Test]
+		public void ADefenceUnderSiegeStillOutranksGoingLooking()
+		{
+			// Rules 1 to 3 are about the base falling over, and none of them care that we cannot
+			// find their main force.
+			var decision = ReferenceBotLogic.Decide(State(
+				doctrine: ReferenceDoctrines.Attack,
+				armyValue: Tuning.AttackArmyValue,
+				units: 50,
+				enemyBaseFound: true,
+				buildingsLost: 1,
+				secondsSinceContact: Tuning.LostContactSeconds * 2));
+
+			Assert.That(decision.Doctrine, Is.EqualTo(ReferenceDoctrines.Defence));
+		}
+
+		[Test]
+		public void TheDeadlockThatLostBadlandRidgesNowBreaksItself()
+		{
+			// The real window, replayed. From 875s the bot saw nothing at all: secondsSinceContact
+			// climbed by five every assessment for the rest of the match while the army grew from
+			// 32 units to 115. The old rules answered "Attack" to every one of those and the army
+			// never moved again. The host's minimum dwell is modelled because a rescue rule that
+			// cannot survive it is no rescue at all.
+			var doctrine = ReferenceDoctrines.Attack;
+			var doctrineSeconds = 580;
+			var searching = 0;
+
+			for (var sinceContact = 30; sinceContact <= 570; sinceContact += AssessmentSeconds)
+			{
+				var decision = ReferenceBotLogic.Decide(State(
+					doctrine: doctrine,
+					doctrineSeconds: doctrineSeconds,
+					armyValue: 5800 + sinceContact * 30,
+					units: 32 + sinceContact / 6,
+					refineries: 3,
+					enemyBaseFound: true,
+					enemiesInSight: 0,
+					secondsSinceContact: sinceContact));
+
+				if (decision.WantsChange && decision.Doctrine != doctrine && doctrineSeconds >= MinimumDwellSeconds)
+				{
+					doctrine = decision.Doctrine;
+					doctrineSeconds = 0;
+				}
+
+				doctrineSeconds += AssessmentSeconds;
+
+				if (doctrine == ReferenceDoctrines.Scout)
+					searching++;
+			}
+
+			Assert.That(doctrine, Is.EqualTo(ReferenceDoctrines.Scout),
+				"an army that cannot find anything must end this window looking, not standing");
+			Assert.That(searching, Is.GreaterThan(0));
+		}
+
+		// --- Rules 5 and 8: scouting -------------------------------------------
 
 		[Test]
 		public void ScoutsOnceTheEconomyCanAffordIt()
@@ -418,7 +600,7 @@ namespace AutoCnC.Reference.Tests
 			Assert.That(decision.WantsChange, Is.False);
 		}
 
-		// --- Rules 4 and 5: pushing --------------------------------------------
+		// --- Rules 6 and 7: pushing --------------------------------------------
 
 		[Test]
 		public void AttacksWithAnArmyWorthSpendingAndSomewhereToSpendIt()
@@ -529,15 +711,18 @@ namespace AutoCnC.Reference.Tests
 							foreach (var found in new[] { false, true })
 								foreach (var lost in new[] { 0, 2 })
 									foreach (var near in new[] { 0, Tuning.RaidEnemies, Tuning.AssaultEnemies, 20 })
-										yield return State(
-											doctrine: doctrine,
-											doctrineSeconds: 300,
-											armyValue: army,
-											units: units,
-											refineries: refineries,
-											buildingsLost: lost,
-											enemiesNearBase: near,
-											enemyBaseFound: found);
+										foreach (var contact in new[] { -1, 0, Tuning.LostContactSeconds })
+											yield return State(
+												doctrine: doctrine,
+												doctrineSeconds: 300,
+												armyValue: army,
+												units: units,
+												refineries: refineries,
+												buildingsLost: lost,
+												enemiesNearBase: near,
+												enemyBaseFound: found,
+												enemiesInSight: near,
+												secondsSinceContact: contact);
 		}
 	}
 }

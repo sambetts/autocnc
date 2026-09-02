@@ -29,7 +29,8 @@ namespace AutoCnC.Reference.Logic
 		int RaidEnemies,          // this many at the base is a raid; fewer is a scout
 		int AssaultEnemies,       // floor for "not a raid, their army" — the early-game number
 		int AssaultForceShare,    // ...and past that, a share of our own force: Units / this
-		int DefenceHoldSeconds)   // how long to keep turtling after the shooting stops
+		int DefenceHoldSeconds,   // how long to keep turtling after the shooting stops
+		int LostContactSeconds)   // seeing nothing this long means we have lost them, not that we are marching
 	{
 		public static ReferenceBotTuning Default { get; } = new(
 			AttackArmyValue: 6000,
@@ -38,7 +39,8 @@ namespace AutoCnC.Reference.Logic
 			RaidEnemies: 3,
 			AssaultEnemies: 6,
 			AssaultForceShare: 4,
-			DefenceHoldSeconds: 45);
+			DefenceHoldSeconds: 45,
+			LostContactSeconds: 300);
 	}
 
 	public static class ReferenceBotLogic
@@ -95,28 +97,66 @@ namespace AutoCnC.Reference.Logic
 					: DoctrineDecision.SwitchTo(ReferenceDoctrines.Opening, "the attack is over");
 			}
 
-			// 4. Scouting has answered its question, so stop paying for it.
+			// 4. Contact lost. We found their base, we went there, and now there is nothing of
+			//    theirs anywhere — either we levelled it or they rebuilt somewhere we have never
+			//    seen. Either way the answer is to go and look, not to stand in the crater.
+			//
+			//    Without this rule the bot has no way back at all. AttackBaseMode marches on the
+			//    last remembered sighting and drops it once a unit stands on the spot and finds
+			//    nothing; only a unit that can already SEE an enemy structure ever records a new
+			//    one. So an army with nothing to march on stops moving, and a stopped army never
+			//    sees anything again. Rule 6 below meanwhile keeps naming Attack — EnemyBaseFound
+			//    never goes back to false — and rule 8 cannot fire for exactly the same reason.
+			//
+			//    On badland-ridges that deadlocked the match: AttackBaseMode issued its last order
+			//    at 719s and none in the remaining 1,495s, every assessment from 900s to 1500s
+			//    reported unitsKilled 0 with secondsSinceContact climbing 30 -> 570, and a
+			//    115-unit army stood still while the other side rebuilt from three buildings to
+			//    twenty and went on to win.
+			if (s.EnemyBaseFound && LostContact(s, t))
+				return DoctrineDecision.SwitchTo(ReferenceDoctrines.Scout,
+					$"nothing of theirs seen for {s.SecondsSinceContact}s; finding them again");
+
+			// 5. Scouting has answered its question, so stop paying for it.
 			if (Is(s.Doctrine, ReferenceDoctrines.Scout) && s.EnemyBaseFound)
 				return DoctrineDecision.SwitchTo(ReferenceDoctrines.Opening, "their base has been found");
 
-			// 5. An army worth spending, and somewhere to spend it. Naming the doctrine already
+			// 6. An army worth spending, and somewhere to spend it. Naming the doctrine already
 			//    running is the same as continuing, so this also means "keep attacking".
 			if (readyToPush)
 				return DoctrineDecision.SwitchTo(ReferenceDoctrines.Attack,
 					$"army worth {s.ArmyValue} and their base is known");
 
-			// 6. A push that has run out of army. Going home and rebuilding beats feeding the
+			// 7. A push that has run out of army. Going home and rebuilding beats feeding the
 			//    rest of it in one unit at a time.
 			if (Is(s.Doctrine, ReferenceDoctrines.Attack) && s.ArmyValue < t.RetreatArmyValue)
 				return DoctrineDecision.SwitchTo(ReferenceDoctrines.Opening, $"army down to {s.ArmyValue}");
 
-			// 7. Economy is up and we still do not know where they live. Worth a jeep to find out,
-			//    because rule 5 cannot fire until we do.
+			// 8. Economy is up and we still do not know where they live. Worth a jeep to find out,
+			//    because rule 6 cannot fire until we do.
 			if (!s.EnemyBaseFound && s.Refineries >= t.ScoutRefineries)
 				return DoctrineDecision.SwitchTo(ReferenceDoctrines.Scout, "economy is up and their base is unknown");
 
 			return DoctrineDecision.Continue;
 		}
+
+		/// <summary>
+		/// Whether this side has lost the enemy entirely, rather than merely being between fights.
+		/// </summary>
+		/// <remarks>
+		/// The threshold has to clear a legitimate approach march, because a push crossing the map
+		/// sees nothing at all the whole way there and must not be called off for it. On
+		/// badland-ridges the winning push ran 245s without contact between leaving home and
+		/// arriving at their base, so any threshold below that would have cancelled the attack
+		/// that very nearly won the match.
+		/// <para>
+		/// A negative <c>SecondsSinceContact</c> means "never seen them at all", which is rule 8's
+		/// business rather than this one's, and comparing it against a positive threshold already
+		/// excludes it.
+		/// </para>
+		/// </remarks>
+		public static bool LostContact(in BattleState s, ReferenceBotTuning t) =>
+			s.EnemiesInSight == 0 && s.SecondsSinceContact >= t.LostContactSeconds;
 
 		/// <summary>
 		/// How many enemies in the base stop being a raid and start being their army.

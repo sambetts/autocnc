@@ -105,7 +105,7 @@ namespace AutoCnC.Launcher
 		}
 
 		public static void PrepareContext(TrainingRun run, string gameGuidePath, string gameRulesPath,
-			string promptTemplate)
+			string promptTemplate, string recoveryContext = null)
 		{
 			if (!run.IsEditable)
 				throw new InvalidOperationException("AI improvement requires a battle bot project, not a prebuilt assembly.");
@@ -125,16 +125,18 @@ namespace AutoCnC.Launcher
 				StringComparison.OrdinalIgnoreCase))
 				File.Copy(gameRulesPath, run.GameRulesPath, true);
 			run.ExportFightManifest();
-			File.WriteAllText(run.PromptPath, RenderPrompt(run, promptTemplate));
+			File.WriteAllText(run.PromptPath,
+				RenderPrompt(run, promptTemplate, recoveryContext));
 		}
 
 		public static void Prepare(TrainingRun run, string gameGuidePath, string gameRulesPath,
-			string promptTemplate, string command, IReadOnlyList<string> arguments)
+			string promptTemplate, string command, IReadOnlyList<string> arguments,
+			string recoveryContext = null)
 		{
 			if (string.IsNullOrWhiteSpace(command))
 				throw new InvalidOperationException("The agent command is empty.");
 
-			PrepareContext(run, gameGuidePath, gameRulesPath, promptTemplate);
+			PrepareContext(run, gameGuidePath, gameRulesPath, promptTemplate, recoveryContext);
 
 			var configuration = new TrainingAgentConfiguration { Command = command.Trim() };
 			configuration.Arguments.AddRange(arguments is { Count: > 0 } ? arguments : DefaultArguments);
@@ -208,7 +210,57 @@ namespace AutoCnC.Launcher
 			return true;
 		}
 
-		public static string RenderPrompt(TrainingRun run, string template)
+		public static string BuildRecoveryContext(TrainingAgentResult failedAttempt,
+			string archivedTranscript)
+		{
+			if (failedAttempt?.ExitCode is not int exitCode || exitCode == 0)
+				return null;
+
+			var verification = string.Equals(failedAttempt.FailurePhase, "verification",
+				StringComparison.OrdinalIgnoreCase);
+			if (!verification && !string.IsNullOrEmpty(archivedTranscript) &&
+				File.Exists(archivedTranscript))
+			{
+				try
+				{
+					verification = File.ReadAllText(archivedTranscript)
+						.Contains("=== Verification ===", StringComparison.Ordinal);
+				}
+				catch (IOException)
+				{
+				}
+			}
+
+			var phase = verification
+				? "independent build/test verification"
+				: "the coding-agent process";
+			var transcript = string.IsNullOrEmpty(archivedTranscript)
+				? "No previous transcript was captured."
+				: $"Read the archived attempt transcript first: `{archivedTranscript}`";
+			var message = string.IsNullOrWhiteSpace(failedAttempt.FailureMessage)
+				? $"The previous attempt exited with code {exitCode}."
+				: failedAttempt.FailureMessage;
+
+			return $"""
+				# Recovery attempt
+
+				The previous improvement failed during {phase}. Its source edits are still present in
+				the bot workspace; do not restart from the original strategy or add another unrelated
+				improvement.
+
+				{transcript}
+
+				Reported failure: {message}
+
+				First reproduce the failure with the bot's build and test commands. Repair the current
+				changes until every test and build exits successfully. If generated `bin`/`obj` output
+				is corrupt, clean it and rerun before diagnosing source. Only revisit the strategic
+				change if the tests prove its behavior is wrong.
+				""";
+		}
+
+		public static string RenderPrompt(TrainingRun run, string template,
+			string recoveryContext = null)
 		{
 			var result = run.Manifest.Result;
 			var battle = run.Manifest.Battle;
@@ -243,7 +295,9 @@ namespace AutoCnC.Launcher
 			foreach (var replacement in replacements)
 				prompt = prompt.Replace(replacement.Key, replacement.Value, StringComparison.Ordinal);
 
-			return prompt;
+			return string.IsNullOrWhiteSpace(recoveryContext)
+				? prompt
+				: recoveryContext.Trim() + Environment.NewLine + Environment.NewLine + prompt;
 		}
 
 		static string NextPromptContract() =>

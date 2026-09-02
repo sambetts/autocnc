@@ -497,6 +497,12 @@ evidence, result, and source revision through required placeholders. This replac
 appends, so the prompt can get more focused without growing indefinitely. While a build, fight, or
 improvement is running, the launcher taskbar icon shows indeterminate progress.
 
+If improvement stops with a build or test error, it no longer dead-ends. The Improvement window
+states whether the coding agent or independent verification failed. **Retry verification** cleans
+generated output and retests without invoking AI. If the source genuinely needs work, **Fix failed
+improvement** starts a recovery attempt with the previous transcript and current edits; **Restore
+previous iteration** discards the attempt.
+
 And if you touch the mod's YAML or traits, validate the wiring:
 
 ```powershell

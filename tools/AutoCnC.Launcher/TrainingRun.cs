@@ -51,6 +51,7 @@ namespace AutoCnC.Launcher
 
 	public sealed class TrainingAgentResult
 	{
+		public int Attempt { get; set; }
 		public DateTime? StartedUtc { get; set; }
 		public DateTime? CompletedUtc { get; set; }
 		public DateTime? RestoredUtc { get; set; }
@@ -59,6 +60,18 @@ namespace AutoCnC.Launcher
 		public string Command { get; set; }
 		public string SuggestedNextPrompt { get; set; }
 		public bool SuggestedNextPromptAccepted { get; set; }
+		public string FailurePhase { get; set; }
+		public string FailureMessage { get; set; }
+		public string RecoveryTranscript { get; set; }
+	}
+
+	public sealed class TrainingAgentExecutionStatus
+	{
+		public string State { get; set; }
+		public string Phase { get; set; }
+		public int? AgentExitCode { get; set; }
+		public int? VerificationExitCode { get; set; }
+		public string Message { get; set; }
 	}
 
 	public sealed class TrainingRunManifest
@@ -102,6 +115,8 @@ namespace AutoCnC.Launcher
 		public string GameRulesPath => Path.Combine(EvidenceDirectory, "game-rules.json");
 		public string AgentConfigurationPath => Path.Combine(RunDirectory, "agent-command.json");
 		public string AgentTranscriptPath => Path.Combine(RunDirectory, "agent-transcript.txt");
+		public string AgentStatusPath => Path.Combine(RunDirectory, "agent-status.json");
+		public string AttemptsDirectory => Path.Combine(EvidenceDirectory, "attempts");
 		public string SnapshotDirectory => Path.Combine(RunDirectory, "source-before-agent");
 		public string SnapshotManifestPath => Path.Combine(RunDirectory, "source-before-agent.json");
 		public string ChangesPath => Path.Combine(RunDirectory, "agent-changes.json");
@@ -162,7 +177,12 @@ namespace AutoCnC.Launcher
 
 			var manifest = JsonSerializer.Deserialize<TrainingRunManifest>(
 				File.ReadAllText(manifestPath), JsonOptions);
-			return manifest == null ? null : new TrainingRun(full, manifest);
+			if (manifest == null)
+				return null;
+
+			var run = new TrainingRun(full, manifest);
+			run.InferLegacyFailure();
+			return run;
 		}
 
 		public void Finish(string status, MatchLog matchLog, BattleEventLog battleLog)
@@ -246,19 +266,68 @@ namespace AutoCnC.Launcher
 			Save();
 		}
 
-		public void AgentStarted(string command)
+		public string ArchiveAgentAttempt()
 		{
+			if (Manifest.Agent == null)
+				return null;
+
+			var directory = Path.Combine(AttemptsDirectory,
+				$"attempt-{Math.Max(1, Manifest.Agent.Attempt):D2}-{DateTime.UtcNow:yyyyMMdd-HHmmss-fff}");
+			Directory.CreateDirectory(directory);
+
+			CopyIfExists(AgentTranscriptPath, Path.Combine(directory, "transcript.txt"));
+			CopyIfExists(PromptPath, Path.Combine(directory, "prompt.txt"));
+			CopyIfExists(AgentConfigurationPath, Path.Combine(directory, "agent-command.json"));
+			CopyIfExists(AgentStatusPath, Path.Combine(directory, "status.json"));
+			CopyIfExists(ChangesPath, Path.Combine(directory, "changes.json"));
+
+			var transcript = Path.Combine(directory, "transcript.txt");
+			return File.Exists(transcript) ? transcript : directory;
+		}
+
+		public TrainingAgentExecutionStatus ReadAgentStatus()
+		{
+			if (!File.Exists(AgentStatusPath))
+				return null;
+
+			return JsonSerializer.Deserialize<TrainingAgentExecutionStatus>(
+				File.ReadAllText(AgentStatusPath), JsonOptions);
+		}
+
+		public void AgentStarted(string command, string recoveryTranscript = null)
+		{
+			var attempt = Manifest.Agent == null
+				? 1
+				: Math.Max(1, Manifest.Agent.Attempt) + 1;
 			if (File.Exists(AgentTranscriptPath))
 				File.Delete(AgentTranscriptPath);
 			if (File.Exists(ChangesPath))
 				File.Delete(ChangesPath);
+			if (File.Exists(AgentStatusPath))
+				File.Delete(AgentStatusPath);
 
 			Manifest.Agent = new TrainingAgentResult
 			{
+				Attempt = attempt,
 				StartedUtc = DateTime.UtcNow,
-				Command = command
+				Command = command,
+				RecoveryTranscript = recoveryTranscript
 			};
 			Manifest.Status = "improving";
+			Save();
+		}
+
+		public void VerificationStarted()
+		{
+			if (File.Exists(AgentStatusPath))
+				File.Delete(AgentStatusPath);
+
+			Manifest.Agent ??= new TrainingAgentResult { Attempt = 1 };
+			Manifest.Agent.CompletedUtc = null;
+			Manifest.Agent.ExitCode = null;
+			Manifest.Agent.FailurePhase = null;
+			Manifest.Agent.FailureMessage = null;
+			Manifest.Status = "verifying";
 			Save();
 		}
 
@@ -268,13 +337,16 @@ namespace AutoCnC.Launcher
 			File.WriteAllText(FightManifestPath, JsonSerializer.Serialize(Manifest, JsonOptions));
 		}
 
-		public void AgentFinished(int exitCode, int changeCount, string suggestedNextPrompt = null)
+		public void AgentFinished(int exitCode, int changeCount, string suggestedNextPrompt = null,
+			string failurePhase = null, string failureMessage = null)
 		{
 			Manifest.Agent ??= new TrainingAgentResult();
 			Manifest.Agent.CompletedUtc = DateTime.UtcNow;
 			Manifest.Agent.ExitCode = exitCode;
 			Manifest.Agent.ChangeCount = changeCount;
 			Manifest.Agent.SuggestedNextPrompt = suggestedNextPrompt;
+			Manifest.Agent.FailurePhase = failurePhase;
+			Manifest.Agent.FailureMessage = failureMessage;
 			Manifest.Status = exitCode == 0 ? "improved" : "improvement-failed";
 			Save();
 		}
@@ -320,6 +392,48 @@ namespace AutoCnC.Launcher
 			var invalid = Path.GetInvalidFileNameChars();
 			var cleaned = new string((value ?? "bot").Select(c => invalid.Contains(c) ? '-' : c).ToArray()).Trim();
 			return cleaned.Length == 0 ? "bot" : cleaned;
+		}
+
+		static void CopyIfExists(string source, string destination)
+		{
+			if (File.Exists(source))
+				File.Copy(source, destination, true);
+		}
+
+		void InferLegacyFailure()
+		{
+			var agent = Manifest.Agent;
+			if (agent?.ExitCode is not int exitCode || exitCode == 0 ||
+				!string.IsNullOrEmpty(agent.FailurePhase))
+				return;
+
+			try
+			{
+				var status = ReadAgentStatus();
+				if (string.Equals(status?.State, "failed", StringComparison.OrdinalIgnoreCase))
+				{
+					agent.FailurePhase = status.Phase;
+					agent.FailureMessage = status.Message;
+					return;
+				}
+
+				if (File.Exists(AgentTranscriptPath) && File.ReadLines(AgentTranscriptPath)
+					.Any(line => line.StartsWith("=== Verification", StringComparison.Ordinal)))
+				{
+					agent.FailurePhase = "verification";
+					agent.FailureMessage = "Independent bot verification failed.";
+				}
+				else
+					agent.FailurePhase = "agent";
+			}
+			catch (IOException)
+			{
+				agent.FailurePhase = "process";
+			}
+			catch (JsonException)
+			{
+				agent.FailurePhase = "process";
+			}
 		}
 	}
 }

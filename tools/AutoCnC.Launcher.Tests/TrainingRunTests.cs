@@ -81,7 +81,7 @@ namespace AutoCnC.Launcher.Tests
 			var oldRoot = Path.Combine(root, "old-checkout");
 			var currentRoot = Path.Combine(root, "current-checkout");
 			CreateCheckout(oldRoot, authoringApi: null);
-			CreateCheckout(currentRoot, authoringApi: "3");
+			CreateCheckout(currentRoot, authoringApi: "4");
 			var nestedStart = Path.Combine(currentRoot, "tools", "AutoCnC.Launcher", "bin");
 			Directory.CreateDirectory(nestedStart);
 
@@ -252,6 +252,52 @@ namespace AutoCnC.Launcher.Tests
 			Assert.That(history.Iterations[0].LocalPlayer.ArmyValue, Is.EqualTo(1800));
 			Assert.That(history.Iterations[0].Opponents.ArmyValue, Is.EqualTo(7200));
 			Assert.That(history.Iterations[1].Outcome, Is.EqualTo("Won"));
+		}
+
+		[Test]
+		public void FailedAttemptIsArchivedAndRecoveryPromptTargetsItsVerificationError()
+		{
+			var run = NewRun();
+			TrainingAgent.PrepareContext(run, gameGuide, gameRules, promptTemplate);
+			run.AgentStarted("agent");
+			File.WriteAllText(run.AgentTranscriptPath,
+				"agent output" + Environment.NewLine + "=== Verification ===" +
+				Environment.NewLine + "tests failed");
+			run.AgentFinished(1, 4, failurePhase: "verification",
+				failureMessage: "Bot tests failed.");
+
+			var transcript = run.ArchiveAgentAttempt();
+			var recovery = TrainingAgent.BuildRecoveryContext(run.Manifest.Agent, transcript);
+			TrainingAgent.PrepareContext(run, gameGuide, gameRules, promptTemplate, recovery);
+			run.AgentStarted("agent", transcript);
+
+			Assert.That(File.Exists(transcript), Is.True);
+			Assert.That(File.ReadAllText(run.PromptPath), Does.Contain("Recovery attempt"));
+			Assert.That(File.ReadAllText(run.PromptPath), Does.Contain("Bot tests failed."));
+			Assert.That(File.ReadAllText(run.PromptPath), Does.Contain(transcript));
+			Assert.That(run.Manifest.Agent.Attempt, Is.EqualTo(2));
+			Assert.That(run.Manifest.Agent.RecoveryTranscript, Is.EqualTo(transcript));
+		}
+
+		[Test]
+		public void LegacyFailedRunInfersVerificationPhaseFromTranscript()
+		{
+			var run = NewRun();
+			run.AgentStarted("agent");
+			File.WriteAllText(run.AgentTranscriptPath,
+				"agent finished" + Environment.NewLine + "=== Verification ===" +
+				Environment.NewLine + "tests failed");
+			run.AgentFinished(1, 2);
+
+			var loaded = TrainingRun.Load(run.RunDirectory);
+
+			Assert.That(loaded.Manifest.Agent.FailurePhase, Is.EqualTo("verification"));
+			Assert.That(loaded.Manifest.Agent.FailureMessage,
+				Is.EqualTo("Independent bot verification failed."));
+
+			loaded.VerificationStarted();
+			Assert.That(loaded.Manifest.Status, Is.EqualTo("verifying"));
+			Assert.That(loaded.Manifest.Agent.ExitCode, Is.Null);
 		}
 
 		[Test]

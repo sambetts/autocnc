@@ -320,6 +320,12 @@ additive guidance. `docs/agent-prompt-template.md` is the repository default, wh
 replacement is user state. Script queue activity is mirrored to Windows taskbar indeterminate
 progress and cleared on every terminal state.
 
+`train-bot.ps1` records agent and verification phases in `agent-status.json`.
+`verify-bot.ps1` owns the shared clean/test/build/deploy check, so initial verification and the
+no-agent retry path cannot drift. A failed agent attempt is archived under `evidence/attempts`;
+recovery keeps the current source edits and prepends the archived failure context to the next
+agent prompt. The original source snapshot remains outside agent-visible evidence.
+
 `BattleSetup` is listed *ahead of* `LobbyCommands` in `mod.yaml`, which matters for exactly one
 reason: the engine starts a launched map by issuing a hardcoded `option gamespeed default` from
 the client, and it arrives after `IClientJoined` has run. The server stops at the first trait

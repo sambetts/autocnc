@@ -16,7 +16,9 @@ Treat the guide as authoritative for game mechanics, fair information access, an
 - Preserve the public SDK boundary and existing project conventions.
 - Make evidence-based changes rather than arbitrary tuning.
 - Add or update focused tests for changed pure strategy logic.
-- Run the bot's tests and build before finishing. The host will run them again.
+- Run the bot's tests and build before finishing. Do not stop while either command is failing; fix
+  failures and rerun until both exit successfully. The host will clean generated output and run
+  them again independently.
 - Do not launch another game. Finish after the code is ready for the next fight.
 
 ## Evidence

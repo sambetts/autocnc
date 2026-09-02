@@ -178,6 +178,19 @@ namespace AutoCnC.Launcher
 			taskbarProgress.SetBusy(Handle, busy: true);
 		}
 
+		public void StartVerificationRun(TrainingRun run)
+		{
+			shownRun = run;
+			LoadInputs(run);
+			progress.Clear();
+			transcriptParser.Reset();
+			liveOutputStarted = false;
+			summary.Text = "Cleaning generated output and retrying independent verification…";
+			views.SelectedTab = progressTab;
+			Text = "AutoC&C — Improvement (verifying)";
+			taskbarProgress.SetBusy(Handle, busy: true);
+		}
+
 		public void AppendAgentOutput(TerminalLine line)
 		{
 			if (!liveOutputStarted)
@@ -405,12 +418,24 @@ namespace AutoCnC.Launcher
 			if (result.ExitCode == null)
 				return "Improvement agent running — progress is streaming above.";
 
+			if (result.ExitCode != 0)
+			{
+				var phase = string.Equals(result.FailurePhase, "verification",
+					StringComparison.OrdinalIgnoreCase)
+					? "Independent verification failed"
+					: "The coding agent failed";
+				var detail = string.IsNullOrWhiteSpace(result.FailureMessage)
+					? ""
+					: " — " + result.FailureMessage;
+				return $"{phase}{detail}. Choose Fix failed improvement to repair the current changes, or Restore previous iteration.";
+			}
+
 			return result.ExitCode == 0
 				? $"{result.ChangeCount} source file(s) changed. Verification passed." +
 					(!string.IsNullOrEmpty(result.SuggestedNextPrompt) && !result.SuggestedNextPromptAccepted
 						? " Review Next prompt * to choose the complete prompt for the next round."
 						: "")
-				: $"{result.ChangeCount} source file(s) changed. The agent or verification failed with exit code {result.ExitCode}.";
+				: "";
 		}
 
 		static TextBox TextPane() => new()

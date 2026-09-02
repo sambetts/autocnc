@@ -293,6 +293,12 @@ result. A valid agent-authored next prompt is accepted automatically; any battle
 build failure stops the loop. Player assessments are disabled because continuous mode does not
 pause after a battle.
 
+An agent exit and a host verification failure are recorded separately. Verification always cleans
+the bot's generated `bin`/`obj` output before testing. If it still fails, **Retry verification**
+repeats that cheap check without spending another agent run; **Fix failed improvement** archives
+the failed transcript and asks the agent to repair the current changes. **Restore previous
+iteration** remains the escape hatch back to the pre-agent snapshot.
+
 The agent command is provider-neutral and configurable as one argument per line. It supports
 `{prompt}`, `{promptFile}`, `{project}`, `{workspace}`, `{evidence}`, and `{run}` placeholders.
 The default Copilot command grants file access only to the bot workspace and `{evidence}`, keeping

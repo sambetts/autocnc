@@ -85,6 +85,7 @@ namespace AutoCnC.Launcher
 		Button openCodeButton;
 		Button historyButton;
 		Button improveButton;
+		Button retryVerificationButton;
 		Button reviewButton;
 		Button restoreButton;
 		Button runFolderButton;
@@ -391,6 +392,9 @@ namespace AutoCnC.Launcher
 			improveButton = new Button { Text = "Analyze && improve", AutoSize = true, Padding = new Padding(8, 3, 8, 3) };
 			improveButton.Click += (_, _) => { ImproveBot(); };
 
+			retryVerificationButton = new Button { Text = "Retry verification", AutoSize = true, Padding = new Padding(8, 3, 8, 3), Visible = false };
+			retryVerificationButton.Click += (_, _) => RetryVerification();
+
 			reviewButton = new Button { Text = "Agent workspace", AutoSize = true, Padding = new Padding(8, 3, 8, 3) };
 			reviewButton.Click += (_, _) => ReviewImprovement();
 
@@ -421,6 +425,7 @@ namespace AutoCnC.Launcher
 			actions.Controls.Add(openCodeButton);
 			actions.Controls.Add(historyButton);
 			actions.Controls.Add(improveButton);
+			actions.Controls.Add(retryVerificationButton);
 			actions.Controls.Add(reviewButton);
 			actions.Controls.Add(restoreButton);
 			actions.Controls.Add(runFolderButton);
@@ -859,7 +864,9 @@ namespace AutoCnC.Launcher
 			var continuousReady = compatible && editable && continuousBox.Checked;
 			var agent = lastRun?.Manifest.Agent;
 			var lastRunMatches = LastRunMatchesSelectedBot();
-			var canRetryImprovement = agent == null || agent.ChangeCount == 0 || agent.RestoredUtc != null;
+			var failedImprovement = agent?.ExitCode is int agentExitCode && agentExitCode != 0;
+			var canRetryImprovement = agent == null || agent.ChangeCount == 0 ||
+				agent.RestoredUtc != null || failedImprovement;
 
 			launchButton.Enabled = ready;
 			buildButton.Enabled = !busy && compatible && BotExists();
@@ -875,6 +882,13 @@ namespace AutoCnC.Launcher
 				File.Exists(lastRun.BattleLogPath) &&
 				File.Exists(lastRun.TelemetryPath) &&
 				File.Exists(lastRun.DecisionTracePath);
+			improveButton.Text = failedImprovement && agent.RestoredUtc == null
+				? "Fix failed improvement"
+				: "Analyze && improve";
+			retryVerificationButton.Visible = failedImprovement &&
+				string.Equals(agent.FailurePhase, "verification", StringComparison.OrdinalIgnoreCase);
+			retryVerificationButton.Enabled = !busy && compatible &&
+				File.Exists(repo.VerifyBotScript) && lastRunMatches;
 			reviewButton.Enabled = compatible && lastRunMatches &&
 				lastRun?.IsEditable == true && lastRun.Manifest.CompletedUtc != null;
 			restoreButton.Enabled = !busy && lastRunMatches && lastRun != null &&
@@ -913,6 +927,8 @@ namespace AutoCnC.Launcher
 				Status("Fight saved. Edit manually, or analyze and improve it with the configured agent.");
 			else if (lastRun?.Manifest.Status == "improved")
 				Status("Improvement verified and deployed. Fight again to measure it.");
+			else if (lastRunMatches && lastRun?.Manifest.Status == "improvement-failed")
+				Status("Improvement failed. Fix its current changes with the agent, or restore the previous iteration.");
 			else if (lastRun?.Manifest.Status == "restored")
 				Status("The previous source iteration has been restored.");
 			else
@@ -1488,7 +1504,8 @@ namespace AutoCnC.Launcher
 		{
 			var previousAgent = lastRun?.Manifest.Agent;
 			var canRetry = previousAgent == null || previousAgent.ChangeCount == 0 ||
-				previousAgent.RestoredUtc != null;
+				previousAgent.RestoredUtc != null ||
+				previousAgent.ExitCode is int previousExitCode && previousExitCode != 0;
 			if (repo == null || !LastRunMatchesSelectedBot() ||
 				lastRun?.IsEditable != true || !canRetry)
 			{
@@ -1507,9 +1524,18 @@ namespace AutoCnC.Launcher
 				if (!File.Exists(lastRun.GameRulesPath))
 					AgentRulesExporter.Export(repo, lastRun.GameRulesPath);
 
+				var recovering = previousAgent?.ExitCode is int failedExitCode &&
+					failedExitCode != 0 && previousAgent.RestoredUtc == null;
+				var archivedTranscript = recovering
+					? lastRun.ArchiveAgentAttempt()
+					: null;
+				var recoveryContext = recovering
+					? TrainingAgent.BuildRecoveryContext(previousAgent, archivedTranscript)
+					: null;
 				TrainingAgent.Prepare(lastRun, repo.AgentGameGuide, lastRun.GameRulesPath,
-					CurrentPromptTemplate(), settings.AgentCommand, settings.AgentArguments);
-				lastRun.AgentStarted(settings.AgentCommand);
+					CurrentPromptTemplate(), settings.AgentCommand, settings.AgentArguments,
+					recoveryContext);
+				lastRun.AgentStarted(settings.AgentCommand, archivedTranscript);
 			}
 			catch (InvalidOperationException ex)
 			{
@@ -1568,30 +1594,53 @@ namespace AutoCnC.Launcher
 			if (lastRun == null)
 				return;
 
-			var suggestedNextPrompt = exitCode == 0
+			TrainingAgentExecutionStatus status = null;
+			try
+			{
+				status = lastRun.ReadAgentStatus();
+			}
+			catch (IOException ex)
+			{
+				AppendImprovementOutput($"Could not read the improvement status: {ex.Message}");
+			}
+			catch (System.Text.Json.JsonException ex)
+			{
+				AppendImprovementOutput($"Could not read the improvement status: {ex.Message}");
+			}
+
+			var failed = exitCode != 0;
+			var failurePhase = failed ? status?.Phase ?? "process" : null;
+			var failureMessage = failed
+				? status?.Message ?? $"Improvement process exited with code {exitCode}."
+				: null;
+			var suggestedNextPrompt = !failed
 				? TrainingAgent.FindSuggestedNextPrompt(runner.LastOutput)
 				: null;
 			try
 			{
 				var changes = WorkspaceSnapshot.Compare(lastRun);
-				lastRun.AgentFinished(exitCode, changes.Count, suggestedNextPrompt);
+				lastRun.AgentFinished(exitCode, changes.Count, suggestedNextPrompt,
+					failurePhase, failureMessage);
 				if (!closing && improvementWindow != null)
 					improvementWindow.CompleteAgentRun(lastRun);
 			}
 			catch (InvalidDataException ex)
 			{
 				AppendImprovementOutput($"Could not record the agent's changes: {ex.Message}");
-				lastRun.AgentFinished(exitCode, 0, suggestedNextPrompt);
+				lastRun.AgentFinished(exitCode, 0, suggestedNextPrompt,
+					failurePhase, failureMessage);
 			}
 			catch (IOException ex)
 			{
 				AppendImprovementOutput($"Could not record the agent's changes: {ex.Message}");
-				lastRun.AgentFinished(exitCode, 0, suggestedNextPrompt);
+				lastRun.AgentFinished(exitCode, 0, suggestedNextPrompt,
+					failurePhase, failureMessage);
 			}
 			catch (System.Text.Json.JsonException ex)
 			{
 				AppendImprovementOutput($"Could not record the agent's changes: {ex.Message}");
-				lastRun.AgentFinished(exitCode, 0, suggestedNextPrompt);
+				lastRun.AgentFinished(exitCode, 0, suggestedNextPrompt,
+					failurePhase, failureMessage);
 			}
 
 			if (exitCode == 0 && continuousLoop.Stage == ContinuousTrainingStage.Improving)
@@ -1622,6 +1671,34 @@ namespace AutoCnC.Launcher
 			settings.Save();
 			improvementWindow?.MarkNextPromptSaved();
 			AppendImprovementOutput("The next-round prompt was accepted automatically for continuous improvement.");
+		}
+
+		void RetryVerification()
+		{
+			if (repo == null || lastRun?.Manifest.Agent == null ||
+				!LastRunMatchesSelectedBot() ||
+				!string.Equals(lastRun.Manifest.Agent.FailurePhase, "verification",
+					StringComparison.OrdinalIgnoreCase))
+				return;
+
+			lastRun.VerificationStarted();
+			ShowImprovementWindow().StartVerificationRun(lastRun);
+			queue.Clear();
+			queue.Enqueue(new ScriptJob
+			{
+				Title = "Retrying independent verification",
+				ScriptPath = repo.VerifyBotScript,
+				Arguments =
+				[
+					"-BattleBot", lastRun.Manifest.BotProject,
+					"-RunDirectory", lastRun.RunDirectory
+				],
+				PreserveColor = true,
+				Output = AppendImprovementOutput,
+				Completed = FinishImprovement
+			});
+
+			RunNext();
 		}
 
 		void ReviewImprovement()

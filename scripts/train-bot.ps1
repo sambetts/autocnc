@@ -94,6 +94,28 @@ foreach ($required in 'battle.csv', 'telemetry.csv', 'decisions.jsonl') {
 $workspace = Split-Path -Parent $project
 $promptFile = Join-Path $evidence 'agent-prompt.txt'
 $transcript = Join-Path $run 'agent-transcript.txt'
+$statusFile = Join-Path $run 'agent-status.json'
+
+function Write-AgentStatus {
+    param(
+        [Parameter(Mandatory)][string]$State,
+        [Parameter(Mandatory)][string]$Phase,
+        [Nullable[int]]$AgentExitCode,
+        [Nullable[int]]$VerificationExitCode,
+        [string]$Message
+    )
+
+    $status = [ordered]@{
+        State = $State
+        Phase = $Phase
+        AgentExitCode = $AgentExitCode
+        VerificationExitCode = $VerificationExitCode
+        Message = $Message
+    }
+    $temporary = "$statusFile.tmp"
+    $status | ConvertTo-Json | Set-Content -LiteralPath $temporary -Encoding utf8
+    Move-Item -LiteralPath $temporary -Destination $statusFile -Force
+}
 
 if (-not (Test-Path -LiteralPath $promptFile)) {
     $templatePath = Join-Path $repoRoot 'docs\agent-prompt-template.md'
@@ -209,34 +231,28 @@ $agentArguments = foreach ($argument in @($agent.arguments)) {
 Set-Content -LiteralPath $transcript -Value "=== Agent: $($agent.command) ==="
 Write-Host "==> Improving $([IO.Path]::GetFileNameWithoutExtension($project)) with $($agent.command)" -ForegroundColor Cyan
 Write-Host "    Evidence: $run" -ForegroundColor DarkGray
+Write-AgentStatus -State 'running' -Phase 'agent'
 
 Push-Location $workspace
 try {
+    $agentFailure = $null
     try {
         & $agent.command @agentArguments 2>&1 | Tee-Object -FilePath $transcript -Append
         $agentExitCode = $LASTEXITCODE
     } catch {
+        $agentExitCode = if ($LASTEXITCODE) { $LASTEXITCODE } else { 1 }
+        $agentFailure = $_
         $_ | Out-String | Tee-Object -FilePath $transcript -Append | Write-Host
-        throw
     }
 
-    if ($null -ne $agentExitCode -and $agentExitCode -ne 0) {
+    if ($agentFailure -or ($null -ne $agentExitCode -and $agentExitCode -ne 0)) {
+        $message = if ($agentFailure) { $agentFailure.Exception.Message } else { "The improvement agent exited with code $agentExitCode." }
+        Write-AgentStatus -State 'failed' -Phase 'agent' -AgentExitCode $agentExitCode -Message $message
         throw "The improvement agent exited with code $agentExitCode."
     }
 
-    '=== Verification ===' | Tee-Object -FilePath $transcript -Append | Write-Host
-    try {
-        & (Join-Path $PSScriptRoot 'run-bot.ps1') -BattleBot $project -Test -NoLaunch `
-            -Configuration $Configuration 2>&1 | Tee-Object -FilePath $transcript -Append
-        $validationExitCode = $LASTEXITCODE
-    } catch {
-        $_ | Out-String | Tee-Object -FilePath $transcript -Append | Write-Host
-        throw
-    }
-
-    if ($null -ne $validationExitCode -and $validationExitCode -ne 0) {
-        throw "Post-agent verification exited with code $validationExitCode."
-    }
+    & (Join-Path $PSScriptRoot 'verify-bot.ps1') -BattleBot $project -RunDirectory $run `
+        -Configuration $Configuration
 } finally {
     Pop-Location
 }

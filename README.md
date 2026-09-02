@@ -353,6 +353,10 @@ template replaces the previous one next round, with fresh paths, fight, result, 
 inserted through required placeholders. Long-running launcher work also shows an indeterminate
 progress bar on its Windows taskbar icon.
 
+Agent and independent-verification failures are separate states. A failed verification exposes
+**Retry verification**, which cleans generated output before retesting, plus **Fix failed
+improvement** for asking the agent to repair genuine source failures from the archived transcript.
+
 It runs the scripts below and shows you their output, so it never does anything you could not
 have typed yourself. Windows only; elsewhere use the command it wraps, which takes the same
 options:

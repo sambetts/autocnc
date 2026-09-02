@@ -109,6 +109,12 @@ namespace AutoCnC.Platform
 		public static string BattleLog => Value("Launch.BattleLog");
 
 		/// <summary>
+		/// Where to write the newline-delimited JSON trace connecting assessments and mode
+		/// decisions to the orders they produced. Blank disables the trace.
+		/// </summary>
+		public static string DecisionTrace => Value("Launch.DecisionTrace");
+
+		/// <summary>
 		/// The engine's own map argument. We only read it to recognise the battle this process
 		/// was launched into, which is the one — and the only one — we are entitled to set up.
 		/// </summary>

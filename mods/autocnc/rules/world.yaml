@@ -40,6 +40,10 @@
 # ctx.SenseThreats filters with. Read the graph to see how a bot did; read the log to see what it
 # knew when it decided. ReportsToBattleLog is the player-actor half of it, because the engine
 # delivers damage and death notifications to the damaged actor's owner rather than to the world.
+#
+# Launch.DecisionTrace optionally asks ModeExecutor to write the missing reasoning bridge as JSONL:
+# each bot assessment, doctrine outcome, and mode decision that actually became an order. It is
+# diagnostic output for after the match and is never exposed back to bot code.
 
 World:
 	ModeExecutor:

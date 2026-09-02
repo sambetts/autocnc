@@ -194,13 +194,16 @@ you'd expect. A player can still override anything live with `/mode`.
 ## Getting set up
 
 ```powershell
-cp -r bots/Reference bots/MyBot
+./scripts/new-bot.ps1 -Name MyBot
 cd bots/MyBot
-# rename the .csproj, .sln, and the IBattleBot class + its Name
-dotnet build
+dotnet test .\Tests\MyBot.Tests.csproj
 ```
 
-Or do the whole loop in one command:
+The launcher exposes the same operation as **New bot…** and selects the generated project
+immediately. The starter is intentionally small rather than a copy of `Reference`: one doctrine,
+one sense/decide/act mode, pure logic, and tests you can safely evolve.
+
+Build and play in one command:
 
 ```powershell
 ./scripts/run-bot.ps1 -BattleBot MyBot -Test
@@ -236,6 +239,53 @@ scanned as bots.
 Built output goes to `BattleBotInstallDirectory`, which defaults to `engine/bin/bots`. The
 platform scans that plus `<SupportDir>/autocnc/bots`, the latter being where a player drops a bot
 someone shared with them.
+
+### Training from a fight
+
+The launcher preserves every fight as a unique training run under
+`%LOCALAPPDATA%\AutoCnC\TrainingRuns`. A run contains:
+
+| Artifact | Answers |
+|---|---|
+| `manifest.json` | Authoritative run state, result, and improvement status |
+| `evidence/agent-prompt.txt` | The exact instruction sent to the configured agent |
+| `evidence/game-guide.md` | Shared mechanics, SDK semantics, fairness constraints, and improvement rules |
+| `evidence/game-rules.json` | Actors and weapons exported from OpenRA's resolved runtime ruleset |
+| `evidence/fight.json` | The source revision, map, opponent, factions and result shown to an agent |
+| `evidence/telemetry.csv` | When the economy or army moved ahead or fell behind |
+| `evidence/battle.csv` | What this side could observe and react to |
+| `evidence/decisions.jsonl` | What the bot assessed and which mode decisions became orders |
+| `evidence/replay.orarep` | What the fight looked like |
+
+That is enough to correlate cause and effect without giving strategy code omniscient information
+during the match. `decisions.jsonl` is diagnostic output written by the host; a bot cannot read it.
+
+`game-rules.json` is generated from `ModData.DefaultRules` after OpenRA has merged the inherited
+Tiberian Dawn YAML with AutoC&C overrides. It is a snapshot of the actual engine build, not a
+second hand-maintained stats database.
+
+**Open code** is the normal manual path. **Analyze & improve** is optional: it snapshots the
+editable bot files, invokes the configured local coding agent (GitHub Copilot CLI by default), and
+then runs the bot's tests and deployment build independently. **Agent workspace** opens a
+dedicated window that streams the agent's colored terminal progress and exposes the exact prompt
+and all shared context before and after the run. Review the changed files before fighting again.
+**Restore previous iteration** restores modified and deleted files
+and removes files added by that agent run; build output and git metadata are never part of the
+snapshot.
+
+The Fight and Units & weapons views are lazy JSON trees: expand only the objects or actors you
+need. Every agent is also asked to draft a complete replacement prompt template for the next
+round—not an extra hint. It appears in **Next prompt***, where the player can edit and approve it.
+The approved template replaces the previous one and is rendered with fresh run values through
+required placeholders such as `{workspace}`, `{telemetry}`, `{result}`, and
+`{nextPromptContract}`. The initial template lives at `docs/agent-prompt-template.md`; an approved
+replacement is saved in the player's launcher settings.
+
+The agent command is provider-neutral and configurable as one argument per line. It supports
+`{prompt}`, `{promptFile}`, `{project}`, `{workspace}`, `{evidence}`, and `{run}` placeholders.
+The default Copilot command grants file access only to the bot workspace and `{evidence}`, keeping
+the restore snapshot outside the agent's allowed paths. The equivalent terminal entry point is
+`scripts/train-bot.ps1`.
 
 ---
 

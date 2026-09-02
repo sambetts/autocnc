@@ -10,7 +10,9 @@
 #endregion
 
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 
 namespace AutoCnC.Launcher
 {
@@ -19,21 +21,32 @@ namespace AutoCnC.Launcher
 	/// </summary>
 	public sealed class RepoLayout
 	{
+		public const int RequiredAuthoringApiVersion = 3;
+
 		public string Root { get; }
+		public int AuthoringApiVersion { get; }
+		public bool SupportsTraining => AuthoringApiVersion >= RequiredAuthoringApiVersion;
 
 		RepoLayout(string root)
 		{
 			Root = root;
+			AuthoringApiVersion = ReadAuthoringApiVersion(root);
 		}
 
 		public string ScriptsDir => Path.Combine(Root, "scripts");
 		public string EngineDir => Path.Combine(Root, "engine");
 		public string EngineBinDir => Path.Combine(EngineDir, "bin");
+		public string PackagesDir => Path.Combine(Root, "packages");
 
 		public string RunBotScript => Path.Combine(ScriptsDir, "run-bot.ps1");
+		public string NewBotScript => Path.Combine(ScriptsDir, "new-bot.ps1");
+		public string TrainBotScript => Path.Combine(ScriptsDir, "train-bot.ps1");
 		public string LaunchScript => Path.Combine(ScriptsDir, "launch.ps1");
 		public string BuildScript => Path.Combine(ScriptsDir, "build.ps1");
 		public string DifficultiesFile => Path.Combine(ScriptsDir, "difficulties.json");
+		public string AuthoringApiFile => Path.Combine(ScriptsDir, "authoring-api.version");
+		public string AgentGameGuide => Path.Combine(Root, "docs", "agent-game-guide.md");
+		public string AgentPromptTemplate => Path.Combine(Root, "docs", "agent-prompt-template.md");
 
 		public string ReferenceBot => Path.Combine(Root, "bots", "Reference", "ReferenceBot.csproj");
 
@@ -42,6 +55,11 @@ namespace AutoCnC.Launcher
 
 		/// <summary>Building the engine takes minutes, so it is worth knowing before we start.</summary>
 		public bool EngineBuilt => File.Exists(Path.Combine(EngineBinDir, "OpenRA.dll"));
+
+		public bool PackagesBuilt =>
+			Directory.Exists(PackagesDir) &&
+			Directory.EnumerateFiles(PackagesDir, "AutoCnC.Sdk.*.nupkg").Any() &&
+			Directory.EnumerateFiles(PackagesDir, "AutoCnC.Core.*.nupkg").Any();
 
 		public static bool LooksLikeRoot(string directory) =>
 			!string.IsNullOrWhiteSpace(directory)
@@ -57,25 +75,53 @@ namespace AutoCnC.Launcher
 		/// gets to point at the repository themselves.
 		/// </summary>
 		public static RepoLayout Discover(string hint = null)
-		{
-			var found = For(hint);
-			if (found != null)
-				return found;
+			=> Discover(hint, [AppContext.BaseDirectory, Directory.GetCurrentDirectory()]);
 
-			foreach (var start in new[] { AppContext.BaseDirectory, Directory.GetCurrentDirectory() })
+		public static RepoLayout Discover(string hint, IEnumerable<string> starts)
+		{
+			var hinted = For(hint);
+			if (hinted?.SupportsTraining == true)
+				return hinted;
+
+			RepoLayout fallback = hinted;
+
+			foreach (var start in starts)
 			{
 				var directory = start;
 				while (!string.IsNullOrEmpty(directory))
 				{
-					found = For(directory);
+					var found = For(directory);
 					if (found != null)
-						return found;
+					{
+						fallback ??= found;
+						if (found.SupportsTraining)
+							return found;
+					}
 
 					directory = Path.GetDirectoryName(directory.TrimEnd(Path.DirectorySeparatorChar));
 				}
 			}
 
-			return null;
+			return fallback;
+		}
+
+		static int ReadAuthoringApiVersion(string root)
+		{
+			try
+			{
+				var path = Path.Combine(root, "scripts", "authoring-api.version");
+				return File.Exists(path) && int.TryParse(File.ReadAllText(path).Trim(), out var version)
+					? version
+					: 0;
+			}
+			catch (IOException)
+			{
+				return 0;
+			}
+			catch (UnauthorizedAccessException)
+			{
+				return 0;
+			}
 		}
 	}
 }

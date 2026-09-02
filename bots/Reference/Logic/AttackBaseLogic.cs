@@ -27,6 +27,23 @@ namespace AutoCnC.Reference.Logic
 	}
 
 	/// <summary>
+	/// Where a push marches when it cannot see anything to shoot: the last place this side saw
+	/// an enemy structure.
+	/// </summary>
+	/// <remarks>
+	/// An assault has to start before it can see its target. Two bases on an ordinary map are
+	/// further apart than any unit's sight — and sensing only ever returns what is visible
+	/// *now* — so an army standing in its own base sees no objective at all. Without somewhere
+	/// to march it holds, and an attack doctrine whose units all hold is indistinguishable from
+	/// no attack doctrine at all.
+	/// </remarks>
+	public readonly record struct ApproachOrders(bool HasTarget, int X, int Y, int DistanceUnits)
+	{
+		/// <summary>Nowhere to go: this side has never seen an enemy structure.</summary>
+		public static ApproachOrders None { get; } = new(false, 0, 0, 0);
+	}
+
+	/// <summary>
 	/// Pure decision logic for a unit pushing into an enemy base.
 	/// </summary>
 	/// <remarks>
@@ -38,6 +55,9 @@ namespace AutoCnC.Reference.Logic
 	public static class AttackBaseLogic
 	{
 		public static UnitDecision Decide(in AssaultState state, in AssaultTuning tuning)
+			=> Decide(state, tuning, ApproachOrders.None);
+
+		public static UnitDecision Decide(in AssaultState state, in AssaultTuning tuning, in ApproachOrders approach)
 		{
 			// 0. An unarmed unit cannot assault anything. Leave it alone rather than marching it
 			//    into the enemy base to die. See the equivalent guard in DefensiveLogic.
@@ -49,7 +69,7 @@ namespace AutoCnC.Reference.Logic
 				return UnitDecision.Retreat($"health {state.HealthPercent}% <= {tuning.RetreatBelowHealthPercent}%");
 
 			if (!state.HasObjective)
-				return state.IsIdle ? UnitDecision.Hold("no objective assigned") : UnitDecision.Continue;
+				return Approach(state, approach);
 
 			// 2. In range of the objective: hit it. The objective always wins over distractions.
 			if (state.DistanceToObjectiveUnits <= state.WeaponRangeUnits)
@@ -71,8 +91,26 @@ namespace AutoCnC.Reference.Logic
 		}
 
 		/// <summary>
-		/// Chooses something worth shooting *without deviating from the advance*, or null.
+		/// What to do with no objective in sensor range: close on the last known enemy base, or
+		/// hold if this side has never seen one.
 		/// </summary>
+		/// <remarks>
+		/// Attack-move rather than move, because the whole point is to arrive able to fight. It
+		/// is not a breach of the never-chase rule: the destination is fixed before the unit
+		/// sets off, so nothing it meets on the way can redirect it. As soon as a structure
+		/// comes into range the objective rules above take over.
+		/// </remarks>
+		static UnitDecision Approach(in AssaultState state, in ApproachOrders approach)
+		{
+			if (approach.HasTarget && state.CanMove)
+				return UnitDecision.AttackMoveTo(approach.X, approach.Y,
+					$"nothing in sight, closing on their base, {approach.DistanceUnits}u out");
+
+			return state.IsIdle ? UnitDecision.Hold("no objective assigned") : UnitDecision.Continue;
+		}
+
+		/// <summary>
+
 		public static ThreatSnapshot? SelectBlocker(in AssaultState state, in AssaultTuning tuning)
 		{
 			var threats = state.Threats;

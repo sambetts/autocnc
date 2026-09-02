@@ -1,0 +1,26 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Launch AutoC&C",
+            "type": "coreclr",
+            "request": "launch",
+            "preLaunchTask": "build",
+            "program": "__AUTOCNC_REPOSITORY_PATH_JSON__\\engine\\bin\\OpenRA.dll",
+            "args": [
+                "Engine.EngineDir=__AUTOCNC_REPOSITORY_PATH_JSON__\\engine",
+                "Engine.ModSearchPaths=__AUTOCNC_REPOSITORY_PATH_JSON__\\mods,__AUTOCNC_REPOSITORY_PATH_JSON__\\engine\\mods",
+                "Game.Mod=autocnc",
+                "Launch.BattleBotPath=__AUTOCNC_REPOSITORY_PATH_JSON__\\engine\\bin\\bots\\__AUTOCNC_BOT_ROOT_NAMESPACE__.dll"
+            ],
+            "cwd": "__AUTOCNC_REPOSITORY_PATH_JSON__\\engine\\bin",
+            "console": "internalConsole",
+            "stopAtEntry": false
+        },
+        {
+            "name": "Attach to AutoC&C",
+            "type": "coreclr",
+            "request": "attach"
+        }
+    ]
+}

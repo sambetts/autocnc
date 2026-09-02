@@ -12,6 +12,7 @@
 using System;
 using System.IO;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace AutoCnC.Launcher
 {
@@ -34,6 +35,13 @@ namespace AutoCnC.Launcher
 		public string Faction { get; set; } = "Random";
 		public string BotFaction { get; set; } = "Random";
 		public bool RunTests { get; set; }
+		public string LastTrainingRunDirectory { get; set; }
+		public string AgentCommand { get; set; } = "copilot";
+		public string[] AgentArguments { get; set; } = TrainingAgent.DefaultArguments;
+		public string AgentPromptTemplate { get; set; }
+
+		[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+		public string[] AgentPromptGuidance { get; set; }
 
 		static readonly JsonSerializerOptions Options = new() { WriteIndented = true };
 
@@ -46,7 +54,13 @@ namespace AutoCnC.Launcher
 			try
 			{
 				if (File.Exists(FilePath))
-					return JsonSerializer.Deserialize<LauncherSettings>(File.ReadAllText(FilePath)) ?? new LauncherSettings();
+				{
+					var settings = JsonSerializer.Deserialize<LauncherSettings>(File.ReadAllText(FilePath)) ??
+						new LauncherSettings();
+					settings.AgentArguments = TrainingAgent.UpgradeDefaultArguments(
+						settings.AgentCommand, settings.AgentArguments);
+					return settings;
+				}
 			}
 			catch (Exception)
 			{

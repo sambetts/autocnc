@@ -133,11 +133,105 @@ namespace AutoCnC.Reference.Tests
 		}
 
 		[Test]
-		public void HoldsWhenNoObjectiveAssigned()
+		public void HoldsWhenNoObjectiveAssignedAndNowhereToGo()
 		{
+			// Nothing in sight and this side has never seen an enemy structure: there is genuinely
+			// nowhere to march.
 			var decision = AttackBaseLogic.Decide(State(hasObjective: false), AssaultTuning.Default);
 
 			Assert.That(decision.Action, Is.EqualTo(UnitAction.Hold));
+		}
+
+		// --- Getting there at all ----------------------------------------------
+		//
+		// Sensing is centred on the unit and shows only what is visible now, so an army that
+		// starts a push from its own base sees no objective whatsoever. Standing still is then
+		// the difference between an attack doctrine and no attack doctrine.
+
+		[Test]
+		public void MarchesOnTheLastKnownBaseWhenNothingIsInSight()
+		{
+			var decision = AttackBaseLogic.Decide(
+				State(hasObjective: false),
+				AssaultTuning.Default,
+				new ApproachOrders(true, 78, 12, 97 * Cell));
+
+			Assert.That(decision.Action, Is.EqualTo(UnitAction.AttackMoveTo),
+				"a push with nothing in sight must close the distance, not hold");
+			Assert.That(decision.TargetX, Is.EqualTo(78));
+			Assert.That(decision.TargetY, Is.EqualTo(12));
+		}
+
+		[Test]
+		public void StillHoldsWhenItCannotMove()
+		{
+			var immobile = State(hasObjective: false) with { CanMove = false };
+
+			var decision = AttackBaseLogic.Decide(immobile, AssaultTuning.Default,
+				new ApproachOrders(true, 78, 12, 97 * Cell));
+
+			Assert.That(decision.Action, Is.EqualTo(UnitAction.Hold));
+		}
+
+		[Test]
+		public void AVisibleObjectiveAlwaysBeatsAMarch()
+		{
+			// Once something is actually in view the remembered location stops mattering.
+			var decision = AttackBaseLogic.Decide(
+				State(distanceToObjectiveCells: 20, weaponRangeCells: 4),
+				AssaultTuning.Default,
+				new ApproachOrders(true, 78, 12, 97 * Cell));
+
+			Assert.That(decision.Action, Is.EqualTo(UnitAction.AdvanceToObjective));
+			Assert.That(decision.TargetActorId, Is.EqualTo(99u));
+		}
+
+		[Test]
+		public void AnUnarmedUnitIsNotMarchedAcrossTheMap()
+		{
+			var unarmed = State(hasObjective: false) with { HasWeapon = false };
+
+			var decision = AttackBaseLogic.Decide(unarmed, AssaultTuning.Default,
+				new ApproachOrders(true, 78, 12, 97 * Cell));
+
+			Assert.That(decision.Action, Is.EqualTo(UnitAction.Continue));
+		}
+
+		[Test]
+		public void MarchingSaysHowFarItHasToGo()
+		{
+			var decision = AttackBaseLogic.Decide(
+				State(hasObjective: false),
+				AssaultTuning.Default,
+				new ApproachOrders(true, 78, 12, 97 * Cell));
+
+			Assert.That(decision.Reason, Is.Not.Null.And.Not.Empty);
+			Assert.That(decision.Reason, Does.Contain((97 * Cell).ToString()));
+		}
+
+		[Test]
+		public void TheMarchIsOneOrderNotAStreamOfThem()
+		{
+			// The reason carries a distance that changes every step. Intent must not, or the
+			// executor re-issues the move order each evaluation and the push stutters instead of
+			// walking.
+			var far = AttackBaseLogic.Decide(State(hasObjective: false), AssaultTuning.Default,
+				new ApproachOrders(true, 78, 12, 97 * Cell));
+			var closer = AttackBaseLogic.Decide(State(hasObjective: false), AssaultTuning.Default,
+				new ApproachOrders(true, 78, 12, 40 * Cell));
+
+			Assert.That(far.SameIntent(closer), Is.True);
+			Assert.That(far.Reason, Is.Not.EqualTo(closer.Reason), "but it should still say how far");
+		}
+
+		[Test]
+		public void TheTwoArgumentOverloadStillMeansNowhereToGo()
+		{
+			var withoutOrders = AttackBaseLogic.Decide(State(hasObjective: false), AssaultTuning.Default);
+			var withNone = AttackBaseLogic.Decide(State(hasObjective: false), AssaultTuning.Default, ApproachOrders.None);
+
+			Assert.That(withNone, Is.EqualTo(withoutOrders));
+			Assert.That(ApproachOrders.None.HasTarget, Is.False);
 		}
 
 		[Test]

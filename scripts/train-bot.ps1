@@ -169,7 +169,7 @@ accept a valid template automatically.
         '{telemetry}' = (Join-Path $evidence 'telemetry.csv')
         '{decisionTrace}' = (Join-Path $evidence 'decisions.jsonl')
         '{replay}' = (Join-Path $evidence 'replay.orarep')
-        '{battle}' = "map=$($battle.Map), difficulty=$($battle.Difficulty), opponents=$($battle.Opponents), faction=$($battle.Faction), opponent faction=$($battle.BotFaction), speed=$($battle.GameSpeed)"
+        '{battle}' = "map=$($battle.Map), difficulty=$($battle.Difficulty), opponents=$($battle.Opponents), faction=$($battle.Faction), opponent faction=$($battle.BotFaction), speed=$($battle.GameSpeed), execution=$($battle.ExecutionMode)"
         '{result}' = "$($result.Outcome) after $($result.DurationSeconds) game seconds; $score`n$playerFeedback"
         '{sourceRevision}' = [string]$manifest.SourceRevision
         '{nextPromptContract}' = $nextPromptContract

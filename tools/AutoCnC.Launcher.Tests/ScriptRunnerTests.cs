@@ -141,6 +141,50 @@ namespace AutoCnC.Launcher.Tests
 			}
 		}
 
+		[Test]
+		public void StopSignalsAHeadlessJobBeforeKillingIt()
+		{
+			var directory = TempDirectory();
+			var script = Path.Combine(directory, "cancel.ps1");
+			var cancellation = Path.Combine(directory, "cancel.request");
+			var ready = Path.Combine(directory, "ready");
+			File.WriteAllText(cancellation, "stale");
+			File.WriteAllText(script,
+				"param([string]$CancellationFile, [string]$ReadyFile)\n" +
+				"Set-Content -LiteralPath $ReadyFile -Value ready\n" +
+				"while (-not (Test-Path -LiteralPath $CancellationFile)) { Start-Sleep -Milliseconds 10 }\n" +
+				"Write-Output 'clean stop observed'\n");
+
+			try
+			{
+				using var finished = new ManualResetEventSlim();
+				var runner = new ScriptRunner();
+				var exitCode = -1;
+				runner.Finished += code =>
+				{
+					exitCode = code;
+					finished.Set();
+				};
+				runner.Start(new ScriptJob
+				{
+					ScriptPath = script,
+					Arguments = ["-CancellationFile", cancellation, "-ReadyFile", ready],
+					CancellationFile = cancellation
+				}, directory);
+
+				Assert.That(SpinWait.SpinUntil(() => File.Exists(ready), TimeSpan.FromSeconds(5)), Is.True);
+				runner.Stop();
+
+				Assert.That(finished.Wait(TimeSpan.FromSeconds(5)), Is.True);
+				Assert.That(exitCode, Is.Zero);
+				Assert.That(runner.LastOutput, Does.Contain("clean stop observed"));
+			}
+			finally
+			{
+				Directory.Delete(directory, true);
+			}
+		}
+
 		static (int ExitCode, System.Collections.Generic.IReadOnlyList<string> Output) Run(
 			string script, string directory, string[] arguments)
 		{

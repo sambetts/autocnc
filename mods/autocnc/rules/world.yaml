@@ -44,6 +44,9 @@
 # Launch.DecisionTrace optionally asks ModeExecutor to write the missing reasoning bridge as JSONL:
 # each bot assessment, doctrine outcome, and mode decision that actually became an order. It is
 # diagnostic output for after the match and is never exposed back to bot code.
+#
+# HeadlessSimulation takes over the normal client world loop only when Launch.Headless is present.
+# It keeps the order/world/TickRender sequence intact, but removes wall-clock pacing and drawing.
 
 World:
 	ModeExecutor:
@@ -52,6 +55,7 @@ World:
 	TurboSpeed:
 	MatchTelemetry:
 	BattleLog:
+	HeadlessSimulation:
 
 Player:
 	ReportsToBattleLog:

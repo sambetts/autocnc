@@ -25,6 +25,7 @@ namespace AutoCnC.Launcher
 		public string ScriptPath { get; init; }
 		public IReadOnlyList<string> Arguments { get; init; } = [];
 		public bool PreserveColor { get; init; }
+		public string CancellationFile { get; init; }
 		public Action<TerminalLine> Output { get; init; }
 		public Action<int> Completed { get; init; }
 	}
@@ -68,6 +69,7 @@ namespace AutoCnC.Launcher
 		readonly List<string> currentOutput = [];
 		readonly TerminalTextParser terminalParser = new();
 		Process process;
+		string cancellationFile;
 
 		/// <summary>Every line of output, in order, from both stdout and stderr.</summary>
 		public event Action<TerminalLine> Output;
@@ -83,6 +85,7 @@ namespace AutoCnC.Launcher
 			if (IsRunning)
 				throw new InvalidOperationException("Something is already running.");
 
+			var preparedCancellationFile = PrepareCancellationFile(job.CancellationFile);
 			var startInfo = new ProcessStartInfo
 			{
 				FileName = PowerShellPath(),
@@ -108,6 +111,9 @@ namespace AutoCnC.Launcher
 				startInfo.Environment.Remove("FORCE_COLOR");
 			}
 
+			if (preparedCancellationFile != null)
+				startInfo.Environment["AUTOCNC_CANCELLATION_PRECLEARED"] = "1";
+
 			// -NonInteractive so a script that decides to prompt fails fast instead of hanging
 			// behind a window nobody can see.
 			startInfo.ArgumentList.Add("-NoProfile");
@@ -132,6 +138,7 @@ namespace AutoCnC.Launcher
 
 			var started = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
 			process = started;
+			cancellationFile = preparedCancellationFile;
 			started.OutputDataReceived += (_, e) => Emit(e.Data);
 			started.ErrorDataReceived += (_, e) => Emit(e.Data);
 			started.Exited += (_, _) =>
@@ -145,7 +152,10 @@ namespace AutoCnC.Launcher
 					LastOutput = currentOutput.ToArray();
 
 				if (ReferenceEquals(process, started))
+				{
 					process = null;
+					cancellationFile = null;
+				}
 				started.Dispose();
 				Finished?.Invoke(code);
 			};
@@ -171,7 +181,10 @@ namespace AutoCnC.Launcher
 		void CleanupFailedStart(Process started)
 		{
 			if (ReferenceEquals(process, started))
+			{
 				process = null;
+				cancellationFile = null;
+			}
 
 			try
 			{
@@ -186,6 +199,35 @@ namespace AutoCnC.Launcher
 			}
 
 			started.Dispose();
+		}
+
+		static string PrepareCancellationFile(string path)
+		{
+			if (string.IsNullOrWhiteSpace(path))
+				return null;
+
+			try
+			{
+				var fullPath = Path.GetFullPath(path);
+				File.Delete(fullPath);
+				return fullPath;
+			}
+			catch (ArgumentException ex)
+			{
+				throw new InvalidOperationException($"The cancellation path is invalid: {ex.Message}", ex);
+			}
+			catch (NotSupportedException ex)
+			{
+				throw new InvalidOperationException($"The cancellation path is invalid: {ex.Message}", ex);
+			}
+			catch (IOException ex)
+			{
+				throw new InvalidOperationException($"Could not clear the cancellation path: {ex.Message}", ex);
+			}
+			catch (UnauthorizedAccessException ex)
+			{
+				throw new InvalidOperationException($"Could not clear the cancellation path: {ex.Message}", ex);
+			}
 		}
 
 		/// <summary>
@@ -206,6 +248,9 @@ namespace AutoCnC.Launcher
 
 			try
 			{
+				if (RequestCancellation() && running.WaitForExit(CloseTimeout))
+					return;
+
 				if (GameWindows.CloseAllStartedAfter(running.StartTime) && running.WaitForExit(CloseTimeout))
 					return;
 
@@ -218,6 +263,31 @@ namespace AutoCnC.Launcher
 			catch (System.ComponentModel.Win32Exception)
 			{
 				// It exited on its own between the check and the kill. Nothing to do.
+			}
+		}
+
+		bool RequestCancellation()
+		{
+			var path = cancellationFile;
+			if (string.IsNullOrWhiteSpace(path))
+				return false;
+
+			try
+			{
+				var fullPath = Path.GetFullPath(path);
+				Directory.CreateDirectory(Path.GetDirectoryName(fullPath));
+				File.WriteAllText(fullPath, "stop");
+				return true;
+			}
+			catch (IOException ex)
+			{
+				Emit($"Could not request a clean stop: {ex.Message}");
+				return false;
+			}
+			catch (UnauthorizedAccessException ex)
+			{
+				Emit($"Could not request a clean stop: {ex.Message}");
+				return false;
 			}
 		}
 

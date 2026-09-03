@@ -24,6 +24,25 @@ namespace AutoCnC.Launcher
 		public string Faction { get; set; }
 		public string BotFaction { get; set; }
 		public string GameSpeed { get; set; }
+		public string ExecutionMode { get; set; }
+	}
+
+	public sealed class TrainingSimulationPerformance
+	{
+		public int SchemaVersion { get; set; }
+		public string Mode { get; set; }
+		public string Status { get; set; }
+		public DateTime StartedUtc { get; set; }
+		public DateTime CompletedUtc { get; set; }
+		public long ElapsedMilliseconds { get; set; }
+		public int WorldTicks { get; set; }
+		public long LogicAttempts { get; set; }
+		public double TicksPerSecond { get; set; }
+		public double SimulationSpeed { get; set; }
+		public double GameSeconds { get; set; }
+		public int MaxGameSeconds { get; set; }
+		public string Result { get; set; }
+		public string Error { get; set; }
 	}
 
 	public sealed class TrainingPlayerResult
@@ -76,7 +95,7 @@ namespace AutoCnC.Launcher
 
 	public sealed class TrainingRunManifest
 	{
-		public int SchemaVersion { get; set; } = 3;
+		public int SchemaVersion { get; set; } = 4;
 		public string Id { get; set; }
 		public string Status { get; set; }
 		public DateTime CreatedUtc { get; set; }
@@ -89,6 +108,7 @@ namespace AutoCnC.Launcher
 		public string ReplayFile { get; set; }
 		public TrainingBattleConfiguration Battle { get; set; }
 		public TrainingBattleResult Result { get; set; }
+		public TrainingSimulationPerformance Performance { get; set; }
 		public TrainingAgentResult Agent { get; set; }
 		public List<string> Warnings { get; set; } = [];
 	}
@@ -96,7 +116,11 @@ namespace AutoCnC.Launcher
 	/// <summary>One durable fight and all evidence needed to understand or improve it.</summary>
 	public sealed class TrainingRun
 	{
-		static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+		static readonly JsonSerializerOptions JsonOptions = new()
+		{
+			PropertyNameCaseInsensitive = true,
+			WriteIndented = true
+		};
 
 		public const int MaxPlayerFeedbackLength = 4000;
 
@@ -109,7 +133,9 @@ namespace AutoCnC.Launcher
 		public string TelemetryPath => Path.Combine(EvidenceDirectory, "telemetry.csv");
 		public string BattleLogPath => Path.Combine(EvidenceDirectory, "battle.csv");
 		public string DecisionTracePath => Path.Combine(EvidenceDirectory, "decisions.jsonl");
+		public string PerformancePath => Path.Combine(EvidenceDirectory, "performance.json");
 		public string ReplayPath => Path.Combine(EvidenceDirectory, "replay.orarep");
+		public string CancellationPath => Path.Combine(RunDirectory, "cancel.request");
 		public string PromptPath => Path.Combine(EvidenceDirectory, "agent-prompt.txt");
 		public string GameGuidePath => Path.Combine(EvidenceDirectory, "game-guide.md");
 		public string GameRulesPath => Path.Combine(EvidenceDirectory, "game-rules.json");
@@ -225,7 +251,33 @@ namespace AutoCnC.Launcher
 			Manifest.Status = status;
 			Manifest.CompletedUtc = DateTime.UtcNow;
 			Manifest.Result = result;
+			LoadPerformance();
+			if (File.Exists(CancellationPath))
+				File.Delete(CancellationPath);
 			Save();
+		}
+
+		void LoadPerformance()
+		{
+			if (!File.Exists(PerformancePath))
+			{
+				if (string.Equals(Manifest.Battle?.ExecutionMode, BattleExecutionModes.Headless,
+					StringComparison.OrdinalIgnoreCase))
+					Manifest.Warnings.Add("The headless performance report is missing.");
+				return;
+			}
+
+			try
+			{
+				Manifest.Performance = JsonSerializer.Deserialize<TrainingSimulationPerformance>(
+					File.ReadAllText(PerformancePath), JsonOptions);
+				if (Manifest.Performance == null)
+					Manifest.Warnings.Add("The headless performance report was empty.");
+			}
+			catch (JsonException ex)
+			{
+				Manifest.Warnings.Add("The headless performance report could not be read: " + ex.Message);
+			}
 		}
 
 		public void SetPlayerFeedback(string feedback)

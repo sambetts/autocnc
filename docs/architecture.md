@@ -243,6 +243,8 @@ built from three pieces, all inside our own assemblies:
 | `LaunchOptions` | Re-reads the process command line for `Launch.*` arguments the engine does not know about. `Arguments` ignores keys it has no field for, so a mod can add its own without touching `LaunchArguments`. |
 | `Server.BattleSetup` | A `ServerTrait` on `IClientJoined` that seats the requested bots and applies handicaps and factions. The engine's `SkirmishLogic` only seats a bot for `ServerType.Skirmish`, and a `Launch.Map` game is `ServerType.Local`, so without this you get a map with nobody on it. |
 | `ModeExecutor.WorldLoaded` | Loads the battle bot named by `Launch.BattleBot`, or the one in the assembly at `Launch.BattleBotPath`. |
+| `OpenRA.Platforms.Headless` | Supplies the engine's public platform interfaces with a suspended null window, no-op graphics, blank fonts, and no-op sound. OpenRA still constructs its normal renderer/world objects, but creates no OS window or GPU context. |
+| `HeadlessSimulation` | After the normal local server/client start completes, drives the client's ordinary immediate-orders -> network-orders -> order generator -> `World.Tick` -> `World.TickRender` sequence in a tight loop. |
 
 | Argument | Meaning |
 |---|---|
@@ -254,10 +256,33 @@ built from three pieces, all inside our own assemblies:
 | `Launch.Faction` / `Launch.BotFaction` | Faction for you / for the opponents |
 | `Launch.GameSpeed` | Tick rate for the match, e.g. `fastest` |
 | `Launch.DecisionTrace` | Optional JSONL path for assessments and issued mode decisions |
+| `Launch.Headless` | Select the CPU-speed simulation-client loop |
+| `Launch.HeadlessReport` | JSON performance report path |
+| `Launch.CancellationFile` | Sentinel path for a clean Stop request |
 
 Naming the assembly rather than the bot means nothing outside the bot has to know the `Name`
 declared inside it, and a bot played from its own build output cannot be shadowed by a stale copy
 in `engine/bin/bots`.
+
+The headless path deliberately is not the dedicated server. The server owns lobby and order
+distribution; the client owns the deterministic world, OpenRA bots, AutoC&C modes, telemetry, and
+replay recorder. Headless therefore starts the same loopback server and recording
+`NetworkConnection` as Rendered, then removes only client scheduling and rendering:
+
+```
+TickImmediate -> TryTick -> OrderGenerator.Tick -> World.Tick -> World.TickRender
+```
+
+`World.TickRender` remains because AutoC&C's client-local `ModeExecutor`, decision trace, and
+telemetry use render-tick traits to emit orders and evidence. Fog/visibility predicates and normal
+order latency are unchanged. When every combatant has a final `WinState`, headless ends immediately
+instead of waiting for the rendered results panel's 1.5-second wall-clock notification delay.
+
+OpenRA does not expose `World.OrderManager`, so the adapter resolves that one internal field by
+name from the deliberately pinned engine build and fails explicitly if it changes. Everything it
+invokes is a public engine API; the submodule remains untouched. This is the compatibility seam to
+revalidate when bumping OpenRA. The null platform also assumes a launched local AutoC&C battle:
+interactive UI, remote multiplayer, editor, and rendering diagnostics belong on the Rendered path.
 
 ### Authoring and training flow
 
@@ -275,8 +300,10 @@ the compatible checkout it was launched from; selecting an incompatible checkout
 authoring actions with an explicit message.
 
 Each fight gets a unique directory outside the source tree. Its manifest records the battle
-configuration and source revision; the game writes telemetry, the visibility-filtered battle log,
-and a decision trace there; the launcher copies the finished replay and result into the same run.
+configuration, execution mode and source revision; the game writes telemetry, the
+visibility-filtered battle log, and a decision trace there; the launcher copies the finished replay
+and result into the same run. Headless additionally writes `performance.json` (ticks/second,
+effective multiplier, wall time and result), which the launcher folds into the manifest.
 Completed manifests are reduced to chronological local-versus-opponent KPI samples for the Results
 window's iteration charts. The duration series colors each point by outcome. This avoids the old
 fixed-path/one-deep-rotation limit and makes iterations directly comparable.
@@ -306,9 +333,13 @@ on a completed run; regenerating agent context includes that assessment in both 
 the rendered `{result}`.
 
 Continuous mode is a small explicit state machine over the existing script queue: Fighting ->
-Improving -> Fighting. It creates a fresh durable run and source snapshot on every pass,
-automatically accepts only a valid complete next-round prompt, and stops on user request or any
-non-zero game, agent, test, or build exit. It deliberately has no player-assessment pause.
+Improving -> Fighting. Headless is the default execution mode, with Rendered selectable for
+watching/debugging. It creates a fresh durable run and source snapshot on every pass, automatically
+accepts only a valid complete next-round prompt, and stops on user request or any non-zero game,
+agent, test, or build exit. Headless also treats 90 nominal game minutes without a result as a
+failed stalemate (configurable with `-MaxGameSeconds`). Stop writes the run's cancellation sentinel
+first, allowing the world, evidence writers and replay recorder to close cleanly before process-tree
+termination is used as a fallback. It deliberately has no player-assessment pause.
 
 The JSON views parse lazily into collapsible trees, so the resolved rules snapshot is not expanded
 into thousands of controls up front. After coding, the agent returns a complete replacement prompt

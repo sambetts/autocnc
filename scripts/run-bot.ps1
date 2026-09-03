@@ -71,6 +71,20 @@
     Where the match writes newline-delimited JSON connecting battle assessments and issued mode
     decisions to their outcomes. Disabled unless a path is supplied.
 
+.PARAMETER ExecutionMode
+    Rendered opens the normal game window. Headless uses the same client simulation and orders
+    without drawing, and runs logic ticks as fast as the CPU permits.
+
+.PARAMETER CancellationFile
+    Headless-only sentinel path. Creating this file asks the match to stop cleanly.
+
+.PARAMETER PerformanceReport
+    Headless-only JSON path for measured ticks/second and effective simulation multiplier.
+
+.PARAMETER MaxGameSeconds
+    Maximum nominal game seconds before a headless match is treated as a failed stalemate.
+    Defaults to 5400 (90 game minutes). Pass 0 for no limit.
+
 .PARAMETER Test
     Run the bot's unit tests first and stop if they fail.
 
@@ -112,6 +126,12 @@ param(
     [string]$Telemetry,
     [string]$BattleLog,
     [string]$DecisionTrace,
+    [ValidateSet('Rendered', 'Headless')]
+    [string]$ExecutionMode = 'Rendered',
+    [string]$CancellationFile,
+    [string]$PerformanceReport,
+    [ValidateRange(0, [int]::MaxValue)]
+    [int]$MaxGameSeconds = 5400,
     [switch]$Test,
     [switch]$NoLaunch,
     [ValidateSet('Debug', 'Release')]
@@ -177,7 +197,8 @@ Write-Host "    $($source.Path)" -ForegroundColor DarkGray
 # ---------------------------------------------------------------------------
 # 2. Make sure the platform and its packages exist
 # ---------------------------------------------------------------------------
-if (-not (Test-Path (Join-Path $binDir 'AutoCnC.Platform.dll'))) {
+if (-not (Test-Path (Join-Path $binDir 'AutoCnC.Platform.dll')) -or
+    -not (Test-Path (Join-Path $binDir 'OpenRA.Platforms.Headless.dll'))) {
     Write-Host '==> Platform not built; building it first' -ForegroundColor Cyan
     & (Join-Path $PSScriptRoot 'build.ps1') -Configuration $Configuration -SkipBots
     if ($LASTEXITCODE -ne 0) { throw 'Platform build failed.' }
@@ -264,6 +285,12 @@ function Resolve-Difficulty([string]$requested) {
 
 $battleArgs = @()
 
+if ($ExecutionMode -eq 'Headless') {
+    # The headless loop removes scheduling rather than changing rules. Keep the world configured
+    # exactly like the rendered 40x path so orders, replay metadata and timing semantics match.
+    $GameSpeed = 'maximum'
+}
+
 if ($Map -and $GameSpeed) {
     $battleArgs += "Launch.GameSpeed=$GameSpeed"
     Write-Host "==> Speed: $GameSpeed" -ForegroundColor Cyan
@@ -284,6 +311,31 @@ if ($BattleLog) {
 if ($DecisionTrace) {
     $battleArgs += "Launch.DecisionTrace=$DecisionTrace"
     Write-Host "==> Decision trace: $DecisionTrace" -ForegroundColor Cyan
+}
+
+if ($ExecutionMode -eq 'Headless') {
+    if (-not $Map) { throw 'Headless execution requires -Map.' }
+
+    $battleArgs += 'Launch.Headless=true'
+    if ($CancellationFile) {
+        $cancellationPath = [IO.Path]::GetFullPath($CancellationFile)
+        # ScriptRunner already cleared this unique run path before starting us. Do not erase a
+        # Stop request that arrived while the bot was building.
+        if ($env:AUTOCNC_CANCELLATION_PRECLEARED -ne '1') {
+            Remove-Item -LiteralPath $cancellationPath -Force -ErrorAction SilentlyContinue
+        }
+        $battleArgs += "Launch.CancellationFile=$cancellationPath"
+    }
+    if (-not $PerformanceReport) {
+        $PerformanceReport = Join-Path ([IO.Path]::GetTempPath()) "autocnc-headless-$PID.json"
+    }
+
+    $performancePath = [IO.Path]::GetFullPath($PerformanceReport)
+    Remove-Item -LiteralPath $performancePath -Force -ErrorAction SilentlyContinue
+    $battleArgs += "Launch.HeadlessReport=$performancePath"
+    $battleArgs += "Launch.HeadlessMaxGameSeconds=$MaxGameSeconds"
+
+    Write-Host '==> Execution: headless (CPU maximum)' -ForegroundColor Cyan
 }
 
 if ($Map -and $Opponents -gt 0) {
@@ -320,6 +372,8 @@ $gameArgs = @(
     "Launch.BattleBotPath=$botPath"
 )
 
+if ($ExecutionMode -eq 'Headless') { $gameArgs += 'Game.Platform=Headless' }
+
 if ($Map) { $gameArgs += "Launch.Map=$Map" }
 $gameArgs += $battleArgs
 
@@ -329,3 +383,15 @@ if (-not $Map) {
 }
 
 & dotnet @gameArgs
+if ($LASTEXITCODE -ne 0) { throw "Battle process failed with exit code $LASTEXITCODE." }
+
+if ($ExecutionMode -eq 'Headless' -and -not (Test-Path -LiteralPath $performancePath)) {
+    throw "Headless battle exited without writing its performance report: $performancePath"
+}
+
+if ($ExecutionMode -eq 'Headless') {
+    $performance = Get-Content -LiteralPath $performancePath -Raw | ConvertFrom-Json
+    if ($performance.status -notin @('completed', 'cancelled')) {
+        throw "Headless battle reported failure: $($performance.error)"
+    }
+}

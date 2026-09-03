@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>OpenRA.Platforms.Headless</RootNamespace>
+    <AssemblyName>OpenRA.Platforms.Headless</AssemblyName>
+    <Description>Null graphics and sound platform for AutoC&amp;C headless simulations.</Description>
+    <OutputPath>$(EngineBinDirectory)\</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="OpenRA.Game">
+      <HintPath>$(EngineBinDirectory)\OpenRA.Game.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>

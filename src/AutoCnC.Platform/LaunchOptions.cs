@@ -114,6 +114,22 @@ namespace AutoCnC.Platform
 		/// </summary>
 		public static string DecisionTrace => Value("Launch.DecisionTrace");
 
+		/// <summary>Run the world from the CPU-speed client loop instead of the rendered scheduler.</summary>
+		public static bool Headless => Boolean("Launch.Headless");
+
+		/// <summary>Where the headless runner writes measured simulation throughput.</summary>
+		public static string HeadlessReport => Value("Launch.HeadlessReport");
+
+		/// <summary>
+		/// A sentinel file checked by the headless loop. Creating it requests a clean game end.
+		/// </summary>
+		public static string CancellationFile => Value("Launch.CancellationFile");
+
+		/// <summary>
+		/// Maximum nominal game seconds for a headless match. Zero allows an unlimited match.
+		/// </summary>
+		public static int HeadlessMaxGameSeconds => Math.Max(0, Integer("Launch.HeadlessMaxGameSeconds", 90 * 60));
+
 		/// <summary>
 		/// The engine's own map argument. We only read it to recognise the battle this process
 		/// was launched into, which is the one — and the only one — we are entitled to set up.
@@ -137,6 +153,12 @@ namespace AutoCnC.Platform
 		{
 			var value = Value(key);
 			return value != null && int.TryParse(value, out var parsed) ? parsed : fallback;
+		}
+
+		static bool Boolean(string key)
+		{
+			var value = Value(key);
+			return value == "1" || value != null && bool.TryParse(value, out var parsed) && parsed;
 		}
 
 		/// <summary>Reads a handicap and snaps it to what the server will actually accept.</summary>

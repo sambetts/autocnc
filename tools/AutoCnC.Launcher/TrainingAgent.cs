@@ -284,7 +284,8 @@ namespace AutoCnC.Launcher
 				["{decisionTrace}"] = run.DecisionTracePath,
 				["{replay}"] = File.Exists(run.ReplayPath) ? run.ReplayPath : "not captured",
 				["{battle}"] = $"map={battle?.Map}, difficulty={battle?.Difficulty}, opponents={battle?.Opponents}, " +
-					$"faction={battle?.Faction}, opponent faction={battle?.BotFaction}, speed={battle?.GameSpeed}",
+					$"faction={battle?.Faction}, opponent faction={battle?.BotFaction}, speed={battle?.GameSpeed}, " +
+					$"execution={battle?.ExecutionMode ?? BattleExecutionModes.Rendered}",
 				["{result}"] = $"{result?.Outcome ?? "unknown"} after {result?.DurationSeconds ?? 0} game seconds; {score}" +
 					Environment.NewLine + playerFeedback,
 				["{sourceRevision}"] = run.Manifest.SourceRevision,

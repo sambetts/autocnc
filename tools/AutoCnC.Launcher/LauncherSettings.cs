@@ -31,6 +31,7 @@ namespace AutoCnC.Launcher
 		public string Map { get; set; }
 		public string Difficulty { get; set; }
 		public string GameSpeed { get; set; }
+		public string ExecutionMode { get; set; } = BattleExecutionModes.Headless;
 		public int Opponents { get; set; } = 1;
 		public string Faction { get; set; } = "Random";
 		public string BotFaction { get; set; } = "Random";

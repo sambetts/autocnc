@@ -310,8 +310,10 @@ Cloned without `--recursive`? `git submodule update --init --depth 1`
 `./scripts/launcher.ps1` opens a window over the whole authoring loop. **New bot** creates a
 standalone C# solution with the AutoC&C dependencies, a starter doctrine and mode, and tests.
 **Open code** hands that solution to your configured editor, **Deploy bot** builds and installs it,
-and **Fight** boots straight into the selected match with the bot loaded — no menus, lobby, or
-`/bot` command.
+and **Run fight** boots straight into the selected match with the bot loaded — no menus, lobby, or
+`/bot` command. The **Execution** selector chooses **Headless** (the default, CPU-speed training
+with no game window) or **Rendered** (the existing battle window, up to 40x, for watching and
+debugging).
 
 Launching a battle changes the UI, the way an IDE changes when it starts debugging: the launcher
 window is only for setting a fight up, so when one starts two more windows open beside it and stay
@@ -329,9 +331,10 @@ up afterwards for as long as you want to read them.
   time, which is the half you can do something about.
 
 Every fight is preserved under `%LOCALAPPDATA%\AutoCnC\TrainingRuns`: its setup, source revision,
-telemetry, battle log, structured decision trace, result, replay, agent guide, and a generated JSON
-snapshot of the actors and weapons from OpenRA's resolved ruleset. The decision trace connects the
-other records by writing each bot assessment and each mode decision that actually became an order.
+telemetry, battle log, structured decision trace, result, replay, measured headless throughput,
+agent guide, and a generated JSON snapshot of the actors and weapons from OpenRA's resolved
+ruleset. The decision trace connects the other records by writing each bot assessment and each mode
+decision that actually became an order.
 
 Improvement is optional. Edit normally with **Open code**, or press **Analyze & improve** after a
 fight. In manual mode, the selected battle also accepts your assessment of why it won or lost; that
@@ -362,17 +365,18 @@ have typed yourself. Windows only; elsewhere use the command it wraps, which tak
 options:
 
 ```powershell
-./scripts/run-bot.ps1 -Map tiberium-rift.oramap -Difficulty Hard -GameSpeed maximum -Test
+./scripts/run-bot.ps1 -Map tiberium-rift.oramap -Difficulty Hard -ExecutionMode Headless -Test
+./scripts/run-bot.ps1 -Map tiberium-rift.oramap -Difficulty Hard -ExecutionMode Rendered -GameSpeed maximum
 ```
 
 Difficulty is a bot personality plus a handicap, because C&C's bots are personalities rather
 than tiers. The levels live in [`scripts/difficulties.json`](scripts/difficulties.json), which
-the launcher and the script both read. Game speed runs from `slowest` to `maximum` — 0.5x to 40x,
-and worth reaching for, since a bot is code you are waiting on. The simulation is identical
-at every speed, so watching a match at 40x is watching the same match; only the clock changes.
-Past `fastest` the number is a target rather than a promise, so ask for more than you expect and
-let `/speed` tell you what you actually got. Every battle is recorded, so **Watch replay** takes
-you back over the bit that mattered at a speed you can see.
+the launcher and the script both read. Rendered game speed runs from `slowest` to `maximum` —
+0.5x to 40x. Headless uses the same `maximum` world configuration but removes wall-clock pacing
+and rendered frames, so logic runs as fast as the CPU permits. One measured Reference-vs-Watson
+match reached **68.5x** (1,713 ticks/s); `evidence/performance.json` records the result for each
+machine and match. Every battle is recorded, so **Watch replay** takes you back over the bit that
+mattered at a speed you can see.
 
 ### Loops
 

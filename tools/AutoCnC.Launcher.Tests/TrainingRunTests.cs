@@ -81,7 +81,7 @@ namespace AutoCnC.Launcher.Tests
 			var oldRoot = Path.Combine(root, "old-checkout");
 			var currentRoot = Path.Combine(root, "current-checkout");
 			CreateCheckout(oldRoot, authoringApi: null);
-			CreateCheckout(currentRoot, authoringApi: "4");
+			CreateCheckout(currentRoot, authoringApi: "5");
 			var nestedStart = Path.Combine(currentRoot, "tools", "AutoCnC.Launcher", "bin");
 			Directory.CreateDirectory(nestedStart);
 
@@ -322,6 +322,43 @@ namespace AutoCnC.Launcher.Tests
 			Assert.That(upgraded, Does.Not.Contain("--silent"));
 		}
 
+		[Test]
+		public void HeadlessPerformanceIsStoredInTheDurableManifest()
+		{
+			var run = NewRun();
+			run.Manifest.Battle.ExecutionMode = BattleExecutionModes.Headless;
+			File.WriteAllText(run.TelemetryPath,
+				"seconds,player,faction,bot,colour,units,army,buildings,basevalue,assets,cash,killed,lost,buildingskilled,buildingslost,state\n" +
+				"42,Commander,gdi,0,C82020,5,2500,3,4200,7000,1000,8,3,2,1,Won\n" +
+				"42,Watson,nod,1,12B572,0,0,0,0,0,0,3,8,1,2,Lost\n");
+			File.WriteAllText(run.BattleLogPath,
+				"seconds,event,player,actor,actorid,otherplayer,otheractor,otheractorid,x,y,detail\n" +
+				"0,player,Commander,,,,,,,,faction=gdi bot=0 colour=C82020 side=you\n" +
+				"0,player,Watson,,,,,,,,faction=nod bot=1 colour=12B572 side=enemy\n" +
+				"42,over,Commander,,,,,,,,result=Won\n");
+			File.WriteAllText(run.PerformancePath,
+				"{\"schemaVersion\":1,\"mode\":\"headless\",\"status\":\"completed\"," +
+				"\"elapsedMilliseconds\":1000,\"worldTicks\":2500,\"logicAttempts\":2600," +
+				"\"ticksPerSecond\":2500,\"simulationSpeed\":100,\"gameSeconds\":100,\"result\":\"won\"}");
+			File.WriteAllText(run.CancellationPath, "stop");
+
+			var match = new MatchLog();
+			match.Watch(run.TelemetryPath);
+			Assert.That(match.Refresh(), Is.True);
+			var battle = new BattleEventLog();
+			battle.Watch(run.BattleLogPath);
+			Assert.That(battle.Refresh(), Is.True);
+
+			run.Finish("finished", match, battle);
+
+			var loaded = TrainingRun.Load(run.RunDirectory);
+			Assert.That(loaded.Manifest.SchemaVersion, Is.EqualTo(4));
+			Assert.That(loaded.Manifest.Result.Outcome, Is.EqualTo("Won"));
+			Assert.That(loaded.Manifest.Performance.SimulationSpeed, Is.EqualTo(100));
+			Assert.That(loaded.Manifest.Performance.TicksPerSecond, Is.EqualTo(2500));
+			Assert.That(File.Exists(run.CancellationPath), Is.False);
+		}
+
 		TrainingRun NewRun() =>
 			TrainingRun.Create(project, new TrainingBattleConfiguration
 			{
@@ -330,7 +367,8 @@ namespace AutoCnC.Launcher.Tests
 				Opponents = 1,
 				Faction = "gdi",
 				BotFaction = "nod",
-				GameSpeed = "maximum"
+				GameSpeed = "maximum",
+				ExecutionMode = BattleExecutionModes.Rendered
 			}, runs);
 
 		static void Complete(TrainingRun run, string outcome, int duration, int army,

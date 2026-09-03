@@ -37,11 +37,32 @@ namespace AutoCnC.Launcher
 			public override string ToString() => Label;
 		}
 
+		sealed class ExecutionChoice
+		{
+			public string Value { get; init; }
+			public string Label { get; init; }
+			public override string ToString() => Label;
+		}
+
 		static readonly FactionChoice[] Factions =
 		[
 			new() { Value = "Random", Label = "Random" },
 			new() { Value = "gdi", Label = "GDI" },
 			new() { Value = "nod", Label = "Nod" }
+		];
+
+		static readonly ExecutionChoice[] ExecutionModes =
+		[
+			new()
+			{
+				Value = BattleExecutionModes.Headless,
+				Label = "Headless - CPU maximum, no game window"
+			},
+			new()
+			{
+				Value = BattleExecutionModes.Rendered,
+				Label = "Rendered - watch the battle, up to 40x"
+			}
 		];
 
 		readonly LauncherSettings settings = LauncherSettings.Load();
@@ -78,6 +99,7 @@ namespace AutoCnC.Launcher
 		ComboBox factionBox;
 		ComboBox botFactionBox;
 		ComboBox speedBox;
+		ComboBox executionBox;
 		Button launchButton;
 		Button buildButton;
 		Button platformButton;
@@ -337,6 +359,14 @@ namespace AutoCnC.Launcher
 
 			grid.Controls.Add(Caption("Speed:"), 0, 5);
 			grid.Controls.Add(speedBox, 1, 5);
+
+			executionBox = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList };
+			executionBox.Items.AddRange(ExecutionModes);
+			executionBox.SelectedIndex = 0;
+			executionBox.SelectedIndexChanged += (_, _) => ExecutionModeChanged();
+
+			grid.Controls.Add(Caption("Execution:"), 0, 6);
+			grid.Controls.Add(executionBox, 1, 6);
 
 			battleGroup = Group("The battle", grid);
 			return battleGroup;
@@ -704,6 +734,7 @@ namespace AutoCnC.Launcher
 			opponentsBox.Value = Math.Clamp(settings.Opponents, opponentsBox.Minimum, opponentsBox.Maximum);
 			Select(factionBox, settings.Faction);
 			Select(botFactionBox, settings.BotFaction);
+			SelectExecutionMode(settings.ExecutionMode);
 
 			LoadDifficulties();
 			LoadSpeeds();
@@ -733,20 +764,27 @@ namespace AutoCnC.Launcher
 			speedBox.Items.Clear();
 
 			if (repo == null)
+			{
+				ExecutionModeChanged();
 				return;
+			}
 
 			var speeds = GameSpeedCatalog.Read(repo);
 			foreach (var speed in speeds)
 				speedBox.Items.Add(speed);
 
 			if (speeds.Count == 0)
+			{
+				ExecutionModeChanged();
 				return;
+			}
 
 			var index = speeds.ToList().FindIndex(s => string.Equals(s.Id, settings.GameSpeed, StringComparison.OrdinalIgnoreCase));
 			if (index < 0)
 				index = speeds.ToList().FindIndex(s => s.IsDefault);
 
 			speedBox.SelectedIndex = Math.Max(0, index);
+			ExecutionModeChanged();
 		}
 
 		void RepositoryChanged()
@@ -830,6 +868,34 @@ namespace AutoCnC.Launcher
 			if (match != null)
 				combo.SelectedItem = match;
 		}
+
+		void SelectExecutionMode(string value)
+		{
+			var normalized = BattleExecutionModes.Normalize(value);
+			var match = executionBox.Items.Cast<ExecutionChoice>()
+				.First(choice => choice.Value == normalized);
+			executionBox.SelectedItem = match;
+		}
+
+		void ExecutionModeChanged()
+		{
+			var headless = IsHeadlessSelected();
+			speedBox.Enabled = !headless;
+
+			if (headless)
+			{
+				var maximum = speedBox.Items.Cast<GameSpeedInfo>()
+					.FirstOrDefault(speed => speed.Id == BattleExecutionModes.MaximumGameSpeed);
+				if (maximum != null)
+					speedBox.SelectedItem = maximum;
+			}
+
+			if (launchButton != null)
+				launchButton.Text = headless ? "Run fight" : "Fight";
+		}
+
+		bool IsHeadlessSelected() =>
+			(executionBox.SelectedItem as ExecutionChoice)?.Value == BattleExecutionModes.Headless;
 
 		// -------------------------------------------------------------------
 		// Reacting to choices
@@ -946,7 +1012,9 @@ namespace AutoCnC.Launcher
 			battleBannerText.Text = battleRunning
 				? continuousLoop.IsRunning
 					? "Continuous training is fighting this iteration. Results and output are following it; Stop ends the loop."
-					: "Battle in progress. The results and output windows are following it; this one waits until it is over."
+					: activeRun?.Manifest.Battle?.ExecutionMode == BattleExecutionModes.Headless
+						? "Headless battle in progress at CPU speed. Results and output are following it; Stop ends it cleanly."
+						: "Battle in progress. The results and output windows are following it; this one waits until it is over."
 				: continuousLoop.Stage == ContinuousTrainingStage.Improving
 					? "Continuous training is improving the bot from the finished battle. The next fight starts automatically."
 					: "The last battle is finished. Its results and output are still open - close them when you are done reading.";
@@ -1342,9 +1410,14 @@ namespace AutoCnC.Launcher
 
 			queue.Enqueue(new ScriptJob
 			{
-				Title = play ? "Building your bot and starting the battle" : "Building your bot",
+				Title = play
+					? IsHeadlessSelected()
+						? "Building your bot and running the headless battle"
+						: "Building your bot and starting the battle"
+					: "Building your bot",
 				ScriptPath = repo.RunBotScript,
-				Arguments = RunBotArguments(play)
+				Arguments = RunBotArguments(play),
+				CancellationFile = play && IsHeadlessSelected() ? activeRun.CancellationPath : null
 			});
 
 			RunNext();
@@ -1359,6 +1432,9 @@ namespace AutoCnC.Launcher
 			var arguments = new List<string>
 			{
 				"-BattleBot", botBox.Text.Trim(),
+				"-ExecutionMode", IsHeadlessSelected()
+					? BattleExecutionModes.Headless
+					: BattleExecutionModes.Rendered,
 				"-Opponents", ((int)opponentsBox.Value).ToString(),
 				"-Faction", ((FactionChoice)factionBox.SelectedItem).Value,
 				"-BotFaction", ((FactionChoice)botFactionBox.SelectedItem).Value
@@ -1370,8 +1446,11 @@ namespace AutoCnC.Launcher
 			if (difficulty != null)
 				arguments.AddRange(["-Difficulty", difficulty.Name]);
 
-			if (speedBox.SelectedItem is GameSpeedInfo speed)
-				arguments.AddRange(["-GameSpeed", speed.Id]);
+			var gameSpeed = BattleExecutionModes.EffectiveGameSpeed(
+				IsHeadlessSelected() ? BattleExecutionModes.Headless : BattleExecutionModes.Rendered,
+				(speedBox.SelectedItem as GameSpeedInfo)?.Id);
+			if (gameSpeed != null)
+				arguments.AddRange(["-GameSpeed", gameSpeed]);
 
 			if (play)
 			{
@@ -1384,6 +1463,13 @@ namespace AutoCnC.Launcher
 					"-BattleLog", activeRun.BattleLogPath,
 					"-DecisionTrace", activeRun.DecisionTracePath
 				]);
+
+				if (IsHeadlessSelected())
+					arguments.AddRange(
+					[
+						"-CancellationFile", activeRun.CancellationPath,
+						"-PerformanceReport", activeRun.PerformancePath
+					]);
 			}
 
 			if (runTestsBox.Checked && !IsPrebuilt())
@@ -1418,7 +1504,12 @@ namespace AutoCnC.Launcher
 				Opponents = (int)opponentsBox.Value,
 				Faction = ((FactionChoice)factionBox.SelectedItem).Value,
 				BotFaction = ((FactionChoice)botFactionBox.SelectedItem).Value,
-				GameSpeed = speed?.Id
+				GameSpeed = BattleExecutionModes.EffectiveGameSpeed(
+					IsHeadlessSelected() ? BattleExecutionModes.Headless : BattleExecutionModes.Rendered,
+					speed?.Id),
+				ExecutionMode = IsHeadlessSelected()
+					? BattleExecutionModes.Headless
+					: BattleExecutionModes.Rendered
 			});
 			lastRun = activeRun;
 			settings.LastTrainingRunDirectory = activeRun.RunDirectory;
@@ -2063,6 +2154,9 @@ namespace AutoCnC.Launcher
 			settings.Map = (mapBox.SelectedItem as MapInfo)?.Id;
 			settings.Difficulty = (difficultyBox.SelectedItem as DifficultyLevel)?.Name;
 			settings.GameSpeed = (speedBox.SelectedItem as GameSpeedInfo)?.Id;
+			settings.ExecutionMode = IsHeadlessSelected()
+				? BattleExecutionModes.Headless
+				: BattleExecutionModes.Rendered;
 			settings.Opponents = (int)opponentsBox.Value;
 			settings.Faction = ((FactionChoice)factionBox.SelectedItem).Value;
 			settings.BotFaction = ((FactionChoice)botFactionBox.SelectedItem).Value;

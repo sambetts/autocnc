@@ -143,12 +143,48 @@ simulation at 20x is the same simulation, tick for tick, as the one at 1x. A bot
 | `turbo` | 8ms | 5x | |
 | `ludicrous` | 4ms | 10x | |
 | `plaid` | 2ms | 20x | |
-| `maximum` | 1ms | 40x | the engine's ceiling: timesteps are whole milliseconds |
+| `maximum` | 1ms | 40x | the rendered scheduler's ceiling: timesteps are whole milliseconds |
 
 ```powershell
 ./scripts/run-bot.ps1 -Map tiberium-rift.oramap -GameSpeed maximum
 ./scripts/run-bot.ps1 -Map tiberium-rift.oramap -Opponents 0 -GameSpeed slowest   # no enemy, watch the build
 ```
+
+### Headless training or a rendered fight
+
+The launcher's **Execution** selector separates training throughput from watching a match:
+
+| Mode | Use it for | Pace |
+|---|---|---|
+| **Headless** (default) | continuous improvement and outcome/evidence runs | same `maximum` battle, logic ticks at CPU speed |
+| **Rendered** | watching and debugging the bot | normal game window, up to `maximum` (40x) |
+
+Headless is a simulation client, not `OpenRA.Server`: it still loads the AutoC&C world, runs the
+local battle bot and OpenRA opponent bots, applies factions and handicaps, evaluates doctrines and
+modes through visibility-filtered `ModeContext`, and sends their ordinary lockstep orders through
+the loopback server. It skips only wall-clock scheduling, sound output, and drawing.
+
+```powershell
+# Fast training match. Headless always uses the same world configuration as rendered maximum.
+./scripts/run-bot.ps1 -Map tiberium-rift.oramap -Difficulty Hard `
+    -ExecutionMode Headless -PerformanceReport C:\tmp\performance.json
+
+# Watch the equivalent 40x battle.
+./scripts/run-bot.ps1 -Map tiberium-rift.oramap -Difficulty Hard `
+    -ExecutionMode Rendered -GameSpeed maximum
+```
+
+Throughput depends on the map, armies, bot code, and CPU. A Reference-vs-Watson validation match on
+`tiberium-rift.oramap` completed at **1,713 ticks/s, or 68.5x** nominal game speed. Launcher runs
+write their own measured `evidence/performance.json` and copy the values into `manifest.json`; do
+not treat that one-machine number as a guarantee.
+
+Limitations: headless matches have no interactive chat or viewport, support only launched local
+battles, and load one match per process. A headless match that remains undecided for 90 nominal game
+minutes fails the iteration instead of growing evidence forever; use `-MaxGameSeconds 0` only when
+an unlimited match is intentional. **Stop** creates a cancellation sentinel so the client can end
+the world and finalize evidence/replay before the launcher resorts to killing it. Use Rendered when
+debugging UI/render traits or issuing commands by hand.
 
 **Ask for more than you expect to get.** Past `fastest` the setting is a target, not a promise —
 what you actually get is whatever your machine manages. `/speed` in the chatbox reports both
@@ -465,9 +501,10 @@ you tick **Run its tests first**. From a terminal that whole loop is one line:
 ```
 
 Every launcher fight is durable under `%LOCALAPPDATA%\AutoCnC\TrainingRuns`: manifest, telemetry,
-battle log, decision trace, replay, and result. **History & trends** selects any saved battle and
-plots final units, army value, buildings, base value, kills, and outcome-colored duration across
-iterations. After a fight ends there are two equally supported paths:
+battle log, decision trace, replay, result, and (for headless runs) `performance.json`.
+**History & trends** selects any saved battle and plots final units, army value, buildings, base
+value, kills, and outcome-colored duration across iterations. After a fight ends there are two
+equally supported paths:
 
 1. **Open code** — make the next change yourself, deploy, and fight again.
 2. **Analyze & improve** — let a configured local coding agent inspect that evidence and edit the
@@ -485,10 +522,12 @@ files, and `game-rules.json`—a generated snapshot of units, health, armor, mov
 armaments, range, reload, projectile, damage, and armor modifiers from OpenRA's resolved runtime
 rules. Use **Restore previous iteration** to put the exact pre-agent source back.
 
-For an unattended loop, check **Continuous improvement** before starting. It repeats Fight ->
-analyze and improve -> Fight until **Stop**, automatically accepting each valid next-round prompt.
-Player assessments are disabled because the loop does not pause between stages. A failed game,
-agent command, test, or build stops the loop instead of advancing with an unverified bot.
+For an unattended loop, keep **Execution** on its default **Headless**, check **Continuous
+improvement**, and start. It repeats Fight -> analyze and improve -> Fight until **Stop**,
+automatically accepting each valid next-round prompt. Switch Execution to **Rendered** when you
+want to watch the same loop. Player assessments are disabled because the loop does not pause
+between stages. A failed game, agent command, test, or build stops the loop instead of advancing
+with an unverified bot.
 
 Fight and rules JSON are shown as collapsible trees. When the run finishes, the agent drafts an
 entire replacement prompt template in **Next prompt***. Edit and approve it in manual mode, or let

@@ -21,7 +21,7 @@ namespace AutoCnC.Launcher
 	/// </summary>
 	public sealed class RepoLayout
 	{
-		public const int RequiredAuthoringApiVersion = 4;
+		public const int RequiredAuthoringApiVersion = 5;
 
 		public string Root { get; }
 		public int AuthoringApiVersion { get; }

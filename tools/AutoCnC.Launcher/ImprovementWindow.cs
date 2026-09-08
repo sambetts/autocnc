@@ -411,10 +411,24 @@ namespace AutoCnC.Launcher
 				return "Review the inputs, then choose Analyze & improve when ready.";
 
 			if (result.RestoredUtc != null)
-				return $"The {result.ChangeCount} agent change(s) were restored to the pre-agent snapshot.";
+				return result.ChangeCount < 0
+					? "The agent's changes were restored to the pre-agent snapshot."
+					: $"The {result.ChangeCount} agent change(s) were restored to the pre-agent snapshot.";
 
 			if (result.ExitCode == null)
 				return "Improvement agent running — progress is streaming above.";
+
+			if (result.Cancelled)
+			{
+				var stopped = result.ChangeCount switch
+				{
+					> 0 => $"It had already changed {result.ChangeCount} file(s), which are still in the workspace.",
+					0 => "It had not changed anything yet.",
+					_ => "Whether it changed anything could not be determined."
+				};
+				return $"Stopped before it finished. {stopped} " +
+					"Choose Analyze & improve to start another round, or Restore previous iteration.";
+			}
 
 			if (result.ExitCode != 0)
 			{
@@ -429,7 +443,9 @@ namespace AutoCnC.Launcher
 			}
 
 			return result.ExitCode == 0
-				? $"{result.ChangeCount} source file(s) changed. Verification passed." +
+				? (result.ChangeCount < 0
+						? "The agent's changes could not be inspected. Verification passed."
+						: $"{result.ChangeCount} source file(s) changed. Verification passed.") +
 					(!string.IsNullOrEmpty(result.SuggestedNextPrompt) && !result.SuggestedNextPromptAccepted
 						? " Review Next prompt * to choose the complete prompt for the next round."
 						: "")

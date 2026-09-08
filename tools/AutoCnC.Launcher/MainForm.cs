@@ -659,6 +659,7 @@ namespace AutoCnC.Launcher
 			{
 				created = true;
 				improvementWindow = new ImprovementWindow();
+				improvementWindow.FormClosing += ImprovementWindowClosing;
 				improvementWindow.FormClosed += (_, _) => improvementWindow = null;
 				improvementWindow.NextPromptAccepted += AcceptNextPrompt;
 			}
@@ -669,6 +670,50 @@ namespace AutoCnC.Launcher
 				improvementWindow.ShowAgentRun(lastRun);
 			return improvementWindow;
 		}
+
+		/// <summary>
+		/// Closing this window while the agent is working is ambiguous, so it asks.
+		/// </summary>
+		/// <remarks>
+		/// Closing it used to do nothing but hide the agent, which is the worst of the three
+		/// answers: the agent carries on editing the bot where you cannot see it, and the reason
+		/// people close it is usually that they want it to stop. Stopping silently would be just
+		/// as wrong for the times you only wanted the screen space back, and a long agent run is
+		/// not something to discard by accident.
+		/// </remarks>
+		void ImprovementWindowClosing(object sender, FormClosingEventArgs e)
+		{
+			if (closing || !ImprovementRunning())
+				return;
+
+			// Remember which job the question is about. A message box pumps messages, so the agent
+			// can finish while it is on screen and continuous training can start the next one.
+			var askedAbout = activeJob;
+
+			var answer = MessageBox.Show(improvementWindow,
+				"The improvement agent is still working on your bot." +
+				Environment.NewLine + Environment.NewLine +
+				"Yes — stop it now." + Environment.NewLine +
+				"No — leave it running and just close this window." + Environment.NewLine +
+				"Cancel — keep watching.",
+				"AutoC&C", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+
+			if (answer == DialogResult.Cancel)
+			{
+				e.Cancel = true;
+				return;
+			}
+
+			// Stop only what was actually asked about. Stopping anything else would kill a job the
+			// player never saw, and stopping nothing at all would leave the request latched onto
+			// whatever runs next, which would then be reported as stopped without being stopped.
+			if (answer == DialogResult.Yes && ImprovementRunning() &&
+				ReferenceEquals(activeJob, askedAbout))
+				StopEverything();
+		}
+
+		/// <summary>True while the running job is the improvement agent rather than a battle.</summary>
+		bool ImprovementRunning() => runner.IsRunning && activeJob?.Output != null;
 
 		static TableLayoutPanel Grid(int columns)
 		{
@@ -930,9 +975,11 @@ namespace AutoCnC.Launcher
 			var continuousReady = compatible && editable && continuousBox.Checked;
 			var agent = lastRun?.Manifest.Agent;
 			var lastRunMatches = LastRunMatchesSelectedBot();
-			var failedImprovement = agent?.ExitCode is int agentExitCode && agentExitCode != 0;
+			var stoppedImprovement = agent is { Cancelled: true };
+			var failedImprovement = !stoppedImprovement &&
+				agent?.ExitCode is int agentExitCode && agentExitCode != 0;
 			var canRetryImprovement = agent == null || agent.ChangeCount == 0 ||
-				agent.RestoredUtc != null || failedImprovement;
+				agent.RestoredUtc != null || failedImprovement || stoppedImprovement;
 
 			launchButton.Enabled = ready;
 			buildButton.Enabled = !busy && compatible && BotExists();
@@ -957,8 +1004,10 @@ namespace AutoCnC.Launcher
 				File.Exists(repo.VerifyBotScript) && lastRunMatches;
 			reviewButton.Enabled = compatible && lastRunMatches &&
 				lastRun?.IsEditable == true && lastRun.Manifest.CompletedUtc != null;
+			// Any count but a confirmed zero. An unknown count means the workspace could not be
+			// inspected, which is the state where undoing matters most, not least.
 			restoreButton.Enabled = !busy && lastRunMatches && lastRun != null &&
-				agent?.ChangeCount > 0 && agent.RestoredUtc == null &&
+				agent != null && agent.ChangeCount != 0 && agent.RestoredUtc == null &&
 				File.Exists(lastRun.SnapshotManifestPath);
 			runFolderButton.Enabled = !busy && lastRun != null && Directory.Exists(lastRun.RunDirectory);
 			stopButton.Enabled = busy;
@@ -1615,18 +1664,23 @@ namespace AutoCnC.Launcher
 				if (!File.Exists(lastRun.GameRulesPath))
 					AgentRulesExporter.Export(repo, lastRun.GameRulesPath);
 
-				var recovering = previousAgent?.ExitCode is int failedExitCode &&
+				var previousCancelled = previousAgent is { Cancelled: true };
+				var recovering = !previousCancelled &&
+					previousAgent?.ExitCode is int failedExitCode &&
 					failedExitCode != 0 && previousAgent.RestoredUtc == null;
-				var archivedTranscript = recovering
+
+				// A stopped attempt is archived too. Its transcript is the only record of how far
+				// it got, and AgentStarted deletes the live one.
+				var archivedTranscript = recovering || previousCancelled
 					? lastRun.ArchiveAgentAttempt()
 					: null;
 				var recoveryContext = recovering
 					? TrainingAgent.BuildRecoveryContext(previousAgent, archivedTranscript)
-					: null;
+					: TrainingAgent.BuildCancellationContext(previousAgent, archivedTranscript);
 				TrainingAgent.Prepare(lastRun, repo.AgentGameGuide, lastRun.GameRulesPath,
 					CurrentPromptTemplate(), settings.AgentCommand, settings.AgentArguments,
 					recoveryContext);
-				lastRun.AgentStarted(settings.AgentCommand, archivedTranscript);
+				lastRun.AgentStarted(settings.AgentCommand, archivedTranscript, recovering);
 			}
 			catch (InvalidOperationException ex)
 			{
@@ -1700,9 +1754,22 @@ namespace AutoCnC.Launcher
 			}
 
 			var failed = exitCode != 0;
-			var failurePhase = failed ? status?.Phase ?? "process" : null;
+
+			// stopRequested is still set: JobFinished clears it only after this runs. Killing a
+			// process tree returns an arbitrary exit code, so this flag is the only evidence that
+			// the player asked for the stop rather than something breaking.
+			//
+			// Stopping a repair is not the same as stopping an improvement. The fault it was sent
+			// to fix is still there, so that stays recorded as a failure — otherwise the next
+			// round is told everything is fine and the original fault is quietly forgotten.
+			var repairing = lastRun.Manifest.Agent?.Repairing == true ||
+				string.Equals(lastRun.Manifest.Status, "verifying", StringComparison.Ordinal);
+			var cancelled = failed && stopRequested && !repairing;
+			var failurePhase = failed ? cancelled ? "cancelled" : status?.Phase ?? "process" : null;
 			var failureMessage = failed
-				? status?.Message ?? $"Improvement process exited with code {exitCode}."
+				? cancelled
+					? "The improvement was stopped from the launcher before it finished."
+					: status?.Message ?? $"Improvement process exited with code {exitCode}."
 				: null;
 			var suggestedNextPrompt = !failed
 				? TrainingAgent.FindSuggestedNextPrompt(runner.LastOutput, lastRun)
@@ -1711,28 +1778,31 @@ namespace AutoCnC.Launcher
 			{
 				var changes = WorkspaceSnapshot.Compare(lastRun);
 				lastRun.AgentFinished(exitCode, changes.Count, suggestedNextPrompt,
-					failurePhase, failureMessage);
-				if (!closing && improvementWindow != null)
-					improvementWindow.CompleteAgentRun(lastRun);
+					failurePhase, failureMessage, cancelled);
 			}
 			catch (InvalidDataException ex)
 			{
 				AppendImprovementOutput($"Could not record the agent's changes: {ex.Message}");
-				lastRun.AgentFinished(exitCode, 0, suggestedNextPrompt,
-					failurePhase, failureMessage);
+				lastRun.AgentFinished(exitCode, TrainingAgentResult.UnknownChangeCount, suggestedNextPrompt,
+					failurePhase, failureMessage, cancelled);
 			}
 			catch (IOException ex)
 			{
 				AppendImprovementOutput($"Could not record the agent's changes: {ex.Message}");
-				lastRun.AgentFinished(exitCode, 0, suggestedNextPrompt,
-					failurePhase, failureMessage);
+				lastRun.AgentFinished(exitCode, TrainingAgentResult.UnknownChangeCount, suggestedNextPrompt,
+					failurePhase, failureMessage, cancelled);
 			}
 			catch (System.Text.Json.JsonException ex)
 			{
 				AppendImprovementOutput($"Could not record the agent's changes: {ex.Message}");
-				lastRun.AgentFinished(exitCode, 0, suggestedNextPrompt,
-					failurePhase, failureMessage);
+				lastRun.AgentFinished(exitCode, TrainingAgentResult.UnknownChangeCount, suggestedNextPrompt,
+					failurePhase, failureMessage, cancelled);
 			}
+
+			// Deliberately outside the block above: this only draws what was just recorded, and a
+			// display fault must not be able to rewrite the durable change count with a zero.
+			if (!closing && improvementWindow != null)
+				improvementWindow.CompleteAgentRun(lastRun);
 
 			if (exitCode == 0 && continuousLoop.Stage == ContinuousTrainingStage.Improving)
 				AcceptContinuousPrompt(lastRun, suggestedNextPrompt);
@@ -1888,7 +1958,7 @@ namespace AutoCnC.Launcher
 		void RestoreIteration()
 		{
 			if (lastRun == null || !LastRunMatchesSelectedBot() ||
-				lastRun.Manifest.Agent?.ChangeCount <= 0)
+				lastRun.Manifest.Agent?.ChangeCount == 0)
 				return;
 
 			var answer = MessageBox.Show(this,
@@ -2087,7 +2157,11 @@ namespace AutoCnC.Launcher
 
 		void StopEverything()
 		{
-			stopRequested = true;
+			// Only claim a stop when there is something running to stop. The flag is read by the
+			// next JobFinished, so setting it with nothing in flight hands it to whatever starts
+			// afterwards: that job would be reported as stopped, and a failed improvement would be
+			// recorded as one the player cancelled.
+			stopRequested = runner.IsRunning;
 			continuousLoop.Stop();
 			queue.Clear();
 			runner.Stop();

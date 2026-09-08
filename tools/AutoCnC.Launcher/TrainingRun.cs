@@ -70,11 +70,43 @@ namespace AutoCnC.Launcher
 
 	public sealed class TrainingAgentResult
 	{
+		/// <summary>
+		/// <see cref="ChangeCount"/> when the workspace could not be compared at all.
+		/// </summary>
+		/// <remarks>
+		/// Distinct from zero on purpose. Zero is a comparison that ran and found the workspace
+		/// untouched, which is a reason to say nothing; this is a comparison that never happened,
+		/// which is a reason to be careful — the edits may be there and simply could not be seen.
+		/// </remarks>
+		public const int UnknownChangeCount = -1;
+
 		public int Attempt { get; set; }
 		public DateTime? StartedUtc { get; set; }
 		public DateTime? CompletedUtc { get; set; }
 		public DateTime? RestoredUtc { get; set; }
 		public int? ExitCode { get; set; }
+
+		/// <summary>
+		/// True when the player stopped this attempt rather than it going wrong.
+		/// </summary>
+		/// <remarks>
+		/// Stopping kills the process tree, so the exit code that comes back is whatever Windows
+		/// chose and is indistinguishable from a crash. Without this flag the next attempt opens
+		/// as an investigation into a failure that never happened.
+		/// </remarks>
+		public bool Cancelled { get; set; }
+
+		/// <summary>
+		/// True when this attempt was sent to repair a failure rather than to make a fresh
+		/// improvement.
+		/// </summary>
+		/// <remarks>
+		/// Stopping one of these does not undo the reason it was started, so the failure it was
+		/// sent to fix is still there and the next attempt has to be told. Without this, stopping
+		/// a repair would read as "nothing is wrong" and quietly lose the original fault.
+		/// </remarks>
+		public bool Repairing { get; set; }
+
 		public int ChangeCount { get; set; }
 		public string Command { get; set; }
 		public string SuggestedNextPrompt { get; set; }
@@ -346,7 +378,8 @@ namespace AutoCnC.Launcher
 				File.ReadAllText(AgentStatusPath), JsonOptions);
 		}
 
-		public void AgentStarted(string command, string recoveryTranscript = null)
+		public void AgentStarted(string command, string recoveryTranscript = null,
+			bool repairing = false)
 		{
 			var attempt = Manifest.Agent == null
 				? 1
@@ -363,7 +396,8 @@ namespace AutoCnC.Launcher
 				Attempt = attempt,
 				StartedUtc = DateTime.UtcNow,
 				Command = command,
-				RecoveryTranscript = recoveryTranscript
+				RecoveryTranscript = recoveryTranscript,
+				Repairing = repairing
 			};
 			Manifest.Status = "improving";
 			Save();
@@ -390,16 +424,19 @@ namespace AutoCnC.Launcher
 		}
 
 		public void AgentFinished(int exitCode, int changeCount, string suggestedNextPrompt = null,
-			string failurePhase = null, string failureMessage = null)
+			string failurePhase = null, string failureMessage = null, bool cancelled = false)
 		{
 			Manifest.Agent ??= new TrainingAgentResult();
 			Manifest.Agent.CompletedUtc = DateTime.UtcNow;
 			Manifest.Agent.ExitCode = exitCode;
+			Manifest.Agent.Cancelled = cancelled && exitCode != 0;
 			Manifest.Agent.ChangeCount = changeCount;
 			Manifest.Agent.SuggestedNextPrompt = suggestedNextPrompt;
 			Manifest.Agent.FailurePhase = failurePhase;
 			Manifest.Agent.FailureMessage = failureMessage;
-			Manifest.Status = exitCode == 0 ? "improved" : "improvement-failed";
+			Manifest.Status = exitCode == 0
+				? "improved"
+				: cancelled ? "improvement-cancelled" : "improvement-failed";
 			Save();
 		}
 
@@ -455,7 +492,7 @@ namespace AutoCnC.Launcher
 		void InferLegacyFailure()
 		{
 			var agent = Manifest.Agent;
-			if (agent?.ExitCode is not int exitCode || exitCode == 0 ||
+			if (agent?.ExitCode is not int exitCode || exitCode == 0 || agent.Cancelled ||
 				!string.IsNullOrEmpty(agent.FailurePhase))
 				return;
 

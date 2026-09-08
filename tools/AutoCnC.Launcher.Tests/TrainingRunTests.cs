@@ -407,6 +407,156 @@ namespace AutoCnC.Launcher.Tests
 			Assert.That(File.Exists(run.CancellationPath), Is.False);
 		}
 
+		/// <remarks>
+		/// Stopping kills the process tree, so the exit code is indistinguishable from a crash.
+		/// If that is all the next round knows, it opens as an investigation into a failure that
+		/// never happened — which is both untrue and slow, because the agent reads a transcript
+		/// and reruns the tests before starting the work that was actually wanted.
+		/// </remarks>
+		[Test]
+		public void AStoppedAttemptIsNotTreatedAsAFailureNextRound()
+		{
+			var run = NewRun();
+			run.AgentStarted("agent");
+			File.WriteAllText(run.AgentTranscriptPath,
+				"agent output" + Environment.NewLine + "=== Verification ===" +
+				Environment.NewLine + "half way through");
+			run.AgentFinished(-1, 3, failurePhase: "cancelled",
+				failureMessage: "The improvement was stopped from the launcher before it finished.",
+				cancelled: true);
+
+			var loaded = TrainingRun.Load(run.RunDirectory);
+			Assert.Multiple(() =>
+			{
+				Assert.That(loaded.Manifest.Agent.Cancelled, Is.True);
+				Assert.That(loaded.Manifest.Status, Is.EqualTo("improvement-cancelled"));
+
+				// The transcript names a verification section, which is what the legacy inference
+				// reads to relabel an unexplained failure. It must not reinterpret a stop.
+				Assert.That(loaded.Manifest.Agent.FailurePhase, Is.EqualTo("cancelled"));
+			});
+
+			var transcript = loaded.ArchiveAgentAttempt();
+			Assert.That(TrainingAgent.BuildRecoveryContext(loaded.Manifest.Agent, transcript),
+				Is.Null, "A stop is not a failure to be recovered from.");
+
+			var cancellation = TrainingAgent.BuildCancellationContext(loaded.Manifest.Agent,
+				transcript);
+			TrainingAgent.PrepareContext(loaded, gameGuide, gameRules, promptTemplate, cancellation);
+			var prompt = File.ReadAllText(loaded.PromptPath);
+			Assert.Multiple(() =>
+			{
+				Assert.That(prompt, Does.Not.Contain("Recovery attempt"));
+				Assert.That(prompt, Does.Contain("stopped the previous improvement"));
+
+				// The half-finished edits are the one thing it does have to be warned about.
+				Assert.That(prompt, Does.Contain("3 file(s)"));
+				Assert.That(prompt, Does.Contain(transcript));
+			});
+		}
+
+		[Test]
+		public void AStopThatChangedNothingSaysNothingToTheNextRound()
+		{
+			var run = NewRun();
+			run.AgentStarted("agent");
+			run.AgentFinished(-1, 0, failurePhase: "cancelled", cancelled: true);
+
+			Assert.That(
+				TrainingAgent.BuildCancellationContext(run.Manifest.Agent, "transcript.txt"),
+				Is.Null, "With no edits left behind there is nothing the next round needs told.");
+		}
+
+		/// <remarks>
+		/// Covers the guard itself rather than the path production takes. A cancelled run normally
+		/// carries the "cancelled" phase, which stops the legacy inference on its own — so without
+		/// a run that has no phase at all, the <c>Cancelled</c> clause would never be exercised and
+		/// could be dropped by a later edit without any test noticing.
+		/// </remarks>
+		[Test]
+		public void ACancelledRunWithNoPhaseIsStillNotRelabelledAsAFailure()
+		{
+			var run = NewRun();
+			run.AgentStarted("agent");
+			File.WriteAllText(run.AgentTranscriptPath,
+				"=== Verification ===" + Environment.NewLine + "stopped part way");
+			run.AgentFinished(-1, 1, cancelled: true);
+			Assert.That(run.Manifest.Agent.FailurePhase, Is.Null, "Precondition for this test.");
+
+			var loaded = TrainingRun.Load(run.RunDirectory);
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(loaded.Manifest.Agent.Cancelled, Is.True);
+				Assert.That(loaded.Manifest.Agent.FailurePhase, Is.Null);
+				Assert.That(loaded.Manifest.Agent.FailureMessage, Is.Null);
+			});
+		}
+
+		/// <remarks>
+		/// The counterpart to the test above. Stopping a *repair* is not the same as stopping an
+		/// improvement: whatever it was sent to fix is still broken, so the next attempt must
+		/// still be told to fix it rather than being reassured that nothing failed.
+		/// </remarks>
+		[Test]
+		public void StoppingARepairKeepsTheFailureItWasSentToFix()
+		{
+			var run = NewRun();
+			run.AgentStarted("agent");
+			run.AgentFinished(1, 2, failurePhase: "verification",
+				failureMessage: "Bot tests failed.");
+			var firstTranscript = run.ArchiveAgentAttempt();
+
+			// The repair attempt, which the player then stops part way through.
+			run.AgentStarted("agent", firstTranscript, repairing: true);
+			Assert.That(run.Manifest.Agent.Repairing, Is.True, "Precondition for this test.");
+			run.AgentFinished(1, 5, failurePhase: "verification",
+				failureMessage: "Bot tests failed.");
+
+			var loaded = TrainingRun.Load(run.RunDirectory);
+			Assert.Multiple(() =>
+			{
+				Assert.That(loaded.Manifest.Agent.Cancelled, Is.False);
+				Assert.That(loaded.Manifest.Status, Is.EqualTo("improvement-failed"));
+			});
+
+			var recovery = TrainingAgent.BuildRecoveryContext(loaded.Manifest.Agent,
+				firstTranscript);
+			Assert.That(recovery, Is.Not.Null,
+				"A stopped repair still has a failure to recover from.");
+			Assert.That(recovery, Does.Contain("Bot tests failed."));
+		}
+
+		[Test]
+		public void AnUninspectableStopIsWarnedAboutRatherThanAssumedClean()
+		{
+			var run = NewRun();
+			run.AgentStarted("agent");
+			run.AgentFinished(-1, TrainingAgentResult.UnknownChangeCount,
+				failurePhase: "cancelled", cancelled: true);
+
+			var context = TrainingAgent.BuildCancellationContext(run.Manifest.Agent, null);
+
+			Assert.That(context, Is.Not.Null,
+				"An unreadable workspace is not the same as a clean one.");
+			Assert.That(context, Does.Contain("could not be determined"));
+			Assert.That(context, Does.Not.Contain("-1"));
+		}
+
+		[Test]
+		public void ASuccessfulRunIsNeverRecordedAsCancelled()
+		{
+			var run = NewRun();
+			run.AgentStarted("agent");
+			run.AgentFinished(0, 2, cancelled: true);
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(run.Manifest.Agent.Cancelled, Is.False);
+				Assert.That(run.Manifest.Status, Is.EqualTo("improved"));
+			});
+		}
+
 		TrainingRun NewRun() =>
 			TrainingRun.Create(project, new TrainingBattleConfiguration
 			{

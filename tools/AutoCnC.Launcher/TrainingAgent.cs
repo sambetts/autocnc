@@ -242,7 +242,8 @@ namespace AutoCnC.Launcher
 		public static string BuildRecoveryContext(TrainingAgentResult failedAttempt,
 			string archivedTranscript)
 		{
-			if (failedAttempt?.ExitCode is not int exitCode || exitCode == 0)
+			if (failedAttempt?.ExitCode is not int exitCode || exitCode == 0 ||
+				failedAttempt.Cancelled)
 				return null;
 
 			var verification = string.Equals(failedAttempt.FailurePhase, "verification",
@@ -285,6 +286,58 @@ namespace AutoCnC.Launcher
 				changes until every test and build exits successfully. If generated `bin`/`obj` output
 				is corrupt, clean it and rerun before diagnosing source. Only revisit the strategic
 				change if the tests prove its behavior is wrong.
+				""";
+		}
+
+		/// <summary>
+		/// What to tell the next attempt about a run the player stopped on purpose.
+		/// </summary>
+		/// <remarks>
+		/// <para>
+		/// Nothing went wrong, so there is nothing to diagnose — and saying otherwise is expensive
+		/// as well as untrue, because an agent told to investigate a failure will go and read a
+		/// transcript, rerun the tests and reason about a fault that does not exist before it
+		/// starts on the work you actually wanted.
+		/// </para>
+		/// <para>
+		/// The one thing it does need is a warning that the workspace may not be clean. A run
+		/// stopped halfway can leave a half-finished edit behind, and an agent that believes it is
+		/// starting from the last good state would build on top of it without ever looking.
+		/// Silence is only safe when the stopped attempt changed nothing, which is why this
+		/// returns null in that case rather than an empty reassurance.
+		/// </para>
+		/// </remarks>
+		public static string BuildCancellationContext(TrainingAgentResult cancelledAttempt,
+			string archivedTranscript)
+		{
+			if (cancelledAttempt is not { Cancelled: true } ||
+				cancelledAttempt.RestoredUtc != null ||
+				cancelledAttempt.ChangeCount == 0)
+				return null;
+
+			var edits = cancelledAttempt.ChangeCount < 0
+				? "It may have left edits in the bot workspace — that could not be determined, so " +
+					"assume there are some."
+				: $"It had already changed {cancelledAttempt.ChangeCount} file(s) in the bot " +
+					"workspace, and those edits are still there, possibly half-finished.";
+
+			var transcript = string.IsNullOrEmpty(archivedTranscript)
+				? ""
+				: $"""
+
+					What it had done before it was stopped is in `{archivedTranscript}`.
+					""";
+
+			return $"""
+				# The previous attempt was stopped
+
+				The player stopped the previous improvement before it finished. It did not fail and
+				there is nothing to diagnose, so do not go looking for a fault.
+
+				{edits} Read the current state of any file you intend to change rather than assuming
+				it is the last known-good version. Finish or replace that work as the task below
+				requires, and make sure the build and tests pass before you are done.
+				{transcript}
 				""";
 		}
 

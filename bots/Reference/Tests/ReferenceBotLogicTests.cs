@@ -55,6 +55,21 @@ namespace AutoCnC.Reference.Tests
 
 		static ReferenceBotTuning Tuning => ReferenceBotTuning.Default;
 
+		/// <summary>Asserts a decision leaves a push that is already running alone.</summary>
+		/// <remarks>
+		/// Stricter than "the doctrine is still Attack", and deliberately so. A bot that is
+		/// already attacking carries on by having <em>no opinion</em>, because the host reads any
+		/// named doctrine as an opinion and the bot's opinion outranks the requests its own modes
+		/// make. Naming Attack while attacking is therefore not the harmless no-op it looks like:
+		/// it gags AttackBaseMode, which is the only part of this bot that can see whether there
+		/// is anything left to attack.
+		/// </remarks>
+		static void AssertThePushCarriesOn(DoctrineDecision decision)
+		{
+			Assert.That(decision.WantsChange, Is.False,
+				"a running push carries on by staying quiet, so its modes can still be heard");
+		}
+
 		// --- Rule 1: home comes first ------------------------------------------
 
 		[Test]
@@ -96,7 +111,7 @@ namespace AutoCnC.Reference.Tests
 				enemyBaseFound: true,
 				enemiesNearBase: Tuning.AssaultEnemies - 1));
 
-			Assert.That(decision.Doctrine, Is.EqualTo(ReferenceDoctrines.Attack));
+			AssertThePushCarriesOn(decision);
 		}
 
 		[Test]
@@ -211,7 +226,7 @@ namespace AutoCnC.Reference.Tests
 				enemyBaseFound: true,
 				enemiesNearBase: Tuning.AssaultEnemies));
 
-			Assert.That(decision.Doctrine, Is.EqualTo(ReferenceDoctrines.Attack));
+			AssertThePushCarriesOn(decision);
 		}
 
 		[Test]
@@ -427,7 +442,7 @@ namespace AutoCnC.Reference.Tests
 				enemyBaseFound: true,
 				secondsSinceContact: ObservedApproachMarchSeconds));
 
-			Assert.That(decision.Doctrine, Is.EqualTo(ReferenceDoctrines.Attack));
+			AssertThePushCarriesOn(decision);
 		}
 
 		[Test]
@@ -440,7 +455,12 @@ namespace AutoCnC.Reference.Tests
 		[Test]
 		public void SomethingInSightIsNotLostContactHoweverStaleTheClock()
 		{
-			// Being able to see them is the definition of not having lost them.
+			// Being able to see them is the definition of not having lost them — so rule 4 stays
+			// out of it, and the push is left alone. Note what that costs and why rule 6 no longer
+			// re-affirms itself: their counter-attack standing on a stranded army is "something in
+			// sight", which pins the clock at zero and disarms this rule for good. The way out has
+			// to come from AttackBaseMode, which knows the difference between seeing enemies and
+			// having something to attack.
 			var decision = ReferenceBotLogic.Decide(State(
 				doctrine: ReferenceDoctrines.Attack,
 				armyValue: Tuning.AttackArmyValue,
@@ -449,7 +469,10 @@ namespace AutoCnC.Reference.Tests
 				enemiesInSight: 4,
 				secondsSinceContact: Tuning.LostContactSeconds * 10));
 
-			Assert.That(decision.Doctrine, Is.EqualTo(ReferenceDoctrines.Attack));
+			Assert.That(ReferenceBotLogic.LostContact(
+				State(enemiesInSight: 4, secondsSinceContact: Tuning.LostContactSeconds * 10), Tuning),
+				Is.False);
+			AssertThePushCarriesOn(decision);
 		}
 
 		[Test]
@@ -566,6 +589,135 @@ namespace AutoCnC.Reference.Tests
 		// --- Rules 5 and 8: scouting -------------------------------------------
 
 		[Test]
+		public void ASearchIsGivenLongEnoughToActuallySearch()
+		{
+			// EnemyBaseFound never goes back to false, so this rule is answered before the search
+			// starts. Observed at 710s: AttackBaseMode reported their base was gone, the bot went
+			// looking, and this rule ended it 30 seconds later — the host's minimum dwell — having
+			// found nothing. It then went straight back to attacking a base that was not there.
+			var decision = ReferenceBotLogic.Decide(State(
+				doctrine: ReferenceDoctrines.Scout,
+				doctrineSeconds: MinimumDwellSeconds,
+				refineries: 3,
+				enemyBaseFound: true));
+
+			Assert.That(decision.WantsChange, Is.False, "a 30-second search is not a search");
+		}
+
+		[Test]
+		public void TheSearchHoldClearsTheHostsMinimumDwell()
+		{
+			Assert.That(Tuning.ScoutHoldSeconds, Is.GreaterThan(MinimumDwellSeconds),
+				"a hold inside the dwell window changes nothing at all");
+		}
+
+		[Test]
+		public void ASearchIsNotYankedStraightBackIntoAPushItCannotAim()
+		{
+			// Rule 6 is why this has to Continue rather than fall through. An army worth spending
+			// is not worth spending on a base we have just established is no longer there, and
+			// re-entering Attack only makes AttackBaseMode ask for the search again.
+			var decision = ReferenceBotLogic.Decide(State(
+				doctrine: ReferenceDoctrines.Scout,
+				doctrineSeconds: MinimumDwellSeconds,
+				armyValue: 21900,
+				units: 115,
+				refineries: 3,
+				enemyBaseFound: true));
+
+			Assert.That(decision.WantsChange, Is.False);
+		}
+
+		[Test]
+		public void ASearchThatHasHadItsTimeStillHandsBack()
+		{
+			// The hold is a floor, not a commitment: with the jeeps out of ideas the economy
+			// should stop paying for them.
+			var decision = ReferenceBotLogic.Decide(State(
+				doctrine: ReferenceDoctrines.Scout,
+				doctrineSeconds: Tuning.ScoutHoldSeconds,
+				refineries: 3,
+				enemyBaseFound: true));
+
+			Assert.That(decision.Doctrine, Is.EqualTo(ReferenceDoctrines.Opening));
+		}
+
+		[Test]
+		public void ABaseFallingOverStillOutranksAnUnfinishedSearch()
+		{
+			// The hold must not have quietly disarmed rules 1 and 2 for a searching side.
+			var falling = ReferenceBotLogic.Decide(State(
+				doctrine: ReferenceDoctrines.Scout,
+				doctrineSeconds: 5,
+				refineries: 3,
+				enemyBaseFound: true,
+				buildingsLost: 1));
+
+			Assert.That(falling.Doctrine, Is.EqualTo(ReferenceDoctrines.Defence));
+
+			var besieged = ReferenceBotLogic.Decide(State(
+				doctrine: ReferenceDoctrines.Scout,
+				doctrineSeconds: 5,
+				refineries: 3,
+				enemyBaseFound: true,
+				enemiesNearBase: Tuning.RaidEnemies));
+
+			Assert.That(besieged.Doctrine, Is.EqualTo(ReferenceDoctrines.Defence));
+		}
+
+		[Test]
+		public void ThePushThatWasFarmedInACornerNowLeavesInsteadOfDying()
+		{
+			// The whole failure, end to end. AttackBaseMode had nothing left to attack from 430s
+			// and said so on every assessment; the bot answered "army worth N and their base is
+			// known" to all 56 of them, so all 56 were discarded as already-active. At 595s their
+			// counter-attack arrived and killed 71 units for zero kills while the army held.
+			//
+			// The mode's request is modelled because it is the thing that was being thrown away,
+			// and the host's minimum dwell is modelled because a rescue that cannot survive it is
+			// no rescue at all.
+			var doctrine = ReferenceDoctrines.Attack;
+			var doctrineSeconds = 90;
+			var leftAt = -1;
+
+			for (var seconds = 430; seconds <= 710; seconds += AssessmentSeconds)
+			{
+				// From 595s their army is standing on ours, which is exactly why rule 4 cannot
+				// help: being shot at is "contact".
+				var inSight = seconds >= 595 ? 14 : 0;
+				var sinceContact = seconds >= 595 ? 0 : (seconds - 485) / AssessmentSeconds * AssessmentSeconds;
+
+				var decision = ReferenceBotLogic.Decide(State(
+					doctrine: doctrine,
+					doctrineSeconds: doctrineSeconds,
+					armyValue: 12400,
+					units: 100,
+					refineries: 3,
+					enemyBaseFound: true,
+					enemiesInSight: inSight,
+					secondsSinceContact: sinceContact));
+
+				// The host takes the bot's answer where it has one, and the mode's only where it
+				// does not. AttackBaseMode asks for Scout on every one of these ticks.
+				var wanted = decision.WantsChange ? decision.Doctrine : ReferenceDoctrines.Scout;
+
+				if (wanted != doctrine && doctrineSeconds >= MinimumDwellSeconds)
+				{
+					doctrine = wanted;
+					doctrineSeconds = 0;
+					if (leftAt < 0)
+						leftAt = seconds;
+				}
+
+				doctrineSeconds += AssessmentSeconds;
+			}
+
+			Assert.That(leftAt, Is.InRange(430, 480),
+				"the push must end when its own mode reports there is nothing left to attack, "
+				+ "not 280 seconds later when the army has been ground down below AttackArmyValue");
+		}
+
+		[Test]
 		public void ScoutsOnceTheEconomyCanAffordIt()
 		{
 			var decision = ReferenceBotLogic.Decide(State(refineries: Tuning.ScoutRefineries));
@@ -642,8 +794,73 @@ namespace AutoCnC.Reference.Tests
 				armyValue: Tuning.AttackArmyValue,
 				enemyBaseFound: true));
 
-			// Naming the doctrine already running is how a rule says "carry on".
-			Assert.That(decision.Doctrine, Is.EqualTo(ReferenceDoctrines.Attack));
+			// Having no opinion is how a rule says "carry on" — see AssertThePushCarriesOn.
+			AssertThePushCarriesOn(decision);
+		}
+
+		[Test]
+		public void ARunningPushNeverRepeatsItselfOverItsOwnModes()
+		{
+			// The bug that lost badland-ridges, stated directly. AttackBaseMode ends its own
+			// doctrine by calling ctx.SwitchDoctrine, exactly as ScoutMode does — but the host
+			// only honours a mode's request when the bot itself has no opinion. Rule 6 used to
+			// answer "army worth N and their base is known" on every single assessment, so the
+			// request was discarded with outcome=already-active 82 times between 235s and 955s
+			// while the mode was shouting that there was nothing left to attack.
+			//
+			// Whatever else rule 6 does, it must never be the thing that speaks for a push that
+			// is already running.
+			foreach (var army in new[] { Tuning.AttackArmyValue, Tuning.AttackArmyValue * 4, 21900 })
+				foreach (var units in new[] { 0, 50, 115 })
+					foreach (var contact in new[] { -1, 0, 30, Tuning.LostContactSeconds - 1 })
+					{
+						var decision = ReferenceBotLogic.Decide(State(
+							doctrine: ReferenceDoctrines.Attack,
+							armyValue: army,
+							units: units,
+							refineries: 3,
+							enemyBaseFound: true,
+							enemiesInSight: 2,
+							secondsSinceContact: contact));
+
+						Assert.That(decision.WantsChange, Is.False,
+							$"army {army}, {units} units, {contact}s since contact");
+					}
+		}
+
+		[Test]
+		public void TheArmyThatWasFarmedWhileHoldingNowGetsToLeave()
+		{
+			// 595s to 710s, replayed. The push had nothing left to attack, so AttackBaseMode
+			// asked for Scout every assessment; the bot answered Attack every assessment; the
+			// army stood at (35-39, 69-73) and their counter-attack killed 71 of it for no kills
+			// in return. unitsKilled was 0 and enemiesInSight climbed 5 -> 20 the whole way, so
+			// rule 4 could not fire either. The only thing that eventually freed it was the army
+			// bleeding below AttackArmyValue at 710s.
+			//
+			// The bot must now be silent through all of it, so the mode's request actually lands.
+			int[] enemiesInSight = [1, 5, 8, 12, 13, 14, 14, 14, 14, 14, 13, 9, 9, 10, 10, 15, 17, 18, 19, 20, 14, 17, 19];
+			int[] armyValue =
+			[
+				12400, 13150, 12950, 12850, 12450, 12250, 11950, 11650, 11450, 11250, 10950, 10850,
+				10350, 10050, 9550, 9250, 8650, 8350, 8700, 7250, 6750, 6250, 6100,
+			];
+
+			for (var i = 0; i < enemiesInSight.Length; i++)
+			{
+				var decision = ReferenceBotLogic.Decide(State(
+					doctrine: ReferenceDoctrines.Attack,
+					doctrineSeconds: 255 + i * AssessmentSeconds,
+					armyValue: armyValue[i],
+					units: 100 - i * 3,
+					refineries: 3,
+					enemyBaseFound: true,
+					enemiesInSight: enemiesInSight[i],
+					secondsSinceContact: 0));
+
+				Assert.That(decision.WantsChange, Is.False,
+					$"at 595+{i * AssessmentSeconds}s the bot must leave the doctrine to its modes");
+			}
 		}
 
 		[Test]

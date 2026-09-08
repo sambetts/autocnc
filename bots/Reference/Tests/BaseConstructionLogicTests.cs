@@ -253,6 +253,34 @@ namespace AutoCnC.Reference.Tests
 		}
 
 		[Test]
+		public void EveryPlanBuildsSomethingThatCanShootAircraft()
+		{
+			// The turtle having anti-air is not enough, because the bot is rarely turtling. On
+			// badland-ridges it entered Defence at 770s of a 995-second match; aircraft had
+			// already taken 67 of its 159 units, and took 21 of the last 23.
+			foreach (var plan in ReferencePlans.AllBuildPlans)
+			{
+				var built = Run(plan, EconomyDone);
+
+				Assert.That(built.Any(ReferencePlans.AntiAirStructures.Contains), Is.True,
+					"a base with no anti-air is free damage for as long as this plan is running");
+			}
+		}
+
+		[Test]
+		public void TheEconomyUnlocksTheUnitsTheProductionPlansAskFor()
+		{
+			// mtnk, ltnk, e2 and atwr all require anyhq. Without an hq in the plan every
+			// doctrine shares, those steps are skipped in silence: on badland-ridges the first
+			// hq landed at 445s, so a 2,000-credit war factory built jeeps for five minutes.
+			var built = Run(ReferencePlans.Economy, Owned());
+
+			Assert.That(built, Does.Contain("hq"));
+			Assert.That(built.IndexOf("hq"), Is.LessThan(built.IndexOf("weap")),
+				"unlock the tanks before paying for the factory that builds them");
+		}
+
+		[Test]
 		public void TheOpeningBuildsItsTowersToo()
 		{
 			var built = Run(ReferencePlans.OpeningBuild, EconomyDone);

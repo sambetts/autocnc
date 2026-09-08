@@ -136,10 +136,130 @@ namespace AutoCnC.Reference.Tests
 		public void HoldsWhenNoObjectiveAssignedAndNowhereToGo()
 		{
 			// Nothing in sight and this side has never seen an enemy structure: there is genuinely
-			// nowhere to march.
+			// nowhere to march, and nothing in range to shoot either.
 			var decision = AttackBaseLogic.Decide(State(hasObjective: false), AssaultTuning.Default);
 
 			Assert.That(decision.Action, Is.EqualTo(UnitAction.Hold));
+		}
+
+		// --- Stranded: no objective, nowhere to march, and being shot ----------
+		//
+		// badland-ridges, 595s to 710s. The push had levelled everything it could see and
+		// dropped the stale sighting, so every unit fell through to Hold — and a held unit in
+		// this mode does not shoot. Their counter-attack walked into a hundred-unit army parked
+		// at (35-39, 69-73) and killed 71 of them for ZERO kills in return.
+
+		[Test]
+		public void AStrandedUnitShootsBackInsteadOfStandingStill()
+		{
+			var decision = AttackBaseLogic.Decide(
+				State(hasObjective: false, weaponRangeCells: 4,
+					threats: Threat(id: 7, distanceCells: 2, canHitUs: true)),
+				AssaultTuning.Default);
+
+			Assert.That(decision.Action, Is.EqualTo(UnitAction.Attack),
+				"an assault with nothing left to assault must still defend itself");
+			Assert.That(decision.TargetActorId, Is.EqualTo(7u));
+		}
+
+		[Test]
+		public void AStrandedUnitStillWillNotChase()
+		{
+			// The one rule that survives having no objective: never leave weapon range. Otherwise
+			// "shoot back" quietly becomes the AutoTarget behaviour this mode exists to avoid.
+			var decision = AttackBaseLogic.Decide(
+				State(hasObjective: false, weaponRangeCells: 4,
+					threats: Threat(id: 7, distanceCells: 10, canHitUs: true)),
+				AssaultTuning.Default);
+
+			Assert.That(decision.Action, Is.EqualTo(UnitAction.Hold));
+		}
+
+		[Test]
+		public void AStrandedUnitTakesFreeShotsAtThingsThatCannotHitBack()
+		{
+			// SelectBlocker skips harmless targets because they are not worth interrupting an
+			// advance for. A unit that has no advance left is interrupting nothing, so a harvester
+			// sitting inside its weapon range is simply free.
+			var harvester = Threat(id: 7, distanceCells: 2, kind: ThreatKind.Economy, canHitUs: false);
+
+			var decision = AttackBaseLogic.Decide(
+				State(hasObjective: false, weaponRangeCells: 4, threats: harvester),
+				AssaultTuning.Default);
+
+			Assert.That(decision.Action, Is.EqualTo(UnitAction.Attack));
+			Assert.That(decision.TargetActorId, Is.EqualTo(7u));
+		}
+
+		[Test]
+		public void AStrandedUnitShootsTheThingShootingAtItFirst()
+		{
+			var harmless = Threat(id: 1, distanceCells: 1, kind: ThreatKind.Economy, canHitUs: false);
+			var shooting = Threat(id: 2, distanceCells: 3, kind: ThreatKind.Infantry, canHitUs: true);
+
+			var decision = AttackBaseLogic.Decide(
+				State(hasObjective: false, weaponRangeCells: 4, threats: [harmless, shooting]),
+				AssaultTuning.Default);
+
+			Assert.That(decision.TargetActorId, Is.EqualTo(2u));
+		}
+
+		[Test]
+		public void AnImmobileUnitWithSomewhereToBeStillFightsWhatIsInRange()
+		{
+			// It cannot take the march, so the march is not a reason to hold its fire.
+			var immobile = State(hasObjective: false, weaponRangeCells: 4,
+				threats: Threat(id: 7, distanceCells: 2, canHitUs: true)) with { CanMove = false };
+
+			var decision = AttackBaseLogic.Decide(immobile, AssaultTuning.Default,
+				new ApproachOrders(true, 78, 12, 97 * Cell));
+
+			Assert.That(decision.Action, Is.EqualTo(UnitAction.Attack));
+			Assert.That(decision.TargetActorId, Is.EqualTo(7u));
+		}
+
+		[Test]
+		public void AMarchStillBeatsShootingAtWhateverIsPassing()
+		{
+			// Stopping the push to trade shots on the way there is the commuting failure. A unit
+			// that can still reach their base keeps walking.
+			var decision = AttackBaseLogic.Decide(
+				State(hasObjective: false, weaponRangeCells: 4,
+					threats: Threat(id: 7, distanceCells: 2, canHitUs: true)),
+				AssaultTuning.Default,
+				new ApproachOrders(true, 78, 12, 97 * Cell));
+
+			Assert.That(decision.Action, Is.EqualTo(UnitAction.AttackMoveTo));
+		}
+
+		[Test]
+		public void AStrandedUnitPicksTheSameTargetEveryEvaluation()
+		{
+			// Re-picking an equivalent target every tick is how a stranded force dithers instead
+			// of shooting.
+			var a = Threat(id: 8, distanceCells: 2, canHitUs: true);
+			var b = Threat(id: 4, distanceCells: 2, canHitUs: true);
+
+			var forwards = AttackBaseLogic.Decide(
+				State(hasObjective: false, weaponRangeCells: 4, threats: [a, b]), AssaultTuning.Default);
+			var backwards = AttackBaseLogic.Decide(
+				State(hasObjective: false, weaponRangeCells: 4, threats: [b, a]), AssaultTuning.Default);
+
+			Assert.That(forwards.TargetActorId, Is.EqualTo(backwards.TargetActorId));
+			Assert.That(forwards.TargetActorId, Is.EqualTo(4u));
+		}
+
+		[Test]
+		public void AnUnarmedStrandedUnitIsLeftAlone()
+		{
+			// Rule 0 still comes first: a harvester caught by this mode must not be told to open
+			// fire on anything.
+			var unarmed = State(hasObjective: false, weaponRangeCells: 4,
+				threats: Threat(id: 7, distanceCells: 2, canHitUs: true)) with { HasWeapon = false };
+
+			var decision = AttackBaseLogic.Decide(unarmed, AssaultTuning.Default);
+
+			Assert.That(decision.Action, Is.EqualTo(UnitAction.Continue));
 		}
 
 		// --- Getting there at all ----------------------------------------------

@@ -91,14 +91,25 @@ namespace AutoCnC.Reference.Logic
 		}
 
 		/// <summary>
-		/// What to do with no objective in sensor range: close on the last known enemy base, or
-		/// hold if this side has never seen one.
+		/// What to do with no objective in sensor range: close on the last known enemy base,
+		/// fight whatever is already in range if there is nowhere to close on, and only hold if
+		/// there is genuinely nothing to do.
 		/// </summary>
 		/// <remarks>
 		/// Attack-move rather than move, because the whole point is to arrive able to fight. It
 		/// is not a breach of the never-chase rule: the destination is fixed before the unit
 		/// sets off, so nothing it meets on the way can redirect it. As soon as a structure
 		/// comes into range the objective rules above take over.
+		/// <para>
+		/// The last-stand branch below is the one that badland-ridges was lost for. The push
+		/// levelled everything it could see, dropped the stale sighting, and every unit fell
+		/// through to <c>Hold</c> — and a held unit in this mode does not shoot, because holding
+		/// fire at things it has not been sent to kill is the entire point of the mode. So a
+		/// hundred-unit army stood in a five-cell cluster at (35-39, 69-73) while their
+		/// counter-attack walked into it and killed 71 of them for zero kills in return between
+		/// 595s and 710s. Refusing to be baited off an assault is a virtue; refusing to shoot
+		/// back when there is no assault left to be baited off is not.
+		/// </para>
 		/// </remarks>
 		static UnitDecision Approach(in AssaultState state, in ApproachOrders approach)
 		{
@@ -106,11 +117,58 @@ namespace AutoCnC.Reference.Logic
 				return UnitDecision.AttackMoveTo(approach.X, approach.Y,
 					$"nothing in sight, closing on their base, {approach.DistanceUnits}u out");
 
+			var target = SelectLastStandTarget(state);
+			if (target.HasValue)
+				return UnitDecision.Attack(target.Value.ActorId,
+					$"nowhere to push, engaging {target.Value.Kind} at {target.Value.DistanceUnits}u");
+
 			return state.IsIdle ? UnitDecision.Hold("no objective assigned") : UnitDecision.Continue;
 		}
 
 		/// <summary>
+		/// The best thing to shoot for a unit that has no objective and nowhere to march.
+		/// </summary>
+		/// <remarks>
+		/// Deliberately looser than <see cref="SelectBlocker"/>. A blocker is filtered down to
+		/// what is worth interrupting an advance for, so it skips anything that cannot shoot
+		/// back; a unit with no advance left to protect is interrupting nothing, and every shot
+		/// inside its weapon range is free. The one rule kept from the mode's contract is the
+		/// one that defines it: never leave weapon range, so this can still never turn into a
+		/// chase.
+		/// </remarks>
+		public static ThreatSnapshot? SelectLastStandTarget(in AssaultState state)
+		{
+			var threats = state.Threats;
+			if (threats == null || threats.Count == 0)
+				return null;
 
+			ThreatSnapshot? best = null;
+			var bestScore = int.MinValue;
+
+			for (var i = 0; i < threats.Count; i++)
+			{
+				var t = threats[i];
+				if (!t.IsAttackable)
+					continue;
+
+				if (t.DistanceUnits > state.WeaponRangeUnits)
+					continue;
+
+				var score = ScoreBlocker(t);
+				if (score > bestScore || (score == bestScore && best.HasValue && t.ActorId < best.Value.ActorId))
+				{
+					bestScore = score;
+					best = t;
+				}
+			}
+
+			return best;
+		}
+
+		/// <summary>
+		/// The best thing to shoot without giving up any forward progress, or null if nothing
+		/// is worth interrupting the advance for.
+		/// </summary>
 		public static ThreatSnapshot? SelectBlocker(in AssaultState state, in AssaultTuning tuning)
 		{
 			var threats = state.Threats;

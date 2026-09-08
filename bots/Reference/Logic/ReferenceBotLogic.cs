@@ -30,6 +30,7 @@ namespace AutoCnC.Reference.Logic
 		int AssaultEnemies,       // floor for "not a raid, their army" — the early-game number
 		int AssaultForceShare,    // ...and past that, a share of our own force: Units / this
 		int DefenceHoldSeconds,   // how long to keep turtling after the shooting stops
+		int ScoutHoldSeconds,     // how long to let a search actually search
 		int LostContactSeconds)   // seeing nothing this long means we have lost them, not that we are marching
 	{
 		public static ReferenceBotTuning Default { get; } = new(
@@ -40,6 +41,7 @@ namespace AutoCnC.Reference.Logic
 			AssaultEnemies: 6,
 			AssaultForceShare: 4,
 			DefenceHoldSeconds: 45,
+			ScoutHoldSeconds: 90,
 			LostContactSeconds: 300);
 	}
 
@@ -105,27 +107,79 @@ namespace AutoCnC.Reference.Logic
 			//    last remembered sighting and drops it once a unit stands on the spot and finds
 			//    nothing; only a unit that can already SEE an enemy structure ever records a new
 			//    one. So an army with nothing to march on stops moving, and a stopped army never
-			//    sees anything again. Rule 6 below meanwhile keeps naming Attack — EnemyBaseFound
-			//    never goes back to false — and rule 8 cannot fire for exactly the same reason.
+			//    sees anything again. Rule 8 cannot fire either, because EnemyBaseFound never
+			//    goes back to false.
 			//
 			//    On badland-ridges that deadlocked the match: AttackBaseMode issued its last order
 			//    at 719s and none in the remaining 1,495s, every assessment from 900s to 1500s
 			//    reported unitsKilled 0 with secondsSinceContact climbing 30 -> 570, and a
 			//    115-unit army stood still while the other side rebuilt from three buildings to
 			//    twenty and went on to win.
+			//
+			//    This is a backstop rather than the primary escape, because the clock it reads is
+			//    about seeing *anything*, not about having a target. A stranded push that their
+			//    counter-attack has walked into can see plenty and still have nothing to attack,
+			//    which pins SecondsSinceContact at zero and disarms this rule exactly when it is
+			//    needed. AttackBaseMode knows the difference and rule 6 now lets it say so.
 			if (s.EnemyBaseFound && LostContact(s, t))
 				return DoctrineDecision.SwitchTo(ReferenceDoctrines.Scout,
 					$"nothing of theirs seen for {s.SecondsSinceContact}s; finding them again");
 
 			// 5. Scouting has answered its question, so stop paying for it.
-			if (Is(s.Doctrine, ReferenceDoctrines.Scout) && s.EnemyBaseFound)
-				return DoctrineDecision.SwitchTo(ReferenceDoctrines.Opening, "their base has been found");
+			//
+			//    Held first, for the same reason Defence is, and for a sharper one besides:
+			//    EnemyBaseFound never goes back to false, so this rule is answered before a
+			//    search has begun. It ends every search the instant the host's minimum dwell
+			//    allows — 30 seconds, during which a jeep crosses about a tenth of the map.
+			//
+			//    That was survivable while nothing ever asked for a second search. Now that
+			//    AttackBaseMode can say "their base is not there any more" and be heard, the
+			//    search it asks for has to be allowed to happen, or the two rules simply trade
+			//    the doctrine back and forth every dwell window and the army commutes instead of
+			//    looking. On badland-ridges the one search that worked ran 120s (120s to 240s);
+			//    the second got the 30s minimum and found nothing.
+			//
+			//    Continue rather than fall through, so that during the hold the doctrine belongs
+			//    to ScoutMode: it ends its own doctrine the moment it sees a structure, and its
+			//    answer is better than this rule's stale flag.
+			if (Is(s.Doctrine, ReferenceDoctrines.Scout))
+			{
+				if (s.DoctrineSeconds < t.ScoutHoldSeconds)
+					return DoctrineDecision.Continue;
 
-			// 6. An army worth spending, and somewhere to spend it. Naming the doctrine already
-			//    running is the same as continuing, so this also means "keep attacking".
+				if (s.EnemyBaseFound)
+					return DoctrineDecision.SwitchTo(ReferenceDoctrines.Opening, "their base has been found");
+			}
+
+			// 6. An army worth spending, and somewhere to spend it.
+			//
+			//    Only ever a *switch*. A bot that is already attacking says "carry on" by having
+			//    no opinion, not by naming Attack again. Re-affirming the doctrine that is
+			//    already running looks like a harmless no-op and is not one: the host reads any
+			//    named doctrine as the bot having an opinion, and the bot's opinion outranks the
+			//    requests its own modes make. Naming Attack while attacking therefore gags
+			//    AttackBaseMode — the one part of this bot that can actually see whether there is
+			//    anything left to attack.
+			//
+			//    That is how badland-ridges was lost. AttackBaseMode asked for Scout ("nothing
+			//    left to attack") on 82 separate assessments; every one was discarded with
+			//    outcome=already-active because this rule kept answering "army worth N and their
+			//    base is known". The push had levelled everything it could see by 480s and then
+			//    stood in the far corner of the map at (35-39, 69-73) for 230 seconds. From 595s
+			//    their counter-attack walked into it: enemiesInSight climbed 5 -> 20, unitsLost
+			//    ran 2 -> 51 and unitsKilled stayed 0 the whole way — 71 units lost for no kills.
+			//    The bot only escaped at 710s, when the army had bled below AttackArmyValue and
+			//    this rule finally stopped firing. Losing the army is not an acceptable way to
+			//    discover the attack is over.
+			//
+			//    Rules 7 and 8 cannot fire while readyToPush holds — 7 needs an army below the
+			//    retreat floor and 8 needs a base we have never found — so continuing here is
+			//    exactly what falling through to the bottom would do, minus the gag.
 			if (readyToPush)
-				return DoctrineDecision.SwitchTo(ReferenceDoctrines.Attack,
-					$"army worth {s.ArmyValue} and their base is known");
+				return Is(s.Doctrine, ReferenceDoctrines.Attack)
+					? DoctrineDecision.Continue
+					: DoctrineDecision.SwitchTo(ReferenceDoctrines.Attack,
+						$"army worth {s.ArmyValue} and their base is known");
 
 			// 7. A push that has run out of army. Going home and rebuilding beats feeding the
 			//    rest of it in one unit at a time.

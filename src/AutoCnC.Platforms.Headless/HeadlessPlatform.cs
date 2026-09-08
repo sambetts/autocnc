@@ -17,6 +17,34 @@ namespace OpenRA.Platforms.Headless
 {
 	public sealed class HeadlessPlatform : IPlatform
 	{
+		/// <remarks>
+		/// <para>
+		/// <c>Game.Platform</c> is a saved setting, not a command line flag the engine forgets:
+		/// it is written back to <c>settings.yaml</c> during startup, long before a battle ends.
+		/// So asking for this platform once is enough to make it the answer for good — every
+		/// later launch that does not name a platform loads it whether anybody asked or not, and
+		/// a rendered battle and a replay alike come up with no window, no sound and nothing on
+		/// screen to say why. Only a build that ships this assembly is affected: an install
+		/// without it fails to load the name, logs a renderer-init failure, and falls back.
+		/// </para>
+		/// <para>
+		/// By the time this constructor runs the setting has already done its entire job: the
+		/// engine picked its list of candidate platforms before the loop that builds us, so
+		/// putting the value back cannot affect the fallback. The engine only saves settings
+		/// that differ from their default, so restoring the default is also what erases any
+		/// value an earlier build already persisted.
+		/// </para>
+		/// </remarks>
+		public HeadlessPlatform()
+		{
+			var settings = Game.Settings?.Game;
+			if (settings != null)
+				settings.Platform = DefaultPlatformName;
+		}
+
+		/// <summary>The engine's stock rendering platform, and the value it treats as unset.</summary>
+		const string DefaultPlatformName = "Default";
+
 		public IPlatformWindow CreateWindow(
 			Size size, WindowMode windowMode, float scaleModifier, int vertexBatchSize,
 			int indexBatchSize, int videoDisplay, GLProfile profile) =>

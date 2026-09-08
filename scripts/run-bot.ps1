@@ -372,7 +372,12 @@ $gameArgs = @(
     "Launch.BattleBotPath=$botPath"
 )
 
-if ($ExecutionMode -eq 'Headless') { $gameArgs += 'Game.Platform=Headless' }
+# Name the platform on every launch, not just the headless one. Game.Platform is a saved setting,
+# so whatever was used last time is what a launch that stays quiet about it inherits — which is how
+# a single headless battle used to make every rendered battle afterwards run with no window. Saying
+# it out loud each time also repairs a profile that a previous build already wrote Headless into,
+# because the engine erases any setting equal to its default.
+$gameArgs += if ($ExecutionMode -eq 'Headless') { 'Game.Platform=Headless' } else { 'Game.Platform=Default' }
 
 if ($Map) { $gameArgs += "Launch.Map=$Map" }
 $gameArgs += $battleArgs

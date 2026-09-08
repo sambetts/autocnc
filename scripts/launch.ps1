@@ -43,7 +43,13 @@ $gameArgs = @(
     $launcher,
     "Engine.EngineDir=$engineDir",
     "Engine.ModSearchPaths=$modSearchPaths",
-    'Game.Mod=autocnc'
+    'Game.Mod=autocnc',
+
+    # Watching anything at all depends on this. Game.Platform is a saved setting, so a headless
+    # battle leaves "Headless" behind in the profile and a replay that does not ask for a platform
+    # inherits it: the game starts, loads the mod, plays the whole replay through a null renderer
+    # and never opens a window. -ExtraArgs is applied after this, so a caller can still choose.
+    'Game.Platform=Default'
 )
 
 if ($Map) { $gameArgs += "Launch.Map=$Map" }

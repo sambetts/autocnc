@@ -284,6 +284,20 @@ invokes is a public engine API; the submodule remains untouched. This is the com
 revalidate when bumping OpenRA. The null platform also assumes a launched local AutoC&C battle:
 interactive UI, remote multiplayer, editor, and rendering diagnostics belong on the Rendered path.
 
+The platform is chosen by `Game.Platform`, and that is a **saved setting rather than a command
+line flag** — the engine writes settings back to the shared OpenRA profile during startup, before
+a battle ends. Left alone, asking for `Headless` once makes it the answer for good: every later
+launch that does not name a platform loads the null platform whether it was asked for or not, so
+rendered battles and replay playback both start, load the mod, run to completion, and never open a
+window — with nothing on screen to say why. Only a build carrying `OpenRA.Platforms.Headless.dll`
+is affected; an install without it cannot load the name, and the engine's platform fallback moves
+on to `Default` and saves that instead. Two things prevent the trap.
+`HeadlessPlatform`'s constructor puts the setting back to `Default` the moment it is built, which
+is safe because the engine fixes its candidate list before constructing anything, and which also
+erases a value an older build already saved, since only non-default settings are written. And
+`run-bot.ps1` and `launch.ps1` name `Game.Platform` on every launch instead of only the headless
+one, so nothing is ever inherited from whatever ran last.
+
 ### Authoring and training flow
 
 The launcher remains a front end over scripts rather than a second build system:

@@ -42,11 +42,11 @@ namespace AutoCnC.Launcher
 			};
 			tree.BeforeExpand += (_, e) => Populate(e.Node);
 
-			var collapse = new Button { Text = "Collapse all", AutoSize = true };
+			var collapse = new ActionButton { Text = "Collapse all" };
 			collapse.Click += (_, _) => tree.CollapseAll();
-			var expand = new Button { Text = "Expand selected", AutoSize = true };
+			var expand = new ActionButton { Text = "Expand selected" };
 			expand.Click += (_, _) => tree.SelectedNode?.Expand();
-			var copy = new Button { Text = "Copy value", AutoSize = true };
+			var copy = new ActionButton { Text = "Copy value" };
 			copy.Click += (_, _) =>
 			{
 				if (tree.SelectedNode?.Tag is JsonElement element)

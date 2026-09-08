@@ -270,12 +270,10 @@ namespace AutoCnC.Launcher
 			};
 			feedback.TextChanged += (_, _) => UpdateFeedbackState();
 
-			saveFeedback = new Button
+			saveFeedback = new ActionButton
 			{
 				Text = "Save assessment",
-				AutoSize = true,
-				Enabled = false,
-				Padding = new Padding(8, 3, 8, 3)
+				Enabled = false
 			};
 			saveFeedback.Click += (_, _) => SubmitFeedback();
 

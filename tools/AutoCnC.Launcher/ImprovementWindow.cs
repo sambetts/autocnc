@@ -118,12 +118,10 @@ namespace AutoCnC.Launcher
 			};
 			nextPrompt.TextChanged += (_, _) => ValidateNextPromptDraft();
 
-			applyNextPrompt = new Button
+			applyNextPrompt = new ActionButton
 			{
 				Text = "Use this prompt next round",
-				AutoSize = true,
-				Enabled = false,
-				Padding = new Padding(8, 3, 8, 3)
+				Enabled = false
 			};
 			applyNextPrompt.Click += (_, _) => SubmitNextPrompt();
 

@@ -1705,7 +1705,7 @@ namespace AutoCnC.Launcher
 				? status?.Message ?? $"Improvement process exited with code {exitCode}."
 				: null;
 			var suggestedNextPrompt = !failed
-				? TrainingAgent.FindSuggestedNextPrompt(runner.LastOutput)
+				? TrainingAgent.FindSuggestedNextPrompt(runner.LastOutput, lastRun)
 				: null;
 			try
 			{

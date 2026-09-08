@@ -174,6 +174,48 @@ namespace AutoCnC.Launcher.Tests
 
 			Assert.That(run.Manifest.Agent.SuggestedNextPromptAccepted, Is.True);
 			Assert.That(run.Manifest.Agent.SuggestedNextPrompt, Is.EqualTo(nextPrompt));
+			Assert.That(TrainingAgent.FindSuggestedNextPrompt(
+				[TrainingAgent.NextPromptBegin, TrainingAgent.NextPromptEnd]), Is.Null);
+		}
+
+		[Test]
+		public void NestedContractMarkersAndRenderedValuesAreNormalized()
+		{
+			var run = NewRun();
+			var copiedContract = string.Join(Environment.NewLine,
+			[
+				"## Create the complete prompt for the next round",
+				"",
+				"Keep these placeholders: " + run.Manifest.BotDirectory +
+					", {gameGuide}, {gameRules}, {fightManifest}, {battleLog}, {telemetry}, " +
+					"{decisionTrace}, {battle}, {result}, {sourceRevision}, {nextPromptContract}",
+				"",
+				"Return the template between these marker lines:",
+				TrainingAgent.NextPromptBegin,
+				"<complete replacement prompt template>",
+				TrainingAgent.NextPromptEnd,
+				"",
+				"Continuous improvement may accept it automatically."
+			]);
+			var proposal = promptTemplate
+				.Replace("{workspace}", run.Manifest.BotDirectory, StringComparison.Ordinal)
+				.Replace("{nextPromptContract}", copiedContract, StringComparison.Ordinal);
+
+			var extracted = TrainingAgent.FindSuggestedNextPrompt(
+			[
+				"Finished.",
+				TrainingAgent.NextPromptBegin,
+				.. proposal.Split(Environment.NewLine),
+				TrainingAgent.NextPromptEnd
+			], run);
+
+			Assert.That(extracted, Does.Contain("{workspace}"));
+			Assert.That(extracted, Does.Not.Contain(run.Manifest.BotDirectory));
+			Assert.That(extracted, Does.Not.Contain("<complete replacement prompt template>"));
+			Assert.That(extracted.Split(Environment.NewLine)
+				.Count(line => line == "{nextPromptContract}"), Is.EqualTo(1));
+			Assert.That(TrainingAgent.ValidatePromptTemplate(extracted, out var error), Is.True,
+				error);
 		}
 
 		[Test]
@@ -185,6 +227,12 @@ namespace AutoCnC.Launcher.Tests
 				promptTemplate.Replace("{telemetry}", "no telemetry", StringComparison.Ordinal),
 				out var invalidError), Is.False);
 			Assert.That(invalidError, Does.Contain("{telemetry}"));
+
+			var inlineContract = promptTemplate.Replace(
+				"{nextPromptContract}", "Keep {nextPromptContract} here.", StringComparison.Ordinal);
+			Assert.That(TrainingAgent.ValidatePromptTemplate(inlineContract, out var contractError),
+				Is.False);
+			Assert.That(contractError, Does.Contain("on a line by itself"));
 		}
 
 		[Test]

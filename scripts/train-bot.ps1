@@ -150,6 +150,13 @@ The template must retain these placeholders exactly:
 {workspace}, {gameGuide}, {gameRules}, {fightManifest}, {battleLog}, {telemetry}, {decisionTrace},
 {battle}, {result}, {sourceRevision}, {nextPromptContract}
 
+Do not replace any placeholder with a path or value from this fight, even where the rendered prompt
+above shows that value.
+
+Put {nextPromptContract} on a line by itself where this section belongs. Do not copy this contract
+text or its marker example into the replacement; that placeholder inserts the current contract when
+the launcher renders the next round.
+
 Return the full template without a Markdown code fence, between these marker lines:
 
 AUTOCNC_NEXT_PROMPT_BEGIN

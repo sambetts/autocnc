@@ -27,6 +27,8 @@ namespace AutoCnC.Launcher
 	{
 		public const string NextPromptBegin = "AUTOCNC_NEXT_PROMPT_BEGIN";
 		public const string NextPromptEnd = "AUTOCNC_NEXT_PROMPT_END";
+		const string NextPromptContractPlaceholder = "{nextPromptContract}";
+		const string NextPromptHeading = "## Create the complete prompt for the next round";
 
 		static readonly string[] RequiredPromptPlaceholders =
 		[
@@ -40,7 +42,7 @@ namespace AutoCnC.Launcher
 			"{battle}",
 			"{result}",
 			"{sourceRevision}",
-			"{nextPromptContract}"
+			NextPromptContractPlaceholder
 		];
 
 		static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
@@ -144,34 +146,52 @@ namespace AutoCnC.Launcher
 				JsonSerializer.Serialize(configuration, JsonOptions));
 		}
 
-		public static string FindSuggestedNextPrompt(IReadOnlyList<string> output)
+		public static string FindSuggestedNextPrompt(IReadOnlyList<string> output,
+			TrainingRun run = null)
 		{
 			if (output is not { Count: > 0 })
 				return null;
 
-			var begin = -1;
+			// Parse backwards from the final complete block. The contract itself shows a nested
+			// marker pair, and agents sometimes copy that example into their proposed template.
+			// Pairing the final End with the nearest Begin used to extract only that example's
+			// footer instead of the actual outer proposal.
+			var depth = 0;
+			var end = -1;
 			for (var i = output.Count - 1; i >= 0; i--)
 			{
-				var line = output[i] ?? "";
-				if (line.Contains(NextPromptEnd, StringComparison.OrdinalIgnoreCase))
+				var line = (output[i] ?? "").Trim();
+				if (string.Equals(line, NextPromptEnd, StringComparison.OrdinalIgnoreCase))
 				{
-					for (var j = i - 1; j >= 0; j--)
-						if ((output[j] ?? "").Contains(NextPromptBegin, StringComparison.OrdinalIgnoreCase))
-						{
-							begin = j;
-							var template = string.Join(Environment.NewLine,
-								output.Skip(begin + 1).Take(i - begin - 1)).Trim();
-							if (template.StartsWith("```", StringComparison.Ordinal))
-								template = template[(template.IndexOf('\n') + 1)..];
-							if (template.EndsWith("```", StringComparison.Ordinal))
-								template = template[..^3].TrimEnd();
+					if (end < 0)
+						end = i;
 
-							return template.Length == 0 ? null :
-								template.Length <= 30_000 ? template : template[..30_000];
-						}
-
-					break;
+					depth++;
+					continue;
 				}
+
+				if (!string.Equals(line, NextPromptBegin, StringComparison.OrdinalIgnoreCase) ||
+					depth == 0)
+					continue;
+
+				depth--;
+				if (depth > 0)
+					continue;
+
+				var template = string.Join(Environment.NewLine,
+					output.Skip(i + 1).Take(end - i - 1)).Trim();
+				if (template.StartsWith("```", StringComparison.Ordinal))
+				{
+					var firstNewline = template.IndexOf('\n');
+					template = firstNewline >= 0 ? template[(firstNewline + 1)..] : "";
+				}
+
+				if (template.EndsWith("```", StringComparison.Ordinal))
+					template = template[..^3].TrimEnd();
+
+				template = NormalizeSuggestedPrompt(template, run);
+				return template.Length == 0 ? null :
+					template.Length <= 30_000 ? template : template[..30_000];
 			}
 
 			return null;
@@ -197,6 +217,15 @@ namespace AutoCnC.Launcher
 			if (missing.Length > 0)
 			{
 				error = "It must retain these placeholders: " + string.Join(", ", missing);
+				return false;
+			}
+
+			var contractOccurrences = CountOccurrences(template, NextPromptContractPlaceholder);
+			var standaloneContract = SplitLines(template).Count(line =>
+				string.Equals(line.Trim(), NextPromptContractPlaceholder, StringComparison.Ordinal));
+			if (contractOccurrences != 1 || standaloneContract != 1)
+			{
+				error = $"It must contain {NextPromptContractPlaceholder} exactly once, on a line by itself.";
 				return false;
 			}
 
@@ -262,6 +291,18 @@ namespace AutoCnC.Launcher
 		public static string RenderPrompt(TrainingRun run, string template,
 			string recoveryContext = null)
 		{
+			var prompt = template;
+			foreach (var replacement in PromptReplacements(run))
+				prompt = prompt.Replace(replacement.Placeholder, replacement.Value,
+					StringComparison.Ordinal);
+
+			return string.IsNullOrWhiteSpace(recoveryContext)
+				? prompt
+				: recoveryContext.Trim() + Environment.NewLine + Environment.NewLine + prompt;
+		}
+
+		static (string Placeholder, string Value)[] PromptReplacements(TrainingRun run)
+		{
 			var result = run.Manifest.Result;
 			var battle = run.Manifest.Battle;
 			var score = result?.Players is { Count: > 0 }
@@ -273,32 +314,109 @@ namespace AutoCnC.Launcher
 				: "Player assessment of why the battle was won or lost:" + Environment.NewLine +
 					result.PlayerFeedback.Trim();
 
-			var replacements = new Dictionary<string, string>(StringComparer.Ordinal)
-			{
-				["{workspace}"] = run.Manifest.BotDirectory,
-				["{gameGuide}"] = run.GameGuidePath,
-				["{gameRules}"] = run.GameRulesPath,
-				["{fightManifest}"] = run.FightManifestPath,
-				["{battleLog}"] = run.BattleLogPath,
-				["{telemetry}"] = run.TelemetryPath,
-				["{decisionTrace}"] = run.DecisionTracePath,
-				["{replay}"] = File.Exists(run.ReplayPath) ? run.ReplayPath : "not captured",
-				["{battle}"] = $"map={battle?.Map}, difficulty={battle?.Difficulty}, opponents={battle?.Opponents}, " +
+			return
+			[
+				("{workspace}", run.Manifest.BotDirectory),
+				("{gameGuide}", run.GameGuidePath),
+				("{gameRules}", run.GameRulesPath),
+				("{fightManifest}", run.FightManifestPath),
+				("{battleLog}", run.BattleLogPath),
+				("{telemetry}", run.TelemetryPath),
+				("{decisionTrace}", run.DecisionTracePath),
+				("{replay}", File.Exists(run.ReplayPath) ? run.ReplayPath : "not captured"),
+				("{battle}", $"map={battle?.Map}, difficulty={battle?.Difficulty}, opponents={battle?.Opponents}, " +
 					$"faction={battle?.Faction}, opponent faction={battle?.BotFaction}, speed={battle?.GameSpeed}, " +
-					$"execution={battle?.ExecutionMode ?? BattleExecutionModes.Rendered}",
-				["{result}"] = $"{result?.Outcome ?? "unknown"} after {result?.DurationSeconds ?? 0} game seconds; {score}" +
-					Environment.NewLine + playerFeedback,
-				["{sourceRevision}"] = run.Manifest.SourceRevision,
-				["{nextPromptContract}"] = NextPromptContract()
-			};
+					$"execution={battle?.ExecutionMode ?? BattleExecutionModes.Rendered}"),
+				("{result}", $"{result?.Outcome ?? "unknown"} after {result?.DurationSeconds ?? 0} game seconds; {score}" +
+					Environment.NewLine + playerFeedback),
+				("{sourceRevision}", run.Manifest.SourceRevision),
 
-			var prompt = template;
-			foreach (var replacement in replacements)
-				prompt = prompt.Replace(replacement.Key, replacement.Value, StringComparison.Ordinal);
+				// This must stay last so placeholders inside the contract remain literal.
+				(NextPromptContractPlaceholder, NextPromptContract())
+			];
+		}
 
-			return string.IsNullOrWhiteSpace(recoveryContext)
-				? prompt
-				: recoveryContext.Trim() + Environment.NewLine + Environment.NewLine + prompt;
+		static string NormalizeSuggestedPrompt(string template, TrainingRun run)
+		{
+			if (string.IsNullOrWhiteSpace(template))
+				return "";
+
+			if (run != null)
+			{
+				foreach (var replacement in PromptReplacements(run)
+					.Where(replacement => !string.IsNullOrWhiteSpace(replacement.Value))
+					.Where(replacement => replacement.Placeholder != "{replay}" ||
+						File.Exists(run.ReplayPath))
+					.OrderByDescending(replacement => replacement.Value.Length))
+				{
+					var comparison = IsPathPlaceholder(replacement.Placeholder)
+						? StringComparison.OrdinalIgnoreCase
+						: StringComparison.Ordinal;
+					template = template.Replace(replacement.Value, replacement.Placeholder,
+						comparison);
+				}
+			}
+
+			var lines = SplitLines(template).ToList();
+			var copiedContract = lines.FindIndex(line =>
+				string.Equals(line.Trim(), NextPromptHeading, StringComparison.OrdinalIgnoreCase));
+			if (copiedContract >= 0)
+				lines.RemoveRange(copiedContract, lines.Count - copiedContract);
+
+			var keptContract = false;
+			for (var i = 0; i < lines.Count; i++)
+			{
+				if (string.Equals(lines[i].Trim(), NextPromptContractPlaceholder,
+					StringComparison.Ordinal))
+				{
+					if (!keptContract)
+					{
+						lines[i] = NextPromptContractPlaceholder;
+						keptContract = true;
+					}
+					else
+						lines[i] = "";
+
+					continue;
+				}
+
+				if (lines[i].Contains(NextPromptContractPlaceholder, StringComparison.Ordinal))
+					lines[i] = lines[i].Replace(NextPromptContractPlaceholder,
+						"the next-round prompt contract", StringComparison.Ordinal);
+			}
+
+			while (lines.Count > 0 && string.IsNullOrWhiteSpace(lines[^1]))
+				lines.RemoveAt(lines.Count - 1);
+
+			if (!keptContract)
+			{
+				if (lines.Count > 0)
+					lines.Add("");
+				lines.Add(NextPromptContractPlaceholder);
+			}
+
+			return string.Join(Environment.NewLine, lines).Trim();
+		}
+
+		static bool IsPathPlaceholder(string placeholder) =>
+			placeholder is "{workspace}" or "{gameGuide}" or "{gameRules}" or
+				"{fightManifest}" or "{battleLog}" or "{telemetry}" or "{decisionTrace}" or
+				"{replay}";
+
+		static string[] SplitLines(string value) =>
+			value.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n').Split('\n');
+
+		static int CountOccurrences(string value, string sought)
+		{
+			var count = 0;
+			var offset = 0;
+			while ((offset = value.IndexOf(sought, offset, StringComparison.Ordinal)) >= 0)
+			{
+				count++;
+				offset += sought.Length;
+			}
+
+			return count;
 		}
 
 		static string NextPromptContract() =>
@@ -313,7 +431,14 @@ namespace AutoCnC.Launcher
 			The template must retain these placeholders exactly so the launcher can insert fresh data:
 			{{string.Join(", ", RequiredPromptPlaceholders)}}
 
+			Do not replace any placeholder with a path or value from this fight, even where the
+			rendered prompt above shows that value.
+
 			It must explicitly restrict edits to {workspace}.
+
+			Put {nextPromptContract} on a line by itself where this section belongs. Do not copy this
+			contract text or its marker example into the replacement; that placeholder inserts the
+			current contract when the launcher renders the next round.
 
 			Return the full template without a Markdown code fence, between these marker lines:
 

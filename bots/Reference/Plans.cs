@@ -51,31 +51,71 @@ namespace AutoCnC.Reference
 		/// plan used to name <c>harv</c> at all, so this bot's entire income was "one harvester
 		/// per refinery" — two of them for the first seven minutes of badland-ridges, three
 		/// until 870s, four thereafter — and its cash was 0 or 1 at 46 of the 55 assessments
-		/// after 150s, peaking at 244 for the rest of the match. Income, not judgement, was the
-		/// binding constraint on nearly the whole game.
+		/// after 150s. Income, not judgement, was the binding constraint on nearly the whole
+		/// game.
 		/// <para>
 		/// The floor is four because a Tiberian Dawn refinery has one docking bay and comfortably
-		/// feeds two harvesters, so two refineries — which this bot has by 117s — want four. A
-		/// harvester costs 1,100 against the refinery's 1,500 and needs only <c>proc</c> plus a
-		/// vehicle queue, so it is both the cheaper and the earlier way to buy income: the
-		/// airstrip was standing at 247s, where the third free harvester did not arrive until
-		/// 390s and the fourth until 841s.
+		/// feeds two harvesters, so the two refineries this bot has by 117s want four.
+		/// </para>
+		/// <para>
+		/// Naming <c>harv</c> was necessary and turned out not to be sufficient, because the step
+		/// cannot fire until a <c>Vehicle</c> queue exists. On the next badland-ridges the
+		/// factory did not stand until 414s, the queue was given four orders in the whole match,
+		/// and the one <c>harv</c> it was asked for at 576s was still unpaid at 1,023s. So
+		/// <see cref="RefineryCore"/> now delivers this floor from the construction yard instead,
+		/// and this step is what re-buys a harvester that dies.
 		/// </para>
 		/// </remarks>
 		const int HarvesterCore = 4;
 
 		/// <summary>
+		/// How many refineries the construction yard buys before it buys any tech.
+		/// </summary>
+		/// <remarks>
+		/// Equal to <see cref="HarvesterCore"/>, and that equality is the whole point.
+		/// <c>harv</c> needs a <c>weap</c>/<c>afld</c> that costs 2,000 credits; <c>proc</c>
+		/// needs only <c>anypower</c>, costs 1,500, carries a free harvester and is buildable
+		/// from the <c>Building</c> queue the yard owns at second zero. A refinery is therefore
+		/// the only harvester a poor bot can buy, and the harvester floor has to be reachable
+		/// from the refinery count alone or it is not reachable at all.
+		/// <para>
+		/// It was not. On badland-ridges the ladder bought two refineries (51s, 117s) and then
+		/// spent 1,000 on <c>hq</c> (167s) and 2,000 on <c>afld</c> (414s) before its third
+		/// refinery — which was ninth in the plan, was not ordered until 498s and did not stand
+		/// until 860s of a 1,023-second match. The bot therefore had exactly **two harvesters
+		/// for the entire game**: the only three <c>harv</c> that ever existed appeared at 51s,
+		/// 117s and 860s, each in the same second as a <c>proc</c>, so every one was a refinery's
+		/// free actor and the bot produced none. Its cash read 0 from 150s to the end.
+		/// </para>
+		/// <para>
+		/// The arithmetic that fixes it is simply the opening bank. Power, refinery, power,
+		/// barracks, refinery costs 4,500 of the 7,500 a side starts with, which leaves exactly
+		/// two more refineries — so four of them, and four harvesters, are affordable before a
+		/// single credit of income is needed. The 1,000 spent on <c>hq</c> at 167s was the third
+		/// refinery.
+		/// </para>
+		/// </remarks>
+		const int RefineryCore = HarvesterCore;
+
+		/// <summary>
 		/// Where surplus vehicle capacity goes before it goes on tank number nine.
 		/// </summary>
 		/// <remarks>
-		/// Two per refinery for the three every plan builds. It doubles as the only replacement
-		/// rule this bot has: <c>Until(n)</c> counts what is standing now, so a step that names
-		/// <c>harv</c> above the endless combat step re-fires the moment a harvester dies. All
-		/// four died between 1351s and 1365s on badland-ridges and the bot spent its last 285
-		/// seconds with three refineries, fourteen buildings, zero income and no way to ever
-		/// build another harvester; it completed one unit in the last 470 seconds of the match.
+		/// Two per refinery for the <see cref="RefineryCore"/> every plan now builds. It doubles
+		/// as the only replacement rule this bot has: <c>Until(n)</c> counts what is standing
+		/// now, so a step that names <c>harv</c> above the endless combat step re-fires the
+		/// moment a harvester dies. All four died between 1351s and 1365s on badland-ridges and
+		/// the bot spent its last 285 seconds with three refineries, fourteen buildings, zero
+		/// income and no way to ever build another harvester; it completed one unit in the last
+		/// 470 seconds of the match.
+		/// <para>
+		/// Tied to the refinery count rather than fixed, because a saturation target below
+		/// two-per-refinery quietly stops being saturation the moment the base grows. It sits
+		/// above the endless combat step, so it is the last thing bought before the plan goes
+		/// back to buying things that shoot.
+		/// </para>
 		/// </remarks>
-		const int HarvesterSaturation = 6;
+		const int HarvesterSaturation = RefineryCore * 2;
 
 		/// <summary>
 		/// The economy every doctrine wants, whichever one is running.
@@ -84,13 +124,29 @@ namespace AutoCnC.Reference
 		/// Candidates are alternatives for one role, so "powr" or "nuke" both mean "a power
 		/// plant" and this works as either faction.
 		/// <para>
-		/// The headquarters is economy rather than tech for this bot, because almost everything
-		/// worth building is gated behind it: <c>mtnk</c>, <c>ltnk</c>, <c>e2</c> and the
-		/// anti-air tower all require <c>anyhq</c>. Without it every production plan below is
-		/// asking for units it has not unlocked, and a queue skips what it cannot build in
-		/// silence. On badland-ridges only the Attack doctrine ever built one, at 445s: for the
-		/// first seven minutes the barracks could produce nothing but <c>e1</c> and a
-		/// 2,000-credit war factory built three jeeps.
+		/// The order is income, then tech. That is the correction badland-ridges paid for: the
+		/// ladder used to read power, refinery, power, barracks, refinery, <c>hq</c>,
+		/// <c>weap</c>/<c>afld</c>, power, refinery — so the third refinery sat behind 3,000
+		/// credits of buildings that earn nothing. It was ordered at 498s and stood at 860s of a
+		/// 1,023-second match, and the bot ran the whole game on the two free harvesters its
+		/// first two refineries handed out. Cash read 0 from 150s to the end, and total income
+		/// worked out at roughly 12 credits a second against the winner's 88.
+		/// </para>
+		/// <para>
+		/// Nothing was overtaken that pays for itself. <c>hq</c> unlocks <c>mtnk</c>,
+		/// <c>ltnk</c>, <c>e2</c> and <c>atwr</c>, and the bot fielded none of them in that
+		/// match; <c>weap</c>/<c>afld</c> unlocks scouting and harvester production, and took
+		/// 247 seconds to pay for at two-harvester income. Both arrive **sooner** in wall-clock
+		/// behind four refineries than they did in front of two, because the four refineries pay
+		/// for them. Only the <c>Building</c> queue reads this list, so moving rungs around here
+		/// does not slow infantry production at all — that comes from the production plan and a
+		/// separate queue.
+		/// </para>
+		/// <para>
+		/// The power rung between the two new refineries is not decoration. Two <c>nuke</c> ran
+		/// a balance of -25 by 420s with two refineries and the shared defences up, and a
+		/// brownout throttles every queue at once; <see cref="Modes.BuildBaseMode"/>'s low-power
+		/// override is a rescue, not a plan.
 		/// </para>
 		/// </remarks>
 		public static IReadOnlyList<BuildStep> Economy { get; } =
@@ -100,10 +156,11 @@ namespace AutoCnC.Reference
 			new(["powr", "nuke"], 2),
 			new(["pyle", "hand"], 1),          // barracks
 			new(["proc"], 2),
+			new(["proc"], 3),                  // ...and income again, while the opening bank lasts
+			new(["powr", "nuke"], 3),
+			new(["proc"], RefineryCore),       // four refineries is four harvesters, with no factory
 			new(["hq"], 1),                    // unlocks tanks, grenadiers and the AA tower
 			new(["weap", "afld"], 1),          // vehicle production
-			new(["powr", "nuke"], 3),
-			new(["proc"], 3),
 		];
 
 		/// <summary>
@@ -244,6 +301,23 @@ namespace AutoCnC.Reference
 		/// <summary>Structures that produce and store harvested credits.</summary>
 		public static IReadOnlyList<string> Refineries { get; } = ["proc"];
 
+		/// <summary>Structures that own a <c>Vehicle</c> queue, and so gate <c>harv</c>.</summary>
+		/// <remarks>
+		/// Both cost 2,000 and both need <c>proc</c>, which is why a refinery is the cheaper
+		/// harvester until one of these is standing: 1,500 for a refinery and its free actor
+		/// against 2,000 plus 1,100 for the first bought one. Used by tests to prove the income
+		/// rungs of every build plan come before the factory rather than behind it.
+		/// </remarks>
+		public static IReadOnlyList<string> VehicleFactories { get; } = ["weap", "afld"];
+
+		/// <summary>Structures bought for what they unlock rather than for what they do.</summary>
+		/// <remarks>
+		/// <c>hq</c> earns nothing. It is worth having — <c>mtnk</c>, <c>ltnk</c>, <c>e2</c> and
+		/// <c>atwr</c> all need <c>anyhq</c> — but not at the price of the refinery it displaced
+		/// at 167s on badland-ridges. Used by tests to prove income leads tech in every plan.
+		/// </remarks>
+		public static IReadOnlyList<string> TechStructures { get; } = ["hq", "eye", "tmpl"];
+
 		public static IReadOnlyList<ProductionStep> DefenceTrain { get; } =
 		[
 			new("Infantry", ["e1"], RifleCore),
@@ -264,7 +338,7 @@ namespace AutoCnC.Reference
 			new(["weap", "afld"], 2),
 			new(["pyle", "hand"], 2),
 			new(["powr", "nuke"], 5),
-			new(["proc"], 4),
+			new(["proc"], RefineryCore + 1),
 		];
 
 		/// <summary>

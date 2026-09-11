@@ -67,8 +67,34 @@ namespace AutoCnC.Reference.Tests
 				[.. ReferencePlans.PowerPlants]);
 
 		/// <summary>An economy far enough along that the Building queue has run out of plan.</summary>
+		/// <remarks>
+		/// Derived from the shipped plan rather than written down. Hard-coding it turns "the
+		/// Building queue has nothing left to do" into "the Building queue had nothing left to
+		/// do when this was written": adding a fourth refinery to <see cref="ReferencePlans.Economy"/>
+		/// left one rung unsatisfied, and these tests would have gone on asserting a defence
+		/// question while actually measuring an economy one.
+		/// </remarks>
 		static Dictionary<string, int> EconomyDone
-			=> Owned(("nuke", 4), ("proc", 3), ("pyle", 1), ("weap", 1), ("hq", 1));
+		{
+			get
+			{
+				var owned = Owned();
+
+				foreach (var step in ReferencePlans.DefenceBuild)
+				{
+					var item = step.Candidates.FirstOrDefault(
+						c => BuildingItems.Contains(c, System.StringComparer.OrdinalIgnoreCase));
+
+					if (item == null)
+						continue;
+
+					if (!owned.TryGetValue(item, out var standing) || standing < step.DesiredCount)
+						owned[item] = step.DesiredCount;
+				}
+
+				return owned;
+			}
+		}
 
 		// --- The bug ------------------------------------------------------------
 

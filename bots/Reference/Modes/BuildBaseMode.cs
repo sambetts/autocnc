@@ -12,6 +12,12 @@
 //  Note it reads ctx.BuildPlan rather than hardcoding an order, so the same mode
 //  works for any module: change the plan in your IDoctrine, not here.
 //
+//  It also decides WHERE, not just what. FindBuildLocation defaults to a 2-14
+//  cell ring around the base centre, which is right for a power plant and wrong
+//  for a refinery: harvesters work the closest tiberium to the refinery they
+//  dock with, so refineries stacked in one ring share one patch and run it dry.
+//  See BasePlacementLogic.
+//
 //  Licence: GPL-3.0-or-later. See LICENSE and NOTICE.md.
 // ============================================================================
 
@@ -36,6 +42,16 @@ namespace AutoCnC.Reference.Modes
 		static readonly string[] ConstructionQueues = ["Building", "Support"];
 
 		static readonly string[] PowerCandidates = [.. ReferencePlans.PowerPlants];
+
+		/// <summary>
+		/// Structures that should be pushed outward as they multiply, rather than stacked at home.
+		/// </summary>
+		/// <remarks>
+		/// Refineries only. See <see cref="BasePlacementLogic"/> for why: harvesters work the
+		/// closest tiberium to the refinery they dock with, so refineries built on top of each
+		/// other share one patch and starve together once it runs out.
+		/// </remarks>
+		static readonly string[] ExpandingStructures = [.. ReferencePlans.Refineries];
 
 		// Sensing buffers are reused by the host, so what we read from one queue would be
 		// overwritten by reading the next. Copy into buffers we own instead.
@@ -100,14 +116,16 @@ namespace AutoCnC.Reference.Modes
 			}
 
 			// --- Decide ------------------------------------------------------------
+			var owned = ctx.OwnedBuildingCounts();
+
 			var order = BaseConstructionLogic.ChooseNext(
-				queues, ctx.Cash, ctx.PowerBalance, ctx.OwnedBuildingCounts(), ctx.BuildPlan, PowerCandidates);
+				queues, ctx.Cash, ctx.PowerBalance, owned, ctx.BuildPlan, PowerCandidates);
 
 			// --- Act ---------------------------------------------------------------
 			switch (order.Action)
 			{
 				case ConstructionAction.Place:
-					return Place(ctx, order);
+					return Place(ctx, order, owned);
 
 				case ConstructionAction.Produce:
 					return UnitDecision.Produce(order.Queue, order.Item, order.Reason);
@@ -117,14 +135,21 @@ namespace AutoCnC.Reference.Modes
 			}
 		}
 
-		UnitDecision Place(ModeContext ctx, in ConstructionOrder order)
+		UnitDecision Place(ModeContext ctx, in ConstructionOrder order, IReadOnlyDictionary<string, int> owned)
 		{
 			var i = IndexOf(order.Queue);
 
 			if (plannedItem[i] != order.Item || plannedLocation[i] == null)
 			{
 				plannedItem[i] = order.Item;
-				plannedLocation[i] = ctx.FindBuildLocation(order.Item);
+
+				// Income expands outward; everything else stays behind the defences. The ring is
+				// a preference — if nothing out there is legal we take the default rather than
+				// stall holding a refinery we have already paid for.
+				var ring = BasePlacementLogic.RingFor(order.Item, owned, ExpandingStructures);
+
+				plannedLocation[i] = ctx.FindBuildLocation(order.Item, ring.MinRangeCells, ring.MaxRangeCells)
+					?? ctx.FindBuildLocation(order.Item);
 			}
 
 			if (plannedLocation[i] == null)

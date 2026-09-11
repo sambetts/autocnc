@@ -105,6 +105,148 @@ endless infantry step on top hands nearly every evaluation to whichever queue is
 — and a barracks turning out a 100-credit rifleman every three seconds is idle far more often
 than a war factory. Two war factories produced ten vehicles in 900 seconds because of it.
 
+## An army is a rate, and the rate is harvesters
+
+A `proc` carries a `FreeActor` harvester and hands out exactly one, ever. No production plan used
+to name `harv` at all, so this bot's entire income was one harvester per refinery — and that was
+the whole game.
+
+On badland-ridges it had **two** harvesters for the first seven minutes, three until 870s and four
+after; its cash was 0 or 1 at 46 of the 55 assessments after 150s and never once exceeded 244
+again. It was not short of judgement, it was short of money: between 1176s and 1485s it issued no
+unit order at all, from two barracks and two airstrips, with nothing on the field. Its army value
+never exceeded 7,800 in the entire match while the other side's went 7,250 at 900s to **70,200**,
+and its buildings 13 to 38. It finished ahead on the trade — 110 kills to 106 losses — and lost by
+four to one on production. When all four harvesters died between 1351s and 1365s the bot spent its
+last 285 seconds with three refineries, fourteen buildings and no income at all, because nothing
+it owned could build another one.
+
+Two harvester steps are now in every plan, and a `harv` costs 1,100 against the refinery's 1,500
+while needing only `proc` and a vehicle queue — so it is both the cheaper and the earlier way to
+buy income. The airstrip was standing at 247s; the third free harvester did not arrive until 390s
+and the fourth until 841s.
+
+- **A floor of four**, above the first combat vehicle in every plan. A Tiberian Dawn refinery has
+  one docking bay and comfortably feeds two harvesters, and this bot has two refineries by 117s.
+  Income compounds for the rest of the match; a light tank does not.
+- **A saturation target of six**, immediately above the endless combat step. Two per refinery for
+  the three every plan builds — and because `Until(n)` counts what is *standing*, it doubles as
+  the replacement rule the bot never had. A dead harvester now outranks the next tank.
+
+The steps name `harv` and nothing else, for the same reason the anti-air steps name `e3` and
+nothing else: `Until(n)` counts every candidate a step lists, so `["harv", "ltnk"]` would be
+satisfied by tanks and buy no income at all. A test asserts it.
+
+## A field is finite, and three refineries on one field is one field
+
+The harvester floor held. On the second badland-ridges match the bot had five harvesters and
+three refineries by 443s — against two harvesters for the first seven minutes last time — and all
+five were alive and working until the first died at 838s.
+
+It made no difference, because **it bought more harvesters for the same patch of tiberium.**
+
+Cash was 0 at 30 of the 35 assessments sampled from 240s to the end, so what the bot spent is what
+it earned. Pricing the build log gives the income curve directly:
+
+| Window | Harvesters | Refineries | Income | Per harvester |
+|---|---|---|---|---|
+| 300–400s | 2 → 4 | 2 → 3 | 5,300 | ~1,900 |
+| 400–500s | 4 → 5 | 3 | 4,600 | ~1,000 |
+| 500–600s | 5 | 3 | 3,620 | 724 |
+| 600–700s | 5 | 3 | 3,660 | 732 |
+| 700–800s | 5 | 3 | 2,400 | 480 |
+
+Credits per 100 game seconds. Income *fell by more than half* while the fleet more than doubled.
+That is not a harvester shortage and it is not a losses problem — nothing was lost until 838s. It
+is one field running out.
+
+The round trip says the same thing from the other side. A `harv` moves 1.758 cells per game second
+and carries about 700 credits, so 2,550 credits per 100s each over 200–300s is a load turned
+around in roughly 27 seconds, and 640 each over 500–700s is roughly 92. The harvesters were
+neither idle nor dead. They were walking.
+
+**Every structure went in the same ring.** `ModeContext.FindBuildLocation(item, minRange = 2,
+maxRange = 14)` looks in a 2–14 cell band around the base centre, and `BuildBaseMode` took that
+default for everything in every plan. A Tiberian Dawn harvester works the closest tiberium to the
+refinery it docks with, so all three refineries — 51s, 117s, 398s, all inside that one band —
+shared a single harvesting footprint. The third one bought a docking bay and not one cell of new
+ground.
+
+[`Logic/BasePlacementLogic.cs`](Logic/BasePlacementLogic.cs) now decides *where*, not just what.
+Refinery *n* is looked for in a ring pushed `RingStepCells` further out than refinery *n−1*: the
+first stays home at 2–14, the second goes to 8–20, the third to 14–26. Power plants, production
+and defences keep the default ring, because those want to be behind the front rather than beyond
+it.
+
+Two things keep it honest rather than clever:
+
+- **The step is narrower than the band.** Six cells against a twelve-cell ring, so consecutive
+  rings overlap. A Tiberian Dawn structure has to sit in buildable area, so a refinery that
+  cannot reach the last one is a refinery that never gets placed. A test asserts the overlap.
+- **The near edge is capped.** Without a ceiling the fourth refinery asks for open ground twenty
+  cells out, finds nothing legal, and falls back — which is the old behaviour with extra steps.
+  The far edge carries on growing; the near edge stops at sixteen.
+
+It is a preference, not a demand. `BuildBaseMode` falls back to the default ring whenever nothing
+in the outer one is legal, so a base hemmed in against a cliff still builds its refinery instead
+of stalling with one paid for and nowhere to put it.
+
+## A refinery is the only harvester a poor bot can buy
+
+Both fixes above were real and neither one fired. On the third badland-ridges the bot had **two
+harvesters for the entire 1,023-second match** and put a third refinery down at 860s.
+
+Only three `harv` ever existed — at 51s, 117s and 860s — and each appeared *in the same second as
+a `proc`*, so every one of them was a refinery's free actor. The bot produced none. Its `Vehicle`
+queue received **four orders in the whole match**: `bggy` at 414s, 456s and 532s, then a single
+`harv` at 576s that was still unpaid when the game ended 447 seconds later.
+
+The reason is one line of ordering. `harv` costs 1,100 and needs a `weap`/`afld`; that factory
+costs 2,000 and earns nothing. `proc` costs **1,500, needs only `anypower`, arrives with a
+harvester attached, and comes from the `Building` queue the construction yard owns at second
+zero.** The ladder bought the factory first:
+
+| | Ordered | Stood | Cost | Building-queue rate |
+|---|---|---|---|---|
+| `proc` #1 | 14s | 51s | 1,500 | — |
+| `proc` #2 | 80s | 117s | 1,500 | — |
+| `hq` | 118s | 167s | 1,000 | ~20/s |
+| `afld` | 168s | **414s** | 2,000 | **8.1/s** |
+| `nuke` | 415s | 497s | 500 | 6.1/s |
+| `proc` #3 | 498s | **860s** | 1,500 | **4.1/s** |
+
+The third refinery was *ninth* in the plan. Cash read 0 from 150s to the end, so what the bot
+spent is what it earned: roughly **12 credits a second, against the winner's 88**. Its army value
+grew in a straight line — 1,300 at 120s, 2,400 at 180s, 3,600 at 360s, 5,700 at 600s — while
+Cabal's compounded from 0 to 4,400 by 300s, 20,550 by 660s and 54,100 by 1,020s. The two curves
+cross at about 270s and never come back. Twenty-six units died between 660s and 720s for two
+kills, and the base was gone by 1,020s, but that was the funeral rather than the cause.
+
+It also cost the rest of the game plan. The bot sat in `Scout` from 120s to 495s because it had
+no vehicle to scout with, and never built a single tank.
+
+So the ladder in [`Plans.cs`](Plans.cs) now buys income first, and buys enough of it:
+
+- **Four refineries before any tech**, because four refineries hand out four harvesters and
+  `HarvesterCore` is four. The floor the last round added could only ever be met through a factory
+  the bot could not afford; it is now met by the one queue that exists at second zero.
+- **Power, refinery, power, barracks, refinery, refinery costs 6,000 of a 7,500 opening bank**, so
+  three harvesters are on the field before a credit has to be earned. A power rung and the fourth
+  refinery take it to 8,000 — a short wait, not the 362-second project the third one became.
+- **`hq` and `weap`/`afld` moved below it, not out of it.** Neither pays for itself, and both
+  arrive *sooner in wall-clock* behind four refineries than they did in front of two, because the
+  four refineries pay for them. Only the `Building` queue reads this list, so nothing here slows
+  infantry production — that is a different plan and a different queue.
+- **Saturation is now two per refinery** rather than a fixed six, so it cannot quietly stop being
+  saturation as the base grows.
+
+[`Logic/EconomyPlanLogic.cs`](Logic/EconomyPlanLogic.cs) is the rule written down. An ordering
+mistake in a plan has no symptom — `BaseBuildLogic` walks the list top down and every rung looks
+reasonable on its own — so the tests state it directly over the shipped plans: income reaches its
+target before any vehicle factory, before any tech, for less than the opening bank, and a refinery
+is cheaper than a factory plus a harvester. Every one of those assertions fails against the plan
+this match was fought with.
+
 ## Layout
 
 ```
@@ -117,9 +259,11 @@ Reference/
 │   ├── DefenceDoctrine.cs
 │   └── AttackDoctrine.cs
 ├── Plans.cs                     ← what each doctrine builds and trains, as plain data
+│                                  (income leads tech — see EconomyPlanLogic)
 ├── Modes/                       ← behaviours
 │   ├── BuildBaseMode.cs         ←   deploys the MCV, grows the base from ctx.BuildPlan
-│   │                                (drives both the Building and Support queues)
+│   │                                (drives both the Building and Support queues,
+│   │                                 and expands refineries outward as they multiply)
 │   ├── TrainUnitsMode.cs        ←   trains units from ctx.ProductionPlan
 │   ├── DefensiveMode.cs         ←   holds ground, won't be baited, retreats to repair
 │   ├── AttackBaseMode.cs        ←   pushes a base, never chases

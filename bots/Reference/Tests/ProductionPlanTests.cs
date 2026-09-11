@@ -12,6 +12,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using AutoCnC.Core;
+using AutoCnC.Reference.Logic;
 using NUnit.Framework;
 
 namespace AutoCnC.Reference.Tests
@@ -33,6 +34,12 @@ namespace AutoCnC.Reference.Tests
 	/// the same plan and only the owner of the chosen queue acts: a barracks is idle at far more
 	/// evaluations than a war factory, so it wins nearly every one.
 	/// </para>
+	/// <para>
+	/// The income tests below are the same shape of fault one layer down. A plan that never names
+	/// <c>harv</c> caps the bot at the one free harvester each refinery hands out and can never
+	/// replace a dead one — which held it at 0 cash for the whole of a later match while the
+	/// other side's army value grew tenfold.
+	/// </para>
 	/// </remarks>
 	[TestFixture]
 	public class ProductionPlanTests
@@ -42,6 +49,8 @@ namespace AutoCnC.Reference.Tests
 
 		/// <summary>What a Vehicle queue offers once an hq exists.</summary>
 		static readonly string[] VehicleItems = ["jeep", "bggy", "mtnk", "ltnk", "harv", "apc"];
+
+		static readonly string[] Harvesters = [.. ReferencePlans.HarvesterUnits];
 
 		static ProductionQueueState Infantry(bool idle = true) => new("Infantry", idle, InfantryItems);
 
@@ -153,7 +162,12 @@ namespace AutoCnC.Reference.Tests
 			// Both queues consult the same plan and only the chosen queue's owner acts, so an
 			// endless infantry step above an endless vehicle step means the war factory only
 			// ever builds on the rare evaluation where the barracks is busy.
-			var lateGame = Owned(("e1", 60), ("e2", 4), ("e3", 40), ("mtnk", 8), ("jeep", 2));
+			//
+			// Harvesters are seeded well past any plan's saturation target because every plan
+			// now buys income before the ninth tank; without them this would pass by picking a
+			// harvester, which proves nothing about the ordering it exists to check.
+			var lateGame = Owned(
+				("e1", 60), ("e2", 4), ("e3", 40), ("mtnk", 8), ("jeep", 2), ("harv", 40));
 
 			foreach (var plan in ReferencePlans.AllProductionPlans)
 			{
@@ -161,7 +175,120 @@ namespace AutoCnC.Reference.Tests
 
 				Assert.That(choice.Queue, Is.EqualTo("Vehicle"),
 					"with both queues idle and every count met, the expensive queue must get the order");
+
+				Assert.That(choice.ActorType, Is.AnyOf("mtnk", "ltnk"),
+					"and the order must be the combat vehicle, not more economy");
 			}
+		}
+
+		// --- Income --------------------------------------------------------------
+
+		[Test]
+		public void EveryPlanReplacesALostHarvester()
+		{
+			// The regression this exists to prevent. A refinery carries a FreeActor harvester and
+			// hands out exactly one, ever, so a plan that never names harv has no way back from
+			// losing them. Refineries are seeded at the target and harvesters at none, which is
+			// exactly the state badland-ridges ended in: the last harvester died at 978s and the
+			// bot spent the rest of the match with refineries standing and no income at all.
+			//
+			// Everything else a plan can ask for is seeded, including the scouts: this asserts
+			// that income is what a satisfied plan buys next, not that it outranks the first jeep.
+			var economyDead = Owned(
+				("e1", 60), ("e2", 4), ("e3", 40), ("mtnk", 8), ("bggy", 2), ("proc", 4));
+
+			foreach (var plan in ReferencePlans.AllProductionPlans)
+			{
+				var choice = Next(plan, economyDead);
+
+				Assert.That(choice.IsValid, Is.True);
+				Assert.That(choice.ActorType, Is.EqualTo("harv"),
+					"an army with no income has nothing to spend on the next tank");
+			}
+		}
+
+		[Test]
+		public void NoHarvesterStepIsSatisfiableByACombatVehicle()
+		{
+			// Same trap as the anti-air steps: Until(n) counts every candidate a step lists, so
+			// a step written ["harv", "ltnk"] is satisfied by the tanks bought two lines earlier
+			// and never buys income.
+			var harvesters = new HashSet<string>(ReferencePlans.HarvesterUnits, System.StringComparer.OrdinalIgnoreCase);
+
+			foreach (var plan in ReferencePlans.AllProductionPlans)
+				foreach (var step in plan)
+				{
+					if (!step.Candidates.Any(harvesters.Contains))
+						continue;
+
+					Assert.That(step.Candidates.All(harvesters.Contains), Is.True,
+						$"income step [{string.Join(", ", step.Candidates)}] can be satisfied by something that earns nothing");
+				}
+		}
+
+		[Test]
+		public void EveryPlanWantsMoreHarvestersThanTheRefineriesHandOut()
+		{
+			// One harvester per refinery is the ceiling this bot keeps running into: on the last
+			// badland-ridges the only three harv that ever existed appeared at 51s, 117s and
+			// 860s, each in the same second as a proc, so every one was a refinery's free actor.
+			// It had two for the whole match and its cash read 0 from 150s to the end.
+			//
+			// Refineries are now the floor rather than the ceiling, so the test is the other way
+			// round from what it looks: a plan whose harvester target does not exceed the
+			// refinery target has given the Vehicle queue nothing to add.
+			var refineries = new HashSet<string>(ReferencePlans.Refineries, System.StringComparer.OrdinalIgnoreCase);
+			var harvesters = new HashSet<string>(ReferencePlans.HarvesterUnits, System.StringComparer.OrdinalIgnoreCase);
+
+			var free = ReferencePlans.AllBuildSteps
+				.Where(s => s.Candidates.Any(refineries.Contains))
+				.Max(s => s.DesiredCount);
+
+			foreach (var plan in ReferencePlans.AllProductionPlans)
+			{
+				var wanted = plan
+					.Where(s => s.Candidates.Any(harvesters.Contains))
+					.Select(s => s.DesiredCount)
+					.DefaultIfEmpty(0)
+					.Max();
+
+				Assert.That(wanted, Is.GreaterThan(free),
+					$"a plan that wants {wanted} harvesters against {free} refineries buys no income at all");
+			}
+		}
+
+		[Test]
+		public void TheOpeningBuysIncomeBeforeItBuysTanks()
+		{
+			// A harvester costs 1,100 against a light tank's 750 and needs only a refinery, so it
+			// is available from the moment the vehicle queue is, and it is the only purchase on
+			// the list that pays for the next one.
+			var built = Run(ReferencePlans.OpeningTrain, 30);
+
+			var firstHarvester = built.IndexOf("harv");
+			var firstTank = built.FindIndex(i => i is "mtnk" or "ltnk");
+
+			Assert.That(firstHarvester, Is.GreaterThanOrEqualTo(0), "the opening must buy income at all");
+			Assert.That(firstTank, Is.GreaterThanOrEqualTo(0), "...and must still reach combat vehicles");
+			Assert.That(firstHarvester, Is.LessThan(firstTank),
+				"income compounds for the rest of the match; a light tank does not");
+		}
+
+		[Test]
+		public void IncomeDoesNotCrowdOutTheArmy()
+		{
+			// The other half of the trade. Harvester steps are finite and sit above the endless
+			// combat step, so a bot at saturation must go back to buying things that shoot.
+			var saturation = EconomyPlanLogic.TargetFor(
+				EconomyPlanLogic.Rungs(ReferencePlans.OpeningTrain), Harvesters);
+
+			var built = Run(ReferencePlans.OpeningTrain, 60);
+
+			Assert.That(built.Count(i => i == "harv"), Is.EqualTo(saturation),
+				"a long run must stop buying harvesters at the saturation target, not keep going");
+
+			Assert.That(built.Count(i => i is "mtnk" or "ltnk"), Is.GreaterThan(saturation),
+				"and past saturation the surplus belongs in things that shoot");
 		}
 
 		// --- What the plans actually produce -------------------------------------

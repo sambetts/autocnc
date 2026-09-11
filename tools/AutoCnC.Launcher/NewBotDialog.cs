@@ -27,7 +27,7 @@ namespace AutoCnC.Launcher
 		public NewBotDialog(string defaultDirectory)
 		{
 			Text = "Create a battle bot";
-			Font = SystemFonts.MessageBoxFont;
+			Font = CommandTheme.Body;
 			FormBorderStyle = FormBorderStyle.FixedDialog;
 			StartPosition = FormStartPosition.CenterParent;
 			MinimizeBox = false;
@@ -40,12 +40,12 @@ namespace AutoCnC.Launcher
 			nameBox = new TextBox { Width = 380 };
 			locationBox = new TextBox { Width = 380, Text = defaultDirectory };
 
-			var browse = new Button { Text = "Browse…", AutoSize = true };
+			var browse = new ActionButton { Text = "Browse…", AutoSize = true };
 			browse.Click += (_, _) => Browse();
 
-			var ok = new Button { Text = "Create", AutoSize = true, DialogResult = DialogResult.OK };
+			var ok = new ActionButton { Text = "Create", Primary = true, AutoSize = true, DialogResult = DialogResult.OK };
 			ok.Click += Validate;
-			var cancel = new Button { Text = "Cancel", AutoSize = true, DialogResult = DialogResult.Cancel };
+			var cancel = new ActionButton { Text = "Cancel", AutoSize = true, DialogResult = DialogResult.Cancel };
 
 			var grid = new TableLayoutPanel { AutoSize = true, ColumnCount = 3, Dock = DockStyle.Fill };
 			grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
@@ -83,6 +83,7 @@ namespace AutoCnC.Launcher
 			Controls.Add(grid);
 			AcceptButton = ok;
 			CancelButton = cancel;
+			CommandTheme.Apply(this);
 		}
 
 		static Label Label(string text) =>

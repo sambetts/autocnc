@@ -177,7 +177,7 @@ namespace AutoCnC.Launcher
 
 			var battlePage = new TabPage("Battle") { BackColor = Paper, Padding = new Padding(2) };
 			battlePage.Controls.Add(battleLayout);
-			var views = new TabControl { Dock = DockStyle.Fill };
+			var views = new CommandTabs { Dock = DockStyle.Fill };
 			views.TabPages.Add(battlePage);
 			views.TabPages.Add(trendsPage);
 			Controls.Add(views);
@@ -302,7 +302,7 @@ namespace AutoCnC.Launcher
 				ColumnCount = 2,
 				RowCount = 2,
 				Padding = new Padding(8, 4, 8, 4),
-				BackColor = Color.FromArgb(38, 38, 38)
+				BackColor = CommandTheme.Surface
 			};
 			layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
 			layout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));

@@ -136,7 +136,7 @@ namespace AutoCnC.Launcher
 				Dock = DockStyle.Bottom,
 				AutoSize = true,
 				Padding = new Padding(6, 4, 6, 4),
-				BackColor = Color.FromArgb(38, 38, 38)
+				BackColor = CommandTheme.Surface
 			};
 			nextPromptFooter.Controls.Add(applyNextPrompt);
 			nextPromptFooter.Controls.Add(nextPromptStatus);
@@ -147,7 +147,7 @@ namespace AutoCnC.Launcher
 			nextPromptTab.Controls.Add(Heading(
 				"Complete replacement prompt for the next round. Edit it before saving if needed."));
 
-			views = new TabControl { Dock = DockStyle.Fill };
+			views = new CommandTabs { Dock = DockStyle.Fill };
 			views.TabPages.Add(progressTab);
 			views.TabPages.Add(promptTab);
 			views.TabPages.Add(Page("Game guide", gameGuide));

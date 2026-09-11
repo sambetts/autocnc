@@ -30,7 +30,7 @@ namespace AutoCnC.Launcher
 		public AgentSettingsDialog(string command, string[] arguments)
 		{
 			Text = "Improvement agent";
-			Font = SystemFonts.MessageBoxFont;
+			Font = CommandTheme.Body;
 			FormBorderStyle = FormBorderStyle.Sizable;
 			StartPosition = FormStartPosition.CenterParent;
 			MinimizeBox = false;
@@ -51,16 +51,16 @@ namespace AutoCnC.Launcher
 				Lines = arguments is { Length: > 0 } ? arguments : TrainingAgent.DefaultArguments
 			};
 
-			var reset = new Button { Text = "Use GitHub Copilot CLI defaults", AutoSize = true };
+			var reset = new ActionButton { Text = "Use GitHub Copilot CLI defaults", AutoSize = true };
 			reset.Click += (_, _) =>
 			{
 				commandBox.Text = "copilot";
 				argumentsBox.Lines = TrainingAgent.DefaultArguments;
 			};
 
-			var ok = new Button { Text = "Save", AutoSize = true, DialogResult = DialogResult.OK };
+			var ok = new ActionButton { Text = "Save", Primary = true, AutoSize = true, DialogResult = DialogResult.OK };
 			ok.Click += Validate;
-			var cancel = new Button { Text = "Cancel", AutoSize = true, DialogResult = DialogResult.Cancel };
+			var cancel = new ActionButton { Text = "Cancel", AutoSize = true, DialogResult = DialogResult.Cancel };
 
 			var grid = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 6 };
 			grid.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -100,6 +100,7 @@ namespace AutoCnC.Launcher
 			Controls.Add(grid);
 			AcceptButton = ok;
 			CancelButton = cancel;
+			CommandTheme.Apply(this);
 		}
 
 		void Validate(object sender, EventArgs e)

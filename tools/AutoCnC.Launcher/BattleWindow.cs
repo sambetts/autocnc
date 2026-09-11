@@ -33,22 +33,28 @@ namespace AutoCnC.Launcher
 	/// </remarks>
 	public abstract class BattleWindow : Form
 	{
-		internal static readonly Color Paper = Color.FromArgb(30, 30, 30);
-		internal static readonly Color Ink = Color.Gainsboro;
-		internal static readonly Color Faded = Color.FromArgb(150, 150, 150);
-		internal static readonly Color Rule = Color.FromArgb(58, 58, 58);
+		internal static readonly Color Paper = CommandTheme.Background;
+		internal static readonly Color Ink = CommandTheme.Ink;
+		internal static readonly Color Faded = CommandTheme.Muted;
+		internal static readonly Color Rule = CommandTheme.Rule;
 
 		bool placed;
 
 		protected BattleWindow(string title)
 		{
 			Text = title;
-			Font = SystemFonts.MessageBoxFont;
+			Font = CommandTheme.Body;
 			BackColor = Paper;
 			ForeColor = Ink;
 			ShowInTaskbar = true;
 			MinimumSize = new Size(520, 320);
 			StartPosition = FormStartPosition.Manual;
+		}
+
+		protected override void OnLoad(EventArgs e)
+		{
+			CommandTheme.Apply(this);
+			base.OnLoad(e);
 		}
 
 		/// <summary>

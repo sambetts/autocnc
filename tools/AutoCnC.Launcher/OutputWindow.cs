@@ -73,7 +73,7 @@ namespace AutoCnC.Launcher
 				AutoSize = true,
 				AutoSizeMode = AutoSizeMode.GrowAndShrink,
 				Padding = new Padding(6, 4, 6, 4),
-				BackColor = Color.FromArgb(38, 38, 38)
+				BackColor = CommandTheme.Surface
 			};
 
 			battleTab = new TabPage("Battle") { BackColor = Paper, Padding = new Padding(2) };
@@ -97,7 +97,7 @@ namespace AutoCnC.Launcher
 			buildTab = new TabPage("Build output") { BackColor = Paper, Padding = new Padding(2) };
 			buildTab.Controls.Add(build);
 
-			tabs = new TabControl { Dock = DockStyle.Fill };
+			tabs = new CommandTabs { Dock = DockStyle.Fill };
 			tabs.TabPages.Add(battleTab);
 			tabs.TabPages.Add(buildTab);
 
@@ -142,7 +142,7 @@ namespace AutoCnC.Launcher
 			// light style regardless of BackColor, which next to a dark log looks like a bug.
 			list.DrawColumnHeader += (_, e) =>
 			{
-				using var back = new SolidBrush(Color.FromArgb(45, 45, 45));
+				using var back = new SolidBrush(CommandTheme.Raised);
 				using var rule = new Pen(Rule);
 
 				e.Graphics.FillRectangle(back, e.Bounds);
@@ -156,7 +156,7 @@ namespace AutoCnC.Launcher
 
 			list.DrawSubItem += (_, e) =>
 			{
-				using var back = new SolidBrush(e.Item.Selected ? Color.FromArgb(58, 58, 66) : Paper);
+				using var back = new SolidBrush(e.Item.Selected ? CommandTheme.Raised : Paper);
 				e.Graphics.FillRectangle(back, e.Bounds);
 
 				TextRenderer.DrawText(e.Graphics, e.SubItem.Text, list.Font, Rectangle.Inflate(e.Bounds, -6, 0),
@@ -239,7 +239,7 @@ namespace AutoCnC.Launcher
 				AutoSize = true,
 				AutoSizeMode = AutoSizeMode.GrowAndShrink,
 				Padding = new Padding(6, 2, 6, 2),
-				BackColor = Color.FromArgb(38, 38, 38)
+				BackColor = CommandTheme.Surface
 			};
 
 			footer.Controls.Add(countLabel);

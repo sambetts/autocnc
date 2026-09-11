@@ -28,7 +28,7 @@ namespace AutoCnC.Launcher
 	/// deliberate: the window is a convenience over the authoring loop, not a second
 	/// implementation of it.
 	/// </remarks>
-	public sealed class MainForm : Form
+	public sealed partial class MainForm : Form
 	{
 		sealed class FactionChoice
 		{
@@ -65,7 +65,8 @@ namespace AutoCnC.Launcher
 			}
 		];
 
-		readonly LauncherSettings settings = LauncherSettings.Load();
+		readonly LauncherSettings settings;
+		readonly bool persistSettings;
 		readonly ScriptRunner runner = new();
 		readonly Queue<ScriptJob> queue = new();
 		readonly MatchLog matchLog = new();
@@ -127,10 +128,16 @@ namespace AutoCnC.Launcher
 		Timer matchTimer;
 		ToolStripStatusLabel statusLabel;
 
-		public MainForm()
+		public MainForm() : this(LauncherSettings.Load(), persistSettings: true) { }
+
+		internal MainForm(LauncherSettings settings, bool persistSettings = false)
 		{
-			Text = "AutoC&C — Battle Launcher";
-			Font = SystemFonts.MessageBoxFont;
+			this.settings = settings;
+			this.persistSettings = persistSettings;
+			Text = "AutoC&C — Battle Command";
+			Font = CommandTheme.Body;
+			AutoScaleMode = AutoScaleMode.Dpi;
+			AutoScaleDimensions = new SizeF(96, 96);
 			StartPosition = FormStartPosition.Manual;
 
 			BuildLayout();
@@ -144,6 +151,8 @@ namespace AutoCnC.Launcher
 			};
 			runner.Finished += code => Post(() => JobFinished(code));
 		}
+
+		protected override bool ShowWithoutActivation => !persistSettings;
 
 		void Post(Action action)
 		{
@@ -167,7 +176,7 @@ namespace AutoCnC.Launcher
 		// -------------------------------------------------------------------
 
 		/// <summary>
-		/// This window is where a battle is set up, and nothing else.
+		/// Workstations for the authoring loop; live battle evidence stays in its own windows.
 		/// </summary>
 		/// <remarks>
 		/// What a battle produced — the graphs and the log — lives in windows of its own that
@@ -178,35 +187,12 @@ namespace AutoCnC.Launcher
 		/// </remarks>
 		void BuildLayout()
 		{
-			root = new TableLayoutPanel
+			BuildCommandLayout();
+			var status = new StatusStrip
 			{
-				Dock = DockStyle.Fill,
-				ColumnCount = 1,
-				RowCount = 7,
-				Padding = new Padding(10)
+				BackColor = CommandTheme.Field, ForeColor = CommandTheme.Muted,
+				SizingGrip = false, Padding = new Padding(16, 0, 16, 0)
 			};
-
-			root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-			root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-			root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-			root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-			root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-			root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-
-			// The slack lives in a row of its own so that everything else keeps the height it asked
-			// for. A banner that appears and disappears must not be able to squeeze the row below
-			// it out of the window.
-			root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-			root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-
-			root.Controls.Add(BuildBotGroup(), 0, 0);
-			root.Controls.Add(BuildBattleGroup(), 0, 1);
-			root.Controls.Add(BuildActionRow(), 0, 2);
-			root.Controls.Add(BuildTrainingGroup(), 0, 3);
-			root.Controls.Add(BuildBattleBanner(), 0, 4);
-			root.Controls.Add(BuildRepositoryRow(), 0, 6);
-
-			var status = new StatusStrip();
 			statusLabel = new ToolStripStatusLabel("Starting up…") { Spring = true, TextAlign = ContentAlignment.MiddleLeft };
 			status.Items.Add(statusLabel);
 
@@ -215,46 +201,31 @@ namespace AutoCnC.Launcher
 			matchTimer = new Timer { Interval = 500 };
 			matchTimer.Tick += (_, _) => PollBattle(finished: false);
 
-			Controls.Add(root);
 			Controls.Add(status);
 			this.status = status;
+			CommandTheme.Apply(this);
 		}
 
 		/// <summary>
-		/// Sizes the window to what it is actually holding, and puts it out of the way of the
-		/// windows a battle will open to the right of it.
+		/// Keeps the command deck on screen; individual workstations scroll on smaller displays.
 		/// </summary>
-		/// <remarks>
-		/// Measured rather than declared. The tallest things in here are paragraphs of hint text
-		/// and a list of game speeds, both of which are as tall as the system font makes them — so
-		/// a size that fits at 100% clips at 150%, and what it clips is the bottom row.
-		/// </remarks>
 		void FitToContent()
 		{
-			var chrome = Size - ClientSize;
-			var content = root.PreferredSize;
-
-			// Room for the battle banner, which only appears once something has been launched. It
-			// is not part of the measurement because a hidden control has no preferred size, and
-			// it must not push the row below it out of the window when it arrives.
-			var banner = 3 * Font.Height + 24;
-
-			MinimumSize = new Size(
-				content.Width + chrome.Width,
-				content.Height + status.Height + chrome.Height + banner);
-
-			Size = MinimumSize;
-
-			// Left of centre, because a battle claims the space to the right of this window.
 			var area = Screen.FromControl(this).WorkingArea;
-			Location = new Point(area.Left + 24, area.Top + Math.Max(0, (area.Height - Height) / 2));
+			var scale = DeviceDpi / 96f;
+			MinimumSize = new Size(Math.Min(area.Width, (int)(940 * scale)),
+				Math.Min(area.Height, (int)(700 * scale)));
+			Size = new Size(Math.Min(area.Width, (int)(1200 * scale)),
+				Math.Min(area.Height, (int)(850 * scale)));
+			Location = new Point(area.Left + Math.Max(0, (area.Width - Width) / 2),
+				area.Top + Math.Max(0, (area.Height - Height) / 2));
 		}
 
 		Control BuildBotGroup()
 		{
 			var grid = Grid(3);
 
-			botBox = new TextBox { Dock = DockStyle.Fill };
+			botBox = new TextBox { Dock = DockStyle.Fill, AccessibleName = "Battle bot project or assembly" };
 			botBox.TextChanged += (_, _) =>
 			{
 				UpdateEnabledState();
@@ -270,7 +241,9 @@ namespace AutoCnC.Launcher
 			{
 				AutoSize = true,
 				ForeColor = SystemColors.GrayText,
-				Text = "A bot project (.csproj) is built before it plays. A prebuilt .dll is played as it is."
+				Text = "Select a C# project to build, test and improve. A prebuilt .dll can fight, but cannot be AI-trained.",
+				MaximumSize = new Size(530, 0),
+				Margin = new Padding(3, 12, 3, 12)
 			};
 
 			var options = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, Margin = new Padding(0) };
@@ -295,14 +268,19 @@ namespace AutoCnC.Launcher
 			options.Controls.Add(newBotButton);
 			options.Controls.Add(useReference);
 
-			grid.Controls.Add(new Label { Text = string.Empty, AutoSize = true }, 0, 1);
 			grid.Controls.Add(options, 1, 1);
+			grid.SetColumnSpan(options, 2);
 
-			grid.Controls.Add(new Label { Text = string.Empty, AutoSize = true }, 0, 2);
 			grid.Controls.Add(hint, 1, 2);
 			grid.SetColumnSpan(hint, 2);
 
-			botGroup = Group("Your battle code", grid);
+			openCodeButton = SmallButton("Open code", (_, _) => OpenCode());
+			var deploy = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true };
+			deploy.Controls.Add(openCodeButton);
+			deploy.Controls.Add(buildButton);
+			grid.Controls.Add(deploy, 1, 3);
+			grid.SetColumnSpan(deploy, 2);
+			botGroup = Group("BOT WORKSPACE", grid);
 			return botGroup;
 		}
 
@@ -310,24 +288,26 @@ namespace AutoCnC.Launcher
 		{
 			var grid = Grid(3);
 
-			mapBox = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList };
+			mapBox = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList, AccessibleName = "Battle map" };
 			mapBox.SelectedIndexChanged += (_, _) => MapChanged();
 
-			difficultyBox = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList };
+			difficultyBox = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList, AccessibleName = "AI opponent difficulty" };
 			difficultyBox.SelectedIndexChanged += (_, _) => DifficultyChanged();
 
-			difficultySummary = new Label { AutoSize = true, ForeColor = SystemColors.GrayText, MaximumSize = new Size(560, 0) };
+			difficultySummary = new Label { AutoSize = true, ForeColor = SystemColors.GrayText, MaximumSize = new Size(510, 0), Margin = new Padding(3, 3, 3, 14) };
 
-			opponentsBox = new NumericUpDown { Minimum = 0, Maximum = 7, Value = 1, Width = 60 };
+			opponentsBox = new NumericUpDown { Minimum = 0, Maximum = 7, Value = 1, Width = 60, AccessibleName = "Number of AI opponents" };
 
 			factionBox = FactionCombo();
 			botFactionBox = FactionCombo();
+			factionBox.AccessibleName = "Your faction";
+			botFactionBox.AccessibleName = "Opponent faction";
 
 			grid.Controls.Add(Caption("Map:"), 0, 0);
 			grid.Controls.Add(mapBox, 1, 0);
 			grid.Controls.Add(SmallButton("Refresh", (_, _) => LoadMaps()), 2, 0);
 
-			grid.Controls.Add(Caption("Opponent:"), 0, 1);
+			grid.Controls.Add(Caption("AI opponent:"), 0, 1);
 			grid.Controls.Add(difficultyBox, 1, 1);
 
 			grid.Controls.Add(new Label { Text = string.Empty, AutoSize = true }, 0, 2);
@@ -338,13 +318,13 @@ namespace AutoCnC.Launcher
 			counts.Controls.Add(opponentsBox);
 			counts.Controls.Add(new Label
 			{
-				Text = "0 launches the map with nobody to fight.",
+				Text = "Set 0 for a solo test.",
 				AutoSize = true,
 				ForeColor = SystemColors.GrayText,
 				Margin = new Padding(8, 6, 0, 0)
 			});
 
-			grid.Controls.Add(Caption("How many:"), 0, 3);
+			grid.Controls.Add(Caption("Opponents:"), 0, 3);
 			grid.Controls.Add(counts, 1, 3);
 
 			var sides = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, Margin = new Padding(0) };
@@ -355,12 +335,12 @@ namespace AutoCnC.Launcher
 			grid.Controls.Add(Caption("You play:"), 0, 4);
 			grid.Controls.Add(sides, 1, 4);
 
-			speedBox = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList };
+			speedBox = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList, AccessibleName = "Rendered game speed" };
 
 			grid.Controls.Add(Caption("Speed:"), 0, 5);
 			grid.Controls.Add(speedBox, 1, 5);
 
-			executionBox = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList };
+			executionBox = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList, AccessibleName = "Battle execution mode" };
 			executionBox.Items.AddRange(ExecutionModes);
 			executionBox.SelectedIndex = 0;
 			executionBox.SelectedIndexChanged += (_, _) => ExecutionModeChanged();
@@ -368,42 +348,32 @@ namespace AutoCnC.Launcher
 			grid.Controls.Add(Caption("Execution:"), 0, 6);
 			grid.Controls.Add(executionBox, 1, 6);
 
-			battleGroup = Group("The battle", grid);
+			battleGroup = Group("ENGAGEMENT PARAMETERS", grid);
 			return battleGroup;
 		}
 
 		Control BuildActionRow()
 		{
-			var row = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, Margin = new Padding(0, 6, 0, 6) };
+			var row = new TableLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, ColumnCount = 1, Margin = new Padding(0) };
+			row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
 
-			launchButton = new Button { Text = "Fight", AutoSize = true, Padding = new Padding(12, 4, 12, 4) };
+			launchButton = new ActionButton { Text = "DEPLOY && FIGHT", Primary = true, AutoSize = false, Height = 56, Dock = DockStyle.Fill, AccessibleName = "Deploy and fight" };
 			launchButton.Click += (_, _) => Launch(play: true);
 
-			buildButton = new Button { Text = "Deploy bot", AutoSize = true, Padding = new Padding(8, 4, 8, 4) };
+			buildButton = new ActionButton { Text = "Build && deploy", AutoSize = true };
 			buildButton.Click += (_, _) => Launch(play: false);
 
-			platformButton = new Button { Text = "Rebuild platform", AutoSize = true, Padding = new Padding(8, 4, 8, 4) };
+			platformButton = new ActionButton { Text = "Rebuild platform", AutoSize = true };
 			platformButton.Click += (_, _) => RebuildPlatform();
 
-			stopButton = new Button { Text = "Stop", AutoSize = true, Enabled = false, Padding = new Padding(8, 4, 8, 4) };
+			stopButton = new ActionButton { Text = "STOP OPERATION", AutoSize = false, Height = 38, Dock = DockStyle.Fill, Enabled = false, ForeColor = CommandTheme.Danger };
 			stopButton.Click += (_, _) => StopEverything();
 
-			replayButton = new Button { Text = "Watch replay", AutoSize = true, Padding = new Padding(8, 4, 8, 4) };
+			replayButton = new ActionButton { Text = "Watch replay", AutoSize = true };
 			replayButton.Click += (_, _) => WatchReplay();
 
-			var logs = new LinkLabel { Text = "Game logs", AutoSize = true, Margin = new Padding(16, 10, 0, 0) };
-			logs.LinkClicked += (_, _) => OpenLogsFolder();
-
-			var replays = new LinkLabel { Text = "Replays", AutoSize = true, Margin = new Padding(12, 10, 0, 0) };
-			replays.LinkClicked += (_, _) => OpenFolder(ReplaysDir, "No replays yet");
-
-			row.Controls.Add(launchButton);
-			row.Controls.Add(buildButton);
-			row.Controls.Add(platformButton);
-			row.Controls.Add(stopButton);
-			row.Controls.Add(replayButton);
-			row.Controls.Add(logs);
-			row.Controls.Add(replays);
+			row.Controls.Add(launchButton, 0, 0);
+			row.Controls.Add(stopButton, 0, 1);
 
 			AcceptButton = launchButton;
 			return row;
@@ -413,25 +383,22 @@ namespace AutoCnC.Launcher
 		{
 			var actions = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, Margin = new Padding(0) };
 
-			openCodeButton = new Button { Text = "Open code", AutoSize = true, Padding = new Padding(8, 3, 8, 3) };
-			openCodeButton.Click += (_, _) => OpenCode();
-
-			historyButton = new Button { Text = "History && trends", AutoSize = true, Padding = new Padding(8, 3, 8, 3) };
+			historyButton = new ActionButton { Text = "History && trends", AutoSize = true };
 			historyButton.Click += (_, _) => ShowResultsWindow(reloadHistory: true);
 
-			improveButton = new Button { Text = "Analyze && improve", AutoSize = true, Padding = new Padding(8, 3, 8, 3) };
+			improveButton = new ActionButton { Text = "Analyze && improve", AutoSize = true };
 			improveButton.Click += (_, _) => { ImproveBot(); };
 
-			retryVerificationButton = new Button { Text = "Retry verification", AutoSize = true, Padding = new Padding(8, 3, 8, 3), Visible = false };
+			retryVerificationButton = new ActionButton { Text = "Retry verification", AutoSize = true, Visible = false };
 			retryVerificationButton.Click += (_, _) => RetryVerification();
 
-			reviewButton = new Button { Text = "Agent workspace", AutoSize = true, Padding = new Padding(8, 3, 8, 3) };
+			reviewButton = new ActionButton { Text = "Agent workspace", AutoSize = true };
 			reviewButton.Click += (_, _) => ReviewImprovement();
 
-			restoreButton = new Button { Text = "Restore previous iteration", AutoSize = true, Padding = new Padding(8, 3, 8, 3) };
+			restoreButton = new ActionButton { Text = "Restore previous iteration", AutoSize = true };
 			restoreButton.Click += (_, _) => RestoreIteration();
 
-			runFolderButton = new Button { Text = "Open run", AutoSize = true, Padding = new Padding(8, 3, 8, 3) };
+			runFolderButton = new ActionButton { Text = "Open run", AutoSize = true };
 			runFolderButton.Click += (_, _) => OpenTrainingRun();
 
 			var configure = new LinkLabel { Text = "Agent settings", AutoSize = true, Margin = new Padding(14, 8, 0, 0) };
@@ -439,37 +406,33 @@ namespace AutoCnC.Launcher
 
 			continuousBox = new CheckBox
 			{
-				Text = "Continuous improvement",
+				Text = "Repeat: fight > analyze > improve > fight",
 				AutoSize = true,
 				Margin = new Padding(14, 7, 0, 0)
 			};
 			continuousBox.CheckedChanged += (_, _) =>
 			{
 				settings.ContinuousImprovement = continuousBox.Checked;
-				settings.Save();
+				PersistSettings();
 				UpdateEnabledState();
 				if (resultsWindow != null)
 					RefreshResultsHistory();
 			};
 
-			actions.Controls.Add(openCodeButton);
-			actions.Controls.Add(historyButton);
 			actions.Controls.Add(improveButton);
 			actions.Controls.Add(retryVerificationButton);
 			actions.Controls.Add(reviewButton);
 			actions.Controls.Add(restoreButton);
 			actions.Controls.Add(runFolderButton);
-			actions.Controls.Add(continuousBox);
-			actions.Controls.Add(configure);
 
 			var hint = new Label
 			{
 				AutoSize = true,
-				MaximumSize = new Size(680, 0),
+				MaximumSize = new Size(530, 0),
 				ForeColor = SystemColors.GrayText,
 				Margin = new Padding(3, 7, 3, 0),
-				Text = "Continuous improvement repeats Fight -> analyze and improve -> Fight until Stop. " +
-					"History & trends compares every iteration; player assessments can be added to finished battles in manual mode."
+				Text = "Every fight is evidence. The agent reviews the battle, changes your bot's source, then verifies and deploys it. " +
+					"Fight again to find out whether it improved. Previous source iterations remain recoverable."
 			};
 
 			var stack = new FlowLayoutPanel
@@ -483,8 +446,16 @@ namespace AutoCnC.Launcher
 			};
 			stack.Controls.Add(actions);
 			stack.Controls.Add(hint);
+			stack.Controls.Add(continuousBox);
+			stack.Controls.Add(configure);
+			trainingHint = new Label
+			{
+				AutoSize = true, MaximumSize = new Size(530, 0),
+				ForeColor = CommandTheme.Amber, Margin = new Padding(3, 18, 3, 6)
+			};
+			stack.Controls.Add(trainingHint);
 
-			trainingGroup = Group("Train the bot", stack);
+			trainingGroup = Group("IMPROVEMENT ORDERS", stack);
 			return trainingGroup;
 		}
 
@@ -530,11 +501,6 @@ namespace AutoCnC.Launcher
 			stack.Controls.Add(battleBannerText);
 			stack.Controls.Add(links);
 
-			// A coloured edge rather than a tinted panel: on the default Windows theme a panel a
-			// few shades off the form background is indistinguishable from it, which for the one
-			// control that says "a game is running" is the wrong way to be subtle.
-			var accent = new Panel { Dock = DockStyle.Left, Width = 4, BackColor = Color.FromArgb(0, 120, 212) };
-
 			battleBanner = new Panel
 			{
 				Dock = DockStyle.Fill,
@@ -543,18 +509,18 @@ namespace AutoCnC.Launcher
 				Padding = new Padding(12, 8, 10, 8),
 				Margin = new Padding(0, 4, 0, 4),
 				Visible = false,
-				BackColor = Color.FromArgb(232, 240, 250)
+				BackColor = CommandTheme.Raised,
+				ForeColor = CommandTheme.Ink
 			};
 
 			battleBanner.Controls.Add(stack);
-			battleBanner.Controls.Add(accent);
 			return battleBanner;
 		}
 
 		Control BuildRepositoryRow()
 		{
 			var row = Grid(3);
-			repositoryBox = new TextBox { Dock = DockStyle.Fill };
+			repositoryBox = new TextBox { Dock = DockStyle.Fill, AccessibleName = "AutoC&C repository" };
 			row.Controls.Add(Caption("Repository:"), 0, 0);
 			row.Controls.Add(repositoryBox, 1, 0);
 			row.Controls.Add(SmallButton("Browse…", BrowseRepository), 2, 0);
@@ -734,15 +700,18 @@ namespace AutoCnC.Launcher
 			return grid;
 		}
 
-		static GroupBox Group(string title, Control content) =>
-			new() { Text = title, AutoSize = true, Dock = DockStyle.Fill, Padding = new Padding(8), Controls = { content } };
+		static GroupBox Group(string title, Control content)
+		{
+			content.ForeColor = CommandTheme.Ink;
+			return new CommandSection { Text = title, AutoSize = true, Dock = DockStyle.Top, Controls = { content } };
+		}
 
 		static Label Caption(string text) =>
 			new() { Text = text, AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(3, 7, 8, 3) };
 
 		static Button SmallButton(string text, EventHandler onClick)
 		{
-			var button = new Button { Text = text, AutoSize = true, Padding = new Padding(6, 1, 6, 1) };
+			var button = new ActionButton { Text = text, AutoSize = true };
 			button.Click += onClick;
 			return button;
 		}
@@ -761,7 +730,12 @@ namespace AutoCnC.Launcher
 		protected override void OnLoad(EventArgs e)
 		{
 			base.OnLoad(e);
+			LoadConfiguration();
+			FitToContent();
+		}
 
+		void LoadConfiguration()
+		{
 			repo = RepoLayout.Discover(settings.RepositoryRoot);
 			repositoryBox.Text = repo?.Root ?? string.Empty;
 			repositoryBox.TextChanged += (_, _) => RepositoryChanged();
@@ -785,7 +759,6 @@ namespace AutoCnC.Launcher
 			LoadSpeeds();
 			LoadMaps();
 			UpdateEnabledState();
-			FitToContent();
 		}
 
 		void LoadLastTrainingRun()
@@ -835,12 +808,6 @@ namespace AutoCnC.Launcher
 		void RepositoryChanged()
 		{
 			var candidate = RepoLayout.For(repositoryBox.Text.Trim());
-			if (candidate == null)
-			{
-				UpdateEnabledState();
-				return;
-			}
-
 			repo = candidate;
 			LoadDifficulties();
 			LoadSpeeds();
@@ -873,7 +840,9 @@ namespace AutoCnC.Launcher
 
 		void LoadMaps()
 		{
+			mapBox.SelectedIndex = -1;
 			mapBox.Items.Clear();
+			UpdateEnabledState();
 
 			if (repo == null)
 				return;
@@ -935,8 +904,7 @@ namespace AutoCnC.Launcher
 					speedBox.SelectedItem = maximum;
 			}
 
-			if (launchButton != null)
-				launchButton.Text = headless ? "Run fight" : "Fight";
+			UpdateEnabledState();
 		}
 
 		bool IsHeadlessSelected() =>
@@ -947,11 +915,9 @@ namespace AutoCnC.Launcher
 		// -------------------------------------------------------------------
 		void MapChanged()
 		{
-			if (mapBox.SelectedItem is not MapInfo map)
-				return;
-
 			// One slot is yours, so a two-player map has room for exactly one opponent.
-			opponentsBox.Maximum = Math.Max(0, map.PlayerCount - 1);
+			if (mapBox.SelectedItem is MapInfo map)
+				opponentsBox.Maximum = Math.Max(0, map.PlayerCount - 1);
 			UpdateEnabledState();
 		}
 
@@ -963,7 +929,7 @@ namespace AutoCnC.Launcher
 		void UpdateEnabledState()
 		{
 			// Text changes can arrive while the window is still being assembled.
-			if (launchButton == null)
+			if (launchButton == null || continuousBox == null || statusLabel == null)
 				return;
 
 			var busy = runner.IsRunning;
@@ -988,7 +954,8 @@ namespace AutoCnC.Launcher
 			openCodeButton.Enabled = !busy && editable;
 			historyButton.Enabled = BotExists();
 			continuousBox.Enabled = !busy && compatible && editable;
-			launchButton.Text = continuousReady ? "Start continuous training" : "Fight";
+			launchButton.Text = continuousReady ? "START AI TRAINING" : "DEPLOY && FIGHT";
+			launchButton.AccessibleName = continuousReady ? "Start continuous AI training" : "Deploy and fight";
 			improveButton.Enabled = !busy && compatible && File.Exists(repo.TrainBotScript) &&
 				lastRunMatches && lastRun?.IsEditable == true &&
 				lastRun.Manifest.CompletedUtc != null && canRetryImprovement &&
@@ -1025,6 +992,7 @@ namespace AutoCnC.Launcher
 			battleGroup.Enabled = !cycleLocked;
 			trainingGroup.Enabled = !cycleLocked;
 
+			UpdateCommandReadout(ready, editable, busy);
 			UpdateBattleBanner();
 
 			if (busy)
@@ -1038,6 +1006,8 @@ namespace AutoCnC.Launcher
 				Status("The engine submodule is missing. Run ./scripts/setup.ps1 in the repository first.");
 			else if (!BotExists())
 				Status("Choose the battle bot project or assembly you want to play.");
+			else if (mapBox.SelectedItem is not MapInfo)
+				Status("No skirmish maps available. Fetch the engine maps, then refresh the Proving ground.");
 			else if (lastRunMatches && lastRun?.Manifest.Status == "finished" && lastRun.IsEditable)
 				Status("Fight saved. Edit manually, or analyze and improve it with the configured agent.");
 			else if (lastRun?.Manifest.Status == "improved")
@@ -1056,7 +1026,7 @@ namespace AutoCnC.Launcher
 			if (!battleBanner.Visible)
 				return;
 
-			Text = battleRunning ? "AutoC&C — Battle Launcher (battle running)" : "AutoC&C — Battle Launcher";
+			Text = battleRunning ? "AutoC&C — Battle Command (battle running)" : "AutoC&C — Battle Command";
 
 			battleBannerText.Text = battleRunning
 				? continuousLoop.IsRunning
@@ -1289,7 +1259,7 @@ namespace AutoCnC.Launcher
 
 			settings.AgentCommand = dialog.AgentCommand;
 			settings.AgentArguments = dialog.AgentArguments;
-			settings.Save();
+			PersistSettings();
 		}
 
 		void BrowseRepository(object sender, EventArgs e)
@@ -1562,7 +1532,7 @@ namespace AutoCnC.Launcher
 			});
 			lastRun = activeRun;
 			settings.LastTrainingRunDirectory = activeRun.RunDirectory;
-			settings.Save();
+			PersistSettings();
 			battleStartedUtc = DateTime.UtcNow;
 			replayBeforeBattle = NewestReplay()?.FullName;
 
@@ -1624,7 +1594,7 @@ namespace AutoCnC.Launcher
 
 				lastRun = finishedRun;
 				settings.LastTrainingRunDirectory = finishedRun.RunDirectory;
-				settings.Save();
+				PersistSettings();
 				if (resultsWindow != null)
 					RefreshResultsHistory();
 			}
@@ -1829,7 +1799,7 @@ namespace AutoCnC.Launcher
 			settings.AgentPromptTemplate = approved;
 			settings.AgentPromptGuidance = null;
 			run.AcceptSuggestedNextPrompt(approved);
-			settings.Save();
+			PersistSettings();
 			improvementWindow?.MarkNextPromptSaved();
 			AppendImprovementOutput("The next-round prompt was accepted automatically for continuous improvement.");
 		}
@@ -1929,7 +1899,7 @@ namespace AutoCnC.Launcher
 
 			settings.AgentPromptTemplate = template;
 			settings.AgentPromptGuidance = null;
-			settings.Save();
+			PersistSettings();
 			return template;
 		}
 
@@ -1951,7 +1921,7 @@ namespace AutoCnC.Launcher
 			settings.AgentPromptGuidance = null;
 			if (run.Manifest.Agent != null)
 				run.AcceptSuggestedNextPrompt(approved);
-			settings.Save();
+			PersistSettings();
 			improvementWindow?.MarkNextPromptSaved();
 		}
 
@@ -2219,6 +2189,8 @@ namespace AutoCnC.Launcher
 		void Status(string message)
 		{
 			statusLabel.Text = message;
+			if (commandStatus != null)
+				commandStatus.Text = message;
 		}
 
 		void Save()
@@ -2237,7 +2209,13 @@ namespace AutoCnC.Launcher
 			settings.RunTests = runTestsBox.Checked;
 			settings.ContinuousImprovement = continuousBox.Checked;
 			settings.LastTrainingRunDirectory = lastRun?.RunDirectory;
-			settings.Save();
+			PersistSettings();
+		}
+
+		void PersistSettings()
+		{
+			if (persistSettings)
+				settings.Save();
 		}
 
 		protected override void OnFormClosing(FormClosingEventArgs e)
@@ -2276,7 +2254,10 @@ namespace AutoCnC.Launcher
 		protected override void Dispose(bool disposing)
 		{
 			if (disposing)
+			{
 				taskbarProgress.Dispose();
+				matchTimer?.Dispose();
+			}
 
 			base.Dispose(disposing);
 		}

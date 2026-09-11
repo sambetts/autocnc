@@ -38,17 +38,22 @@ namespace AutoCnC.Launcher.Tests
 					"A disabled action button must stay readable on the dark theme.");
 				Assert.That(LabelContrast(enabled: true), Is.GreaterThanOrEqualTo(4.5),
 					"An enabled action button must meet ordinary text contrast.");
+				Assert.That(LabelContrast(enabled: true, primary: true), Is.GreaterThanOrEqualTo(4.5),
+					"The amber deployment action must retain dark, readable text.");
+				Assert.That(LabelContrast(enabled: false, primary: true), Is.GreaterThanOrEqualTo(4.5),
+					"The disabled deployment action must stay readable.");
 			});
 		}
 
-		static double LabelContrast(bool enabled)
+		static double LabelContrast(bool enabled, bool primary = false)
 		{
 			using var button = new ActionButton
 			{
 				Text = "Save assessment",
 				AutoSize = false,
 				Size = new Size(180, 30),
-				Enabled = enabled
+				Enabled = enabled,
+				Primary = primary
 			};
 
 			using var bitmap = new Bitmap(button.Width, button.Height);

@@ -14,66 +14,83 @@ using System.Windows.Forms;
 
 namespace AutoCnC.Launcher
 {
-	/// <summary>A button that stays readable on the dark battle windows.</summary>
-	/// <remarks>
-	/// <para>
-	/// A stock button inherits its parent's colour, which on these windows means its face is the
-	/// same near-black as the panel behind it and its border is darker still. There is nothing
-	/// there to press: the label floats on the panel like a caption.
-	/// </para>
-	/// <para>
-	/// Disabled is worse, and is why this class exists. WinForms derives the disabled label
-	/// colour by *darkening the face*, which assumes the light grey a button normally has. On a
-	/// 38,38,38 panel it produced 12,12,12 text — a contrast ratio of 1.29:1, measured off a
-	/// rendered frame, which is text you cannot read. Face and label colours alone cannot fix
-	/// that, because the engine that picks the label colour is the thing that is wrong, so this
-	/// paints its own disabled state: about 4.2:1, plainly switched off but still legible.
-	/// Enabled is left to the flat renderer, which honours these colours and reaches 7.6:1.
-	/// </para>
-	/// </remarks>
+	/// <summary>Command-console controls with native button semantics and explicit readable states.</summary>
 	public sealed class ActionButton : Button
 	{
-		static readonly Color Face = Color.FromArgb(64, 64, 64);
-		static readonly Color Edge = Color.FromArgb(122, 122, 122);
-		static readonly Color Hover = Color.FromArgb(82, 82, 82);
-		static readonly Color Pressed = Color.FromArgb(96, 96, 96);
+		bool hovered;
+		bool pressed;
+		bool selected;
+		bool primary;
 
-		static readonly Color OffFace = Color.FromArgb(48, 48, 48);
-		static readonly Color OffEdge = Color.FromArgb(78, 78, 78);
-		static readonly Color OffInk = Color.FromArgb(145, 145, 145);
+		public string Detail { get; set; }
+		public bool Primary
+		{
+			get => primary;
+			set { primary = value; Invalidate(); }
+		}
+
+		public bool Selected
+		{
+			get => selected;
+			set { selected = value; Invalidate(); }
+		}
 
 		public ActionButton()
 		{
+			DoubleBuffered = true;
 			AutoSize = true;
-			Padding = new Padding(8, 3, 8, 3);
+			Padding = new Padding(12, 6, 12, 6);
 			FlatStyle = FlatStyle.Flat;
 			UseVisualStyleBackColor = false;
-			BackColor = Face;
-			ForeColor = BattleWindow.Ink;
+			BackColor = CommandTheme.Raised;
+			ForeColor = CommandTheme.Ink;
 			FlatAppearance.BorderSize = 1;
-			FlatAppearance.BorderColor = Edge;
-			FlatAppearance.MouseOverBackColor = Hover;
-			FlatAppearance.MouseDownBackColor = Pressed;
+			FlatAppearance.BorderColor = CommandTheme.Rule;
+			MouseEnter += (_, _) => { hovered = true; Invalidate(); };
+			MouseLeave += (_, _) => { hovered = false; pressed = false; Invalidate(); };
+			MouseDown += (_, _) => { pressed = true; Invalidate(); };
+			MouseUp += (_, _) => { pressed = false; Invalidate(); };
+			KeyDown += (_, e) => { if (e.KeyCode == Keys.Space) { pressed = true; Invalidate(); } };
+			KeyUp += (_, _) => { pressed = false; Invalidate(); };
+			LostFocus += (_, _) => { pressed = false; Invalidate(); };
 		}
 
 		protected override void OnPaint(PaintEventArgs e)
 		{
-			if (Enabled)
-			{
-				base.OnPaint(e);
-				return;
-			}
-
 			var area = ClientRectangle;
-			using (var face = new SolidBrush(OffFace))
+			var faceColor = !Enabled ? CommandTheme.Surface
+				: Primary ? CommandTheme.Amber
+				: pressed ? CommandTheme.Field
+				: hovered || Selected ? Color.FromArgb(55, 72, 53) : BackColor;
+			var ink = !Enabled ? CommandTheme.Muted : Primary ? CommandTheme.Field
+				: Selected ? CommandTheme.Green : ForeColor;
+			using (var face = new SolidBrush(faceColor))
 				e.Graphics.FillRectangle(face, area);
 
-			using (var edge = new Pen(OffEdge))
+			using (var edge = new Pen(Enabled && (Selected || hovered) ? CommandTheme.Green : CommandTheme.Rule))
 				e.Graphics.DrawRectangle(edge, 0, 0, area.Width - 1, area.Height - 1);
+			using (var bevel = new Pen(Primary && Enabled ? Color.FromArgb(255, 218, 159) : CommandTheme.Rule))
+				e.Graphics.DrawLine(bevel, 1, 1, area.Width - 2, 1);
 
-			TextRenderer.DrawText(e.Graphics, Text, Font, area, OffInk,
-				TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter |
-				TextFormatFlags.EndEllipsis);
+			var content = Rectangle.Inflate(area, -Padding.Left, -4);
+			if (pressed && Enabled)
+				content.Offset(1, 1);
+			if (string.IsNullOrEmpty(Detail))
+				TextRenderer.DrawText(e.Graphics, Text, Font, content, ink,
+					TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter |
+					TextFormatFlags.EndEllipsis | (ShowKeyboardCues ? 0 : TextFormatFlags.HidePrefix));
+			else
+			{
+				content.Y += 6;
+				TextRenderer.DrawText(e.Graphics, Text, Font, content, ink,
+					TextFormatFlags.Left | TextFormatFlags.Top | TextFormatFlags.EndEllipsis);
+				content.Y += Font.Height + 4;
+				TextRenderer.DrawText(e.Graphics, Detail, CommandTheme.Small, content, CommandTheme.Muted,
+					TextFormatFlags.Left | TextFormatFlags.Top | TextFormatFlags.EndEllipsis);
+			}
+
+			if (Focused && ShowFocusCues)
+				ControlPaint.DrawFocusRectangle(e.Graphics, Rectangle.Inflate(area, -4, -4), ink, faceColor);
 		}
 	}
 }

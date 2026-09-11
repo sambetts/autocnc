@@ -1,8 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!--
-    Windows Forms rather than a cross-platform UI toolkit: this is a developer convenience that
-    has to build from a clean checkout with no package restore, and every part of it is a thin
+    The native battle command console builds without additional UI packages. Every action is a thin
     wrapper over scripts/ that a Linux or macOS author can run directly.
 
     It deliberately lives outside AutoCnC.sln. That solution is built by CI on Linux, where the

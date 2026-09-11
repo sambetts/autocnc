@@ -20,10 +20,10 @@ namespace AutoCnC.Launcher
 	/// <summary>Plots one final KPI across successive training battles.</summary>
 	public sealed class IterationChart : Control
 	{
-		static readonly Color Ink = Color.FromArgb(210, 210, 210);
-		static readonly Color Faded = Color.FromArgb(140, 140, 140);
-		static readonly Color Grid = Color.FromArgb(58, 58, 58);
-		static readonly Color Paper = Color.FromArgb(30, 30, 30);
+		static readonly Color Ink = CommandTheme.Ink;
+		static readonly Color Faded = CommandTheme.Muted;
+		static readonly Color Grid = CommandTheme.Rule;
+		static readonly Color Paper = CommandTheme.Surface;
 		static readonly Color Local = Color.FromArgb(0, 150, 230);
 		static readonly Color Opponent = Color.FromArgb(160, 160, 160);
 		static readonly Color Won = Color.FromArgb(22, 198, 12);

@@ -63,12 +63,18 @@ Build complete. Next: ./scripts/launch.ps1
 ./scripts/launcher.ps1
 ```
 
-That opens the **battle launcher** (Windows). Press **New bot…** to create a standalone C#
+That opens **Battle Command**, the battle launcher (Windows). In **Bot bay**, press **New bot…** to create a standalone C#
 solution with a starter doctrine, mode, pure logic, and tests. **Open code** opens that solution
-for normal manual editing, **Deploy bot** builds and installs it, and **Fight** starts the game,
+for normal manual editing, **Build & deploy** builds and installs it, and **Deploy & fight** starts the game,
 seats the AI, and loads your bot before the first tick.
 
-The launcher window itself is only for setting a battle up. When one starts, two more windows
+Use **Proving ground** for the battle settings, **AI training** for agent improvement and
+continuous training, and **Systems** for the repository, platform rebuild, logs and replays.
+The command deck keeps deployment, stop and history available while switching workstations
+(keyboard shortcuts: **Alt+1** through **Alt+4**). The bot dossier shows the selected project,
+its readiness and its last battle result. See [the design and its C&C95 references](launcher-design.md).
+
+When a battle starts, two more windows
 open beside it — the **results** graphs and the **output** log — the way a debugger's windows
 appear when you run rather than sitting empty while you edit. They stay up when the game exits,
 because everything you want to ask about a match you ask afterwards.
@@ -457,7 +463,7 @@ That rule is a pure function of what your side can see, so you can test it witho
 dotnet test bots/MyRush/Tests
 ```
 
-Point the launcher at `bots/MyRush/MyRush.csproj` and press **Fight**. It is loaded
+Point the launcher at `bots/MyRush/MyRush.csproj` and press **Deploy & fight**. It is loaded
 before the first tick, so there is nothing to type — but if you want to check, or to take a hand:
 
 ```
@@ -490,10 +496,10 @@ Full loop:
 ```powershell
 # 1. edit your bot's *.cs in your IDE
 dotnet test bots/MyRush/Tests              # 2. check the logic
-./scripts/launcher.ps1                     # 3. Deploy bot, then Fight
+./scripts/launcher.ps1                     # 3. Deploy & fight from the command deck
 ```
 
-**Fight** builds your bot and starts the game in one step, and runs its tests on the way past if
+**Deploy & fight** builds your bot and starts the game in one step, and runs its tests on the way past if
 you tick **Run its tests first**. From a terminal that whole loop is one line:
 
 ```powershell
@@ -522,8 +528,9 @@ files, and `game-rules.json`—a generated snapshot of units, health, armor, mov
 armaments, range, reload, projectile, damage, and armor modifiers from OpenRA's resolved runtime
 rules. Use **Restore previous iteration** to put the exact pre-agent source back.
 
-For an unattended loop, keep **Execution** on its default **Headless**, check **Continuous
-improvement**, and start. It repeats Fight -> analyze and improve -> Fight until **Stop**,
+For an unattended loop, keep **Execution** on its default **Headless** in Proving ground.
+In **AI training**, check **Repeat: fight > analyze > improve > fight**, then press
+**Start AI training**. It repeats the cycle until **Stop operation**,
 automatically accepting each valid next-round prompt. Switch Execution to **Rendered** when you
 want to watch the same loop. Player assessments are disabled because the loop does not pause
 between stages. A failed game, agent command, test, or build stops the loop instead of advancing

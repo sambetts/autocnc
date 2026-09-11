@@ -29,9 +29,9 @@ namespace AutoCnC.Launcher
 	/// </remarks>
 	public sealed class MatchChart : Control
 	{
-		static readonly Color Ink = Color.FromArgb(210, 210, 210);
-		static readonly Color Grid = Color.FromArgb(58, 58, 58);
-		static readonly Color Paper = Color.FromArgb(30, 30, 30);
+		static readonly Color Ink = CommandTheme.Ink;
+		static readonly Color Grid = CommandTheme.Rule;
+		static readonly Color Paper = CommandTheme.Surface;
 
 		/// <summary>Horizontal divisions of the value axis. Four keeps the labels round.</summary>
 		const int Gridlines = 4;
@@ -60,7 +60,7 @@ namespace AutoCnC.Launcher
 
 			using var titleFont = new Font(Font, FontStyle.Bold);
 			using var ink = new SolidBrush(Ink);
-			using var faded = new SolidBrush(Color.FromArgb(140, 140, 140));
+			using var faded = new SolidBrush(CommandTheme.Muted);
 
 			// Every measurement below is in text lines rather than pixels. The window follows the
 			// system font, which on a scaled display is half again as tall as it is at 100%, and

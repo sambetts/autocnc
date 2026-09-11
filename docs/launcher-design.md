@@ -82,8 +82,11 @@ field widths and the dossier scale together. Workstation headings size to their 
 command buttons and the navigation stack can shrink again after the window grows.
 The schematic and painted controls invalidate their whole surface on resize, rather than
 leaving the previous drawing behind when only the newly exposed strip is repainted.
-Disabled labels are deliberately painted with readable colors rather than WinForms'
-default dark-on-dark disabled text. There is no idle animation or unsolicited sound.
+Disabled labels, links, and checkbox captions are deliberately painted with readable colors
+rather than WinForms' default dark-on-dark disabled text. This also applies when a whole
+configuration panel is locked during training: the battle details and hints remain readable
+without enabling the controls. Rendered-pixel tests cover both direct and inherited disabled
+states at native DPI and the 96-DPI baseline. There is no idle animation or unsolicited sound.
 
 Launcher UI tests use the same per-monitor DPI awareness as the application and include
 live resize invalidation and repeated grow/shrink checks. Run them in a fresh test process

@@ -56,20 +56,27 @@ namespace AutoCnC.Launcher.Tests
 				Primary = primary
 			};
 
-			using var bitmap = new Bitmap(button.Width, button.Height);
-			button.DrawToBitmap(bitmap, button.ClientRectangle);
+			return RenderedTextContrast(button, new Rectangle(4, 4, button.Width - 8, button.Height - 8));
+		}
+
+		internal static double RenderedTextContrast(Control control, Rectangle sample, bool mostCommonInk = false)
+		{
+			using var bitmap = new Bitmap(control.Width, control.Height);
+			control.DrawToBitmap(bitmap, control.ClientRectangle);
 
 			// Sample inside the border, so the frame cannot be mistaken for the label.
 			var tally = new Dictionary<Color, int>();
-			for (var y = 4; y < bitmap.Height - 4; y++)
-				for (var x = 4; x < bitmap.Width - 4; x++)
+			for (var y = sample.Top; y < sample.Bottom; y++)
+				for (var x = sample.Left; x < sample.Right; x++)
 				{
 					var pixel = bitmap.GetPixel(x, y);
 					tally[pixel] = tally.GetValueOrDefault(pixel) + 1;
 				}
 
 			var face = tally.MaxBy(entry => entry.Value).Key;
-			var label = tally.Keys.MaxBy(colour => Math.Abs(Luminance(colour) - Luminance(face)));
+			var label = mostCommonInk
+				? tally.Where(entry => entry.Key != face).MaxBy(entry => entry.Value).Key
+				: tally.Keys.MaxBy(colour => Math.Abs(Luminance(colour) - Luminance(face)));
 			return Contrast(face, label);
 		}
 

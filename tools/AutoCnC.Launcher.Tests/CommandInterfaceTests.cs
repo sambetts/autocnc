@@ -271,8 +271,21 @@ namespace AutoCnC.Launcher.Tests
 			Assert.That(window.SelectTrainingBattle(older), Is.True);
 			Descendants(window).OfType<Button>().Single(button => button.Text == "Analyze && improve").PerformClick();
 			Assert.That(Named<ComboBox>(window, "Battle to train from").Enabled, Is.False);
+			var training = Descendants(window).OfType<GroupBox>().Single(group => group.Text == "IMPROVEMENT ORDERS");
+			Assert.That(training.Enabled, Is.False);
+			foreach (var caption in Descendants(training).Where(control =>
+				control is Label or CheckBox && !string.IsNullOrWhiteSpace(control.Text)))
+				CommandThemeTests.AssertReadableDisabledText(caption);
 			Assert.That(window.SelectTrainingBattle(latest), Is.False);
 			Assert.That(() => window.DeleteRecordedSession(latest, _ => true), Throws.InvalidOperationException);
+			var capture = Environment.GetEnvironmentVariable("AUTOCNC_UI_CAPTURE_DIR");
+			if (!string.IsNullOrEmpty(capture))
+			{
+				Directory.CreateDirectory(capture);
+				using var bitmap = new Bitmap(window.Width, window.Height);
+				window.DrawToBitmap(bitmap, new Rectangle(Point.Empty, window.Size));
+				bitmap.Save(Path.Combine(capture, $"training-locked-{window.DeviceDpi}.png"), ImageFormat.Png);
+			}
 			WaitUntil(() => TrainingRun.Load(older.RunDirectory).Manifest.Agent?.CompletedUtc != null);
 
 			Assert.That(File.ReadAllText(Path.Combine(root, "trained-run.txt")).Trim(), Is.EqualTo(older.RunDirectory));
@@ -545,7 +558,9 @@ namespace AutoCnC.Launcher.Tests
 			run.Manifest.Status = "finished";
 			run.Manifest.Result = new TrainingBattleResult
 			{
-				Outcome = "Lost", LocalPlayer = "You", DurationSeconds = 180,
+				Outcome = "Lost",
+				LocalPlayer = "You",
+				DurationSeconds = 180,
 				Players = [new TrainingPlayerResult { Name = "You", Outcome = "Lost" }]
 			};
 			run.Save();

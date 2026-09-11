@@ -94,7 +94,7 @@ namespace AutoCnC.Launcher
 			// Construct shared actions first, then place each in its workstation.
 			var launch = BuildActionRow();
 			AddStation(0, BuildBotGroup());
-			AddStation(1, BuildBattleGroup());
+			AddStation(1, BuildProvingGround());
 			AddStation(2, BuildTrainingGroup());
 			AddStation(3, BuildSystemsStation());
 			main.Controls.Add(BuildBattleBanner(), 0, 3);
@@ -212,6 +212,11 @@ namespace AutoCnC.Launcher
 			];
 			stationTitle.Text = titles[index];
 			stationDescription.Text = descriptions[index];
+			if (index == 2 && statusLabel != null && !OperationInProgress)
+			{
+				RefreshResultsHistory(reload: true);
+				UpdateEnabledState();
+			}
 		}
 
 		Control BuildSystemsStation()
@@ -249,10 +254,12 @@ namespace AutoCnC.Launcher
 				: IsPrebuilt() ? "COMPILED BATTLE BOT / PLAY ONLY" : "YOUR CODE. YOUR DOCTRINE. YOUR ARMY.",
 				readiness, ready || busy, lastSortie);
 			trainingHint.Text = !editable ? "AI training needs an editable C# bot project. Select one in Bot bay."
-				: !LastRunMatchesSelectedBot() || lastRun?.Manifest.CompletedUtc == null
-					? "First, fight a battle. Its logs and decision trace unlock Analyze & improve."
-					: improveButton.Enabled ? "Battle evidence available. Ready for the next improvement."
-						: "Review the agent workspace or fight again to gather fresh evidence.";
+				: !RunMatchesSelectedBot(trainingRun) || trainingRun?.Manifest.CompletedUtc == null
+					? "Select a completed battle above. Its logs and decision trace unlock Analyze & improve."
+					: improveButton.Enabled ? trainingRun.HasPlayerFeedback
+						? "Your feedback and battle evidence are ready for the next improvement."
+						: "No feedback yet. Add your observations before improving, or use the recorded evidence alone."
+						: "Review this battle's agent workspace, restore its snapshot, or fight again to gather fresh evidence.";
 			operationSummary.Text = continuousBox.Checked && editable
 				? "CONTINUOUS TRAINING\nRepeats until you stop the operation"
 				: IsHeadlessSelected() ? "HEADLESS SKIRMISH\nCPU speed / no game window"

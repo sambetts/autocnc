@@ -39,6 +39,7 @@ namespace AutoCnC.Launcher
 
 		bool liveOutputStarted;
 		TrainingRun shownRun;
+		internal TrainingRun ShownRun => shownRun;
 
 		public event Action<TrainingRun, string> NextPromptAccepted;
 

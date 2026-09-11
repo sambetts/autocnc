@@ -24,10 +24,15 @@ music or screenshots are bundled. The dossier illustration is original vector dr
 
 - **Bot bay:** create or select a bot, open its code, choose pre-battle tests, build and deploy.
 - **Proving ground:** configure map, AI difficulty, opponent count, factions, execution mode
-  and speed. Zero opponents is still a solo test. Headless still selects maximum speed.
+  and speed. A leading **Your battle feedback** section shows the last battle's feedback state
+  and offers a dedicated review action. Manual rendered battles ask for optional observations;
+  headless battles require watching their own recorded replay first. Zero opponents is still a
+  solo test. Headless still selects maximum speed.
 - **AI training:** use a completed battle's evidence to improve source, inspect the agent
   workspace, retry verification or restore the previous iteration. Continuous training
-  explicitly repeats the fight/improve cycle until stopped.
+  explicitly repeats the fight/improve cycle until stopped. **Train from battle** names the
+  selected recording with its date, result, duration, map, feedback status and session ID.
+  A neighboring replay action uses that recording, not the latest global replay.
 - **Systems:** repository selection, platform rebuild, build output, logs and replays.
 
 The selected bot's file/project name, editable-versus-prebuilt status, actual readiness
@@ -36,7 +41,18 @@ ratings or progress bars. A large amber **Deploy & fight** command becomes **Sta
 training** only when continuous improvement applies to an editable project. **Stop
 operation** remains outside the configuration groups locked during a fight/training cycle.
 
-History remains one click away. The result charts, battle log and agent workspace still
+History remains one click away and opens on **Recorded sessions**, not on the battle charts.
+The newest-first table shows every session's feedback status, result, duration, and final local
+stats; a persistent feedback preview offers add/edit and replay actions for the selected battle.
+Missing feedback is explicit, including battles from earlier continuous-training runs. Manual
+improvement provides a protected save-and-improve, evidence-only, or cancel decision before
+the agent starts. Continuous training stays unattended, with review available after it stops.
+Right-clicking **Train from this battle** selects that row in AI training without invoking an
+agent. A separate **Delete session** command requires confirmation and removes the run's saved
+evidence and restore snapshots, leaving current bot source untouched. It is disabled during
+operations; selection and trends update after deletion. The latest-fight readout stays independent
+of the manually selected training battle.
+The result charts, battle log and agent workspace still
 open separately, remain available after a fight and share the command-console palette.
 No new multiplayer service is implied: this launcher configures local AI skirmishes;
 OpenRA's lobby is separate.

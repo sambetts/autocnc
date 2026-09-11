@@ -342,9 +342,23 @@ remain outside its allowed paths. The wrapper independently runs the bot tests a
 build; the launcher streams the raw ANSI terminal output as colored UTF-8 spans into a dedicated
 Improvement window and exposes the exact prompt, guide, resolved rules, fight manifest, and
 file-level change set in adjacent tabs. Plain build logs use the same stream with styling removed.
-It can restore the pre-agent snapshot. In manual mode the player can persist a bounded assessment
-on a completed run; regenerating agent context includes that assessment in both `fight.json` and
-the rendered `{result}`.
+It can restore the pre-agent snapshot. Proving ground and the recorded-session history expose
+bounded per-battle feedback, and manual improvement offers to collect missing observations before
+preparing the prompt. Regenerating agent context includes them in both `fight.json` and the rendered
+`{result}`. Feedback eligibility is enforced by `TrainingRun`, not just the UI: a completed,
+recorded headless battle also needs a persisted `ReplayWatchedUtc`. Replay jobs use that run's
+captured replay rather than the newest global replay, and only a successful, uncancelled playback
+marks it watched. The replay launch script propagates the engine's exit code. Legacy manifests
+without the optional watched timestamp remain readable; existing feedback is preserved.
+
+The launcher keeps the latest fought run separate from the selected training run.
+`SelectedTrainingRunDirectory` persists the manual choice, and improvement and verification jobs
+capture that run in their completion callback so the result cannot land on another battle.
+History's train action selects evidence and navigates to AI training; it does not run the agent.
+Deleting a completed session validates its archive location and manifest, rejects active runs and
+linked directories, and removes only that run's files. The manifest is removed last so an I/O
+failure leaves a visible, retryable entry. Last-run and training selections, views, and trend
+summaries are refreshed without reintroducing the deleted run.
 
 Continuous mode is a small explicit state machine over the existing script queue: Fighting ->
 Improving -> Fighting. Headless is the default execution mode, with Rendered selectable for

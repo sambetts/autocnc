@@ -271,6 +271,142 @@ namespace AutoCnC.Launcher.Tests
 		}
 
 		[Test]
+		public void HeadlessFeedbackRequiresSuccessfulPlaybackOfThatBattlesReplay()
+		{
+			var first = NewRun();
+			var second = NewRun();
+			foreach (var run in new[] { first, second })
+			{
+				run.Manifest.Battle.ExecutionMode = BattleExecutionModes.Headless;
+				Complete(run, "Lost", 185, army: 1200, opponentArmy: 4100);
+				File.WriteAllText(run.ReplayPath, "recorded replay fixture");
+			}
+
+			Assert.That(() => first.SetPlayerFeedback("Not observed yet."), Throws.InvalidOperationException);
+			Assert.That(first.RecordReplayPlayback(1, cancelled: false), Is.False);
+			Assert.That(first.RecordReplayPlayback(0, cancelled: true), Is.False);
+			Assert.That(TrainingRun.Load(first.RunDirectory).Manifest.ReplayWatchedUtc, Is.Null);
+			Assert.That(first.CanProvideFeedback, Is.False);
+
+			Assert.That(first.RecordReplayPlayback(0, cancelled: false), Is.True);
+			var reloaded = TrainingRun.Load(first.RunDirectory);
+			Assert.That(reloaded.Manifest.ReplayWatchedUtc, Is.Not.Null);
+			Assert.That(reloaded.CanProvideFeedback, Is.True);
+			Assert.That(second.CanProvideFeedback, Is.False);
+			Assert.That(TrainingRun.Load(second.RunDirectory).Manifest.ReplayWatchedUtc, Is.Null);
+
+			reloaded.SetPlayerFeedback("The replay showed the harvester was left exposed.");
+			TrainingAgent.PrepareContext(reloaded, gameGuide, gameRules, promptTemplate);
+			Assert.That(File.ReadAllText(reloaded.FightManifestPath), Does.Contain("harvester was left exposed"));
+			Assert.That(File.ReadAllText(reloaded.PromptPath), Does.Contain("harvester was left exposed"));
+			Assert.That(TrainingAgent.RenderPrompt(second, promptTemplate), Does.Not.Contain("harvester was left exposed"));
+		}
+
+		[Test]
+		public void UnrecordedBattlesAndMissingReplaysCannotUnlockFeedback()
+		{
+			var run = NewRun();
+			Assert.That(() => run.SetPlayerFeedback("Still running."), Throws.InvalidOperationException);
+			run.Manifest.CompletedUtc = DateTime.UtcNow;
+			run.Manifest.Result = new TrainingBattleResult();
+			Assert.That(() => run.SetPlayerFeedback("No match happened."), Throws.InvalidOperationException);
+			Assert.That(BattleFeedback.ShouldPrompt(run, automated: false), Is.False);
+
+			Complete(run, "Lost", 185, army: 1200, opponentArmy: 4100);
+			run.Manifest.Battle.ExecutionMode = BattleExecutionModes.Headless;
+			Assert.That(() => run.RecordReplayPlayback(0, cancelled: false), Throws.InvalidOperationException);
+			Assert.That(run.Manifest.ReplayWatchedUtc, Is.Null);
+			Assert.That(BattleFeedback.CanReview(run), Is.False);
+		}
+
+		[TestCase(BattleExecutionModes.Rendered, false, true)]
+		[TestCase(BattleExecutionModes.Rendered, true, false)]
+		[TestCase(BattleExecutionModes.Headless, false, false)]
+		[TestCase(BattleExecutionModes.Headless, true, false)]
+		[TestCase(null, false, true)]
+		public void OnlyManualRenderedBattlesPromptForMissingFeedback(string execution, bool automated, bool expected)
+		{
+			var run = NewRun();
+			run.Manifest.Battle.ExecutionMode = execution;
+			Complete(run, "Lost", 185, army: 1200, opponentArmy: 4100);
+			Assert.That(BattleFeedback.ShouldPrompt(run, automated), Is.EqualTo(expected));
+			run.Manifest.Result.PlayerFeedback = "Existing feedback.";
+			Assert.That(BattleFeedback.ShouldPrompt(run, automated), Is.False);
+			run.Manifest.Result.PlayerFeedback = null;
+			run.Manifest.Status = "failed";
+			Assert.That(BattleFeedback.ShouldPrompt(run, automated), Is.False);
+		}
+
+		[Test]
+		public void EditingAndClearingFeedbackRefreshesTheSameBattlesEvidence()
+		{
+			var run = NewRun();
+			Complete(run, "Lost", 185, army: 1200, opponentArmy: 4100);
+			run.SetPlayerFeedback(new string('x', TrainingRun.MaxPlayerFeedbackLength));
+			Assert.That(TrainingRun.Load(run.RunDirectory).Manifest.Result.PlayerFeedback.Length,
+				Is.EqualTo(TrainingRun.MaxPlayerFeedbackLength));
+			run.SetPlayerFeedback("  An updated observation.  ");
+			Assert.That(File.ReadAllText(run.FightManifestPath), Does.Contain("An updated observation."));
+			Assert.That(TrainingAgent.RenderPrompt(run, promptTemplate), Does.Contain("An updated observation."));
+			run.SetPlayerFeedback(" \r\n ");
+			Assert.That(TrainingRun.Load(run.RunDirectory).HasPlayerFeedback, Is.False);
+			Assert.That(File.ReadAllText(run.FightManifestPath), Does.Not.Contain("An updated observation."));
+			Assert.That(TrainingAgent.RenderPrompt(run, promptTemplate), Does.Contain("No player assessment was provided."));
+		}
+
+		[Test]
+		public void PrebuiltBotsCanKeepObservedBattleFeedbackWithoutBeingTrainable()
+		{
+			var assembly = Path.Combine(root, "Prebuilt.dll");
+			File.WriteAllText(assembly, "assembly fixture");
+			var run = TrainingRun.Create(assembly,
+				new TrainingBattleConfiguration { ExecutionMode = BattleExecutionModes.Rendered }, runs);
+			Complete(run, "Lost", 185, army: 1200, opponentArmy: 4100);
+			Assert.That(run.IsEditable, Is.False);
+			run.SetPlayerFeedback("The bot never defended its expansion.");
+			Assert.That(TrainingRun.Load(run.RunDirectory).HasPlayerFeedback, Is.True);
+		}
+
+		[Test]
+		public void LegacyHeadlessRunsKeepTheirFeedbackButRequireAReplayBeforeEditing()
+		{
+			var run = NewRun();
+			Complete(run, "Lost", 185, army: 1200, opponentArmy: 4100);
+			run.Manifest.SchemaVersion = 4;
+			run.Manifest.Battle.ExecutionMode = BattleExecutionModes.Headless;
+			run.Manifest.Result.PlayerFeedback = "An assessment from an older launcher.";
+			run.Save();
+			var manifest = File.ReadAllText(run.ManifestPath)
+				.Replace("  \"ReplayWatchedUtc\": null,\n", "", StringComparison.Ordinal);
+			File.WriteAllText(run.ManifestPath, manifest);
+
+			var loaded = TrainingRun.Load(run.RunDirectory);
+			Assert.That(loaded.HasPlayerFeedback, Is.True);
+			Assert.That(loaded.Manifest.ReplayWatchedUtc, Is.Null);
+			Assert.That(loaded.CanProvideFeedback, Is.False);
+			Assert.That(() => loaded.SetPlayerFeedback("An unobserved edit."), Throws.InvalidOperationException);
+		}
+
+		[Test]
+		public void AFailedManifestWriteCannotClaimFeedbackOrReplayReviewWasSaved()
+		{
+			var run = NewRun();
+			Complete(run, "Lost", 185, army: 1200, opponentArmy: 4100);
+			Directory.CreateDirectory(run.ManifestPath + ".tmp");
+			Assert.That(() => run.SetPlayerFeedback("Unsaved feedback."),
+				Throws.TypeOf<UnauthorizedAccessException>());
+			Assert.That(run.HasPlayerFeedback, Is.False);
+			Assert.That(TrainingRun.Load(run.RunDirectory).HasPlayerFeedback, Is.False);
+
+			run.Manifest.Battle.ExecutionMode = BattleExecutionModes.Headless;
+			File.WriteAllText(run.ReplayPath, "replay fixture");
+			Assert.That(() => run.RecordReplayPlayback(0, cancelled: false),
+				Throws.TypeOf<UnauthorizedAccessException>());
+			Assert.That(run.Manifest.ReplayWatchedUtc, Is.Null);
+			Assert.That(TrainingRun.Load(run.RunDirectory).Manifest.ReplayWatchedUtc, Is.Null);
+		}
+
+		[Test]
 		public void HistoryKeepsOnlyTheSelectedBotAndBuildsChronologicalKpis()
 		{
 			var later = NewRun();
@@ -400,7 +536,7 @@ namespace AutoCnC.Launcher.Tests
 			run.Finish("finished", match, battle);
 
 			var loaded = TrainingRun.Load(run.RunDirectory);
-			Assert.That(loaded.Manifest.SchemaVersion, Is.EqualTo(4));
+			Assert.That(loaded.Manifest.SchemaVersion, Is.EqualTo(5));
 			Assert.That(loaded.Manifest.Result.Outcome, Is.EqualTo("Won"));
 			Assert.That(loaded.Manifest.Performance.SimulationSpeed, Is.EqualTo(100));
 			Assert.That(loaded.Manifest.Performance.TicksPerSecond, Is.EqualTo(2500));

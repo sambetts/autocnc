@@ -508,8 +508,11 @@ you tick **Run its tests first**. From a terminal that whole loop is one line:
 
 Every launcher fight is durable under `%LOCALAPPDATA%\AutoCnC\TrainingRuns`: manifest, telemetry,
 battle log, decision trace, replay, result, and (for headless runs) `performance.json`.
-**History & trends** selects any saved battle and plots final units, army value, buildings, base
-value, kills, and outcome-colored duration across iterations. After a fight ends there are two
+**History & trends** opens a newest-first list of recorded sessions, showing whether you have
+provided feedback, the result, duration, and your bot's final units, army, buildings, base value,
+kills, losses, and cash. Select any battle to read or edit its feedback, watch its own recorded
+replay, or inspect its charts. The **Trends** tab compares final stats and outcome-colored duration
+across iterations. After a fight ends there are two
 equally supported paths:
 
 1. **Open code** — make the next change yourself, deploy, and fight again.
@@ -517,9 +520,31 @@ equally supported paths:
    bot. GitHub Copilot CLI is the default, but **Agent settings** accepts any executable and
    argument list using `{prompt}` or `{promptFile}`.
 
-In manual mode, select the finished battle in Results and save your assessment of why it won or
-lost before choosing **Analyze & improve**. The assessment becomes part of that run's fight manifest
-and agent prompt.
+In **AI training**, **Train from battle** explicitly selects the evidence to use. The picker shows
+the battle number, recorded time, outcome, and duration; the details below show the map, execution
+mode, feedback status, and session ID. **Watch replay** plays that selected battle. You can also
+right-click a row in **History & trends** and choose **Train from this battle** to select it and
+open AI training without starting an agent. Feedback, improvement, verification retry, the agent
+workspace, restore, and **Open run** all use that selection. The latest-battle readout in Proving
+ground stays unchanged. The launcher remembers your training selection separately.
+
+To remove a completed recording, select it in **History & trends** and choose **Delete session**
+(also available in the row's context menu). Confirming permanently removes that session's feedback,
+stats, saved logs and replay copy, agent history, and restore snapshots, and updates the trends.
+The current bot source, other sessions, and original OpenRA replay are untouched. Deletion and
+training-battle selection are disabled while an operation is running.
+
+**Your battle feedback** is at the top of **Proving ground**, with a matching action in **AI
+training**. After a manual rendered battle, the launcher asks what you noticed about the win or
+loss; choose **Save feedback** or **Not now**. For a headless battle, choose **Watch replay & add
+feedback** first. Feedback unlocks for that battle after its recorded replay exits successfully;
+a failed or stopped replay does not unlock it, and the watched state survives launcher restarts.
+
+Manual **Analyze & improve** also offers a chance to add missing feedback before the agent starts.
+You can save and improve, watch the required replay first, improve using the logs and stats without
+feedback, or cancel. Feedback stays with the selected battle in its manifest and agent prompt;
+editing an older battle does not attach its observations to the newest fight. Recorded battles
+from prebuilt bots can also be annotated, although those bots cannot be AI-trained.
 
 The launcher snapshots source first, the wrapper reruns tests and deploys after the agent exits,
 and **Agent workspace** opens a dedicated Improvement window that streams its colored terminal
@@ -531,9 +556,11 @@ rules. Use **Restore previous iteration** to put the exact pre-agent source back
 For an unattended loop, keep **Execution** on its default **Headless** in Proving ground.
 In **AI training**, check **Repeat: fight > analyze > improve > fight**, then press
 **Start AI training**. It repeats the cycle until **Stop operation**,
-automatically accepting each valid next-round prompt. Switch Execution to **Rendered** when you
-want to watch the same loop. Player assessments are disabled because the loop does not pause
-between stages. A failed game, agent command, test, or build stops the loop instead of advancing
+always improving from the battle just fought and automatically accepting each valid next-round
+prompt, regardless of an older manual selection. Switch Execution to **Rendered** when you
+want to watch the same loop. It never pauses for feedback; review those battles from **History &
+trends** after stopping. Feedback actions are locked only while an operation is running, not merely
+because the repeat checkbox is selected. A failed game, agent command, test, or build stops the loop instead of advancing
 with an unverified bot.
 
 Fight and rules JSON are shown as collapsible trees. When the run finishes, the agent drafts an

@@ -127,7 +127,7 @@ namespace AutoCnC.Launcher
 
 	public sealed class TrainingRunManifest
 	{
-		public int SchemaVersion { get; set; } = 4;
+		public int SchemaVersion { get; set; } = 5;
 		public string Id { get; set; }
 		public string Status { get; set; }
 		public DateTime CreatedUtc { get; set; }
@@ -138,6 +138,7 @@ namespace AutoCnC.Launcher
 		public string SourceRevision { get; set; }
 		public string ReplaySource { get; set; }
 		public string ReplayFile { get; set; }
+		public DateTime? ReplayWatchedUtc { get; set; }
 		public TrainingBattleConfiguration Battle { get; set; }
 		public TrainingBattleResult Result { get; set; }
 		public TrainingSimulationPerformance Performance { get; set; }
@@ -181,6 +182,24 @@ namespace AutoCnC.Launcher
 
 		public bool IsEditable => !string.IsNullOrEmpty(Manifest.BotProject) &&
 			File.Exists(Manifest.BotProject) && Directory.Exists(Manifest.BotDirectory);
+
+		public bool HasRecordedBattle => Manifest.CompletedUtc != null &&
+			Manifest.Result?.Players is { Count: > 0 };
+		public bool HasPlayerFeedback => !string.IsNullOrWhiteSpace(Manifest.Result?.PlayerFeedback);
+		public bool IsHeadless => string.Equals(Manifest.Battle?.ExecutionMode,
+			BattleExecutionModes.Headless, StringComparison.OrdinalIgnoreCase);
+		public bool NeedsReplayForFeedback => IsHeadless && Manifest.ReplayWatchedUtc == null;
+		public bool CanProvideFeedback => HasRecordedBattle && !NeedsReplayForFeedback;
+		public bool CanDelete => Manifest.CompletedUtc != null &&
+			Manifest.Agent is not { StartedUtc: not null, CompletedUtc: null } &&
+			!string.Equals(Manifest.Status, "improving", StringComparison.OrdinalIgnoreCase) &&
+			!string.Equals(Manifest.Status, "verifying", StringComparison.OrdinalIgnoreCase);
+		public bool HasImprovementEvidence => IsEditable && Manifest.CompletedUtc != null &&
+			File.Exists(BattleLogPath) && File.Exists(TelemetryPath) && File.Exists(DecisionTracePath);
+		public bool CanImprove => HasImprovementEvidence &&
+			(Manifest.Agent == null || Manifest.Agent.ChangeCount == 0 ||
+				Manifest.Agent.RestoredUtc != null || Manifest.Agent.Cancelled ||
+				Manifest.Agent.ExitCode is int exitCode && exitCode != 0);
 
 		TrainingRun(string directory, TrainingRunManifest manifest)
 		{
@@ -314,17 +333,63 @@ namespace AutoCnC.Launcher
 
 		public void SetPlayerFeedback(string feedback)
 		{
-			if (Manifest.Result == null || Manifest.CompletedUtc == null)
-				throw new InvalidOperationException("Player feedback can only be saved for a completed battle.");
+			if (!HasRecordedBattle)
+				throw new InvalidOperationException("Player feedback requires a completed, recorded battle.");
+			if (NeedsReplayForFeedback)
+				throw new InvalidOperationException("Watch this headless battle's replay before adding feedback.");
 
 			var value = feedback?.Trim();
 			if (value?.Length > MaxPlayerFeedbackLength)
 				throw new ArgumentException(
 					$"Player feedback cannot exceed {MaxPlayerFeedbackLength:N0} characters.", nameof(feedback));
 
+			var previous = Manifest.Result.PlayerFeedback;
 			Manifest.Result.PlayerFeedback = string.IsNullOrEmpty(value) ? null : value;
-			Save();
+			try
+			{
+				Save();
+			}
+			catch (IOException)
+			{
+				Manifest.Result.PlayerFeedback = previous;
+				throw;
+			}
+			catch (UnauthorizedAccessException)
+			{
+				Manifest.Result.PlayerFeedback = previous;
+				throw;
+			}
+
 			ExportFightManifest();
+		}
+
+		public bool RecordReplayPlayback(int exitCode, bool cancelled)
+		{
+			if (exitCode != 0 || cancelled)
+				return false;
+			if (!HasRecordedBattle || !File.Exists(ReplayPath))
+				throw new InvalidOperationException("A completed battle and its recorded replay are required.");
+			if (Manifest.ReplayWatchedUtc != null)
+				return true;
+
+			Manifest.ReplayWatchedUtc = DateTime.UtcNow;
+			try
+			{
+				Save();
+			}
+			catch (IOException)
+			{
+				Manifest.ReplayWatchedUtc = null;
+				throw;
+			}
+			catch (UnauthorizedAccessException)
+			{
+				Manifest.ReplayWatchedUtc = null;
+				throw;
+			}
+
+			ExportFightManifest();
+			return true;
 		}
 
 		public void CaptureReplay(string source)
@@ -456,6 +521,66 @@ namespace AutoCnC.Launcher
 			Manifest.Agent.RestoredUtc = DateTime.UtcNow;
 			Manifest.Status = "restored";
 			Save();
+		}
+
+		public void Delete(string runsRoot = null)
+		{
+			if (!CanDelete)
+				throw new InvalidOperationException("Finish or stop the session's battle and improvement before deleting it.");
+
+			var root = Path.GetFullPath(runsRoot ?? DefaultRoot);
+			var id = Manifest.Id;
+			if (string.IsNullOrWhiteSpace(id) || id is "." or ".." || id != Path.GetFileName(id))
+				throw new InvalidDataException("The recorded session has an invalid directory identifier.");
+			var expected = Path.GetFullPath(Path.Combine(
+				RunsDirectoryForBot(Manifest.BotProject ?? Manifest.BotPath, root), id));
+			if (!string.Equals(Path.TrimEndingDirectorySeparator(RunDirectory), expected, StringComparison.OrdinalIgnoreCase))
+				throw new InvalidDataException("Only this session's directory inside the training archive can be deleted.");
+
+			for (var directory = new DirectoryInfo(RunDirectory); directory != null; directory = directory.Parent)
+			{
+				if ((directory.Attributes & FileAttributes.ReparsePoint) != 0)
+					throw new InvalidDataException("The recorded session's directory is a link or junction.");
+				if (string.Equals(directory.FullName, Path.TrimEndingDirectorySeparator(root), StringComparison.OrdinalIgnoreCase))
+					break;
+			}
+
+			var pending = new Stack<string>();
+			pending.Push(RunDirectory);
+			while (pending.Count > 0)
+			{
+				foreach (var entry in new DirectoryInfo(pending.Pop()).EnumerateFileSystemInfos())
+				{
+					if ((entry.Attributes & FileAttributes.ReparsePoint) != 0)
+						throw new InvalidDataException("The recorded session contains a link or junction: " + entry.Name);
+					if (entry is DirectoryInfo)
+						pending.Push(entry.FullName);
+				}
+			}
+
+			var current = Load(RunDirectory) ??
+				throw new InvalidDataException("The recorded session's manifest is missing.");
+			if (!current.CanDelete || current.Manifest.Id != id ||
+				current.Manifest.BotPath != Manifest.BotPath || current.Manifest.BotProject != Manifest.BotProject)
+				throw new InvalidOperationException("The recorded session changed. Refresh history before deleting it.");
+			foreach (var source in new[] { current.Manifest.BotPath, current.Manifest.BotProject, current.Manifest.BotDirectory })
+			{
+				if (string.IsNullOrWhiteSpace(source))
+					continue;
+				var relative = Path.GetRelativePath(RunDirectory, source);
+				if (!Path.IsPathRooted(relative) && relative != ".." &&
+					!relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+					throw new InvalidDataException("A recorded session containing the bot's source cannot be deleted.");
+			}
+
+			// Keep the manifest until the evidence is removed so a failed deletion remains visible and retryable.
+			foreach (var directory in Directory.EnumerateDirectories(RunDirectory))
+				Directory.Delete(directory, recursive: true);
+			foreach (var file in Directory.EnumerateFiles(RunDirectory))
+				if (!string.Equals(file, ManifestPath, StringComparison.OrdinalIgnoreCase))
+					File.Delete(file);
+			File.Delete(ManifestPath);
+			Directory.Delete(RunDirectory);
 		}
 
 		public void Save()

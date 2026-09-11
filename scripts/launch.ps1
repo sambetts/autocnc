@@ -62,3 +62,4 @@ if ($ExtraArgs) { $gameArgs += $ExtraArgs }
 
 Write-Host '==> Launching AutoC&C' -ForegroundColor Cyan
 & dotnet @gameArgs
+exit $LASTEXITCODE

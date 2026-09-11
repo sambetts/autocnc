@@ -67,6 +67,7 @@ namespace AutoCnC.Launcher
 
 		readonly LauncherSettings settings;
 		readonly bool persistSettings;
+		readonly string trainingRunsRoot;
 		readonly ScriptRunner runner = new();
 		readonly Queue<ScriptJob> queue = new();
 		readonly MatchLog matchLog = new();
@@ -130,12 +131,13 @@ namespace AutoCnC.Launcher
 
 		public MainForm() : this(LauncherSettings.Load(), persistSettings: true) { }
 
-		internal MainForm(LauncherSettings settings, bool persistSettings = false)
+		internal MainForm(LauncherSettings settings, bool persistSettings = false, string trainingRunsRoot = null)
 		{
 			// Keep the 96-DPI baseline pending until all controls have been constructed.
 			SuspendLayout();
 			this.settings = settings;
 			this.persistSettings = persistSettings;
+			this.trainingRunsRoot = trainingRunsRoot;
 			Text = "AutoC&C — Battle Command";
 			Font = CommandTheme.Body;
 			AutoScaleMode = AutoScaleMode.Dpi;
@@ -231,9 +233,8 @@ namespace AutoCnC.Launcher
 			botBox = new TextBox { Dock = DockStyle.Fill, AccessibleName = "Battle bot project or assembly" };
 			botBox.TextChanged += (_, _) =>
 			{
+				RefreshResultsHistory(reload: true);
 				UpdateEnabledState();
-				if (resultsWindow != null)
-					RefreshResultsHistory(reload: true);
 			};
 
 			grid.Controls.Add(Caption("Battle bot:"), 0, 0);
@@ -387,8 +388,10 @@ namespace AutoCnC.Launcher
 			var actions = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, Margin = new Padding(0) };
 
 			historyButton = new ActionButton { Text = "History && trends", AutoSize = true };
-			historyButton.Click += (_, _) => ShowResultsWindow(reloadHistory: true);
+			historyButton.Click += (_, _) => ShowResultsWindow(reloadHistory: true).ShowRecordedSessions();
 
+			trainingFeedbackButton = new ActionButton { Text = "Add feedback", AutoSize = true };
+			trainingFeedbackButton.Click += (_, _) => ReviewBattleFeedback(trainingRun);
 			improveButton = new ActionButton { Text = "Analyze && improve", AutoSize = true };
 			improveButton.Click += (_, _) => { ImproveBot(); };
 
@@ -418,10 +421,10 @@ namespace AutoCnC.Launcher
 				settings.ContinuousImprovement = continuousBox.Checked;
 				PersistSettings();
 				UpdateEnabledState();
-				if (resultsWindow != null)
-					RefreshResultsHistory();
+				RefreshResultsHistory();
 			};
 
+			actions.Controls.Add(trainingFeedbackButton);
 			actions.Controls.Add(improveButton);
 			actions.Controls.Add(retryVerificationButton);
 			actions.Controls.Add(reviewButton);
@@ -438,15 +441,16 @@ namespace AutoCnC.Launcher
 					"Fight again to find out whether it improved. Previous source iterations remain recoverable."
 			};
 
-			var stack = new FlowLayoutPanel
+			var stack = new TableLayoutPanel
 			{
 				AutoSize = true,
 				AutoSizeMode = AutoSizeMode.GrowAndShrink,
-				FlowDirection = FlowDirection.TopDown,
+				ColumnCount = 1,
 				Dock = DockStyle.Fill,
-				Margin = new Padding(0),
-				WrapContents = false
+				Margin = new Padding(0)
 			};
+			stack.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+			stack.Controls.Add(BuildTrainingBattlePanel());
 			stack.Controls.Add(actions);
 			stack.Controls.Add(hint);
 			stack.Controls.Add(continuousBox);
@@ -548,7 +552,10 @@ namespace AutoCnC.Launcher
 			{
 				resultsWindow = new ResultsWindow(matchLog);
 				resultsWindow.FormClosed += (_, _) => resultsWindow = null;
-				resultsWindow.PlayerFeedbackSaved += SavePlayerFeedback;
+				resultsWindow.FeedbackRequested += run => ReviewBattleFeedback(run);
+				resultsWindow.ReplayRequested += run => WatchReplay(run);
+				resultsWindow.DeleteRequested += ConfirmDeleteRecordedSession;
+				resultsWindow.TrainRequested += TrainFromHistory;
 			}
 
 			RefreshResultsHistory(reloadHistory);
@@ -559,7 +566,7 @@ namespace AutoCnC.Launcher
 
 		void RefreshResultsHistory(bool reload = false)
 		{
-			if (resultsWindow == null || resultsWindow.IsDisposed)
+			if (trainingBattleBox == null)
 				return;
 
 			try
@@ -574,14 +581,14 @@ namespace AutoCnC.Launcher
 				}
 				else if (reload || !SamePath(selectedBot, loadedHistoryBot))
 				{
-					loadedHistory = TrainingHistory.Load(botBox.Text.Trim());
+					loadedHistory = TrainingHistory.Load(botBox.Text.Trim(), trainingRunsRoot);
 					loadedHistoryBot = selectedBot;
 				}
 
 				var current = activeRun ?? (LastRunMatchesSelectedBot() ? lastRun : null);
 				loadedHistory = loadedHistory.WithRun(current);
-				resultsWindow.SetHistory(loadedHistory, current,
-					continuousBox.Checked || continuousLoop.IsRunning);
+				RefreshTrainingBattleChoices();
+				resultsWindow?.SetHistory(loadedHistory, current, OperationInProgress);
 			}
 			catch (IOException ex)
 			{
@@ -589,8 +596,8 @@ namespace AutoCnC.Launcher
 				loadedHistoryBot = null;
 				var current = activeRun ?? (LastRunMatchesSelectedBot() ? lastRun : null);
 				loadedHistory = TrainingHistory.Empty.WithRun(current);
-				resultsWindow.SetHistory(loadedHistory, current,
-					continuousBox.Checked || continuousLoop.IsRunning);
+				RefreshTrainingBattleChoices();
+				resultsWindow?.SetHistory(loadedHistory, current, OperationInProgress);
 			}
 			catch (UnauthorizedAccessException ex)
 			{
@@ -598,8 +605,8 @@ namespace AutoCnC.Launcher
 				loadedHistoryBot = null;
 				var current = activeRun ?? (LastRunMatchesSelectedBot() ? lastRun : null);
 				loadedHistory = TrainingHistory.Empty.WithRun(current);
-				resultsWindow.SetHistory(loadedHistory, current,
-					continuousBox.Checked || continuousLoop.IsRunning);
+				RefreshTrainingBattleChoices();
+				resultsWindow?.SetHistory(loadedHistory, current, OperationInProgress);
 			}
 		}
 
@@ -634,9 +641,10 @@ namespace AutoCnC.Launcher
 			}
 
 			improvementWindow.Show(this, 0.05f, 0.9f);
-			if (created && lastRun != null &&
-				(lastRun.Manifest.Agent != null || File.Exists(lastRun.PromptPath)))
-				improvementWindow.ShowAgentRun(lastRun);
+			var run = activeTrainingRun ?? trainingRun;
+			if (created && run != null &&
+				(run.Manifest.Agent != null || File.Exists(run.PromptPath)))
+				improvementWindow.ShowAgentRun(run);
 			return improvementWindow;
 		}
 
@@ -751,6 +759,7 @@ namespace AutoCnC.Launcher
 
 			botBox.Text = rememberedBot ?? repo?.ReferenceBot ?? string.Empty;
 			LoadLastTrainingRun();
+			RefreshResultsHistory(reload: true);
 			runTestsBox.Checked = settings.RunTests;
 			continuousBox.Checked = settings.ContinuousImprovement;
 			opponentsBox.Value = Math.Clamp(settings.Opponents, opponentsBox.Minimum, opponentsBox.Maximum);
@@ -935,21 +944,20 @@ namespace AutoCnC.Launcher
 			if (launchButton == null || continuousBox == null || statusLabel == null)
 				return;
 
-			var busy = runner.IsRunning;
+			var busy = OperationInProgress;
 			if (IsHandleCreated)
 				taskbarProgress.SetBusy(Handle, busy);
 			var compatible = repo?.SupportsTraining == true;
 			var ready = !busy && compatible && BotExists() && mapBox.SelectedItem is MapInfo;
 			var editable = BotExists() && BotWorkspace.ResolveProject(botBox.Text.Trim()) != null;
 			var continuousReady = compatible && editable && continuousBox.Checked;
-			var agent = lastRun?.Manifest.Agent;
+			var run = trainingRun;
+			var agent = run?.Manifest.Agent;
 			var lastRunMatches = LastRunMatchesSelectedBot();
+			var trainingRunMatches = RunMatchesSelectedBot(run);
 			var stoppedImprovement = agent is { Cancelled: true };
 			var failedImprovement = !stoppedImprovement &&
 				agent?.ExitCode is int agentExitCode && agentExitCode != 0;
-			var canRetryImprovement = agent == null || agent.ChangeCount == 0 ||
-				agent.RestoredUtc != null || failedImprovement || stoppedImprovement;
-
 			launchButton.Enabled = ready;
 			buildButton.Enabled = !busy && compatible && BotExists();
 			platformButton.Enabled = !busy && repo != null;
@@ -960,26 +968,22 @@ namespace AutoCnC.Launcher
 			launchButton.Text = continuousReady ? "START AI TRAINING" : "DEPLOY && FIGHT";
 			launchButton.AccessibleName = continuousReady ? "Start continuous AI training" : "Deploy and fight";
 			improveButton.Enabled = !busy && compatible && File.Exists(repo.TrainBotScript) &&
-				lastRunMatches && lastRun?.IsEditable == true &&
-				lastRun.Manifest.CompletedUtc != null && canRetryImprovement &&
-				File.Exists(lastRun.BattleLogPath) &&
-				File.Exists(lastRun.TelemetryPath) &&
-				File.Exists(lastRun.DecisionTracePath);
+				trainingRunMatches && run.CanImprove;
 			improveButton.Text = failedImprovement && agent.RestoredUtc == null
 				? "Fix failed improvement"
 				: "Analyze && improve";
 			retryVerificationButton.Visible = failedImprovement &&
 				string.Equals(agent.FailurePhase, "verification", StringComparison.OrdinalIgnoreCase);
 			retryVerificationButton.Enabled = !busy && compatible &&
-				File.Exists(repo.VerifyBotScript) && lastRunMatches;
-			reviewButton.Enabled = compatible && lastRunMatches &&
-				lastRun?.IsEditable == true && lastRun.Manifest.CompletedUtc != null;
+				File.Exists(repo.VerifyBotScript) && trainingRunMatches;
+			reviewButton.Enabled = compatible && trainingRunMatches &&
+				run?.IsEditable == true && run.Manifest.CompletedUtc != null;
 			// Any count but a confirmed zero. An unknown count means the workspace could not be
 			// inspected, which is the state where undoing matters most, not least.
-			restoreButton.Enabled = !busy && lastRunMatches && lastRun != null &&
+			restoreButton.Enabled = !busy && trainingRunMatches && run != null &&
 				agent != null && agent.ChangeCount != 0 && agent.RestoredUtc == null &&
-				File.Exists(lastRun.SnapshotManifestPath);
-			runFolderButton.Enabled = !busy && lastRun != null && Directory.Exists(lastRun.RunDirectory);
+				File.Exists(run.SnapshotManifestPath);
+			runFolderButton.Enabled = !busy && run != null && Directory.Exists(run.RunDirectory);
 			stopButton.Enabled = busy;
 
 			// A replay is only complete once the game that recorded it has exited.
@@ -990,11 +994,14 @@ namespace AutoCnC.Launcher
 
 			// Continuous training must keep the bot and battle configuration stable between its
 			// fight and improvement stages. Stop is outside these groups and remains available.
-			var cycleLocked = battleRunning || continuousLoop.IsRunning;
+			var cycleLocked = battleRunning || continuousLoop.IsRunning || activeTrainingRun != null;
 			botGroup.Enabled = !cycleLocked;
 			battleGroup.Enabled = !cycleLocked;
 			trainingGroup.Enabled = !cycleLocked;
 
+			UpdateFeedbackActions(busy || continuousLoop.IsRunning);
+			resultsWindow?.SetOperationState(busy || continuousLoop.IsRunning);
+			UpdateTrainingBattleState();
 			UpdateCommandReadout(ready, editable, busy);
 			UpdateBattleBanner();
 
@@ -1012,7 +1019,9 @@ namespace AutoCnC.Launcher
 			else if (mapBox.SelectedItem is not MapInfo)
 				Status("No skirmish maps available. Fetch the engine maps, then refresh the Proving ground.");
 			else if (lastRunMatches && lastRun?.Manifest.Status == "finished" && lastRun.IsEditable)
-				Status("Fight saved. Edit manually, or analyze and improve it with the configured agent.");
+				Status(lastRun.HasPlayerFeedback
+					? "Fight and feedback saved. Ready to analyze and improve."
+					: "Fight saved. Add your feedback in Proving ground, or review recorded sessions in History & trends.");
 			else if (lastRun?.Manifest.Status == "improved")
 				Status("Improvement verified and deployed. Fight again to measure it.");
 			else if (lastRunMatches && lastRun?.Manifest.Status == "improvement-failed")
@@ -1095,18 +1104,20 @@ namespace AutoCnC.Launcher
 			}
 		}
 
-		bool LastRunMatchesSelectedBot()
+		bool LastRunMatchesSelectedBot() => RunMatchesSelectedBot(lastRun);
+
+		bool RunMatchesSelectedBot(TrainingRun run)
 		{
-			if (lastRun == null || !BotExists())
+			if (run == null || !BotExists())
 				return false;
 
 			var selectedProject = BotWorkspace.ResolveProject(botBox.Text.Trim());
-			if (selectedProject != null && lastRun.Manifest.BotProject != null)
+			if (selectedProject != null && run.Manifest.BotProject != null)
 				return string.Equals(Path.GetFullPath(selectedProject),
-					Path.GetFullPath(lastRun.Manifest.BotProject), StringComparison.OrdinalIgnoreCase);
+					Path.GetFullPath(run.Manifest.BotProject), StringComparison.OrdinalIgnoreCase);
 
 			return string.Equals(Path.GetFullPath(botBox.Text.Trim()),
-				Path.GetFullPath(lastRun.Manifest.BotPath), StringComparison.OrdinalIgnoreCase);
+				Path.GetFullPath(run.Manifest.BotPath), StringComparison.OrdinalIgnoreCase);
 		}
 
 		// -------------------------------------------------------------------
@@ -1209,49 +1220,8 @@ namespace AutoCnC.Launcher
 
 		void OpenTrainingRun()
 		{
-			if (lastRun != null)
-				OpenFolder(lastRun.RunDirectory, "No training run yet");
-		}
-
-		void SavePlayerFeedback(TrainingRun run, string feedback)
-		{
-			if (run == null || continuousBox.Checked || continuousLoop.IsRunning)
-				return;
-
-			try
-			{
-				run.SetPlayerFeedback(feedback);
-				if (lastRun != null && SamePath(run.RunDirectory, lastRun.RunDirectory))
-					lastRun = run;
-
-				if (run.IsEditable &&
-					File.Exists(run.BattleLogPath) &&
-					File.Exists(run.TelemetryPath) &&
-					File.Exists(run.DecisionTracePath))
-					EnsureAgentContext(run);
-
-				resultsWindow?.MarkFeedbackSaved(run);
-			}
-			catch (ArgumentException ex)
-			{
-				MessageBox.Show(resultsWindow, ex.Message, "AutoC&C",
-					MessageBoxButtons.OK, MessageBoxIcon.Warning);
-			}
-			catch (InvalidOperationException ex)
-			{
-				MessageBox.Show(resultsWindow, ex.Message, "AutoC&C",
-					MessageBoxButtons.OK, MessageBoxIcon.Warning);
-			}
-			catch (IOException ex)
-			{
-				MessageBox.Show(resultsWindow, $"Could not save the battle assessment: {ex.Message}", "AutoC&C",
-					MessageBoxButtons.OK, MessageBoxIcon.Error);
-			}
-			catch (UnauthorizedAccessException ex)
-			{
-				MessageBox.Show(resultsWindow, $"Could not save the battle assessment: {ex.Message}", "AutoC&C",
-					MessageBoxButtons.OK, MessageBoxIcon.Error);
-			}
+			if (trainingRun != null)
+				OpenFolder(trainingRun.RunDirectory, "No training run selected");
 		}
 
 		void ConfigureAgent()
@@ -1331,8 +1301,15 @@ namespace AutoCnC.Launcher
 		/// </remarks>
 		void WatchReplay()
 		{
+			if (LastRunMatchesSelectedBot() && lastRun?.HasRecordedBattle == true &&
+				File.Exists(lastRun.ReplayPath))
+			{
+				WatchReplay(lastRun);
+				return;
+			}
+
 			var replay = NewestReplay();
-			if (repo == null || replay == null)
+			if (repo == null || replay == null || runner.IsRunning || continuousLoop.IsRunning)
 				return;
 
 			Save();
@@ -1532,9 +1509,11 @@ namespace AutoCnC.Launcher
 				ExecutionMode = IsHeadlessSelected()
 					? BattleExecutionModes.Headless
 					: BattleExecutionModes.Rendered
-			});
+			}, trainingRunsRoot);
 			lastRun = activeRun;
+			trainingRun = activeRun;
 			settings.LastTrainingRunDirectory = activeRun.RunDirectory;
+			settings.SelectedTrainingRunDirectory = activeRun.RunDirectory;
 			PersistSettings();
 			battleStartedUtc = DateTime.UtcNow;
 			replayBeforeBattle = NewestReplay()?.FullName;
@@ -1545,7 +1524,7 @@ namespace AutoCnC.Launcher
 			matchLog.Watch(activeRun.TelemetryPath);
 			battleLog.Watch(activeRun.BattleLogPath);
 
-			ShowResultsWindow();
+			ShowResultsWindow().ShowBattle();
 			ShowOutputWindow().ClearBattle();
 
 			matchTimer.Start();
@@ -1598,8 +1577,7 @@ namespace AutoCnC.Launcher
 				lastRun = finishedRun;
 				settings.LastTrainingRunDirectory = finishedRun.RunDirectory;
 				PersistSettings();
-				if (resultsWindow != null)
-					RefreshResultsHistory();
+				RefreshResultsHistory();
 			}
 		}
 
@@ -1613,29 +1591,30 @@ namespace AutoCnC.Launcher
 				outputWindow.ShowBattle(finished);
 		}
 
-		bool ImproveBot(bool automatic = false)
+		bool ImproveBot(bool automatic = false, bool feedbackReviewed = false)
 		{
-			var previousAgent = lastRun?.Manifest.Agent;
-			var canRetry = previousAgent == null || previousAgent.ChangeCount == 0 ||
-				previousAgent.RestoredUtc != null ||
-				previousAgent.ExitCode is int previousExitCode && previousExitCode != 0;
-			if (repo == null || !LastRunMatchesSelectedBot() ||
-				lastRun?.IsEditable != true || !canRetry)
+			var run = automatic ? lastRun : trainingRun;
+			var previousAgent = run?.Manifest.Agent;
+			if (runner.IsRunning || activeJob != null || battleRunning ||
+				repo == null || !RunMatchesSelectedBot(run) || run?.CanImprove != true)
 			{
-				if (automatic)
-					ReportAutomationFailure(
-						"The finished battle is not eligible for another agent improvement.",
-						MessageBoxIcon.Error, automatic: true);
+				ReportAutomationFailure(
+					"The selected battle is not eligible for another agent improvement, or an operation is already running.",
+					MessageBoxIcon.Error, automatic);
 				return false;
 			}
 
+			if (!automatic && !feedbackReviewed && run.HasRecordedBattle &&
+				!run.HasPlayerFeedback && !ReviewBattleFeedback(run, beforeImprovement: true))
+				return false;
+
 			try
 			{
-				if (!File.Exists(lastRun.SnapshotManifestPath))
-					WorkspaceSnapshot.Capture(lastRun);
+				if (!File.Exists(run.SnapshotManifestPath))
+					WorkspaceSnapshot.Capture(run);
 
-				if (!File.Exists(lastRun.GameRulesPath))
-					AgentRulesExporter.Export(repo, lastRun.GameRulesPath);
+				if (!File.Exists(run.GameRulesPath))
+					AgentRulesExporter.Export(repo, run.GameRulesPath);
 
 				var previousCancelled = previousAgent is { Cancelled: true };
 				var recovering = !previousCancelled &&
@@ -1645,15 +1624,15 @@ namespace AutoCnC.Launcher
 				// A stopped attempt is archived too. Its transcript is the only record of how far
 				// it got, and AgentStarted deletes the live one.
 				var archivedTranscript = recovering || previousCancelled
-					? lastRun.ArchiveAgentAttempt()
+					? run.ArchiveAgentAttempt()
 					: null;
 				var recoveryContext = recovering
 					? TrainingAgent.BuildRecoveryContext(previousAgent, archivedTranscript)
 					: TrainingAgent.BuildCancellationContext(previousAgent, archivedTranscript);
-				TrainingAgent.Prepare(lastRun, repo.AgentGameGuide, lastRun.GameRulesPath,
+				TrainingAgent.Prepare(run, repo.AgentGameGuide, run.GameRulesPath,
 					CurrentPromptTemplate(), settings.AgentCommand, settings.AgentArguments,
 					recoveryContext);
-				lastRun.AgentStarted(settings.AgentCommand, archivedTranscript, recovering);
+				run.AgentStarted(settings.AgentCommand, archivedTranscript, recovering);
 			}
 			catch (InvalidOperationException ex)
 			{
@@ -1673,22 +1652,24 @@ namespace AutoCnC.Launcher
 				return false;
 			}
 
+			trainingRun = run;
+			activeTrainingRun = run;
 			Save();
-			ShowImprovementWindow().StartAgentRun(lastRun);
+			ShowImprovementWindow().StartAgentRun(run);
 			queue.Clear();
 			queue.Enqueue(new ScriptJob
 			{
-				Title = "Analyzing the fight and improving the bot",
+				Title = $"Analyzing battle {run.Manifest.CreatedUtc.ToLocalTime():g} and improving the bot",
 				ScriptPath = repo.TrainBotScript,
 				Arguments =
 				[
-					"-BattleBot", lastRun.Manifest.BotProject,
-					"-RunDirectory", lastRun.RunDirectory,
-					"-AgentConfiguration", lastRun.AgentConfigurationPath
+					"-BattleBot", run.Manifest.BotProject,
+					"-RunDirectory", run.RunDirectory,
+					"-AgentConfiguration", run.AgentConfigurationPath
 				],
 				PreserveColor = true,
 				Output = AppendImprovementOutput,
-				Completed = FinishImprovement
+				Completed = code => FinishImprovement(run, code)
 			});
 
 			RunNext();
@@ -1707,15 +1688,15 @@ namespace AutoCnC.Launcher
 			MessageBox.Show(this, message, "AutoC&C", MessageBoxButtons.OK, icon);
 		}
 
-		void FinishImprovement(int exitCode)
+		void FinishImprovement(TrainingRun run, int exitCode)
 		{
-			if (lastRun == null)
-				return;
+			if (SamePath(activeTrainingRun?.RunDirectory, run.RunDirectory))
+				activeTrainingRun = null;
 
 			TrainingAgentExecutionStatus status = null;
 			try
 			{
-				status = lastRun.ReadAgentStatus();
+				status = run.ReadAgentStatus();
 			}
 			catch (IOException ex)
 			{
@@ -1735,8 +1716,8 @@ namespace AutoCnC.Launcher
 			// Stopping a repair is not the same as stopping an improvement. The fault it was sent
 			// to fix is still there, so that stays recorded as a failure — otherwise the next
 			// round is told everything is fine and the original fault is quietly forgotten.
-			var repairing = lastRun.Manifest.Agent?.Repairing == true ||
-				string.Equals(lastRun.Manifest.Status, "verifying", StringComparison.Ordinal);
+			var repairing = run.Manifest.Agent?.Repairing == true ||
+				string.Equals(run.Manifest.Status, "verifying", StringComparison.Ordinal);
 			var cancelled = failed && stopRequested && !repairing;
 			var failurePhase = failed ? cancelled ? "cancelled" : status?.Phase ?? "process" : null;
 			var failureMessage = failed
@@ -1745,43 +1726,42 @@ namespace AutoCnC.Launcher
 					: status?.Message ?? $"Improvement process exited with code {exitCode}."
 				: null;
 			var suggestedNextPrompt = !failed
-				? TrainingAgent.FindSuggestedNextPrompt(runner.LastOutput, lastRun)
+				? TrainingAgent.FindSuggestedNextPrompt(runner.LastOutput, run)
 				: null;
 			try
 			{
-				var changes = WorkspaceSnapshot.Compare(lastRun);
-				lastRun.AgentFinished(exitCode, changes.Count, suggestedNextPrompt,
+				var changes = WorkspaceSnapshot.Compare(run);
+				run.AgentFinished(exitCode, changes.Count, suggestedNextPrompt,
 					failurePhase, failureMessage, cancelled);
 			}
 			catch (InvalidDataException ex)
 			{
 				AppendImprovementOutput($"Could not record the agent's changes: {ex.Message}");
-				lastRun.AgentFinished(exitCode, TrainingAgentResult.UnknownChangeCount, suggestedNextPrompt,
+				run.AgentFinished(exitCode, TrainingAgentResult.UnknownChangeCount, suggestedNextPrompt,
 					failurePhase, failureMessage, cancelled);
 			}
 			catch (IOException ex)
 			{
 				AppendImprovementOutput($"Could not record the agent's changes: {ex.Message}");
-				lastRun.AgentFinished(exitCode, TrainingAgentResult.UnknownChangeCount, suggestedNextPrompt,
+				run.AgentFinished(exitCode, TrainingAgentResult.UnknownChangeCount, suggestedNextPrompt,
 					failurePhase, failureMessage, cancelled);
 			}
 			catch (System.Text.Json.JsonException ex)
 			{
 				AppendImprovementOutput($"Could not record the agent's changes: {ex.Message}");
-				lastRun.AgentFinished(exitCode, TrainingAgentResult.UnknownChangeCount, suggestedNextPrompt,
+				run.AgentFinished(exitCode, TrainingAgentResult.UnknownChangeCount, suggestedNextPrompt,
 					failurePhase, failureMessage, cancelled);
 			}
 
 			// Deliberately outside the block above: this only draws what was just recorded, and a
 			// display fault must not be able to rewrite the durable change count with a zero.
 			if (!closing && improvementWindow != null)
-				improvementWindow.CompleteAgentRun(lastRun);
+				improvementWindow.CompleteAgentRun(run);
 
 			if (exitCode == 0 && continuousLoop.Stage == ContinuousTrainingStage.Improving)
-				AcceptContinuousPrompt(lastRun, suggestedNextPrompt);
+				AcceptContinuousPrompt(run, suggestedNextPrompt);
 
-			if (resultsWindow != null)
-				RefreshResultsHistory();
+			RefreshFeedbackRun(run);
 		}
 
 		void AcceptContinuousPrompt(TrainingRun run, string promptTemplate)
@@ -1809,14 +1789,16 @@ namespace AutoCnC.Launcher
 
 		void RetryVerification()
 		{
-			if (repo == null || lastRun?.Manifest.Agent == null ||
-				!LastRunMatchesSelectedBot() ||
-				!string.Equals(lastRun.Manifest.Agent.FailurePhase, "verification",
+			var run = trainingRun;
+			if (OperationInProgress || repo == null || run?.Manifest.Agent == null ||
+				!RunMatchesSelectedBot(run) ||
+				!string.Equals(run.Manifest.Agent.FailurePhase, "verification",
 					StringComparison.OrdinalIgnoreCase))
 				return;
 
-			lastRun.VerificationStarted();
-			ShowImprovementWindow().StartVerificationRun(lastRun);
+			run.VerificationStarted();
+			activeTrainingRun = run;
+			ShowImprovementWindow().StartVerificationRun(run);
 			queue.Clear();
 			queue.Enqueue(new ScriptJob
 			{
@@ -1824,12 +1806,12 @@ namespace AutoCnC.Launcher
 				ScriptPath = repo.VerifyBotScript,
 				Arguments =
 				[
-					"-BattleBot", lastRun.Manifest.BotProject,
-					"-RunDirectory", lastRun.RunDirectory
+					"-BattleBot", run.Manifest.BotProject,
+					"-RunDirectory", run.RunDirectory
 				],
 				PreserveColor = true,
 				Output = AppendImprovementOutput,
-				Completed = FinishImprovement
+				Completed = code => FinishImprovement(run, code)
 			});
 
 			RunNext();
@@ -1837,19 +1819,20 @@ namespace AutoCnC.Launcher
 
 		void ReviewImprovement()
 		{
-			if (repo == null || lastRun?.IsEditable != true)
+			var run = activeTrainingRun ?? trainingRun;
+			if (repo == null || run?.IsEditable != true || !RunMatchesSelectedBot(run))
 				return;
 
 			try
 			{
-				if (!File.Exists(lastRun.PromptPath) ||
-					!File.Exists(lastRun.GameGuidePath) ||
-					!File.Exists(lastRun.GameRulesPath) ||
-					!File.Exists(lastRun.FightManifestPath))
-					EnsureAgentContext(lastRun);
+				if (!File.Exists(run.PromptPath) ||
+					!File.Exists(run.GameGuidePath) ||
+					!File.Exists(run.GameRulesPath) ||
+					!File.Exists(run.FightManifestPath))
+					EnsureAgentContext(run);
 
-				ShowImprovementWindow().ShowAgentRun(lastRun,
-					promptFirst: lastRun.Manifest.Agent == null);
+				ShowImprovementWindow().ShowAgentRun(run,
+					promptFirst: run.Manifest.Agent == null);
 			}
 			catch (IOException ex)
 			{
@@ -1930,22 +1913,24 @@ namespace AutoCnC.Launcher
 
 		void RestoreIteration()
 		{
-			if (lastRun == null || !LastRunMatchesSelectedBot() ||
-				lastRun.Manifest.Agent?.ChangeCount == 0)
+			var run = trainingRun;
+			if (OperationInProgress || run == null || !RunMatchesSelectedBot(run) ||
+				run.Manifest.Agent?.ChangeCount == 0)
 				return;
 
 			var answer = MessageBox.Show(this,
-				"Restore every source file to the snapshot taken immediately before the improvement agent ran?",
+				$"Restore every source file to the snapshot for the battle from {run.Manifest.CreatedUtc.ToLocalTime():g}?\n\n" +
+				$"Session: {run.Manifest.Id}\n\nThis replaces the bot's current source with its pre-improvement snapshot.",
 				"Restore previous iteration", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
 			if (answer != DialogResult.Yes)
 				return;
 
 			try
 			{
-				WorkspaceSnapshot.Restore(lastRun);
-				ShowImprovementWindow().ShowAgentRun(lastRun);
+				WorkspaceSnapshot.Restore(run);
+				ShowImprovementWindow().ShowAgentRun(run);
 				Status("The previous source iteration has been restored.");
-				UpdateEnabledState();
+				RefreshFeedbackRun(run);
 			}
 			catch (InvalidDataException ex)
 			{
@@ -1991,6 +1976,7 @@ namespace AutoCnC.Launcher
 			if (queue.Count == 0)
 			{
 				var completedBattle = battleRunning;
+				var automatedBattle = continuousLoop.IsRunning;
 				if (completedBattle)
 					StopWatchingBattle("finished");
 
@@ -2024,6 +2010,11 @@ namespace AutoCnC.Launcher
 
 				Status("Done.");
 				UpdateEnabledState();
+				if (completedBattle && BattleFeedback.ShouldPrompt(lastRun, automatedBattle))
+				{
+					SelectStation(1);
+					ReviewBattleFeedback(lastRun);
+				}
 				return;
 			}
 
@@ -2089,8 +2080,8 @@ namespace AutoCnC.Launcher
 				queue.Clear();
 				if (completed?.Output == null)
 					ShowOutputWindow();
-				else if (improvementWindow == null && lastRun != null)
-					ShowImprovementWindow().ShowAgentRun(lastRun);
+				else if (improvementWindow == null && trainingRun != null)
+					ShowImprovementWindow().ShowAgentRun(trainingRun);
 				UpdateEnabledState();
 				return;
 			}
@@ -2212,6 +2203,7 @@ namespace AutoCnC.Launcher
 			settings.RunTests = runTestsBox.Checked;
 			settings.ContinuousImprovement = continuousBox.Checked;
 			settings.LastTrainingRunDirectory = lastRun?.RunDirectory;
+			settings.SelectedTrainingRunDirectory = trainingRun?.RunDirectory;
 			PersistSettings();
 		}
 

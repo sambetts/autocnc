@@ -38,6 +38,7 @@ namespace AutoCnC.Launcher
 		public bool RunTests { get; set; }
 		public bool ContinuousImprovement { get; set; }
 		public string LastTrainingRunDirectory { get; set; }
+		public string SelectedTrainingRunDirectory { get; set; }
 		public string AgentCommand { get; set; } = "copilot";
 		public string[] AgentArguments { get; set; } = TrainingAgent.DefaultArguments;
 		public string AgentPromptTemplate { get; set; }

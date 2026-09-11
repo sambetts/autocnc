@@ -259,8 +259,13 @@ The launcher preserves every fight as a unique training run under
 
 That is enough to correlate cause and effect without giving strategy code omniscient information
 during the match. `decisions.jsonl` is diagnostic output written by the host; a bot cannot read it.
-The Results window can save the player's assessment of why an individual battle won or lost in
-`manifest.json` and `fight.json`; `{result}` includes it when that battle is sent to an agent.
+**Proving ground**, **AI training**, and **History & trends** expose a dedicated feedback action
+for each recorded battle. It saves the player's observations in `manifest.json` and `fight.json`;
+`{result}` includes them when that battle is sent to an agent. Manual rendered battles ask for
+feedback after finishing, and manual improvement offers another chance before starting.
+Headless battles require successful playback of that run's captured replay before feedback can be
+added or edited. `ReplayWatchedUtc` records that review across restarts; failed or cancelled
+playback cannot mark a battle as watched. Older feedback remains readable.
 
 `game-rules.json` is generated from `ModData.DefaultRules` after OpenRA has merged the inherited
 Tiberian Dawn YAML with AutoC&C overrides. It is a snapshot of the actual engine build, not a
@@ -275,6 +280,13 @@ and all shared context before and after the run. Review the changed files before
 and removes files added by that agent run; build output and git metadata are never part of the
 snapshot.
 
+**Train from battle** in AI training chooses which recording supplies the evidence. The selection
+is independent of the latest fight and survives launcher restarts. Its replay, feedback, prompt,
+verification retry, and restore snapshot stay tied to that run; training still edits the bot's
+current source, not an automatic checkout of the source revision that originally fought.
+Only battles with an editable bot and the required evidence can start training, and existing
+improvement/restore safeguards still apply.
+
 The Fight and Units & weapons views are lazy JSON trees: expand only the objects or actors you
 need. Every agent is also asked to draft a complete replacement prompt template for the next
 round—not an extra hint. It appears in **Next prompt***, where the player can edit and approve it.
@@ -283,15 +295,24 @@ required placeholders such as `{workspace}`, `{telemetry}`, `{result}`, and
 `{nextPromptContract}`. The initial template lives at `docs/agent-prompt-template.md`; an approved
 replacement is saved in the player's launcher settings.
 
-**History & trends** reads every compatible run for the selected bot. It compares the final units,
-army value, buildings, base value, and kills for the local side against the opponents' total, plus
-an outcome-colored duration line that makes faster wins and slower losses visible.
+**History & trends** lists every compatible recorded session for the selected bot, newest first,
+with explicit provided/missing feedback status, outcome, duration, and the local side's final stats.
+Select a row to read or edit its feedback, watch that battle's replay, or open its charts.
+Right-click **Train from this battle** to open AI training with that recording selected.
+**Delete session** permanently removes a completed run and its saved evidence after confirmation,
+including its feedback and restore snapshots, but never deletes the current bot source or original
+OpenRA replay. History, training selection, and trends refresh immediately.
+Incomplete and unrecorded sessions remain visible without invented zero-value stats. The **Trends**
+tab compares final units, army value, buildings, base value, and kills for the local side against
+the opponents' total, plus an outcome-colored duration line.
 
 Checking **Continuous improvement** starts a stateful Fight -> improve -> Fight loop. Every cycle
 still has its own source revision, evidence, reversible snapshot, independent verification, and
 result. A valid agent-authored next prompt is accepted automatically; any battle, agent, test, or
-build failure stops the loop. Player assessments are disabled because continuous mode does not
-pause after a battle.
+build failure stops the loop. Each automatic improvement uses the battle just fought, rather than
+an older manually selected battle. The loop never pauses for feedback. Once it stops, its recorded
+battles can be reviewed from history; leaving the repeat checkbox selected does not disable
+feedback while idle.
 
 An agent exit and a host verification failure are recorded separately. Verification always cleans
 the bot's generated `bin`/`obj` output before testing. If it still fails, **Retry verification**

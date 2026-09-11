@@ -92,12 +92,13 @@ namespace AutoCnC.Launcher
 
 			const int Gap = 8;
 			const int Narrowest = 560;
+			var minimumWidth = Math.Max(Narrowest, MinimumSize.Width);
 
 			var left = launcher.Bounds.Right + Gap;
-			if (area.Right - left < Narrowest)
-				left = Math.Max(area.Left, area.Right - Narrowest);
+			if (area.Right - left < minimumWidth)
+				left = Math.Max(area.Left, area.Right - minimumWidth);
 
-			var width = Math.Max(Narrowest, area.Right - left - Gap);
+			var width = Math.Max(minimumWidth, area.Right - left - Gap);
 			var top = area.Top + (int)(area.Height * topFraction);
 			var height = (int)(area.Height * heightFraction) - Gap;
 

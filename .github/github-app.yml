@@ -1,0 +1,12 @@
+instructions: |
+  When a coding task is complete and its relevant validation has passed, commit
+  the task's changes and merge them into local main by default. The main checkout
+  should be ready for the user to test without switching worktrees.
+
+  Use an app-managed session attached to main when integration requires working
+  in that checkout. Preserve unrelated uncommitted changes and other sessions'
+  work. Do not force an integration through conflicting local changes; report
+  the conflict instead. Honor explicit requests to keep a task on its branch.
+
+  This default applies to local main. Push to GitHub or create a pull request
+  only when the user asks.

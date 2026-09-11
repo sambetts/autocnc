@@ -109,6 +109,35 @@ namespace AutoCnC.Launcher.Tests
 			}
 		}
 
+		[TestCase(0)]
+		[TestCase(23)]
+		public void ReplayLauncherPropagatesTheGameExitCode(int gameExitCode)
+		{
+			var directory = TempDirectory();
+			var launcher = Path.Combine(directory, "scripts", "launch.ps1");
+			var engine = Path.Combine(directory, "engine", "bin");
+			Directory.CreateDirectory(Path.GetDirectoryName(launcher));
+			Directory.CreateDirectory(engine);
+			var repository = RepoLayout.Discover(null, [AppContext.BaseDirectory]);
+			File.WriteAllText(launcher, File.ReadAllText(repository.LaunchScript).Replace(
+				"$ErrorActionPreference = 'Stop'",
+				$"$ErrorActionPreference = 'Stop'\nfunction global:dotnet {{ $global:LASTEXITCODE = {gameExitCode} }}",
+				StringComparison.Ordinal));
+			File.WriteAllText(Path.Combine(engine, "OpenRA.dll"), "engine fixture");
+			var replay = Path.Combine(directory, "recorded.orarep");
+			File.WriteAllText(replay, "replay fixture");
+			try
+			{
+				var result = Run(launcher, directory, ["-Replay", replay]);
+				Assert.That(result.ExitCode, Is.EqualTo(gameExitCode == 0 ? 0 : 1),
+					"The command host must report a failed replay rather than unlocking feedback.");
+			}
+			finally
+			{
+				Directory.Delete(directory, true);
+			}
+		}
+
 		[Test]
 		public void ColorPreservingJobsExposeAnsiStyles()
 		{

@@ -57,6 +57,9 @@ namespace AutoCnC.Launcher
 			return new TrainingHistory(runs, Warnings);
 		}
 
+		public TrainingHistory WithoutRun(TrainingRun run) => run == null ? this :
+			new TrainingHistory(Runs.Where(existing => !SamePath(existing.RunDirectory, run.RunDirectory)).ToList(), Warnings);
+
 		public static TrainingHistory Load(string botPath, string runsRoot = null)
 		{
 			if (string.IsNullOrWhiteSpace(botPath))

@@ -17,23 +17,15 @@ using System.Windows.Forms;
 
 namespace AutoCnC.Launcher
 {
-	/// <summary>Live battle graphs, historical KPI trends, and per-battle player feedback.</summary>
+	/// <summary>Recorded sessions, live battle graphs, trends, and access to per-battle feedback.</summary>
 	public sealed class ResultsWindow : BattleWindow
 	{
-		sealed class BattleChoice
-		{
-			public int Number { get; init; }
-			public TrainingRun Run { get; init; }
-
-			public override string ToString()
-			{
-				var result = Run.Manifest.Result;
-				var outcome = result?.Outcome ?? (Run.Manifest.CompletedUtc == null ? "running" : Run.Manifest.Status);
-				var duration = result == null ? "" : $" in {Csv.Clock(result.DurationSeconds)}";
-				var feedback = string.IsNullOrWhiteSpace(result?.PlayerFeedback) ? "" : " [feedback]";
-				return $"#{Number}  {Run.Manifest.CreatedUtc.ToLocalTime():g}  {outcome}{duration}{feedback}";
-			}
-		}
+		static readonly (string Heading, int Width)[] SessionColumns =
+		[
+			("Battle", 55), ("Recorded", 140), ("Result", 80), ("User feedback", 135), ("Duration", 75),
+			("Units", 65), ("Army", 80), ("Buildings", 75), ("Base", 80), ("Kills", 65),
+			("Losses", 65), ("Cash", 75), ("Execution", 85)
+		];
 
 		readonly MatchLog liveLog;
 		readonly MatchChart[] battleCharts;
@@ -42,33 +34,53 @@ namespace AutoCnC.Launcher
 		readonly Label result;
 		readonly Label historySummary;
 		readonly ScoreStrip scores;
-		TextBox feedback;
-		Button saveFeedback;
+		readonly CommandTabs views;
+		readonly TabPage historyPage;
+		readonly TabPage battlePage;
+		readonly ListView sessions;
+		readonly Button deleteSession;
+		readonly ContextMenuStrip sessionMenu;
+		readonly ToolStripMenuItem trainFromBattle;
+		readonly ToolStripMenuItem deleteFromMenu;
+		TextBox feedbackPreview;
+		Button reviewFeedback;
+		Button replay;
+		Button statistics;
 		Label feedbackStatus;
 
 		MatchLog shownLog;
 		TrainingHistory history = TrainingHistory.Empty;
 		TrainingRun currentRun;
 		TrainingRun selectedRun;
-		bool continuousMode;
+		bool operationBusy;
 		bool loadingBattles;
 		bool followCurrentBattle = true;
 
-		public event Action<TrainingRun, string> PlayerFeedbackSaved;
+		public event Action<TrainingRun> FeedbackRequested;
+		public event Action<TrainingRun> ReplayRequested;
+		public event Action<TrainingRun> DeleteRequested;
+		public event Action<TrainingRun> TrainRequested;
 
-		internal bool CanSaveFeedback => saveFeedback.Enabled;
-		internal string FeedbackText => feedback.Text;
+		internal bool CanReviewFeedback => reviewFeedback.Enabled;
+		internal bool CanWatchReplay => replay.Enabled;
+		internal bool CanDeleteSession => deleteSession.Enabled;
+		internal bool CanTrainFromBattle => trainFromBattle.Enabled;
+		internal string FeedbackText => feedbackPreview.Text;
+		internal string FeedbackActionText => reviewFeedback.Text;
 		internal string HistorySummaryText => historySummary.Text;
+		internal ListView RecordedSessions => sessions;
+		internal TrainingRun SelectedRun => selectedRun;
 		internal int SelectedBattleIndex
 		{
 			get => battlePicker.SelectedIndex;
 			set => battlePicker.SelectedIndex = value;
 		}
-		internal void SetFeedbackText(string value) => feedback.Text = value;
-
 		public ResultsWindow(MatchLog log)
 			: base("AutoC&C - Battle results")
 		{
+			SuspendLayout();
+			AutoScaleMode = AutoScaleMode.Dpi;
+			AutoScaleDimensions = new SizeF(96, 96);
 			liveLog = log;
 			shownLog = log;
 
@@ -82,26 +94,30 @@ namespace AutoCnC.Launcher
 			battlePicker = new ComboBox
 			{
 				DropDownStyle = ComboBoxStyle.DropDownList,
-				Width = 480,
+				Dock = DockStyle.Fill,
+				AccessibleName = "Selected recorded battle",
 				Margin = new Padding(8, 4, 8, 4)
 			};
 			battlePicker.SelectedIndexChanged += (_, _) => SelectBattle();
 
-			var pickerRow = new FlowLayoutPanel
+			var pickerRow = new TableLayoutPanel
 			{
 				Dock = DockStyle.Fill,
 				AutoSize = true,
+				ColumnCount = 2,
 				BackColor = Paper,
 				Margin = new Padding(0)
 			};
+			pickerRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+			pickerRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
 			pickerRow.Controls.Add(new Label
 			{
 				Text = "Battle:",
 				AutoSize = true,
 				ForeColor = Faded,
 				Margin = new Padding(8, 8, 0, 0)
-			});
-			pickerRow.Controls.Add(battlePicker);
+			}, 0, 0);
+			pickerRow.Controls.Add(battlePicker, 1, 0);
 
 			result = new Label
 			{
@@ -121,13 +137,12 @@ namespace AutoCnC.Launcher
 			battleGrid.SetColumnSpan(killsChart, 2);
 
 			scores = new ScoreStrip { Dock = DockStyle.Fill, Log = log };
-			var feedbackPanel = BuildFeedbackPanel();
 
 			var battleLayout = new TableLayoutPanel
 			{
 				Dock = DockStyle.Fill,
 				ColumnCount = 1,
-				RowCount = 5,
+				RowCount = 4,
 				BackColor = Paper
 			};
 			battleLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -135,12 +150,10 @@ namespace AutoCnC.Launcher
 			battleLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, Font.Height + 12));
 			battleLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 			battleLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 3 * Font.Height + 16));
-			battleLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 4 * Font.Height + 28));
 			battleLayout.Controls.Add(pickerRow, 0, 0);
 			battleLayout.Controls.Add(result, 0, 1);
 			battleLayout.Controls.Add(battleGrid, 0, 2);
 			battleLayout.Controls.Add(scores, 0, 3);
-			battleLayout.Controls.Add(feedbackPanel, 0, 4);
 
 			iterationCharts =
 			[
@@ -164,49 +177,184 @@ namespace AutoCnC.Launcher
 
 			historySummary = new Label
 			{
-				Dock = DockStyle.Top,
-				AutoSize = false,
-				Height = 2 * Font.Height + 12,
-				Padding = new Padding(10, 5, 10, 0),
+				Dock = DockStyle.Fill,
+				AutoSize = true,
+				Padding = new Padding(10, 5, 10, 5),
 				ForeColor = Faded,
-				Text = "No completed battles yet."
+				Text = "No recorded sessions yet."
 			};
 			var trendsPage = new TabPage("Trends") { BackColor = Paper, Padding = new Padding(2) };
 			trendsPage.Controls.Add(trendGrid);
-			trendsPage.Controls.Add(historySummary);
 
-			var battlePage = new TabPage("Battle") { BackColor = Paper, Padding = new Padding(2) };
+			sessions = new ListView
+			{
+				Dock = DockStyle.Fill, View = View.Details, FullRowSelect = true,
+				MultiSelect = false, HideSelection = false, ShowItemToolTips = true,
+				BackColor = CommandTheme.Field, ForeColor = Ink, BorderStyle = BorderStyle.FixedSingle,
+				AccessibleName = "Recorded battles"
+			};
+			foreach (var (heading, width) in SessionColumns)
+				sessions.Columns.Add(heading, width);
+			sessions.SelectedIndexChanged += (_, _) =>
+			{
+				if (!loadingBattles && sessions.SelectedItems.Count > 0)
+					battlePicker.SelectedIndex = ((RecordedBattleChoice)sessions.SelectedItems[0].Tag).Number - 1;
+			};
+			sessions.ItemActivate += (_, _) => ShowBattle();
+			sessionMenu = new ContextMenuStrip();
+			trainFromBattle = new ToolStripMenuItem("Train from this battle", null, (_, _) => RequestTraining());
+			deleteFromMenu = new ToolStripMenuItem("Delete session", null, (_, _) => RequestSessionDeletion());
+			sessionMenu.Items.Add(trainFromBattle);
+			sessionMenu.Items.Add(new ToolStripSeparator());
+			sessionMenu.Items.Add(deleteFromMenu);
+			sessionMenu.Opening += (_, e) =>
+			{
+				e.Cancel = sessions.SelectedItems.Count == 0;
+				UpdateFeedbackState();
+			};
+			sessions.ContextMenuStrip = sessionMenu;
+			sessions.MouseDown += (_, e) =>
+			{
+				if (e.Button == MouseButtons.Right)
+					SelectContextBattle(e.Location);
+			};
+			historyPage = new TabPage("Recorded sessions") { BackColor = Paper, Padding = new Padding(2) };
+			var historyLayout = new TableLayoutPanel
+			{
+				Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Margin = new Padding(0)
+			};
+			historyLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+			historyLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+			historyLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+			var historyActions = new TableLayoutPanel
+			{
+				AutoSize = true, Dock = DockStyle.Fill, ColumnCount = 2, Margin = new Padding(0, 0, 0, 4)
+			};
+			historyActions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+			historyActions.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+			historyActions.Controls.Add(new Label
+			{
+				Text = "Newest first. Stats are for your bot.",
+				AutoSize = true, Dock = DockStyle.Fill, ForeColor = Faded,
+				Padding = new Padding(6), TextAlign = ContentAlignment.MiddleLeft
+			}, 0, 0);
+			deleteSession = new ActionButton
+			{
+				Text = "&Delete session", ForeColor = CommandTheme.Danger,
+				AccessibleName = "Delete selected recorded session",
+				AccessibleDescription = "Permanently delete this session and its saved evidence after confirmation.",
+				Margin = new Padding(4, 0, 3, 0)
+			};
+			deleteSession.Click += (_, _) => RequestSessionDeletion();
+			historyActions.Controls.Add(deleteSession, 1, 0);
+			historyLayout.Controls.Add(historyActions, 0, 0);
+			historyLayout.Controls.Add(sessions, 0, 1);
+			historyPage.Controls.Add(historyLayout);
+
+			battlePage = new TabPage("Battle charts") { BackColor = Paper, Padding = new Padding(2) };
 			battlePage.Controls.Add(battleLayout);
-			var views = new CommandTabs { Dock = DockStyle.Fill };
+			views = new CommandTabs { Dock = DockStyle.Fill };
+			views.TabPages.Add(historyPage);
 			views.TabPages.Add(battlePage);
 			views.TabPages.Add(trendsPage);
-			Controls.Add(views);
+			views.SelectedIndexChanged += (_, _) => UpdateTitle();
+
+			var layout = new TableLayoutPanel
+			{
+				Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, Margin = new Padding(0)
+			};
+			layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+			layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+			layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+			layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+			layout.Controls.Add(historySummary, 0, 0);
+			layout.Controls.Add(views, 0, 1);
+			layout.Controls.Add(BuildFeedbackPanel(), 0, 2);
+			Controls.Add(layout);
+			UpdateFeedbackState();
+			ResumeLayout(true);
 		}
 
-		public void SetHistory(TrainingHistory value, TrainingRun current, bool continuous)
+		protected override void OnLoad(EventArgs e)
+		{
+			base.OnLoad(e);
+			ScaleSessionColumns();
+		}
+
+		protected override void OnDpiChanged(DpiChangedEventArgs e)
+		{
+			base.OnDpiChanged(e);
+			ScaleSessionColumns();
+		}
+
+		void ScaleSessionColumns()
+		{
+			for (var index = 0; index < SessionColumns.Length; index++)
+				sessions.Columns[index].Width = SessionColumns[index].Width * DeviceDpi / 96;
+		}
+
+		public void ShowRecordedSessions()
+		{
+			views.SelectedTab = historyPage;
+			sessions.Focus();
+			UpdateTitle();
+		}
+
+		public void ShowBattle()
+		{
+			views.SelectedTab = battlePage;
+			UpdateTitle();
+		}
+
+		public void SetOperationState(bool busy)
+		{
+			operationBusy = busy;
+			UpdateFeedbackState();
+		}
+
+		public void SetHistory(TrainingHistory value, TrainingRun current, bool busy)
 		{
 			var previouslySelected = selectedRun?.RunDirectory;
 			var wasFollowingCurrent = followCurrentBattle;
-			var draftFeedback = feedback.Text;
-			var hadDraftFeedback = saveFeedback.Enabled;
-			history = value ?? TrainingHistory.Empty;
+			history = (value ?? TrainingHistory.Empty).WithRun(current);
 			currentRun = current;
-			continuousMode = continuous;
-
-			var runs = history.Runs
-				.Select(run => SameRun(run, current) ? current : run)
-				.Where(run => run != null)
-				.ToList();
-			if (current != null && !runs.Any(run => SameRun(run, current)))
-			{
-				runs.Add(current);
-				runs.Sort((left, right) => left.Manifest.CreatedUtc.CompareTo(right.Manifest.CreatedUtc));
-			}
+			operationBusy = busy;
+			var runs = history.Runs.ToList();
 
 			loadingBattles = true;
 			battlePicker.Items.Clear();
 			for (var index = 0; index < runs.Count; index++)
-				battlePicker.Items.Add(new BattleChoice { Number = index + 1, Run = runs[index] });
+				battlePicker.Items.Add(new RecordedBattleChoice { Number = index + 1, Run = runs[index] });
+
+			var iterations = history.Iterations.ToDictionary(iteration => iteration.Run.RunDirectory,
+				StringComparer.OrdinalIgnoreCase);
+			sessions.BeginUpdate();
+			sessions.Items.Clear();
+			for (var index = runs.Count - 1; index >= 0; index--)
+			{
+				var choice = (RecordedBattleChoice)battlePicker.Items[index];
+				var run = choice.Run;
+				iterations.TryGetValue(run.RunDirectory, out var iteration);
+				var player = iteration?.LocalPlayer;
+				var item = new ListViewItem(new[]
+				{
+					$"#{choice.Number}", run.Manifest.CreatedUtc.ToLocalTime().ToString("g"),
+					run.Manifest.Result?.Outcome ?? run.Manifest.Status, BattleFeedback.Status(run),
+					run.HasRecordedBattle ? Csv.Clock(run.Manifest.Result.DurationSeconds) : "-",
+					player?.Units.ToString() ?? "-", player?.ArmyValue.ToString() ?? "-",
+					player?.Buildings.ToString() ?? "-", player?.BaseValue.ToString() ?? "-",
+					player?.Killed.ToString() ?? "-", player?.Lost.ToString() ?? "-",
+					player?.Cash.ToString() ?? "-", run.IsHeadless ? "Headless" : "Rendered"
+				})
+				{
+					Tag = choice,
+					ToolTipText = $"{run.Manifest.Id}\nMap: {run.Manifest.Battle?.Map}\n" +
+						$"Difficulty: {run.Manifest.Battle?.Difficulty}; opponents: {run.Manifest.Battle?.Opponents}\n" +
+						BattleFeedback.Description(run)
+				};
+				sessions.Items.Add(item);
+			}
+			sessions.EndUpdate();
 
 			var wanted = wasFollowingCurrent ? current?.RunDirectory : previouslySelected;
 			var selectedIndex = runs.FindIndex(run => SameDirectory(run.RunDirectory, wanted));
@@ -223,8 +371,6 @@ namespace AutoCnC.Launcher
 
 			historySummary.Text = HistorySummary(history);
 			SelectBattle();
-			if (hadDraftFeedback && SameDirectory(selectedRun?.RunDirectory, previouslySelected))
-				feedback.Text = draftFeedback;
 		}
 
 		/// <summary>Called on every poll of the live telemetry file.</summary>
@@ -238,86 +384,114 @@ namespace AutoCnC.Launcher
 			scores.Invalidate();
 			result.Text = Summary(shownLog, finished);
 			result.ForeColor = shownLog.IsDecided ? Ink : Faded;
-			Text = finished ? "AutoC&C - Battle results (finished)" : "AutoC&C - Battle results (running)";
+			UpdateTitle();
 		}
 
-		public void MarkFeedbackSaved(TrainingRun run)
+		void UpdateTitle()
 		{
-			if (!SameRun(run, selectedRun))
+			Text = views.SelectedTab == battlePage && selectedRun != null
+				? $"AutoC&C - Battle #{battlePicker.SelectedIndex + 1} results"
+				: "AutoC&C - History & trends";
+			historySummary.Text = HistorySummary(history, includeDurationTrends: views.SelectedTab?.Text == "Trends");
+		}
+
+		internal void RequestFeedback()
+		{
+			if (selectedRun != null && reviewFeedback.Enabled)
+				FeedbackRequested?.Invoke(selectedRun);
+		}
+
+		internal void RequestSessionDeletion()
+		{
+			if (selectedRun != null && deleteSession.Enabled)
+				DeleteRequested?.Invoke(selectedRun);
+		}
+
+		internal void RequestTraining()
+		{
+			if (selectedRun != null && trainFromBattle.Enabled)
+				TrainRequested?.Invoke(selectedRun);
+		}
+
+		internal void SelectContextBattle(Point location)
+		{
+			var item = sessions.GetItemAt(location.X, location.Y);
+			sessions.SelectedItems.Clear();
+			if (item == null)
 				return;
-
-			feedbackStatus.Text = "Saved. This assessment will be included in the next improvement prompt.";
-			battlePicker.Refresh();
-			UpdateFeedbackState();
-		}
-
-		internal void SubmitFeedback()
-		{
-			if (selectedRun != null && saveFeedback.Enabled)
-				PlayerFeedbackSaved?.Invoke(selectedRun, feedback.Text);
+			item.Selected = true;
+			item.Focused = true;
+			battlePicker.SelectedIndex = ((RecordedBattleChoice)item.Tag).Number - 1;
 		}
 
 		Control BuildFeedbackPanel()
 		{
-			feedback = new TextBox
+			feedbackPreview = new TextBox
 			{
 				Dock = DockStyle.Fill,
 				Multiline = true,
+				ReadOnly = true,
 				ScrollBars = ScrollBars.Vertical,
-				MaxLength = TrainingRun.MaxPlayerFeedbackLength,
-				BackColor = Paper,
-				ForeColor = Ink
+				BackColor = CommandTheme.Field,
+				ForeColor = Ink,
+				AccessibleName = "Saved battle feedback",
+				Margin = new Padding(0, 4, 0, 8)
 			};
-			feedback.TextChanged += (_, _) => UpdateFeedbackState();
 
-			saveFeedback = new ActionButton
+			reviewFeedback = new ActionButton
 			{
-				Text = "Save assessment",
-				Enabled = false
+				Text = "Add feedback",
+				Primary = true,
+				AccessibleName = "Review selected battle feedback"
 			};
-			saveFeedback.Click += (_, _) => SubmitFeedback();
+			reviewFeedback.Click += (_, _) => RequestFeedback();
+			replay = new ActionButton { Text = "Watch replay", AccessibleName = "Watch selected battle replay" };
+			replay.Click += (_, _) =>
+			{
+				if (selectedRun != null && replay.Enabled)
+					ReplayRequested?.Invoke(selectedRun);
+			};
+			statistics = new ActionButton { Text = "Battle statistics" };
+			statistics.Click += (_, _) => ShowBattle();
 
 			feedbackStatus = new Label
 			{
 				AutoSize = true,
-				ForeColor = Faded,
-				MaximumSize = new Size(330, 0),
-				Margin = new Padding(8, 3, 3, 3)
+				Dock = DockStyle.Fill,
+				ForeColor = CommandTheme.Green,
+				UseMnemonic = false,
+				Margin = new Padding(0)
 			};
 
 			var actions = new FlowLayoutPanel
 			{
 				Dock = DockStyle.Fill,
 				AutoSize = true,
-				FlowDirection = FlowDirection.TopDown,
+				AutoSizeMode = AutoSizeMode.GrowAndShrink,
 				WrapContents = false,
 				Margin = new Padding(0)
 			};
-			actions.Controls.Add(saveFeedback);
-			actions.Controls.Add(feedbackStatus);
+			actions.Controls.Add(reviewFeedback);
+			actions.Controls.Add(replay);
+			actions.Controls.Add(statistics);
 
 			var layout = new TableLayoutPanel
 			{
 				Dock = DockStyle.Fill,
-				ColumnCount = 2,
-				RowCount = 2,
-				Padding = new Padding(8, 4, 8, 4),
+				AutoSize = true,
+				AutoSizeMode = AutoSizeMode.GrowAndShrink,
+				ColumnCount = 1,
+				RowCount = 3,
+				Padding = new Padding(10, 8, 10, 8),
 				BackColor = CommandTheme.Surface
 			};
 			layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-			layout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
 			layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-			layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-			var heading = new Label
-			{
-				Text = "Your assessment: why did this battle win or lose?",
-				AutoSize = true,
-				ForeColor = Faded
-			};
-			layout.Controls.Add(heading, 0, 0);
-			layout.SetColumnSpan(heading, 2);
-			layout.Controls.Add(feedback, 0, 1);
-			layout.Controls.Add(actions, 1, 1);
+			layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 56));
+			layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+			layout.Controls.Add(feedbackStatus, 0, 0);
+			layout.Controls.Add(feedbackPreview, 0, 1);
+			layout.Controls.Add(actions, 0, 2);
 			return layout;
 		}
 
@@ -326,13 +500,13 @@ namespace AutoCnC.Launcher
 			if (loadingBattles)
 				return;
 
-			selectedRun = (battlePicker.SelectedItem as BattleChoice)?.Run;
+			selectedRun = (battlePicker.SelectedItem as RecordedBattleChoice)?.Run;
 			if (selectedRun == null)
 			{
 				ShowLog(new MatchLog());
 				result.Text = "No battle selected.";
-				feedback.Clear();
 				UpdateFeedbackState();
+				UpdateTitle();
 				return;
 			}
 
@@ -352,11 +526,21 @@ namespace AutoCnC.Launcher
 			}
 
 			var finished = selectedRun.Manifest.CompletedUtc != null;
-			result.Text = Summary(shownLog, finished);
+			result.Text = shownLog.IsEmpty && selectedRun.HasRecordedBattle
+				? $"{selectedRun.Manifest.Result.Outcome ?? "Undecided"} after " +
+					$"{Csv.Clock(selectedRun.Manifest.Result.DurationSeconds)}. Final stats are in Recorded sessions; the timeline is unavailable."
+				: Summary(shownLog, finished);
 			result.ForeColor = shownLog.IsDecided ? Ink : Faded;
-			feedback.Text = selectedRun.Manifest.Result?.PlayerFeedback ?? "";
-			Text = $"AutoC&C - Battle #{battlePicker.SelectedIndex + 1} results";
+			loadingBattles = true;
+			foreach (ListViewItem item in sessions.Items)
+			{
+				item.Selected = SameRun(((RecordedBattleChoice)item.Tag).Run, selectedRun);
+				if (item.Selected && sessions.IsHandleCreated)
+					item.EnsureVisible();
+			}
+			loadingBattles = false;
 			UpdateFeedbackState();
+			UpdateTitle();
 		}
 
 		void ShowLog(MatchLog log)
@@ -374,22 +558,19 @@ namespace AutoCnC.Launcher
 
 		void UpdateFeedbackState()
 		{
-			var existing = selectedRun?.Manifest.Result?.PlayerFeedback ?? "";
-			var available = selectedRun?.Manifest.CompletedUtc != null && selectedRun.IsEditable && !continuousMode;
-			feedback.Enabled = available;
-			saveFeedback.Enabled = available &&
-				!string.Equals(feedback.Text.Trim(), existing, StringComparison.Ordinal);
-
-			if (continuousMode)
-				feedbackStatus.Text = "Unavailable while continuous improvement is enabled.";
-			else if (selectedRun?.Manifest.CompletedUtc == null)
-				feedbackStatus.Text = "Available when the battle finishes.";
-			else if (selectedRun?.IsEditable != true)
-				feedbackStatus.Text = "Feedback requires an editable bot project.";
-			else if (!saveFeedback.Enabled)
-				feedbackStatus.Text = "Saved feedback is added to this battle's next improvement prompt.";
-			else
-				feedbackStatus.Text = "Save before choosing Analyze & improve.";
+			reviewFeedback.Text = BattleFeedback.ActionText(selectedRun);
+			reviewFeedback.Enabled = !operationBusy && BattleFeedback.CanReview(selectedRun);
+			replay.Enabled = !operationBusy && selectedRun?.HasRecordedBattle == true &&
+				File.Exists(selectedRun.ReplayPath);
+			statistics.Enabled = selectedRun != null;
+			deleteSession.Enabled = !operationBusy && selectedRun?.CanDelete == true;
+			deleteFromMenu.Enabled = deleteSession.Enabled;
+			trainFromBattle.Enabled = !operationBusy && selectedRun?.HasImprovementEvidence == true;
+			feedbackStatus.Text = (selectedRun == null ? "" : $"Battle #{battlePicker.SelectedIndex + 1} / ") +
+				BattleFeedback.Status(selectedRun) + (operationBusy ? " / Operation in progress" : "");
+			feedbackStatus.ForeColor = selectedRun?.HasPlayerFeedback == true ? CommandTheme.Green : CommandTheme.Amber;
+			feedbackPreview.Text = selectedRun?.HasPlayerFeedback == true
+				? selectedRun.Manifest.Result.PlayerFeedback : BattleFeedback.Description(selectedRun, operationBusy);
 		}
 
 		static string Summary(MatchLog log, bool finished)
@@ -411,23 +592,24 @@ namespace AutoCnC.Launcher
 				: $"Battle in progress - {clock}.";
 		}
 
-		static string HistorySummary(TrainingHistory history)
+		static string HistorySummary(TrainingHistory history, bool includeDurationTrends = false)
 		{
-			if (history.Iterations.Count == 0)
-				return history.Warnings.Count == 0
-					? "No completed battles yet."
-					: $"No readable completed battles. {history.Warnings.Count} run(s) could not be read.";
-
 			var wins = history.Iterations.Where(iteration =>
 				string.Equals(iteration.Outcome, "Won", StringComparison.OrdinalIgnoreCase)).ToList();
 			var losses = history.Iterations.Where(iteration =>
 				string.Equals(iteration.Outcome, "Lost", StringComparison.OrdinalIgnoreCase)).ToList();
 			var parts = new List<string>
 			{
-				$"{history.Iterations.Count} iteration(s): {wins.Count} won, {losses.Count} lost."
+				$"{history.Runs.Count} recorded session(s): {wins.Count} won, {losses.Count} lost."
 			};
-			AddDurationTrend(parts, "Wins", wins);
-			AddDurationTrend(parts, "Losses", losses);
+			var completed = history.Runs.Where(run => run.HasRecordedBattle).ToList();
+			var provided = completed.Count(run => run.HasPlayerFeedback);
+			parts.Add($"Your feedback: {provided} provided, {completed.Count - provided} missing.");
+			if (includeDurationTrends)
+			{
+				AddDurationTrend(parts, "Wins", wins);
+				AddDurationTrend(parts, "Losses", losses);
+			}
 			if (history.Warnings.Count > 0)
 				parts.Add($"{history.Warnings.Count} unreadable run(s) skipped.");
 			return string.Join("  ", parts);
@@ -462,6 +644,13 @@ namespace AutoCnC.Launcher
 
 		static bool SameRun(TrainingRun left, TrainingRun right) =>
 			left != null && right != null && SameDirectory(left.RunDirectory, right.RunDirectory);
+
+		protected override void Dispose(bool disposing)
+		{
+			if (disposing)
+				sessionMenu?.Dispose();
+			base.Dispose(disposing);
+		}
 
 		static bool SameDirectory(string left, string right)
 		{

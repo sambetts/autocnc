@@ -44,6 +44,40 @@ namespace AutoCnC.Reference
 		const int RifleCore = 12;
 
 		/// <summary>
+		/// How many harvesters to keep working before anything is spent on the next tank.
+		/// </summary>
+		/// <remarks>
+		/// A refinery carries a <c>FreeActor</c> harvester and hands out exactly one, ever. No
+		/// plan used to name <c>harv</c> at all, so this bot's entire income was "one harvester
+		/// per refinery" — two of them for the first seven minutes of badland-ridges, three
+		/// until 870s, four thereafter — and its cash was 0 or 1 at 46 of the 55 assessments
+		/// after 150s, peaking at 244 for the rest of the match. Income, not judgement, was the
+		/// binding constraint on nearly the whole game.
+		/// <para>
+		/// The floor is four because a Tiberian Dawn refinery has one docking bay and comfortably
+		/// feeds two harvesters, so two refineries — which this bot has by 117s — want four. A
+		/// harvester costs 1,100 against the refinery's 1,500 and needs only <c>proc</c> plus a
+		/// vehicle queue, so it is both the cheaper and the earlier way to buy income: the
+		/// airstrip was standing at 247s, where the third free harvester did not arrive until
+		/// 390s and the fourth until 841s.
+		/// </para>
+		/// </remarks>
+		const int HarvesterCore = 4;
+
+		/// <summary>
+		/// Where surplus vehicle capacity goes before it goes on tank number nine.
+		/// </summary>
+		/// <remarks>
+		/// Two per refinery for the three every plan builds. It doubles as the only replacement
+		/// rule this bot has: <c>Until(n)</c> counts what is standing now, so a step that names
+		/// <c>harv</c> above the endless combat step re-fires the moment a harvester dies. All
+		/// four died between 1351s and 1365s on badland-ridges and the bot spent its last 285
+		/// seconds with three refineries, fourteen buildings, zero income and no way to ever
+		/// build another harvester; it completed one unit in the last 470 seconds of the match.
+		/// </remarks>
+		const int HarvesterSaturation = 6;
+
+		/// <summary>
 		/// The economy every doctrine wants, whichever one is running.
 		/// </summary>
 		/// <remarks>
@@ -102,24 +136,36 @@ namespace AutoCnC.Reference
 		];
 
 		/// <summary>
-		/// The opening army: bodies first, then rockets for everything bodies cannot hurt.
+		/// The opening army: bodies first, then the economy that pays for the rest, then rockets
+		/// for everything bodies cannot hurt.
 		/// </summary>
 		/// <remarks>
 		/// Each rocket step names <c>e3</c> and nothing else, and that is load-bearing.
 		/// <c>Until(n)</c> counts every candidate the step lists, so a step written
 		/// <c>["e3", "e1"]</c> is already satisfied by riflemen that exist for other reasons and
 		/// never buys a single rocket — which is exactly how this bot finished badland-ridges
-		/// having built 125 <c>e1</c> and zero <c>e3</c>.
+		/// having built 125 <c>e1</c> and zero <c>e3</c>. The harvester steps name <c>harv</c>
+		/// alone for the same reason: listed beside a tank they would be satisfied by the tank.
+		/// <para>
+		/// The first harvester step sits above every combat vehicle because income compounds and
+		/// a light tank does not. Two harvesters bought at around 250s, when the vehicle queue
+		/// first exists, run for the remaining twenty minutes of a match this length; the same
+		/// 2,200 credits spent on tanks buys three that die in the next engagement. This bot
+		/// spent 3,300 credits on eleven scout buggies over badland-ridges and never once bought
+		/// income.
+		/// </para>
 		/// </remarks>
 		public static IReadOnlyList<ProductionStep> OpeningTrain { get; } =
 		[
 			new("Infantry", ["e1"], 4),        // bodies now; a first barracks has nothing else
 			new("Vehicle", ["jeep", "bggy"], 1),
 			new("Infantry", ["e3"], 4),        // ...and rockets, which that same barracks can build
+			new("Vehicle", ["harv"], HarvesterCore),   // then income, before anything that shoots
 			new("Infantry", ["e1"], RifleCore),
 			new("Infantry", ["e2"], 4),
 			new("Vehicle", ["mtnk", "ltnk"], 4),
 			new("Infantry", ["e3"], 12),
+			new("Vehicle", ["harv"], HarvesterSaturation),
 			new("Vehicle", ["mtnk", "ltnk"], int.MaxValue),
 			new("Infantry", ["e3"], int.MaxValue),
 		];
@@ -186,11 +232,25 @@ namespace AutoCnC.Reference
 		/// </remarks>
 		public static IReadOnlyList<string> AntiAirUnits { get; } = ["e3"];
 
+		/// <summary>Units that earn credits rather than spend them.</summary>
+		/// <remarks>
+		/// One entry, and that is also the point: <c>harv</c> is the only income this bot has,
+		/// it comes from the same vehicle queue as the tanks and needs only a refinery, and both
+		/// factions build it. Used by tests to prove no plan leaves income to the free harvester
+		/// a refinery hands out.
+		/// </remarks>
+		public static IReadOnlyList<string> HarvesterUnits { get; } = ["harv"];
+
+		/// <summary>Structures that produce and store harvested credits.</summary>
+		public static IReadOnlyList<string> Refineries { get; } = ["proc"];
+
 		public static IReadOnlyList<ProductionStep> DefenceTrain { get; } =
 		[
 			new("Infantry", ["e1"], RifleCore),
 			new("Infantry", ["e3"], 8),        // rockets, for whatever is chewing the base
+			new("Vehicle", ["harv"], HarvesterCore),   // a siege that kills the economy wins by itself
 			new("Infantry", ["e2"], 4),
+			new("Vehicle", ["harv"], HarvesterSaturation),
 			new("Vehicle", ["mtnk", "ltnk"], int.MaxValue),
 			new("Infantry", ["e3"], int.MaxValue),
 		];
@@ -208,7 +268,8 @@ namespace AutoCnC.Reference
 		];
 
 		/// <summary>
-		/// The push: tanks ahead of infantry, and rockets rather than rifles behind them.
+		/// The push: the economy that pays for it, then tanks ahead of infantry, and rockets
+		/// rather than rifles behind them.
 		/// </summary>
 		/// <remarks>
 		/// The vehicle steps sit above the endless infantry step on purpose. Both barracks and
@@ -217,12 +278,22 @@ namespace AutoCnC.Reference
 		/// to whichever queue is idle most — and a barracks turning out a 100-credit rifleman
 		/// every three seconds is idle far more often than a war factory. That ordering cost
 		/// badland-ridges 132 infantry against 10 vehicles from two war factories.
+		/// <para>
+		/// The harvester floor leads even the tanks, and is a no-op whenever the economy is
+		/// intact — it only fires when a harvester has died. A push is what a working economy is
+		/// for, not a substitute for one: this bot entered Attack five separate times on
+		/// badland-ridges with cash pinned at zero, razed ten enemy buildings, and lost anyway
+		/// because the other side rebuilt from thirteen buildings to thirty-eight and grew its
+		/// army from 7,250 at 900s to 70,200 while this one never once exceeded 7,800.
+		/// </para>
 		/// </remarks>
 		public static IReadOnlyList<ProductionStep> AttackTrain { get; } =
 		[
+			new("Vehicle", ["harv"], HarvesterCore),   // replace what the last push cost us
 			new("Vehicle", ["mtnk", "ltnk"], 8),
 			new("Infantry", ["e3"], 8),
 			new("Infantry", ["e1", "e2"], RifleCore),
+			new("Vehicle", ["harv"], HarvesterSaturation),
 			new("Vehicle", ["mtnk", "ltnk"], int.MaxValue),
 			new("Infantry", ["e3"], int.MaxValue),
 		];

@@ -132,6 +132,8 @@ namespace AutoCnC.Launcher
 
 		internal MainForm(LauncherSettings settings, bool persistSettings = false)
 		{
+			// Keep the 96-DPI baseline pending until all controls have been constructed.
+			SuspendLayout();
 			this.settings = settings;
 			this.persistSettings = persistSettings;
 			Text = "AutoC&C — Battle Command";
@@ -141,6 +143,7 @@ namespace AutoCnC.Launcher
 			StartPosition = FormStartPosition.Manual;
 
 			BuildLayout();
+			ResumeLayout(performLayout: true);
 
 			// Both fire on a background thread, and a script can still be writing while the
 			// window is going away.

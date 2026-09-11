@@ -22,6 +22,7 @@ namespace AutoCnC.Launcher
 		internal BotDossier()
 		{
 			DoubleBuffered = true;
+			SetStyle(ControlStyles.ResizeRedraw, true);
 			BackColor = CommandTheme.Field;
 			Padding = new Padding(24);
 			name = new Label

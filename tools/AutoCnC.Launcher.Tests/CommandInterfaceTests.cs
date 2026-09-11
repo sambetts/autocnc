@@ -1,3 +1,6 @@
+// Copyright (c) The AutoC&C Developers and Contributors.
+// Licensed under GPL-3.0-or-later. See LICENSE.
+
 using System;
 using System.Collections.Generic;
 using System.Drawing;
@@ -21,9 +24,6 @@ namespace AutoCnC.Launcher.Tests
 
 		string root;
 		LauncherSettings settings;
-
-		[OneTimeSetUp]
-		public void EnableVisualStyles() => Application.EnableVisualStyles();
 
 		[SetUp]
 		public void SetUp()
@@ -63,7 +63,7 @@ namespace AutoCnC.Launcher.Tests
 		{
 			var window = new MainForm(settings) { ShowInTaskbar = false };
 			window.Show();
-			window.Size = new Size(1200, 850);
+			window.Size = DeviceSize(new Size(1200, 850), window.DeviceDpi);
 			window.PerformLayout();
 			return window;
 		}
@@ -128,8 +128,8 @@ namespace AutoCnC.Launcher.Tests
 		{
 			using var window = Window();
 			window.MinimumSize = Size.Empty;
-			window.Size = new Size(width, height);
-			Assert.That(window.Size, Is.EqualTo(new Size(width, height)));
+			window.Size = DeviceSize(new Size(width, height), window.DeviceDpi);
+			Assert.That(window.Size, Is.EqualTo(DeviceSize(new Size(width, height), window.DeviceDpi)));
 			for (var station = 0; station < 4; station++)
 			{
 				window.SelectStation(station);
@@ -152,7 +152,7 @@ namespace AutoCnC.Launcher.Tests
 				if (!string.IsNullOrEmpty(output))
 				{
 					Directory.CreateDirectory(output);
-					bitmap.Save(Path.Combine(output, $"command-{width}-{station}.png"), ImageFormat.Png);
+					bitmap.Save(Path.Combine(output, $"command-{window.DeviceDpi}-{width}-{height}-{station}.png"), ImageFormat.Png);
 				}
 			}
 		}
@@ -228,6 +228,93 @@ namespace AutoCnC.Launcher.Tests
 				Is.EqualTo((enabled ? CommandTheme.Amber : CommandTheme.Surface).ToArgb()));
 		}
 
+		[Test]
+		public void ResizingTheDossierInvalidatesItsPreviousDrawing()
+		{
+			using var host = new CaptureHost { ClientSize = new Size(800, 210), ShowInTaskbar = false };
+			using var dossier = new BotDossier { Dock = DockStyle.Fill };
+			host.Controls.Add(dossier);
+			host.Show();
+			host.Update();
+			var invalidated = new List<Rectangle>();
+			dossier.Invalidated += (_, e) => invalidated.Add(e.InvalidRect);
+
+			foreach (var width in new[] { 960, 620, 840, 800 })
+			{
+				invalidated.Clear();
+				host.ClientSize = new Size(width, 210);
+				Assert.That(invalidated.Any(rectangle => rectangle.Contains(dossier.ClientRectangle)), Is.True,
+					$"Resizing to {width} must invalidate the whole old schematic, not just the newly exposed strip.");
+				host.Update();
+			}
+		}
+
+		[Test]
+		public void InitialLayoutFitsTheActualMonitorDpi()
+		{
+			using var window = new MainForm(settings) { ShowInTaskbar = false };
+			window.Show();
+			window.PerformLayout();
+			TestContext.WriteLine($"Monitor DPI: {window.DeviceDpi}; scale baseline: {window.AutoScaleDimensions}; size: {window.Size}");
+			var dossier = Descendants(window).OfType<BotDossier>().Single();
+			Assert.Multiple(() =>
+			{
+				foreach (var label in dossier.Controls.OfType<Label>())
+					Assert.That(dossier.ClientRectangle.Contains(label.Bounds), Is.True,
+						$"Dossier label '{label.Text}' at {label.Bounds} must fit {dossier.ClientRectangle} at {window.DeviceDpi} DPI.");
+				var title = Descendants(window).OfType<Label>().Single(label => label.Text == "Prepare for contact.");
+				Assert.That(title.Height, Is.GreaterThanOrEqualTo(title.PreferredHeight),
+					"The station title must include the complete font height and padding.");
+				var faction = Named<ComboBox>(window, "Your faction");
+				var textWidth = TextRenderer.MeasureText("Random", faction.Font).Width;
+				Assert.That(faction.ClientSize.Width, Is.GreaterThanOrEqualTo(textWidth + 28 * window.DeviceDpi / 96),
+					"The complete faction name must fit beside the drop-down arrow.");
+			});
+		}
+
+		[Test]
+		public void MonitorScaledStationsKeepLabelsAndActionsUsableAfterResizing()
+		{
+			using var window = new MainForm(settings) { ShowInTaskbar = false };
+			window.Show();
+			window.MinimumSize = Size.Empty;
+			foreach (var size in new[] { new Size(1200, 850), new Size(940, 700), new Size(1500, 950), new Size(1200, 850) })
+			{
+				window.Size = DeviceSize(size, window.DeviceDpi);
+				for (var station = 0; station < 4; station++)
+				{
+					window.SelectStation(station);
+					window.Update();
+					var dossier = Descendants(window).OfType<BotDossier>().Single();
+					foreach (var label in dossier.Controls.OfType<Label>())
+						Assert.That(dossier.ClientRectangle.Contains(label.Bounds), Is.True,
+							$"{label.Text} must fit after resizing at {window.DeviceDpi} DPI.");
+					var launch = (Button)window.AcceptButton;
+					var origin = window.PointToClient(launch.PointToScreen(Point.Empty));
+					Assert.That(window.ClientRectangle.Contains(new Rectangle(origin, launch.Size)), Is.True);
+					var history = Descendants(window).OfType<Button>().Single(button => button.Text == "History && trends");
+					Assert.That(history.Height, Is.LessThanOrEqualTo(history.GetPreferredSize(Size.Empty).Height),
+						"Resizing must not stretch the history action into empty navigation space.");
+					Assert.That(history.Height, Is.LessThanOrEqualTo(3 * history.Font.Height),
+						"History must stay a single-line action after growing and shrinking the window.");
+					var title = Descendants(window).OfType<Label>().Single(label => label.Name == "StationTitle");
+					Assert.That(title.Height, Is.GreaterThanOrEqualTo(title.PreferredHeight));
+
+					var output = Environment.GetEnvironmentVariable("AUTOCNC_UI_CAPTURE_DIR");
+					if (!string.IsNullOrEmpty(output))
+					{
+						Directory.CreateDirectory(output);
+						using var bitmap = new Bitmap(window.Width, window.Height);
+						window.DrawToBitmap(bitmap, new Rectangle(Point.Empty, window.Size));
+						bitmap.Save(Path.Combine(output, $"resize-{window.DeviceDpi}-{size.Width}-{size.Height}-{station}.png"), ImageFormat.Png);
+					}
+				}
+			}
+		}
+
+		static Size DeviceSize(Size logical, int dpi) =>
+			new((int)Math.Round(logical.Width * dpi / 96f), (int)Math.Round(logical.Height * dpi / 96f));
+
 		static T Named<T>(Control root, string name) where T : Control =>
 			Descendants(root).OfType<T>().Single(control => control.AccessibleName == name);
 
@@ -242,5 +329,3 @@ namespace AutoCnC.Launcher.Tests
 		}
 	}
 }
-// Copyright (c) The AutoC&C Developers and Contributors.
-// Licensed under GPL-3.0-or-later. See LICENSE.

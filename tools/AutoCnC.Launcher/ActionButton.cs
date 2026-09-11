@@ -38,7 +38,9 @@ namespace AutoCnC.Launcher
 		public ActionButton()
 		{
 			DoubleBuffered = true;
+			SetStyle(ControlStyles.ResizeRedraw, true);
 			AutoSize = true;
+			AutoSizeMode = AutoSizeMode.GrowAndShrink;
 			Padding = new Padding(12, 6, 12, 6);
 			FlatStyle = FlatStyle.Flat;
 			UseVisualStyleBackColor = false;

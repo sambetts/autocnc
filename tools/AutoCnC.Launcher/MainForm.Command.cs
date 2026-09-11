@@ -60,24 +60,33 @@ namespace AutoCnC.Launcher
 			};
 			main.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
 			main.RowStyles.Add(new RowStyle(SizeType.Absolute, 188));
-			main.RowStyles.Add(new RowStyle(SizeType.Absolute, 88));
+			main.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 			main.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 			main.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 			dossier = new BotDossier { Dock = DockStyle.Fill, Margin = new Padding(0) };
 			main.Controls.Add(dossier, 0, 0);
 
-			var heading = new Panel { Dock = DockStyle.Fill, Margin = new Padding(0) };
+			var heading = new TableLayoutPanel
+			{
+				Dock = DockStyle.Fill, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
+				ColumnCount = 1, RowCount = 2, Margin = new Padding(0)
+			};
+			heading.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+			heading.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+			heading.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 			stationTitle = new Label
 			{
-				Font = CommandTheme.Heading, AutoSize = false, Dock = DockStyle.Top,
-				Height = 51, Padding = new Padding(0, 16, 0, 0)
+				Name = "StationTitle",
+				Font = CommandTheme.Heading, AutoSize = true, Dock = DockStyle.Fill,
+				Margin = new Padding(0, 16, 0, 4)
 			};
 			stationDescription = new Label
 			{
-				Dock = DockStyle.Bottom, Height = 30, ForeColor = CommandTheme.Muted, AutoEllipsis = true
+				Dock = DockStyle.Fill, AutoSize = true, ForeColor = CommandTheme.Muted,
+				Margin = new Padding(0, 0, 0, 14)
 			};
-			heading.Controls.Add(stationTitle);
-			heading.Controls.Add(stationDescription);
+			heading.Controls.Add(stationTitle, 0, 0);
+			heading.Controls.Add(stationDescription, 0, 1);
 			main.Controls.Add(heading, 0, 1);
 			stationHost = new Panel { Dock = DockStyle.Fill, Margin = new Padding(0) };
 			main.Controls.Add(stationHost, 0, 2);
@@ -104,7 +113,8 @@ namespace AutoCnC.Launcher
 			var navigationHost = new Panel { Dock = DockStyle.Fill, AutoScroll = true, Margin = new Padding(0) };
 			var navigationStack = new TableLayoutPanel
 			{
-				Dock = DockStyle.Top, AutoSize = true, ColumnCount = 1, RowCount = 6, Margin = new Padding(0)
+				Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
+				ColumnCount = 1, RowCount = 6, Margin = new Padding(0)
 			};
 			navigationStack.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
 			navigationStack.RowStyles.Add(new RowStyle(SizeType.AutoSize));

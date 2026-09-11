@@ -82,6 +82,7 @@ namespace AutoCnC.Launcher
 		public CommandSection()
 		{
 			DoubleBuffered = true;
+			SetStyle(ControlStyles.ResizeRedraw, true);
 			ForeColor = CommandTheme.Green;
 			BackColor = CommandTheme.Surface;
 			Padding = new Padding(16, 28, 16, 16);

@@ -61,8 +61,18 @@ Tab, Enter and Alt+1 through Alt+4 for workstation selection, with visible focus
 
 The initial size is bounded by the current monitor. At smaller window sizes, workstations
 scroll while the command deck compresses and the deployment controls remain on screen.
+The complete control tree is built before applying the 96-DPI layout baseline, so fonts,
+field widths and the dossier scale together. Workstation headings size to their text;
+command buttons and the navigation stack can shrink again after the window grows.
+The schematic and painted controls invalidate their whole surface on resize, rather than
+leaving the previous drawing behind when only the newly exposed strip is repainted.
 Disabled labels are deliberately painted with readable colors rather than WinForms'
 default dark-on-dark disabled text. There is no idle animation or unsolicited sound.
+
+Launcher UI tests use the same per-monitor DPI awareness as the application and include
+live resize invalidation and repeated grow/shrink checks. Run them in a fresh test process
+with `AUTOCNC_UI_DPI_UNAWARE=1` to also check the 96-DPI layout; switching awareness inside
+an already-running WinForms process would reuse cached font and scaling metrics.
 
 ## Scope deliberately left for later
 

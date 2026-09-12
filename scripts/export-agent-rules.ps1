@@ -27,6 +27,8 @@ if (-not (Test-Path -LiteralPath $utility) -or -not (Test-Path -LiteralPath $pla
 }
 
 $outputPath = [IO.Path]::GetFullPath($Output)
+. (Join-Path $PSScriptRoot 'engine-runtime.ps1')
+$engineRuntime = Get-EngineRuntime
 $previousEngine = $env:ENGINE_DIR
 $previousSearchPaths = $env:MOD_SEARCH_PATHS
 try {
@@ -34,7 +36,7 @@ try {
     $env:MOD_SEARCH_PATHS = "$(Join-Path $repoRoot 'mods'),$(Join-Path $engineDir 'mods')"
 
     Write-Host '==> Exporting resolved actor and weapon rules' -ForegroundColor Cyan
-    & dotnet $utility autocnc --export-agent-rules $outputPath
+    & $engineRuntime.DotNetPath $utility autocnc --export-agent-rules $outputPath
     if ($LASTEXITCODE -ne 0) {
         throw "Game-rules export failed with exit code $LASTEXITCODE."
     }

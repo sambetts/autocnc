@@ -387,7 +387,9 @@ if (-not $Map) {
     Write-Host '    No -Map, so you land on the menu. /bots to check yours loaded, /modelog to trace decisions.' -ForegroundColor DarkGray
 }
 
-& dotnet @gameArgs
+. (Join-Path $PSScriptRoot 'engine-runtime.ps1')
+$engineRuntime = Get-EngineRuntime
+& $engineRuntime.DotNetPath @gameArgs
 if ($LASTEXITCODE -ne 0) { throw "Battle process failed with exit code $LASTEXITCODE." }
 
 if ($ExecutionMode -eq 'Headless' -and -not (Test-Path -LiteralPath $performancePath)) {

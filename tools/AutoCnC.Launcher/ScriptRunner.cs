@@ -86,48 +86,9 @@ namespace AutoCnC.Launcher
 				throw new InvalidOperationException("Something is already running.");
 
 			var preparedCancellationFile = PrepareCancellationFile(job.CancellationFile);
-			var startInfo = new ProcessStartInfo
-			{
-				FileName = PowerShellPath(),
-				WorkingDirectory = workingDirectory,
-				UseShellExecute = false,
-				CreateNoWindow = true,
-				RedirectStandardOutput = true,
-				RedirectStandardError = true,
-				StandardOutputEncoding = Encoding.UTF8,
-				StandardErrorEncoding = Encoding.UTF8
-			};
-			if (job.PreserveColor)
-			{
-				startInfo.Environment.Remove("NO_COLOR");
-				startInfo.Environment["AUTOCNC_PRESERVE_COLOR"] = "1";
-				startInfo.Environment["CLICOLOR_FORCE"] = "1";
-				startInfo.Environment["FORCE_COLOR"] = "1";
-			}
-			else
-			{
-				startInfo.Environment["NO_COLOR"] = "1";
-				startInfo.Environment.Remove("CLICOLOR_FORCE");
-				startInfo.Environment.Remove("FORCE_COLOR");
-			}
-
+			var startInfo = CreateStartInfo(job, workingDirectory);
 			if (preparedCancellationFile != null)
 				startInfo.Environment["AUTOCNC_CANCELLATION_PRECLEARED"] = "1";
-
-			// -NonInteractive so a script that decides to prompt fails fast instead of hanging
-			// behind a window nobody can see.
-			startInfo.ArgumentList.Add("-NoProfile");
-			startInfo.ArgumentList.Add("-NonInteractive");
-			startInfo.ArgumentList.Add("-ExecutionPolicy");
-			startInfo.ArgumentList.Add("Bypass");
-			startInfo.ArgumentList.Add("-OutputFormat");
-			startInfo.ArgumentList.Add("Text");
-			startInfo.ArgumentList.Add("-EncodedCommand");
-			startInfo.ArgumentList.Add(EncodedRunner);
-
-			var invocation = new List<string> { job.ScriptPath };
-			invocation.AddRange(job.Arguments);
-			startInfo.Environment["AUTOCNC_SCRIPT_JOB"] = JsonSerializer.Serialize(invocation);
 
 			lock (outputLock)
 			{
@@ -176,6 +137,50 @@ namespace AutoCnC.Launcher
 				CleanupFailedStart(started);
 				throw;
 			}
+		}
+
+		internal static ProcessStartInfo CreateStartInfo(ScriptJob job, string workingDirectory)
+		{
+			var startInfo = new ProcessStartInfo
+			{
+				FileName = PowerShellPath(),
+				WorkingDirectory = workingDirectory,
+				UseShellExecute = false,
+				CreateNoWindow = true,
+				RedirectStandardOutput = true,
+				RedirectStandardError = true,
+				StandardOutputEncoding = Encoding.UTF8,
+				StandardErrorEncoding = Encoding.UTF8
+			};
+			if (job.PreserveColor)
+			{
+				startInfo.Environment.Remove("NO_COLOR");
+				startInfo.Environment["AUTOCNC_PRESERVE_COLOR"] = "1";
+				startInfo.Environment["CLICOLOR_FORCE"] = "1";
+				startInfo.Environment["FORCE_COLOR"] = "1";
+			}
+			else
+			{
+				startInfo.Environment["NO_COLOR"] = "1";
+				startInfo.Environment.Remove("CLICOLOR_FORCE");
+				startInfo.Environment.Remove("FORCE_COLOR");
+			}
+
+			// -NonInteractive so a script that decides to prompt fails fast instead of hanging
+			// behind a window nobody can see.
+			startInfo.ArgumentList.Add("-NoProfile");
+			startInfo.ArgumentList.Add("-NonInteractive");
+			startInfo.ArgumentList.Add("-ExecutionPolicy");
+			startInfo.ArgumentList.Add("Bypass");
+			startInfo.ArgumentList.Add("-OutputFormat");
+			startInfo.ArgumentList.Add("Text");
+			startInfo.ArgumentList.Add("-EncodedCommand");
+			startInfo.ArgumentList.Add(EncodedRunner);
+
+			var invocation = new List<string> { job.ScriptPath };
+			invocation.AddRange(job.Arguments);
+			startInfo.Environment["AUTOCNC_SCRIPT_JOB"] = JsonSerializer.Serialize(invocation);
+			return startInfo;
 		}
 
 		void CleanupFailedStart(Process started)

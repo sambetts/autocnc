@@ -11,7 +11,6 @@
 using System;
 using System.Diagnostics;
 using System.IO;
-using System.Text;
 
 namespace AutoCnC.Launcher
 {
@@ -30,25 +29,11 @@ namespace AutoCnC.Launcher
 			if (File.Exists(destination))
 				File.Delete(destination);
 
-			var start = new ProcessStartInfo
+			var start = ScriptRunner.CreateStartInfo(new ScriptJob
 			{
-				FileName = "dotnet",
-				WorkingDirectory = repo.Root,
-				UseShellExecute = false,
-				CreateNoWindow = true,
-				RedirectStandardOutput = true,
-				RedirectStandardError = true,
-				StandardOutputEncoding = Encoding.UTF8,
-				StandardErrorEncoding = Encoding.UTF8
-			};
-			start.ArgumentList.Add(utility);
-			start.ArgumentList.Add("autocnc");
-			start.ArgumentList.Add("--export-agent-rules");
-			start.ArgumentList.Add(destination);
-			start.Environment["ENGINE_DIR"] = repo.EngineDir;
-			start.Environment["MOD_SEARCH_PATHS"] =
-				$"{Path.Combine(repo.Root, "mods")},{Path.Combine(repo.EngineDir, "mods")}";
-			start.Environment["NO_COLOR"] = "1";
+				ScriptPath = repo.ExportAgentRulesScript,
+				Arguments = ["-Output", destination]
+			}, repo.Root);
 
 			Process started;
 			try

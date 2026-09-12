@@ -29,8 +29,11 @@ if (-not (Test-Path (Join-Path $engineDir 'OpenRA.sln'))) {
 }
 
 if (-not $SkipEngine) {
+    . (Join-Path $PSScriptRoot 'engine-runtime.ps1')
+    $engineRuntime = Get-EngineRuntime
     Write-Host "==> Building OpenRA engine ($Configuration)" -ForegroundColor Cyan
-    dotnet build (Join-Path $engineDir 'OpenRA.sln') -c $Configuration -v minimal --nologo
+    dotnet build (Join-Path $engineDir 'OpenRA.sln') -c $Configuration -v minimal --nologo `
+        "-p:TargetPlatform=$($engineRuntime.TargetPlatform)"
     if ($LASTEXITCODE -ne 0) { throw "Engine build failed with exit code $LASTEXITCODE" }
 }
 

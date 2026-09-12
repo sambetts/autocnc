@@ -119,10 +119,10 @@ namespace AutoCnC.Launcher.Tests
 			Directory.CreateDirectory(Path.GetDirectoryName(launcher));
 			Directory.CreateDirectory(engine);
 			var repository = RepoLayout.Discover(null, [AppContext.BaseDirectory]);
-			File.WriteAllText(launcher, File.ReadAllText(repository.LaunchScript).Replace(
-				"$ErrorActionPreference = 'Stop'",
-				$"$ErrorActionPreference = 'Stop'\nfunction global:dotnet {{ $global:LASTEXITCODE = {gameExitCode} }}",
-				StringComparison.Ordinal));
+			File.Copy(repository.LaunchScript, launcher);
+			File.WriteAllText(Path.Combine(directory, "scripts", "engine-runtime.ps1"),
+				"function Get-EngineRuntime { [pscustomobject]@{ DotNetPath = 'Invoke-TestEngine' } }\n" +
+				$"function Invoke-TestEngine {{ $global:LASTEXITCODE = {gameExitCode} }}\n");
 			File.WriteAllText(Path.Combine(engine, "OpenRA.dll"), "engine fixture");
 			var replay = Path.Combine(directory, "recorded.orarep");
 			File.WriteAllText(replay, "replay fixture");
@@ -214,7 +214,7 @@ namespace AutoCnC.Launcher.Tests
 			}
 		}
 
-		static (int ExitCode, System.Collections.Generic.IReadOnlyList<string> Output) Run(
+		internal static (int ExitCode, System.Collections.Generic.IReadOnlyList<string> Output) Run(
 			string script, string directory, string[] arguments)
 		{
 			using var finished = new ManualResetEventSlim();

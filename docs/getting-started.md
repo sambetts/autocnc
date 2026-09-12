@@ -13,6 +13,7 @@ If you just want the API reference, skip to [writing-bots.md](writing-bots.md).
 |---|---|
 | **.NET SDK 8.0 or newer** | [download](https://dotnet.microsoft.com/download) — the **SDK**, not just the runtime, since you're compiling code |
 | **Git** | with submodule support (any modern version) |
+| **PowerShell** | Windows PowerShell or PowerShell 7 on Windows; PowerShell 7 on Linux/macOS |
 | **An IDE** | Visual Studio, Rider, or VS Code with the C# Dev Kit |
 | **OS** | Windows, Linux or macOS |
 
@@ -23,6 +24,28 @@ dotnet --list-sdks
 ```
 
 You need a line starting `8.` or higher.
+
+### ARM64
+
+Keep your native ARM64 .NET SDK. The build scripts select OpenRA's native libraries to match
+the .NET host that will run the engine, rather than assuming x64. Linux ARM64 and Apple Silicon
+use their native `linux-arm64` and `osx-arm64` libraries.
+
+On **Windows ARM64**, the pinned OpenRA dependencies do not include ARM64 Windows DLLs.
+Install the **Windows x64 .NET 8 Runtime** alongside ARM64 .NET
+([download](https://dotnet.microsoft.com/download/dotnet/8.0), choose **.NET Runtime**, **Windows**,
+**x64**). An x64 SDK is not needed. Games, headless battles, replays, YAML linting and rule
+exports then use that runtime automatically under Windows' x64 emulation. Compilation, bot
+tests and the graphical launcher continue using your normal .NET installation.
+
+The scripts find an x64 runtime through `DOTNET_ROOT_X64`, the registered .NET installation,
+or the standard `C:\Program Files\dotnet\x64` directory. For a custom installation, set
+`DOTNET_ROOT_X64` to its directory; do not replace the ARM64 SDK on `PATH`. If no compatible
+runtime is available, the script stops with installation guidance instead of trying to load
+x64 libraries into an ARM64 process.
+
+Use the normal build and launch commands below; no architecture flags are required. The
+graphical launcher is Windows-only, so Linux/macOS authors use `run-bot.ps1`.
 
 ---
 
@@ -53,6 +76,7 @@ Build complete. Next: ./scripts/launch.ps1
 |---|---|
 | `Engine submodule not found` | Run `git submodule update --init --depth 1` |
 | `OpenRA engine not built` | Run `./scripts/build.ps1` without `-SkipEngine` |
+| `OpenRA on Windows ARM64 requires the .NET 8 x64 runtime` | Install the Windows x64 .NET 8 Runtime alongside ARM64 .NET; see [ARM64](#arm64). |
 | `The file is locked by: ".NET Host"` | The game is running. Close it and rebuild. |
 
 ---

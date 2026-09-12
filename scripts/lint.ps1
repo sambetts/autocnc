@@ -24,8 +24,15 @@ $env:ENGINE_DIR = $engineDir
 $env:MOD_SEARCH_PATHS = "$(Join-Path $repoRoot 'mods'),$(Join-Path $engineDir 'mods')"
 
 Write-Host '==> Linting autocnc mod YAML' -ForegroundColor Cyan
-$output = & dotnet $utility autocnc --check-yaml 2>&1
+. (Join-Path $PSScriptRoot 'engine-runtime.ps1')
+$engineRuntime = Get-EngineRuntime
+$output = & $engineRuntime.DotNetPath $utility autocnc --check-yaml 2>&1
+$exitCode = $LASTEXITCODE
 $output | ForEach-Object { Write-Host $_ }
+
+if ($exitCode -ne 0) {
+    throw "YAML lint process failed with exit code $exitCode."
+}
 
 $errors = @($output | Select-String -Pattern '^Error')
 if ($errors.Count -gt 0) {

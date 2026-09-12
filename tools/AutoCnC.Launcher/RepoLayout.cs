@@ -44,6 +44,7 @@ namespace AutoCnC.Launcher
 		public string VerifyBotScript => Path.Combine(ScriptsDir, "verify-bot.ps1");
 		public string LaunchScript => Path.Combine(ScriptsDir, "launch.ps1");
 		public string BuildScript => Path.Combine(ScriptsDir, "build.ps1");
+		public string ExportAgentRulesScript => Path.Combine(ScriptsDir, "export-agent-rules.ps1");
 		public string DifficultiesFile => Path.Combine(ScriptsDir, "difficulties.json");
 		public string AuthoringApiFile => Path.Combine(ScriptsDir, "authoring-api.version");
 		public string AgentGameGuide => Path.Combine(Root, "docs", "agent-game-guide.md");

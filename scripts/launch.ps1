@@ -61,5 +61,7 @@ if ($Replay) {
 if ($ExtraArgs) { $gameArgs += $ExtraArgs }
 
 Write-Host '==> Launching AutoC&C' -ForegroundColor Cyan
-& dotnet @gameArgs
+. (Join-Path $PSScriptRoot 'engine-runtime.ps1')
+$engineRuntime = Get-EngineRuntime
+& $engineRuntime.DotNetPath @gameArgs
 exit $LASTEXITCODE

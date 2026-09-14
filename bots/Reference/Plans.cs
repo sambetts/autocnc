@@ -17,6 +17,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using AutoCnC.Core;
+using AutoCnC.Reference.Logic;
 
 namespace AutoCnC.Reference
 {
@@ -374,6 +375,46 @@ namespace AutoCnC.Reference
 
 		/// <summary>Actor names treated as power plants, for the low-power override.</summary>
 		public static IReadOnlyList<string> PowerPlants { get; } = ["powr", "nuke"];
+
+		/// <summary>
+		/// How many power plants are built inside the base before the rest lead the frontier.
+		/// </summary>
+		/// <remarks>
+		/// Two, because the first two go up before there is anywhere to expand to — the first at
+		/// 13s and the second at 65s on badland-ridges, when the only other structures were the
+		/// yard and one refinery — and because a base whose every power plant is out on the
+		/// frontier browns out the moment the frontier is raided.
+		/// </remarks>
+		const int PowerPlantsAtHome = 2;
+
+		/// <summary>
+		/// Structures that push outward as they multiply, and how many of each stay home first.
+		/// </summary>
+		/// <remarks>
+		/// Refineries expand because a harvester works the closest tiberium to the refinery it
+		/// docks with, so refineries stacked in one ring share one patch and starve together.
+		/// <para>
+		/// Power plants expand because they are the only cheap thing that <em>can</em> move the
+		/// frontier. A Tiberian Dawn cell is buildable when it is close enough to a structure
+		/// carrying <c>GivesBuildableArea</c>, and of everything this bot builds only
+		/// <c>fact</c>, <c>proc</c>, <c>nuke</c>, <c>hand</c>/<c>pyle</c>, <c>hq</c> and
+		/// <c>weap</c>/<c>afld</c> carry it — <c>silo</c>, <c>gtwr</c>, <c>gun</c>, <c>atwr</c>
+		/// and <c>sam</c> all require buildable area without giving any, so no quantity of cheap
+		/// towers ever extends the base by one cell. At 500 credits the power plant is the
+		/// cheapest of the ones that do, against 1,500 for a refinery and 2,000 for a factory,
+		/// and every plan here builds four or five anyway.
+		/// </para>
+		/// <para>
+		/// Production and defence are deliberately absent. A barracks wants its rally point
+		/// inside the base, and a tower that walks off to the frontier is a tower not defending
+		/// anything.
+		/// </para>
+		/// </remarks>
+		public static IReadOnlyList<ExpandingRole> ExpandingRoles { get; } =
+		[
+			new(Refineries, 1),
+			new(PowerPlants, PowerPlantsAtHome),
+		];
 
 		/// <summary>Every build plan any doctrine declares, for tests that check them all.</summary>
 		public static IReadOnlyList<IReadOnlyList<BuildStep>> AllBuildPlans { get; } =

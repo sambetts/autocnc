@@ -13,9 +13,13 @@
 //  works for any module: change the plan in your IDoctrine, not here.
 //
 //  It also decides WHERE, not just what. FindBuildLocation defaults to a 2-14
-//  cell ring around the base centre, which is right for a power plant and wrong
-//  for a refinery: harvesters work the closest tiberium to the refinery they
-//  dock with, so refineries stacked in one ring share one patch and run it dry.
+//  cell ring around the base centre, which is wrong for a refinery: harvesters
+//  work the closest tiberium to the refinery they dock with, so refineries
+//  stacked in one ring share one patch and run it dry. Asking for one far ring
+//  and falling home when it misses is no better, so this walks a ladder of
+//  rings inward and takes the furthest one that is legal. Power plants lead the
+//  way out, because they are the cheapest structure here that gives buildable
+//  area and so the only affordable way to move the frontier at all.
 //  See BasePlacementLogic.
 //
 //  Licence: GPL-3.0-or-later. See LICENSE and NOTICE.md.
@@ -47,11 +51,13 @@ namespace AutoCnC.Reference.Modes
 		/// Structures that should be pushed outward as they multiply, rather than stacked at home.
 		/// </summary>
 		/// <remarks>
-		/// Refineries only. See <see cref="BasePlacementLogic"/> for why: harvesters work the
-		/// closest tiberium to the refinery they dock with, so refineries built on top of each
-		/// other share one patch and starve together once it runs out.
+		/// Refineries, because harvesters work the closest tiberium to the refinery they dock
+		/// with; and power plants, because they are the cheapest thing this bot builds that
+		/// carries <c>GivesBuildableArea</c> and so the only affordable way to move the frontier
+		/// the refineries need. See <see cref="BasePlacementLogic"/> and
+		/// <see cref="ReferencePlans.ExpandingRoles"/>.
 		/// </remarks>
-		static readonly string[] ExpandingStructures = [.. ReferencePlans.Refineries];
+		static readonly IReadOnlyList<ExpandingRole> ExpandingRoles = ReferencePlans.ExpandingRoles;
 
 		// Sensing buffers are reused by the host, so what we read from one queue would be
 		// overwritten by reading the next. Copy into buffers we own instead.
@@ -143,13 +149,19 @@ namespace AutoCnC.Reference.Modes
 			{
 				plannedItem[i] = order.Item;
 
-				// Income expands outward; everything else stays behind the defences. The ring is
-				// a preference — if nothing out there is legal we take the default rather than
-				// stall holding a refinery we have already paid for.
-				var ring = BasePlacementLogic.RingFor(order.Item, owned, ExpandingStructures);
+				// Income and the ground it needs expand outward; everything else stays behind the
+				// defences. The ring is an ambition and the ladder is what is reachable: the near
+				// edge walks inward a couple of cells at a time while the far edge stays put, so
+				// the first rung that matches is the furthest-out band this base can legally build
+				// in. The last rung is the default ring, so a structure already paid for always
+				// has somewhere to go.
+				var ladder = BasePlacementLogic.LadderFor(order.Item, owned, ExpandingRoles);
 
-				plannedLocation[i] = ctx.FindBuildLocation(order.Item, ring.MinRangeCells, ring.MaxRangeCells)
-					?? ctx.FindBuildLocation(order.Item);
+				CPos? chosen = null;
+				for (var rung = 0; rung < ladder.Count && chosen == null; rung++)
+					chosen = ctx.FindBuildLocation(order.Item, ladder[rung].MinRangeCells, ladder[rung].MaxRangeCells);
+
+				plannedLocation[i] = chosen ?? ctx.FindBuildLocation(order.Item);
 			}
 
 			if (plannedLocation[i] == null)

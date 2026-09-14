@@ -247,6 +247,84 @@ target before any vehicle factory, before any tech, for less than the opening ba
 is cheaper than a factory plus a harvester. Every one of those assertions fails against the plan
 this match was fought with.
 
+## A ring is an ambition; a ladder is what you can reach
+
+The refinery ring went in and did nothing. Worse than nothing.
+
+On the fourth badland-ridges the income ladder worked exactly as designed — four refineries by
+237s (51s, 117s, 178s, 237s) against the third one landing at 860s last time, and four harvesters
+on the field by 237s. Every economic fix held. The bot still lost, army 0 to 68,160, because
+**all four refineries went into the same 7-cell circle.**
+
+Here is the entire base, every structure it built in 1,519 seconds, as distance in cells from the
+construction yard at (82, 13):
+
+| | `fact` | `nuke` | `proc` | `nuke` | `hand` | `proc` | `proc` | `nuke` | `proc` | `hq` | `afld` | `nuke` | `afld` | `hand` | `nuke` |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| **at** | 0s | 13s | 51s | 65s | 79s | 117s | 178s | 193s | 237s | 272s | 323s | 343s | 600s | 768s | 892s |
+| **cells** | 0.0 | 2.0 | **7.1** | 3.0 | 3.0 | **3.0** | **4.2** | 4.0 | **5.0** | 4.2 | 5.0 | 5.4 | 6.1 | 5.8 | 5.8 |
+
+Nothing ever exceeded 7.07 cells. The four refineries are in bold, and the shape of the failure is
+in those four numbers: **the only refinery that landed far out was the first one — the one that
+used the plain default ring.** The three that asked for an expanded ring landed at 3.0, 4.2 and
+5.0, every one of them *closer to home than the refinery that asked for nothing.*
+
+That is not the expansion failing to help. That is the expansion actively hurting, and the reason
+is the fallback. `BuildBaseMode` asked `FindBuildLocation(item, 8, 20)`, got nothing, and then ran
+`FindBuildLocation(item)` from scratch — which searches from 2 cells outward and returns the first
+legal cell it finds, which is near. One far request and then home, with no middle.
+
+The income curve is the bill. Cash was 0 or 1 at every assessment from 300s on, so what the bot
+spent is what it earned; pricing the build log and excluding the free actors (`c17` deliveries and
+the harvester a `proc` hands out) gives income directly, against a fleet pinned at four harvesters
+with none lost before 960s:
+
+| Window | Harvesters | Income | Per harvester |
+|---|---|---|---|
+| 200–300s | 4 | 5,800 | 1,450 |
+| 300–400s | 4 | 5,800 | 1,450 |
+| 400–500s | 4 | 2,400 | 600 |
+| 500–600s | 4 | 1,750 | **438** |
+| 700–800s | 4 | 2,550 | 638 |
+
+Credits per 100 game seconds. A 3.3-fold collapse with the fleet constant and nothing lost — the
+harvesters were neither idle nor dead, they were walking further every trip because four docking
+bays stood on one patch of tiberium. Cabal's army went 5,660 at 360s to 55,800 at 1,440s while
+this bot's peaked at 9,750 at 420s and never beat it. The trade was almost even, 78 kills to 92
+losses. It lost on income alone.
+
+Two things were wrong, and they are one fix.
+
+**A ring is an ambition, and a ladder is what is reachable.** Instead of one far request and then
+the default, [`BasePlacementLogic.Ladder`](Logic/BasePlacementLogic.cs) walks the near edge inward
+in `LadderStepCells` steps and leaves the far edge where the ambition put it: refinery two asks
+8–20, then 6–20, then 4–20, then the default. Each rung *contains* the one before it, so the first
+rung that matches anything is the furthest-out band this base can legally build in — which is the
+question worth asking. The step is two cells rather than six, and that inequality is the mechanism:
+a ladder descending a whole ring per rung would have exactly two rungs and no middle, which is the
+behaviour being replaced. A test asserts `LadderStepCells < RingStepCells`, and another asserts
+every ring a shipped plan can ask for yields at least three rungs. The last rung is always the
+default ring, so this can only ever do better than what it replaces — the rungs in between are
+extra chances and the fallback is unchanged.
+
+**Only some structures can move the frontier at all.** A Tiberian Dawn cell is buildable when it
+is close enough to a structure carrying `GivesBuildableArea`. Of everything this bot builds,
+`silo`, `gtwr`, `gun`, `atwr` and `sam` carry `RequiresBuildableArea` and do **not** give it — so
+no quantity of cheap towers, and no number of 100-credit silos, ever extends the base by one cell.
+Only `fact`, `proc`, `nuke`, `pyle`/`hand`, `hq` and `weap`/`afld` do. At 500 credits the power
+plant is the cheapest of those, against 1,500 for a refinery and 2,000 for a factory, and every
+plan here already builds four or five. So power plants now lead the expansion and the refineries
+follow into the ground they opened. The five this bot built stood at 2.0, 3.0, 4.0, 5.4 and 5.8
+cells — every one of them behind refinery number one, none of them buying an inch of new ground.
+
+Expansion is therefore a list of roles rather than a list of actors, because the two roles have to
+be counted separately: a power plant going up must not advance the refinery ring, or they leapfrog
+each other into ground neither can reach. `ReferencePlans.ExpandingRoles` names both, with how
+many of each stay home first — one refinery, because the first is the whole economy and wants the
+starting field, and two power plants, because the first two go up before there is anywhere to
+expand to and a base whose every plant is on the frontier browns out the moment the frontier is
+raided.
+
 ## Layout
 
 ```
@@ -262,8 +340,9 @@ Reference/
 │                                  (income leads tech — see EconomyPlanLogic)
 ├── Modes/                       ← behaviours
 │   ├── BuildBaseMode.cs         ←   deploys the MCV, grows the base from ctx.BuildPlan
-│   │                                (drives both the Building and Support queues,
-│   │                                 and expands refineries outward as they multiply)
+│   │                                (drives both the Building and Support queues, and walks
+│   │                                 a ladder of rings so income and the power plants that
+│   │                                 open ground for it land as far out as is legal)
 │   ├── TrainUnitsMode.cs        ←   trains units from ctx.ProductionPlan
 │   ├── DefensiveMode.cs         ←   holds ground, won't be baited, retreats to repair
 │   ├── AttackBaseMode.cs        ←   pushes a base, never chases

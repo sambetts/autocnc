@@ -44,6 +44,46 @@ namespace AutoCnC.Core
 	}
 
 	/// <summary>
+	/// What one cell holds, as a mode sees it. <see cref="Empty"/> when there is nothing to cut.
+	/// </summary>
+	/// <remarks>
+	/// Cell coordinates rather than world units, because every order a harvester can be given
+	/// names a cell.
+	/// </remarks>
+	public readonly record struct ResourceCell(int X, int Y, string ResourceType, int Density)
+	{
+		public static ResourceCell Empty { get; } = default;
+
+		public bool HasResource => ResourceType != null && Density > 0;
+	}
+
+	/// <summary>
+	/// A contiguous patch of harvestable resource — one tiberium field — flattened into
+	/// engine-free primitives.
+	/// </summary>
+	/// <remarks>
+	/// <para>
+	/// <see cref="NearestX"/>/<see cref="NearestY"/> is the cell of this field closest to whoever
+	/// asked for it, and is the cell to send a harvester to: aiming at
+	/// <see cref="CenterX"/>/<see cref="CenterY"/> drives it through the field to the far side.
+	/// </para>
+	/// <para>
+	/// <see cref="TotalDensity"/> is the sum of every cell's density, so it says how much is
+	/// actually left rather than how wide the patch once was. A field that has been mined out to
+	/// a thin rind has a large <see cref="CellCount"/> and a small <see cref="TotalDensity"/>.
+	/// </para>
+	/// </remarks>
+	public readonly record struct ResourceField(
+		int CenterX,
+		int CenterY,
+		int NearestX,
+		int NearestY,
+		int DistanceUnits,
+		int CellCount,
+		int TotalDensity,
+		string ResourceType);
+
+	/// <summary>
 	/// Everything <see cref="DefensiveLogic"/> is allowed to know about the world.
 	/// </summary>
 	public readonly record struct DefensiveState(

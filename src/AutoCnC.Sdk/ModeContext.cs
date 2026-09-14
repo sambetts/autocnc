@@ -40,6 +40,8 @@ namespace AutoCnC.Sdk
 		readonly AttackBase[] attackBases;
 		readonly IHealth health;
 		readonly IMove move;
+		readonly IResourceLayer resourceLayer;
+		readonly HarvesterInfo harvesterInfo;
 		readonly List<ThreatSnapshot> threatBuffer = [];
 
 		public World World { get; }
@@ -110,6 +112,8 @@ namespace AutoCnC.Sdk
 			attackBases = self.TraitsImplementing<AttackBase>().ToArray();
 			health = self.TraitOrDefault<IHealth>();
 			move = self.TraitOrDefault<IMove>();
+			resourceLayer = World.WorldActor.TraitOrDefault<IResourceLayer>();
+			harvesterInfo = self.Info.TraitInfoOrDefault<HarvesterInfo>();
 		}
 
 		/// <summary>
@@ -334,6 +338,202 @@ namespace AutoCnC.Sdk
 			}
 
 			return best;
+		}
+
+		#endregion
+
+		#region Resources
+
+		/// <summary>True if this map has a resource layer to read at all.</summary>
+		public bool HasResourceLayer => resourceLayer != null;
+
+		/// <summary>True if there is no resource left anywhere on the map.</summary>
+		public bool ResourcesExhausted => resourceLayer == null || resourceLayer.IsEmpty;
+
+		/// <summary>True if this unit is a harvester, i.e. it can cut resource at all.</summary>
+		public bool IsHarvester => harvesterInfo != null;
+
+		/// <summary>
+		/// What is in a cell: tiberium type and how much of it.
+		/// </summary>
+		/// <remarks>
+		/// <see cref="ResourceCell.Empty"/> for bare ground, for cells off the map, and for cells
+		/// this player has never explored — the same rule the engine applies to a human's own
+		/// harvest cursor, so a mode cannot read tiberium out of unexplored shroud.
+		/// </remarks>
+		public ResourceCell ResourceAt(CPos cell)
+		{
+			if (resourceLayer == null || cell.Layer != 0 || !World.Map.Contains(cell))
+				return ResourceCell.Empty;
+
+			if (!self.Owner.Shroud.IsExplored(cell))
+				return ResourceCell.Empty;
+
+			var contents = resourceLayer.GetResource(cell);
+			if (contents.Type == null || contents.Density == 0)
+				return ResourceCell.Empty;
+
+			return new ResourceCell(cell.X, cell.Y, contents.Type, contents.Density);
+		}
+
+		/// <summary>True if there is anything at all to cut in this cell.</summary>
+		public bool HasResource(CPos cell) => ResourceAt(cell).HasResource;
+
+		/// <summary>True if <i>this</i> unit can cut what is in the cell.</summary>
+		/// <remarks>Always false for a unit that is not a harvester.</remarks>
+		public bool CanHarvest(CPos cell)
+		{
+			if (harvesterInfo == null)
+				return false;
+
+			var contents = ResourceAt(cell);
+			return contents.HasResource && harvesterInfo.Resources.Contains(contents.ResourceType);
+		}
+
+		/// <summary>
+		/// Cells this unit should count as a field: what it can cut if it is a harvester, and any
+		/// resource at all if it is not, so a base planner can still find tiberium to build near.
+		/// </summary>
+		bool IsFieldCell(CPos cell) =>
+			harvesterInfo != null ? CanHarvest(cell) : HasResource(cell);
+
+		/// <summary>
+		/// The nearest harvestable cell, or null if there is none within
+		/// <paramref name="radiusCells"/>.
+		/// </summary>
+		/// <remarks>
+		/// Cheap: cells come back nearest-first, so this stops at the first hit. Capped at the
+		/// engine's tile search limit of 50 cells — use <see cref="FindResourceFields"/> to find
+		/// tiberium further out than that.
+		/// </remarks>
+		public CPos? FindNearestResource(int radiusCells = 24, CPos? origin = null)
+		{
+			if (ResourcesExhausted)
+				return null;
+
+			var limit = World.Map.Grid.MaximumTileSearchRange;
+			if (radiusCells > limit)
+				radiusCells = limit;
+
+			if (radiusCells < 0)
+				radiusCells = 0;
+
+			foreach (var cell in World.Map.FindTilesInCircle(origin ?? self.Location, radiusCells))
+				if (IsFieldCell(cell))
+					return cell;
+
+			return null;
+		}
+
+		/// <summary>
+		/// Every distinct resource field on the map, nearest first.
+		/// </summary>
+		/// <remarks>
+		/// <para>
+		/// This is the map-wide answer to "where is the tiberium", and it is deliberately not
+		/// capped by a radius: a harvester that has mined out the ground by its refinery needs to
+		/// be told about a field on the far side of the map, and every radius in the engine's own
+		/// harvester search is far too short to find one.
+		/// </para>
+		/// <para>
+		/// It walks every cell on the map and flood-fills each patch, so it is a scan rather than
+		/// a lookup. Call it when a harvester has run out of work, not every tick.
+		/// </para>
+		/// </remarks>
+		/// <param name="minCells">
+		/// Ignore patches smaller than this, so a harvester is not sent across the map for three
+		/// stray cells.
+		/// </param>
+		/// <param name="maxFields">How many of the nearest fields to return.</param>
+		/// <param name="origin">Measure distance from here; defaults to this unit's cell.</param>
+		public IReadOnlyList<ResourceField> FindResourceFields(int minCells = 4, int maxFields = 16, CPos? origin = null)
+		{
+			var fields = new List<ResourceField>();
+			if (ResourcesExhausted || maxFields <= 0)
+				return fields;
+
+			var from = origin ?? self.Location;
+			var fromPos = World.Map.CenterOfCell(from);
+			var visited = new HashSet<CPos>();
+			var pending = new Queue<CPos>();
+
+			foreach (var seed in World.Map.AllCells)
+			{
+				if (!visited.Add(seed))
+					continue;
+
+				if (!IsFieldCell(seed))
+					continue;
+
+				var cellCount = 0;
+				var totalDensity = 0;
+				var sumX = 0L;
+				var sumY = 0L;
+				var nearest = seed;
+				var nearestDistance = int.MaxValue;
+				string type = null;
+
+				pending.Enqueue(seed);
+
+				while (pending.Count > 0)
+				{
+					var cell = pending.Dequeue();
+					var contents = ResourceAt(cell);
+
+					cellCount++;
+					totalDensity += contents.Density;
+					sumX += cell.X;
+					sumY += cell.Y;
+					type ??= contents.ResourceType;
+
+					var distance = (World.Map.CenterOfCell(cell) - fromPos).HorizontalLength;
+					if (distance < nearestDistance)
+					{
+						nearestDistance = distance;
+						nearest = cell;
+					}
+
+					foreach (var direction in CVec.Directions)
+					{
+						var neighbour = cell + direction;
+						if (!visited.Add(neighbour))
+							continue;
+
+						if (IsFieldCell(neighbour))
+							pending.Enqueue(neighbour);
+					}
+				}
+
+				if (cellCount >= minCells)
+					fields.Add(new ResourceField(
+						CenterX: (int)(sumX / cellCount),
+						CenterY: (int)(sumY / cellCount),
+						NearestX: nearest.X,
+						NearestY: nearest.Y,
+						DistanceUnits: nearestDistance,
+						CellCount: cellCount,
+						TotalDensity: totalDensity,
+						ResourceType: type));
+			}
+
+			fields.Sort(static (a, b) => a.DistanceUnits.CompareTo(b.DistanceUnits));
+			if (fields.Count > maxFields)
+				fields.RemoveRange(maxFields, fields.Count - maxFields);
+
+			return fields;
+		}
+
+		/// <summary>
+		/// The nearest field with resource still in it, or null when the map is mined out.
+		/// </summary>
+		/// <remarks>
+		/// The one call a stalled harvester needs: aim at <see cref="ResourceField.NearestX"/>/
+		/// <see cref="ResourceField.NearestY"/> with <see cref="UnitDecision.Harvest"/>.
+		/// </remarks>
+		public ResourceField? FindNearestResourceField(int minCells = 4, CPos? origin = null)
+		{
+			var fields = FindResourceFields(minCells, 1, origin);
+			return fields.Count > 0 ? fields[0] : null;
 		}
 
 		#endregion
@@ -620,6 +820,18 @@ namespace AutoCnC.Sdk
 
 				case UnitAction.AttackMoveTo:
 					return AttackMoveOrder(new CPos(decision.TargetX, decision.TargetY));
+
+				case UnitAction.Harvest:
+				{
+					if (harvesterInfo == null)
+						return null;
+
+					// Targeting the cell rather than the actor is what makes this work at range:
+					// the engine re-centres its harvest search on the ordered cell, so a harvester
+					// will cross the map to a field that its own search radius could never reach.
+					return new Order("Harvest", self,
+						Target.FromCell(World, new CPos(decision.TargetX, decision.TargetY)), false);
+				}
 
 				case UnitAction.Deploy:
 					return new Order("DeployTransform", self, false);

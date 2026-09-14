@@ -48,6 +48,18 @@ namespace AutoCnC.Core
 		/// <see cref="UnitDecision.TargetX"/>/<see cref="UnitDecision.TargetY"/>.
 		/// </summary>
 		PlaceBuilding = 10,
+
+		/// <summary>
+		/// Harvest the resource at <see cref="UnitDecision.TargetX"/>/<see cref="UnitDecision.TargetY"/>,
+		/// then keep harvesting and delivering from there without further orders.
+		/// </summary>
+		/// <remarks>
+		/// The action to send a harvester to a field, in preference to <see cref="MoveTo"/>. A move
+		/// order puts the harvester on the cell and stops; this one re-centres the engine's own
+		/// harvest-and-deliver loop on the named field, which is the only way to get a harvester to
+		/// work ground further out than its search radius reaches.
+		/// </remarks>
+		Harvest = 11,
 	}
 
 	/// <summary>
@@ -79,6 +91,7 @@ namespace AutoCnC.Core
 		public static UnitDecision Deploy(string reason) => new(UnitAction.Deploy, 0, 0, 0, null, null, reason);
 		public static UnitDecision Produce(string queue, string itemName, string reason) => new(UnitAction.Produce, 0, 0, 0, itemName, queue, reason);
 		public static UnitDecision PlaceBuilding(string queue, string itemName, int x, int y, string reason) => new(UnitAction.PlaceBuilding, 0, x, y, itemName, queue, reason);
+		public static UnitDecision Harvest(int x, int y, string reason) => new(UnitAction.Harvest, 0, x, y, null, null, reason);
 
 		/// <summary>
 		/// True if this decision commands the same thing as <paramref name="other"/>, ignoring the

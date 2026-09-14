@@ -376,7 +376,13 @@ UnitDecision.AdvanceToObjective(id, reason)
 UnitDecision.Deploy(reason)                    // e.g. MCV -> construction yard
 UnitDecision.Produce(queue, item, reason)
 UnitDecision.PlaceBuilding(queue, item, x, y, reason)
+UnitDecision.Harvest(x, y, reason)              // send a harvester to a tiberium field
 ```
+
+**`Harvest` is not `MoveTo`.** A move order parks the harvester on the tiberium and stops there.
+`Harvest` re-centres the engine's own harvest-and-deliver loop on the cell you name, so the
+harvester delivers any load it is carrying, cuts the new field, and keeps going without further
+orders — and it works at any range, which is what gets a harvester out of a mined-out base.
 
 Two things to internalise:
 
@@ -426,6 +432,36 @@ declare, so the rule and the shipped strategy cannot drift apart.
 | `CanAttack(actor)` | Do our weapons work against it? |
 | `FindRepairBay()`, `FindRefinery()`, `FindNearestAllied<T>()` | Nearest allied |
 | `ResolveActor(id)` | ActorID back to a live actor |
+
+### Resources
+
+| Member | Notes |
+|---|---|
+| `ResourceAt(cell)` | Tiberium type and density in one cell; `Empty` for bare ground or unexplored shroud |
+| `HasResource(cell)` / `CanHarvest(cell)` | Anything there / anything *this* unit can cut |
+| `FindNearestResource(radiusCells)` | Nearest harvestable cell. Cheap, but capped at 50 cells by the engine's tile search |
+| `FindResourceFields(minCells, maxFields)` | **Every tiberium field on the map**, nearest first, no radius cap |
+| `FindNearestResourceField(minCells)` | Just the closest one |
+| `HasResourceLayer`, `ResourcesExhausted`, `IsHarvester` | Capability and map checks |
+
+A `ResourceField` gives you `NearestX`/`NearestY` (the cell to send a harvester to), `CenterX`/
+`CenterY`, `DistanceUnits`, `CellCount`, and `TotalDensity`. Aim at **`NearestX`/`NearestY`**;
+aiming at the centre drives the harvester through the field to the far side. `TotalDensity` is
+what is actually left, so a field mined down to a rind has a big `CellCount` and a small
+`TotalDensity`.
+
+> **Why this matters.** OpenRA's own harvester search is radius-capped and never widens: 12 cells
+> from the last cell it cut, or 24 from the refinery. When the tiberium inside that bubble is
+> gone the harvester waits, re-searches the same dead bubble, and waits again for the rest of the
+> match. Nothing the harvester does by itself escapes it. Reading the resource layer and issuing
+> `UnitDecision.Harvest` at a field further out is the only fix.
+
+`FindResourceFields` walks every cell on the map and flood-fills each patch, so it is a scan
+rather than a lookup. Call it when a harvester has run out of work, not every tick.
+
+Resource reads respect shroud: a cell this player has never explored reads as `Empty`, the same
+rule the engine applies to a human's harvest cursor. On a fogged map, finding new fields is a
+genuine reason to scout.
 
 ### Construction and production
 

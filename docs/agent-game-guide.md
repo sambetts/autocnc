@@ -11,6 +11,27 @@ it as authoritative context alongside the source and the evidence from one compl
   processing, create production structures, train an army, find the enemy, and fight.
 - Cash comes from harvesters returning resources to refineries. A plan that loses every harvester
   or stops replacing them will eventually stop.
+- **Harvesters do not find distant tiberium on their own.** OpenRA's built-in harvester search is
+  radius-capped and never widens: 12 cells from the last cell it cut, or 24 cells from the
+  refinery. Once the tiberium inside that bubble is exhausted the harvester waits, re-searches the
+  same dead bubble, and waits again for the rest of the match. This is the single most common
+  cause of an economy that dies partway through a fight while tiberium is still on the map.
+- The fix is to read the resource layer and give an explicit order. `ctx.FindResourceFields(...)`
+  returns every tiberium field on the map with no radius cap, nearest first; sending a stalled
+  harvester to one with `UnitDecision.Harvest(field.NearestX, field.NearestY, reason)` re-centres
+  the engine's search on that field. `UnitDecision.MoveTo` will not do — it parks the harvester on
+  the tiberium and stops it.
+- Refinery placement matters for the same reason. A refinery built next to a large field keeps its
+  harvesters inside their own search bubble for far longer than one built in the middle of a base.
+- **Resource reads respect shroud, so scouting is an economic act, not just a military one.** A
+  cell the side has never explored reads as empty, exactly as it does for a human player. Measured
+  on `tiberium-rift`, a side that never scouts has explored about 36 of the map's 366 tiberium
+  cells — roughly a tenth of the map's income — so `FindResourceFields` legitimately reports a
+  single field no matter how good the harvester logic is. Exploration is permanent: once a cell
+  has been seen, its tiberium stays readable for the rest of the match. Sending one cheap fast unit
+  around the map early therefore raises the income ceiling for the whole game, and a bot whose
+  harvesters keep stalling with "no tiberium in sight" is telling you it has not scouted, not that
+  the map is mined out.
 - Buildings and production require sufficient power. A negative power balance slows the economy.
 - GDI and Nod use different actor IDs for equivalent roles. Candidate lists express alternatives:
   `Build("powr", "nuke")` means build whichever faction's power plant is available.

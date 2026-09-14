@@ -55,6 +55,12 @@ namespace AutoCnC.Reference.Modes
 			var bounds = ctx.World.Map.Bounds;
 			var here = self.Location;
 
+			// Scanning the map is a scan, not a lookup, so only ask once the harvester has
+			// actually run out of work. A harvester that is still cutting never gets here.
+			var field = watchdog.StillEvaluations >= tuning.StallEvaluations
+				? ctx.FindNearestResourceField(tuning.MinFieldCells)
+				: null;
+
 			var state = new HarvesterState(
 				HealthPercent: ctx.HealthPercent,
 				CanMove: ctx.CanMove,
@@ -71,7 +77,11 @@ namespace AutoCnC.Reference.Modes
 				MapMinX: bounds.Left,
 				MapMinY: bounds.Top,
 				MapMaxX: bounds.Left + bounds.Width - 1,
-				MapMaxY: bounds.Top + bounds.Height - 1);
+				MapMaxY: bounds.Top + bounds.Height - 1,
+				HasKnownField: field != null,
+				FieldX: field?.NearestX ?? 0,
+				FieldY: field?.NearestY ?? 0,
+				FieldDistanceUnits: field?.DistanceUnits ?? 0);
 
 			// --- Decide ------------------------------------------------------------
 			var outcome = HarvesterLogic.Decide(state, watchdog, tuning);

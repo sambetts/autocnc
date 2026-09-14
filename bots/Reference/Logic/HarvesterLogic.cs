@@ -22,7 +22,8 @@ namespace AutoCnC.Reference.Logic
 		int FirstProbeCells,
 		int ProbeStepCells,
 		int MaxProbeCells,
-		int ProbeResetEvaluations)
+		int ProbeResetEvaluations,
+		int MinFieldCells)
 	{
 		public static HarvesterTuning Default { get; } = new(
 			PanicRadiusUnits: 7 * 1024,
@@ -40,11 +41,19 @@ namespace AutoCnC.Reference.Logic
 			StallEvaluations: 4,
 
 			FirstProbeCells: 6,
-			ProbeStepCells: 5,
-			MaxProbeCells: 24,
+			ProbeStepCells: 8,
+
+			// The probe is now only used to reveal shroud, so it has to be able to leave the
+			// area the engine's own search already covers. Anything at or below 24 cells is
+			// inside the bubble that stalled the harvester in the first place.
+			MaxProbeCells: 48,
 
 			// Evaluations of healthy behaviour before the search ladder folds back to the start.
-			ProbeResetEvaluations: 8);
+			ProbeResetEvaluations: 8,
+
+			// The smallest patch worth crossing the map for. Below this a harvester spends more
+			// time driving than cutting.
+			MinFieldCells: 4);
 	}
 
 	/// <summary>Everything the harvester rule needs, with no engine types in it.</summary>
@@ -64,7 +73,11 @@ namespace AutoCnC.Reference.Logic
 		int MapMinX,
 		int MapMinY,
 		int MapMaxX,
-		int MapMaxY);
+		int MapMaxY,
+		bool HasKnownField,
+		int FieldX,
+		int FieldY,
+		int FieldDistanceUnits);
 
 	/// <summary>
 	/// What one harvester has been seen doing. Carried by the mode between evaluations, advanced
@@ -96,10 +109,23 @@ namespace AutoCnC.Reference.Logic
 	/// harvester received, and income went from 15.0 credits a second to 1.23.
 	/// <para>
 	/// So this rule is built the other way round. Stopping is the exception and has to be earned;
-	/// a harvester that is provably stopped is always restarted, first by sending it home to
-	/// unload and then by walking it outward in widening steps until it finds ground worth
-	/// cutting. No resource layer is read — the ladder is expressed entirely in move orders, the
-	/// same way <c>ScoutMode</c> searches for a base it cannot see.
+	/// a harvester that is provably stopped is always restarted.
+	/// </para>
+	/// <para>
+	/// <b>Restarting means naming a field.</b> The engine's own search is radius-capped — twelve
+	/// cells from the last cell it cut, or twenty-four from the refinery — and it never widens.
+	/// Once the ground inside that bubble is gone the harvester waits, re-searches the same dead
+	/// bubble, and waits again for the rest of the match, which is what "the tiberium runs out
+	/// and the harvesters sit at home" actually is. Nothing the harvester does by itself escapes
+	/// it. So when one stalls we read the resource layer through
+	/// <c>ModeContext.FindResourceFields</c>, pick the nearest field that still has tiberium in
+	/// it however far away that is, and issue a <see cref="UnitAction.Harvest"/> order at it,
+	/// which re-centres the engine's bubble on the new field.
+	/// </para>
+	/// <para>
+	/// The widening probe underneath is now only the shroud case: with fog on we cannot see
+	/// tiberium we have never explored, so a harvester that knows of no field at all walks
+	/// outward to reveal one. It is a last resort rather than the mechanism.
 	/// </para>
 	/// This type has ZERO OpenRA dependencies by design and is integer-only, so it is both
 	/// lockstep-safe and testable without booting the engine.
@@ -131,20 +157,31 @@ namespace AutoCnC.Reference.Logic
 			if (seen.StillEvaluations < tuning.StallEvaluations)
 				return new HarvesterOutcome(UnitDecision.Continue, seen);
 
-			// 3. Stopped. First try the cheap explanation — a cancelled delivery, with a full hold
-			//    and nowhere it thinks it should take it.
+			// 3. Stopped, and we can see tiberium that still has something in it. Send the
+			//    harvester to cut it. A Harvest order rather than a move: it delivers a full load
+			//    on the way and then keeps working the new field on its own, whereas a move order
+			//    would park it on the tiberium and stop.
+			if (state.HasKnownField)
+				return new HarvesterOutcome(
+					UnitDecision.Harvest(state.FieldX, state.FieldY,
+						$"stopped for {seen.StillEvaluations} evaluations, harvesting the field {state.FieldDistanceUnits / 1024} cells out"),
+					seen with { StillEvaluations = 0, ProbeIndex = 0 });
+
+			// 4. No field in sight. Try the cheap explanation first — a cancelled delivery, with a
+			//    full hold and nowhere it thinks it should take it.
 			if (seen.ProbeIndex == 0 && awayFromRefinery)
 				return new HarvesterOutcome(
 					UnitDecision.MoveTo(state.RefineryX, state.RefineryY, $"stopped for {seen.StillEvaluations} evaluations, returning to the refinery"),
 					seen with { StillEvaluations = 0, ProbeIndex = 1 });
 
-			// 4. Stopped at the refinery, so the ground under it is finished. Walk outward in
-			//    widening steps until the harvester finds something to cut.
+			// 5. Still nothing known anywhere, so every field we have explored is mined out. Walk
+			//    outward in widening steps to pull back shroud until one comes into view.
 			var probe = seen.ProbeIndex < 1 ? 1 : seen.ProbeIndex;
 			var target = ProbeCell(state, probe, tuning, out var cells);
 
 			return new HarvesterOutcome(
-				UnitDecision.MoveTo(target.X, target.Y, $"stopped for {seen.StillEvaluations} evaluations, searching {cells} cells out"),
+				UnitDecision.MoveTo(target.X, target.Y,
+					$"stopped for {seen.StillEvaluations} evaluations, no tiberium in sight, searching {cells} cells out"),
 				seen with { StillEvaluations = 0, ProbeIndex = probe + 1 });
 		}
 

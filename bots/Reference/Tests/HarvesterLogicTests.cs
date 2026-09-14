@@ -26,6 +26,10 @@ namespace AutoCnC.Reference.Tests
 		static HarvesterTuning Tuning => HarvesterTuning.Default;
 
 		/// <summary>A healthy harvester cutting tiberium eight cells from its refinery.</summary>
+		/// <remarks>
+		/// Knows of no field by default, so the tests that predate the resource layer still
+		/// exercise the shroud fallback they were written against.
+		/// </remarks>
 		static HarvesterState Working(int x = 20, int y = 90) => new(
 			HealthPercent: 100,
 			CanMove: true,
@@ -42,7 +46,11 @@ namespace AutoCnC.Reference.Tests
 			MapMinX: 0,
 			MapMinY: 0,
 			MapMaxX: 127,
-			MapMaxY: 127);
+			MapMaxY: 127,
+			HasKnownField: false,
+			FieldX: 0,
+			FieldY: 0,
+			FieldDistanceUnits: 0);
 
 		static HarvesterOutcome Run(HarvesterState state, HarvesterWatchdog watchdog)
 			=> HarvesterLogic.Decide(state, watchdog, Tuning);
@@ -187,6 +195,106 @@ namespace AutoCnC.Reference.Tests
 			Assert.That((outcome.Decision.TargetX, outcome.Decision.TargetY), Is.Not.EqualTo((12, 90)),
 				"sending a stopped harvester to the cell it is already standing on restarts nothing");
 			Assert.That(outcome.Decision.Reason, Does.Contain("searching"));
+		}
+
+		// --- Restarting means naming a field ----------------------------------------------
+
+		/// <summary>A stalled harvester that can see a field 30 cells away.</summary>
+		static HarvesterState StalledWithField(int fieldX = 40, int fieldY = 60, int distanceCells = 30) =>
+			Working() with
+			{
+				IsIdle = true,
+				X = 12,
+				Y = 90,
+				DistanceToRefineryUnits = 512,
+				HasKnownField = true,
+				FieldX = fieldX,
+				FieldY = fieldY,
+				FieldDistanceUnits = distanceCells * 1024,
+			};
+
+		[Test]
+		public void AStalledHarvesterIsSentToTheNearestFieldItCanSee()
+		{
+			var outcome = RunRepeatedly(StalledWithField(), StallEvaluationsNeeded);
+
+			Assert.That(outcome.Decision.Action, Is.EqualTo(UnitAction.Harvest),
+				"a move order parks the harvester on the tiberium and stops; only a harvest order keeps it cutting");
+			Assert.That(outcome.Decision.TargetX, Is.EqualTo(40));
+			Assert.That(outcome.Decision.TargetY, Is.EqualTo(60));
+		}
+
+		[Test]
+		public void AKnownFieldOutranksBothTheTripHomeAndTheBlindSearch()
+		{
+			// The whole bug: every fallback below this one is capped inside the same 24-cell
+			// bubble the engine already searched and found empty.
+			var awayFromHome = StalledWithField() with { X = 20, Y = 90, DistanceToRefineryUnits = 8 * 1024 };
+
+			var outcome = RunRepeatedly(awayFromHome, StallEvaluationsNeeded);
+
+			Assert.That(outcome.Decision.Action, Is.EqualTo(UnitAction.Harvest));
+			Assert.That(outcome.Decision.Reason, Does.Contain("harvesting"));
+		}
+
+		[Test]
+		public void ADistantFieldIsStillWorthCrossingTheMapFor()
+		{
+			// The engine gives up past 24 cells from the refinery. This rule must not, or the
+			// harvester starves next to a mined-out field with tiberium in plain sight.
+			var farField = StalledWithField(fieldX: 110, fieldY: 20, distanceCells: 96);
+
+			var outcome = RunRepeatedly(farField, StallEvaluationsNeeded);
+
+			Assert.That(outcome.Decision.Action, Is.EqualTo(UnitAction.Harvest));
+			Assert.That(outcome.Decision.TargetX, Is.EqualTo(110));
+			Assert.That(outcome.Decision.TargetY, Is.EqualTo(20));
+			Assert.That(outcome.Decision.Reason, Does.Contain("96 cells out"));
+		}
+
+		[Test]
+		public void FindingAFieldFoldsTheBlindSearchLadderBack()
+		{
+			// Drive the ladder out while nothing is visible.
+			var blind = Working() with { IsIdle = true, X = 12, Y = 90, DistanceToRefineryUnits = 512 };
+			var watchdog = HarvesterWatchdog.Start;
+			RunUntilOrdered(blind, ref watchdog);
+			RunUntilOrdered(blind, ref watchdog);
+			Assert.That(watchdog.ProbeIndex, Is.GreaterThan(1), "precondition: the blind search has widened");
+
+			// Shroud comes off and a field appears.
+			var outcome = RunUntilOrdered(StalledWithField(), ref watchdog);
+
+			Assert.That(outcome.Decision.Action, Is.EqualTo(UnitAction.Harvest));
+			Assert.That(outcome.Watchdog.ProbeIndex, Is.Zero,
+				"a field in sight makes the blind ladder irrelevant; the next stall should start clean");
+		}
+
+		[Test]
+		public void AWorkingHarvesterIsNotRedirectedToAField()
+		{
+			var busy = StalledWithField() with { IsIdle = false };
+
+			var outcome = RunRepeatedly(busy, StallEvaluationsNeeded + 4);
+
+			Assert.That(outcome.Decision.Action, Is.EqualTo(UnitAction.Continue),
+				"interrupting a harvester that is already cutting is the expensive mistake this rule exists to avoid");
+		}
+
+		[Test]
+		public void FleeingOutranksHarvesting()
+		{
+			var hurt = StalledWithField() with
+			{
+				DangerNearby = true,
+				HealthPercent = 30,
+				DistanceToRefineryUnits = 8 * 1024,
+			};
+
+			var outcome = RunRepeatedly(hurt, StallEvaluationsNeeded);
+
+			Assert.That(outcome.Decision.Action, Is.EqualTo(UnitAction.MoveTo));
+			Assert.That(outcome.Decision.Reason, Does.Contain("hurt"));
 		}
 
 		[Test]

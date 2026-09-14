@@ -591,7 +591,9 @@ Fight and rules JSON are shown as collapsible trees. When the run finishes, the 
 entire replacement prompt template in **Next prompt***. Edit and approve it in manual mode, or let
 continuous mode accept a valid template automatically. The launcher inserts that round's paths,
 evidence, result, and source revision through required placeholders. This replaces rather than
-appends, so the prompt can get more focused without growing indefinitely. While a build, fight, or
+appends, so the prompt can get more focused without growing indefinitely. Each adopted template is
+kept in `%LOCALAPPDATA%\AutoCnC\PromptHistory` as a numbered file, so a loop left running overnight
+still leaves a readable trail of how its prompt changed. While a build, fight, or
 improvement is running, the launcher taskbar icon shows indeterminate progress.
 
 If improvement stops with a build or test error, it no longer dead-ends. The Improvement window

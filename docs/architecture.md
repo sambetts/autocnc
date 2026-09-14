@@ -376,7 +376,10 @@ template between machine-readable marker lines. The player can edit and approve 
 automatically. Approval replaces the saved template; required placeholders preserve fresh
 workspace, evidence, result, and recursive next-template contract values without accumulating
 additive guidance. `docs/agent-prompt-template.md` is the repository default, while an approved
-replacement is user state. Script queue activity is mirrored to Windows taskbar indeterminate
+replacement is user state. Since approval overwrites that state, each adopted template is also
+appended to `%LOCALAPPDATA%\AutoCnC\PromptHistory` as a numbered file plus an `index.json` of
+provenance, which is the only record of how the prompt evolved across a long continuous loop.
+Script queue activity is mirrored to Windows taskbar indeterminate
 progress and cleared on every terminal state.
 
 `train-bot.ps1` records agent and verification phases in `agent-status.json`.

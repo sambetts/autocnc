@@ -357,8 +357,10 @@ Resolved rules and fight JSON use lazy, collapsible trees rather than raw text. 
 improvement the agent drafts an entirely new prompt template in **Next prompt***. In manual mode the
 player can edit and approve it; continuous mode accepts a valid template automatically. That
 template replaces the previous one next round, with fresh paths, fight, result, and evidence
-inserted through required placeholders. Long-running launcher work also shows an indeterminate
-progress bar on its Windows taskbar icon.
+inserted through required placeholders. Because that replacement is destructive, every template
+the loop adopts is archived to `%LOCALAPPDATA%\AutoCnC\PromptHistory` as numbered plain-text files
+you can diff, so you can still see how the prompt evolved. Long-running launcher work also shows
+an indeterminate progress bar on its Windows taskbar icon.
 
 Agent and independent-verification failures are separate states. A failed verification exposes
 **Retry verification**, which cleans generated output before retesting, plus **Fix failed

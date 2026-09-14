@@ -68,6 +68,7 @@ namespace AutoCnC.Launcher
 		readonly LauncherSettings settings;
 		readonly bool persistSettings;
 		readonly string trainingRunsRoot;
+		readonly PromptHistory promptHistory;
 		readonly ScriptRunner runner = new();
 		readonly Queue<ScriptJob> queue = new();
 		readonly MatchLog matchLog = new();
@@ -131,13 +132,21 @@ namespace AutoCnC.Launcher
 
 		public MainForm() : this(LauncherSettings.Load(), persistSettings: true) { }
 
-		internal MainForm(LauncherSettings settings, bool persistSettings = false, string trainingRunsRoot = null)
+		internal MainForm(LauncherSettings settings, bool persistSettings = false,
+			string trainingRunsRoot = null, string promptHistoryRoot = null)
 		{
 			// Keep the 96-DPI baseline pending until all controls have been constructed.
 			SuspendLayout();
 			this.settings = settings;
 			this.persistSettings = persistSettings;
 			this.trainingRunsRoot = trainingRunsRoot;
+
+			// Archiving is persistence, so a launcher told not to keep the player's settings must
+			// not quietly start writing to their real profile either. A test that wants to inspect
+			// the archive names its own root.
+			promptHistory = promptHistoryRoot != null ? new PromptHistory(promptHistoryRoot)
+				: persistSettings ? new PromptHistory()
+				: null;
 			Text = "AutoC&C — Battle Command";
 			Font = CommandTheme.Body;
 			AutoScaleMode = AutoScaleMode.Dpi;
@@ -1779,6 +1788,7 @@ namespace AutoCnC.Launcher
 			}
 
 			var approved = promptTemplate.Trim();
+			RecordPromptRevision(approved, PromptOrigin.Continuous, run);
 			settings.AgentPromptTemplate = approved;
 			settings.AgentPromptGuidance = null;
 			run.AcceptSuggestedNextPrompt(approved);
@@ -1883,6 +1893,7 @@ namespace AutoCnC.Launcher
 					StringComparison.Ordinal);
 			}
 
+			RecordPromptRevision(template, PromptOrigin.Baseline);
 			settings.AgentPromptTemplate = template;
 			settings.AgentPromptGuidance = null;
 			PersistSettings();
@@ -1903,12 +1914,48 @@ namespace AutoCnC.Launcher
 			}
 
 			var approved = promptTemplate.Trim();
+			RecordPromptRevision(approved, PromptOrigin.Manual, run);
 			settings.AgentPromptTemplate = approved;
 			settings.AgentPromptGuidance = null;
 			if (run.Manifest.Agent != null)
 				run.AcceptSuggestedNextPrompt(approved);
 			PersistSettings();
 			improvementWindow?.MarkNextPromptSaved();
+		}
+
+		/// <summary>
+		/// Keeps the adopted template where the player can still read it a hundred rounds later.
+		/// </summary>
+		/// <remarks>
+		/// This has to run before the caller assigns the new template, because the archive backfills
+		/// the outgoing one when it finds itself empty and would otherwise record the replacement as
+		/// its own predecessor. Failing to write it is reported and then dropped: the improvement it
+		/// belongs to has already succeeded, and refusing to adopt a good prompt over a full disk
+		/// would be a worse outcome than an incomplete history.
+		/// </remarks>
+		void RecordPromptRevision(string template, PromptOrigin origin, TrainingRun run = null)
+		{
+			if (promptHistory == null)
+				return;
+
+			try
+			{
+				// Players who were already evolving prompts before this archive existed have a
+				// current template that came from nowhere on record. Without it there is nothing
+				// for the first archived revision to be a change from.
+				if (origin != PromptOrigin.Baseline && promptHistory.Read().Revisions.Count == 0)
+					promptHistory.Record(settings.AgentPromptTemplate, PromptOrigin.Baseline);
+
+				promptHistory.Record(template, origin, run);
+			}
+			catch (IOException ex)
+			{
+				Append("Could not archive the prompt revision: " + ex.Message);
+			}
+			catch (UnauthorizedAccessException ex)
+			{
+				Append("Could not archive the prompt revision: " + ex.Message);
+			}
 		}
 
 		void RestoreIteration()

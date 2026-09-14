@@ -295,6 +295,13 @@ required placeholders such as `{workspace}`, `{telemetry}`, `{result}`, and
 `{nextPromptContract}`. The initial template lives at `docs/agent-prompt-template.md`; an approved
 replacement is saved in the player's launcher settings.
 
+Because each approval overwrites that single saved template, every template ever adopted is also
+appended to `%LOCALAPPDATA%\AutoCnC\PromptHistory` as a numbered plain-text file, oldest first,
+with an `index.json` recording when it was adopted, whether a player approved it or continuous
+improvement did, and the bot, session and outcome behind it. Diff two consecutive files to see
+what a round changed. A template identical to the one before it is not recorded. Nothing reads
+the archive back, so editing or deleting it only loses history; it changes no behaviour.
+
 **History & trends** lists every compatible recorded session for the selected bot, newest first,
 with explicit provided/missing feedback status, outcome, duration, and the local side's final stats.
 Select a row to read or edit its feedback, watch that battle's replay, or open its charts.

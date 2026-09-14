@@ -59,6 +59,18 @@ namespace AutoCnC.Reference.Modes
 		/// </remarks>
 		static readonly IReadOnlyList<ExpandingRole> ExpandingRoles = ReferencePlans.ExpandingRoles;
 
+		/// <summary>
+		/// Structures that follow the economy out, because a tower is only defence where its
+		/// weapon reaches.
+		/// </summary>
+		/// <remarks>
+		/// The economy expands and the defences did not, so they stacked on the construction
+		/// yard while the refineries they were bought to protect stood 11 to 13 cells away and
+		/// the harvesters working them died to infantry no tower could reach. See
+		/// <see cref="ReferencePlans.CoveringRoles"/>.
+		/// </remarks>
+		static readonly IReadOnlyList<CoveringRole> CoveringRoles = ReferencePlans.CoveringRoles;
+
 		// Sensing buffers are reused by the host, so what we read from one queue would be
 		// overwritten by reading the next. Copy into buffers we own instead.
 		readonly List<string>[] buildable = NewBuffers();
@@ -149,13 +161,14 @@ namespace AutoCnC.Reference.Modes
 			{
 				plannedItem[i] = order.Item;
 
-				// Income and the ground it needs expand outward; everything else stays behind the
-				// defences. The ring is an ambition and the ladder is what is reachable: the near
-				// edge walks inward a couple of cells at a time while the far edge stays put, so
-				// the first rung that matches is the furthest-out band this base can legally build
-				// in. The last rung is the default ring, so a structure already paid for always
-				// has somewhere to go.
-				var ladder = BasePlacementLogic.LadderFor(order.Item, owned, ExpandingRoles);
+				// Income and the ground it needs expand outward, and so does the defence that
+				// covers them — a tower only defends what its weapon reaches, and the default
+				// ring puts every tower on the yard. The ring is an ambition and the ladder is
+				// what is reachable: the near edge walks inward a couple of cells at a time
+				// while the far edge stays put, so the first rung that matches is the
+				// furthest-out band this base can legally build in. The last rung is the default
+				// ring, so a structure already paid for always has somewhere to go.
+				var ladder = BasePlacementLogic.LadderFor(order.Item, owned, ExpandingRoles, CoveringRoles);
 
 				CPos? chosen = null;
 				for (var rung = 0; rung < ladder.Count && chosen == null; rung++)

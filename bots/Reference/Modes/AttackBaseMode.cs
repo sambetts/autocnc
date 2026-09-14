@@ -47,11 +47,19 @@ namespace AutoCnC.Reference.Modes
 		static readonly WDist ArrivedRadius = WDist.FromCells(5);
 
 		AssaultTuning tuning = AssaultTuning.Default;
+		MusterTuning musterTuning = MusterTuning.Default;
+		MusterWatchdog musterWatchdog = MusterWatchdog.Start;
 		uint objectiveId;
 
 		public override void OnEnter(Actor self, ModeContext ctx)
 		{
 			tuning = AssaultTuning.Default;
+			musterTuning = MusterTuning.Default;
+
+			// Each push forms up once. Resetting here rather than latching for the unit's whole
+			// life is what makes that true: a unit that came home, rebuilt a force and set off
+			// again is starting a new assault, not resuming the old one.
+			musterWatchdog = MusterWatchdog.Start;
 			objectiveId = 0;
 		}
 
@@ -86,7 +94,54 @@ namespace AutoCnC.Reference.Modes
 				Threats: ctx.SenseThreats(new WDist(weaponRange > 0 ? weaponRange : 1024)));
 
 			// --- Decide ------------------------------------------------------------
+			// Form up first. Staging is judged against the side's remembered sighting rather
+			// than against whatever this unit can currently see, because it is the one target
+			// every unit in the push agrees on — and a rule that gathered each unit around its
+			// own nearest visible building would gather nobody.
+			var outcome = AssaultStagingLogic.Decide(state, Muster(self, ctx, state), musterWatchdog, musterTuning);
+			musterWatchdog = outcome.Watchdog;
+			if (outcome.Decision.HasValue)
+				return outcome.Decision.Value;
+
 			return AttackBaseLogic.Decide(state, tuning, objective != null ? ApproachOrders.None : Approach(self, ctx));
+		}
+
+		/// <summary>
+		/// What this unit can see about the muster: how far their base is, how far the staging
+		/// cell is, and how much of the army is already standing on it.
+		/// </summary>
+		/// <remarks>
+		/// Allies are counted around this unit rather than around the staging cell, because
+		/// sensing is centred on the sensing unit and that is the only count available. It is
+		/// also the more useful one: "am I going in alone" is a question about the company this
+		/// unit will actually keep, not about a map coordinate.
+		/// </remarks>
+		MusterState Muster(Actor self, ModeContext ctx, in AssaultState assault)
+		{
+			if (!EnemyBaseSightings.TryGetLastKnown(self.Owner, out var theirBase))
+				return default;
+
+			var standoffCells = musterTuning.StandoffUnits / 1024;
+			var home = ctx.BaseCenter;
+			var (x, y) = AssaultStagingLogic.MusterCell(home.X, home.Y, theirBase.X, theirBase.Y, standoffCells);
+			var musterCell = new CPos(x, y);
+
+			var allies = 0;
+			foreach (var ally in ctx.SenseAllies(new WDist(musterTuning.MusterRadiusUnits)))
+			{
+				if (ally != self)
+					allies++;
+			}
+
+			return new MusterState(
+				HasTarget: true,
+				CanMove: ctx.CanMove,
+				ObjectiveInRange: assault.HasObjective && assault.DistanceToObjectiveUnits <= assault.WeaponRangeUnits,
+				DistanceToTargetUnits: ctx.DistanceTo(theirBase),
+				MusterX: x,
+				MusterY: y,
+				DistanceToMusterUnits: ctx.DistanceTo(musterCell),
+				AlliesNearbyCount: allies);
 		}
 
 		/// <summary>

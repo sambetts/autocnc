@@ -50,7 +50,11 @@ namespace AutoCnC.Reference.Doctrines
 			// factories have to run whichever doctrine is deciding what they produce.
 			b.Assign<BuildBaseMode>().ToUnitType("mcv", "fact");
 			b.Assign<TrainUnitsMode>().ToUnitType("pyle", "hand", "weap", "afld");
-			b.Assign<RunHomeMode>().ToUnitType("harv");
+
+			// Harvesters get a mode that can put one back to work, not just one that can stop it.
+			// RunHomeMode only ever answered Continue or MoveTo(refinery), and Continue means
+			// "leave the current activity alone" — which after a flee order is no activity at all.
+			b.Assign<HarvesterMode>().ToUnitType("harv");
 
 			// Control groups stay honoured, so a human watching can take a hand without having to
 			// fight the bot for the whole army.

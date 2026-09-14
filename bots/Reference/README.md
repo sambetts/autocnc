@@ -31,6 +31,12 @@ bot's rule 4 reaches the same conclusion from `SecondsSinceContact` as a backsto
 sits above a real approach march (245s on badland-ridges) so it rescues a stalled push without
 cancelling a marching one.
 
+A push also **forms up before it goes in**. Units in this mod run from 0.952 cells a second to
+4.15, so sending each one at the enemy the instant the doctrine flips is not one attack but one per
+speed class. `AttackBaseMode` gathers the army 14 cells short of the remembered sighting — outside
+every static defence in the ruleset — and releases it when the crowd around it stops growing, or
+when a hard cap says the rest are not coming. See [`Logic/AssaultStagingLogic.cs`](Logic/AssaultStagingLogic.cs).
+
 ## A bot must not talk over its own modes
 
 The host takes the bot's answer where it has one, and a mode's request only where it does not. So
@@ -388,10 +394,270 @@ Two lines of the same rule now:
   almost nothing on this side can shoot upwards at all, and it is perishable, because the target
   crosses the envelope in a second or two while a tank will still be there next evaluation.
 
-Nine tests in [`DefensiveLogicTests`](Tests/DefensiveLogicTests.cs) fail against the logic this
-match was fought with, including one that replays the exact distances from 544s. Two more exist to
-stop the rule growing: a ground target at the same nine cells must still be engaged, so this stays
-a statement about catchability rather than a quiet shrinking of the leash.
+Five tests in [`DefensiveLogicTests`](Tests/DefensiveLogicTests.cs) hold this rule in place,
+including one that replays the exact distance from 544s. One exists to stop the rule growing: a
+ground target at the same 8,602 units must still be engaged, so this stays a statement about
+catchability rather than a quiet shrinking of the leash.
+
+## A rule that can stop a harvester and cannot start one
+
+Everything above held. On the sixth badland-ridges no unit walked at an aircraft — all ten aircraft
+engagements were inside the firing unit's own range — and losses to `world` fell from fifteen to
+three. The refinery ladder put `proc` at 7.07, 13.42, 13.42 and 11.05 cells from the yard at
+(13, 82). `sam` went up at 253s and fifteen `e3` were trained. The bot then killed **337** units
+and lost **29**, against a winner that killed 34 and lost 369.
+
+It lost anyway, four buildings to forty-four, because it stopped earning money at **358 seconds**.
+
+| | first 358s | remaining 1,705s |
+|---|---|---|
+| credits spent, free actors excluded | 12,850 | 2,100 |
+| income | **15.0/s** | **1.23/s** |
+| share of everything it ever spent | 86% | 14% |
+| share of the match | 17% | 83% |
+
+Its whole lifetime was 14,950 credits against a 7,500 opening bank — 7,450 earned in 2,063
+seconds, 3.6 a second. The winner put (76,520 army + 18,166 cash − 7,500) / 2,063 = **42 a second**
+on the board without counting its forty-four buildings or the 369 units it lost. The bot won the
+fight ten to one and lost the match on income.
+
+**Six orders caused it, and they are every order any harvester received all match** — six of 4,290
+unit decisions, 0.14%:
+
+| second | harvester | order |
+|---|---|---|
+| 358 | `harv` 347 | `MoveTo` — *enemy nearby, running home* |
+| 361 | `harv` 400 | `MoveTo` — *enemy nearby, running home* |
+| 987 | `harv` 367 | `MoveTo` — *enemy nearby, running home* |
+| 989 | `harv` 400 | `MoveTo` — *enemy nearby, running home* |
+| 1643, 1672 | `harv` 568 | `MoveTo` — *enemy nearby, running home* |
+
+The bot's last completed actor before the gap is at **358s** and its next is at **919s**: the gap
+opens on the same second as the first order. `harv` 367 — the only one of the three not sent home
+at 358s or 361s — carried the entire economy alone for those 561 seconds and banked exactly 1,500,
+the `proc` that landed at 919s. That is 2.67 credits a second from one harvester while two stood
+still. The pattern then repeats and finishes the match: 367 and 400 were both ordered home at 987s
+and 989s, and **no actor ever completed again in the remaining 1,074 seconds**. The `hq` ordered at
+920s (1,000) and the `gtwr` ordered at 355s (600) were both still unpaid when the base fell.
+
+`RunHomeMode` had exactly two outcomes, `UnitDecision.Continue` and `UnitDecision.MoveTo(refinery)`.
+The move cancels the harvest activity. On the next evaluation the raid has passed, so the mode
+answers `Continue` — which is defined as *"leave the unit's current activity alone"*, and the
+current activity is now nothing. **There is no path in that mode, or anywhere else in the bot, that
+ever tells a harvester to go back to work.** It could stop one and could never start one.
+
+The trigger bar made it cheap to hit. At 354s `harv` 400 took `damage=30 health=99` — one rifle
+burst, one percent of its hit points — and any threat inside seven cells that `CanHitUs` was enough.
+It abandoned a field for a scratch, permanently. A `harv` carries about 700 credits and moves 1.758
+cells per game second, so the 13.42-cell trip from the far refinery is a 27-second round trip; at
+1.23 credits a second the fleet was delivering one load roughly every nine minutes. They were not
+driving. They were parked.
+
+[`HarvesterLogic`](Logic/HarvesterLogic.cs) is built the other way round, on the principle that
+**stopping a harvester has to be earned and always has to be recoverable**:
+
+- **A scratch is not a reason to stop.** Fleeing now needs the harvester to be under
+  `FleeBelowHealthPercent` (70) as well as threatened. 354s no longer qualifies; 366s, where
+  `harv` 347 took 12,420 damage over 40 hits down to 80% and kept being shot, still does.
+- **A stopped harvester is always restarted.** A watchdog counts consecutive evaluations of *idle
+  **and** standing on the same cell*. A harvester driving, cutting or unloading has a live activity
+  and is not idle, so this cannot fire on one that is still earning — the same guard
+  `DefensiveLogic` already uses before it asserts `Hold`.
+- **The restart is a ladder, not a demand.** First the cheap explanation: go to the refinery and
+  unload. Still stopped once it is there, and the ground the refinery was placed on is finished —
+  so walk outward on a widening octagon, 6 cells then 11, 16, 21 and 24, rotating direction each
+  time and clamped to the map, until the harvester finds something to cut. Sustained normal
+  behaviour folds the ladder back to the near ring.
+
+There is no resource-sensing API and reading the resource layer under shroud would breach the
+guide's fairness rules, so the search is expressed **entirely in move orders** — the same way
+`ScoutMode` looks for a base it cannot see. Nothing here knows where tiberium is; it knows only
+that a harvester which is idle and motionless is worth nothing where it stands.
+
+Seven of the fourteen tests in [`HarvesterLogicTests`](Tests/HarvesterLogicTests.cs) fail against
+the rule this match was fought with, including one that replays `damage=30 health=99` from 354s.
+The rest are guards that must not become vacuous: a moving harvester must survive fifty evaluations
+untouched, a stationary one with a live activity must never be interrupted, and a harvester wedged
+in the corner of the map must still be given somewhere to go on every single stall.
+
+## A tower is only defence where its weapon reaches
+
+Everything above held. Only two doctrine switches in 1,453 seconds. `world` fell to 8 of 46 losses.
+The `afld` finally stood — at **558s** — so three `bggy` scouted at 605s, 616s and 660s and `harv`
+became buyable for the first time in this bot's history; it was ordered at 655s. Harvesters got 45
+decisions and **not one** was a stall restart: income ran at **23.19 credits a second** to 662s
+against last round's 15.0, and lifetime spend rose from 14,950 to **23,450**. The harvesters did
+not stop. They were shot.
+
+The refinery ladder worked, and that is the whole problem. From the yard at (13, 82):
+
+| | placed | cells from yard |
+|---|---|---|
+| `proc` | 51s, 117s, 246s, 378s | 7.07, **13.42**, **13.42**, **11.05** |
+| `gtwr` | 105s, 130s | **1.41**, **2.24** |
+| `sam` | 250s | **2.83** |
+
+`ExpandingRoles` pushed the economy out. Defence was excluded from it on the written grounds that
+*"a tower that walks off to the frontier is a tower not defending anything"*, so every defence took
+the default 2–14 ring — and `FindBuildLocation` answers that with the **nearest** legal cell. All
+three went up on top of the construction yard. That is 1,850 credits, **7.9% of everything the bot
+ever spent**, guarding the one part of the base nothing touched until 1,320s.
+
+A `gtwr` reaches **6 cells**. From the nearer of the two, at (12, 81):
+
+| refinery | distance | covered by a 6-cell gun |
+|---|---|---|
+| `proc` (6, 83) | 6.32 | no |
+| `proc` (2, 83) | 10.20 | no |
+| `proc` (1, 76) | 12.08 | no |
+| `proc` (7, 70) | 12.08 | no |
+
+**It covered nothing.** Not one refinery, not even the innermost, which it missed by a third of a
+cell. The `sam` reaches 10 and covered two of the four.
+
+So enemy `e3` walked up to the refineries and shot the economy to pieces, from ground where nothing
+could answer — a rocket soldier reaches 6 cells too, so it simply stood outside the tower and
+outranged the harvesters:
+
+| second | harvester | killed by | cells from the nearest tower |
+|---|---|---|---|
+| 670 | `harv` 396 at (11, 71) | `e3` | 10.05 |
+| 686 | `harv` 347 at (11, 72) | `e3` | 9.06 |
+| 696 | `harv` 435 at (11, 73) | `e3` | 8.06 |
+| 699 | `harv` at (9, 73) | `e3` | 8.54 |
+
+Four harvesters, 29 seconds, 2.06 to 4.05 cells beyond the only gun that might have saved them.
+The assessments read `harvesters=4` at 660s and `harvesters=0` at 720s, and **`refineries=4` for
+the next 540 seconds**.
+
+| | first 662s | remaining 791s |
+|---|---|---|
+| credits spent, free actors excluded | 22,850 | 600 |
+| income | **23.19/s** | **0.76/s** |
+| share of everything it ever spent | 97.4% | 2.6% |
+
+A **96.7% collapse**, and the build log shows it from the other side as a single **623-second gap**
+with nothing completed at all between 662s and 1,285s. The bot held refineries and no harvester for
+**754 of the match's 1,453 seconds — 51.9%**. Its army peaked at 7,800 at 600s and read 300 from
+720s to 1,320s while the winner's went 20,560 → 119,240.
+
+The 1,850 credits were not wasted because they were spent on defence. They were wasted because they
+were spent where the defence could not see the thing it was bought to defend.
+
+[`CoveringRole`](Logic/BasePlacementLogic.cs) is the correction, and it is the mirror of
+`ExpandingRole`: **a covering structure is looked for on the ring the economy has already reached,
+and walks inward only as far as its own weapon can still reach that ring.**
+
+- **The frontier is where the economy is**, not where the next refinery is going — `FrontierRing`
+  takes the ring the last expanding structure landed in, across every expanding role, furthest out
+  wins.
+- **The ladder is floored at `frontier − reach`.** Below that the tower has stopped being cover and
+  is just a building, so no rung nearer than that is worth a `FindBuildLocation` call. With four
+  refineries the `gtwr` ladder is 16, 14, 12, 10 cells; the `atwr`/`sam` pair is floored at 9.
+- **Reach is the pessimistic member of each pair**, so the rule is honest either way round: 6 for
+  `gtwr`/`gun`, and 7 for `atwr`/`sam` because the AA tower's ground gun reaches 7 where the SAM
+  site reaches 10.
+- **One of each kind still stays home.** The yard, the barracks and the factory need something over
+  them and nothing else provides it.
+- **It is a preference, not a demand.** The ladder still ends at the default ring, so a cramped base
+  puts its tower up at home rather than leaving 600 credits wedged in the Support queue.
+
+This works because of a trait, not a distance. `gtwr`, `gun`, `atwr` and `sam` all carry
+`RequiresBuildableArea` and none of them gives it, so out at 10–16 cells the only legal cells in the
+whole map are the ones beside the outer refineries and the power plants that opened the ground for
+them. The radius band is not an approximation of "next to the economy" — out there it is the same
+set.
+
+Five of the fourteen tests in [`BasePlacementLogicTests`](Tests/BasePlacementLogicTests.cs) fail
+against the rule this match was fought with, including one that asserts the first rung plus the
+tower's reach clears the 13-cell refinery. The other nine are guards that must not become vacuous:
+the economy's own ladder must be byte-identical to what it was, an unfloored ladder must still be
+the original sequence, every covering ladder must still end at the default ring, and the first
+tower of each kind must still stay home.
+
+## Forty-six units is one army; five speed classes is five attacks
+
+Everything above held, and for the first time everything worked at once. `weap` stood at **370s**,
+so `jeep` scouted at 402s/414s/649s, five `mtnk` were built, and at **806s** the bot bought a `harv`
+for 1,100 — the first harvester it has ever paid for. The harvester watchdog fired 49 times
+(*"stopped for N evaluations, searching 6 cells out"*) and income held at **35.7/s before 475s and
+16.8/s after**, against the 15.0 → 1.23 collapse that this rule was written for. `world` killed
+nothing at all. `ScoutMode` and `AttackBaseMode`, which had issued zero decisions between them last
+round, issued 327. Lifetime spend went 14,950 → **38,380**.
+
+The bot then destroyed its own army in 135 seconds.
+
+| second | event |
+|---|---|
+| 475 | `Attack`: *army worth 10340 and their base is known.* 46 units ordered to their base, **~70,000u out — 68 cells** |
+| 487 | `jeep` 462 alone: *objective in range* |
+| 520 | `mtnk` 475 alone: *objective in range* |
+| 528 | the 27 `e3` are still **25–32 cells** out |
+| 543 | `mtnk` 475 alone in their base: *nowhere to push, engaging Vehicle at 2896u* |
+| 545 | `Attack` → `Scout`: *nothing left to attack, going looking* |
+| 600 | 6 units, army **1,600** |
+
+At **517s** the column spanned **32.2 cells** — 28 units reporting distances to objective from
+7,913u to 40,922u. The army did not arrive; its speed classes did, one at a time. Over the 68-cell
+approach, at `jeep` 3.54 cells a second, `mtnk` 2.49, `e2` 1.66, `e1` 1.318 and `e3` 0.952 — a
+**3.7× spread** — the leaders were in contact forty seconds before the mass.
+
+**46 units and 12,140 credits died between 475s and 610s for 18 kills:**
+
+| | count | cost |
+|---|---|---|
+| `e3` | 27 | 8,100 |
+| `e1` | 12 | 1,200 |
+| `mtnk` | 2 | 1,800 |
+| `e2` | 4 | 640 |
+| `jeep` | 1 | 400 |
+| **total** | **46** | **12,140** — **31.6%** of the 38,380 the bot spent all match |
+
+Thirty-six of them fell in the 540s minute alone, twenty-six of those `e3` killed by `e1` and `e3`.
+The killers are the tell: 300-credit rocket infantry being shot down by 100-credit riflemen is not
+a losing matchup, it is a losing *arrival*. Nothing after this mattered — the base fell from 960s
+because there was no army left, and the harvesters lost to `msam` from 960s and the 1.21/s income
+after 975s are that collapse, not a second cause.
+
+`AttackBaseMode` had no notion of a force at all. Every unit sensed, decided and marched on its own,
+the instant the doctrine flipped, from wherever it happened to be standing. There is no wrong line
+to point at; the mode simply never asked whether anyone was coming with it.
+
+[`AssaultStagingLogic`](Logic/AssaultStagingLogic.cs) makes the push form up before it goes in:
+
+- **A staging point every unit agrees on.** `MusterCell` puts it on the line from their base back
+  towards ours, **14 cells** short of the target — outside every reach in the ruleset (`msam` 11,
+  `sam` 10, `atwr` 8, `gtwr` 6), so the army gathers where nothing static can shoot it. It is
+  derived from `ctx.BaseCenter`, not from the unit asking, which is the only reason they converge
+  instead of each forming a private crowd.
+- **Release is "the crowd stopped growing", not an army-size constant.** A monotonic peak of allies
+  within 6 cells; `PatienceEvaluations` (16, about 22 game seconds at the measured 1.4s cadence) of
+  nobody new means the muster is complete. That clears the widest gap between two speed classes
+  landing — `e1` to `e3`, 16 seconds over the 54-cell walk — and it cannot be wrong about the size
+  of an army it never counted.
+- **A preference with a fallback.** `MaxWaitEvaluations` (75, about 105 seconds) releases regardless,
+  so a push that is never going to be joined still happens. The peak is monotonic so units dying or
+  drifting cannot keep resetting the clock.
+- **Holding is not the same as not shooting.** A waiting unit fires on anything already inside its
+  weapon range — the lesson already paid for once, when an army stood still under fire and lost 71
+  units for zero kills.
+- **Four guards keep it from being the wrong answer:** an approach under 24 cells, a unit already
+  inside the standoff, a unit whose objective is in weapon range, and a released unit — which is
+  latched, so nobody walks back out to re-form.
+
+There is a second effect worth naming. The staging point at 14 cells is outside `AttackBaseMode`'s
+five-cell `ArrivedRadius`, and it is a unit standing inside that radius which calls
+`EnemyBaseSightings.Forget` for the **whole side**. At 543s one `mtnk` that had arrived alone did
+exactly that and cancelled the attack for 27 `e3` who were still seventeen cells short. A lone fast
+unit can no longer reach the spot to do it.
+
+Eleven of the twenty-eight tests in
+[`AssaultStagingLogicTests`](Tests/AssaultStagingLogicTests.cs) fail against the rule this match was
+fought with, including one that asserts a unit still waiting after twelve evaluations — the `e1`-to-`e3`
+gap. Four more fail when the guards are disabled. The rest are guards that must not become vacuous:
+an unarmed or immobile unit must never be marched anywhere, a side that has never seen their base
+must get no staging opinion at all, an out-of-range threat must not be shot at, and the staging
+point must stay outside every static defence in the ruleset.
 
 
 ```
@@ -408,17 +674,22 @@ Reference/
 ├── Modes/                       ← behaviours
 │   ├── BuildBaseMode.cs         ←   deploys the MCV, grows the base from ctx.BuildPlan
 │   │                                (drives both the Building and Support queues, and walks
-│   │                                 a ladder of rings so income and the power plants that
-│   │                                 open ground for it land as far out as is legal)
+│   │                                 a ladder of rings so income, the power plants that open
+│   │                                 ground for it, and the towers that cover them all land
+│   │                                 as far out as is legal)
 │   ├── TrainUnitsMode.cs        ←   trains units from ctx.ProductionPlan
 │   ├── DefensiveMode.cs         ←   holds ground, won't be baited, retreats to repair
 │   │                                (and never walks at an aircraft — see DefensiveLogic)
 │   ├── AttackBaseMode.cs        ←   pushes a base, never chases
+│   │                                (forms the army up short of their base first — see
+│   │                                 AssaultStagingLogic)
 │   ├── EnemyBaseSightings.cs    ←   where this side last saw their base
-│   ├── RunHomeMode.cs           ←   flees to a refinery when threatened
+│   ├── HarvesterMode.cs         ←   keeps a harvester earning, and restarts a stopped one
+│   ├── RunHomeMode.cs           ←   template: flees to a refinery when threatened
 │   ├── HarvesterEscortMode.cs   ←   guards a harvester
 │   └── ScoutMode.cs             ←   wanders, runs from anything armed
 ├── Logic/                       ← pure decision functions, no engine
+└── Tests/                       ← the pure decision functions, without the engine
 ```
 
 ## Start your own
@@ -435,6 +706,12 @@ A bot builds against AutoC&C **binaries**, so it can live in its own repository:
 
 ```powershell
 dotnet build /p:AutoCnCPath=C:\games\autocnc
+```
+
+`Logic/` has no engine dependency, so the decision layer runs without a game:
+
+```powershell
+dotnet test .\ReferenceBot.sln
 ```
 
 ## Licence

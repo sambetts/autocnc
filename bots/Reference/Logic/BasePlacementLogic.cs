@@ -27,6 +27,20 @@ namespace AutoCnC.Reference.Logic
 	/// </param>
 	public readonly record struct ExpandingRole(IReadOnlyList<string> Candidates, int HomeCount);
 
+	/// <summary>A class of structure that is only worth building where its weapon covers something.</summary>
+	/// <param name="Candidates">The faction alternatives for one role, e.g. <c>gtwr</c>/<c>gun</c>.</param>
+	/// <param name="ReachCells">
+	/// The shortest weapon range in the candidate list, in cells — the pessimistic member of the
+	/// pair, so the ring is honest whichever faction is playing. <c>gtwr</c> and <c>gun</c> both
+	/// reach 6; <c>atwr</c> reaches 7 on the ground and <c>sam</c> 10, so that pair is 7.
+	/// </param>
+	/// <param name="HomeCount">
+	/// How many of this role stay in the base before the rest go out to cover the economy. The
+	/// first tower of each kind guards the yard, the barracks and the production cluster, which
+	/// nothing else does.
+	/// </param>
+	public readonly record struct CoveringRole(IReadOnlyList<string> Candidates, int ReachCells, int HomeCount);
+
 	/// <summary>
 	/// Where to put the next structure — specifically, how far out.
 	/// </summary>
@@ -93,6 +107,37 @@ namespace AutoCnC.Reference.Logic
 	/// the ground they opened. The bot's five power plants stood at 2.00, 3.00, 4.00, 5.39 and
 	/// 5.83 cells: all of them behind refinery number one, none of them buying an inch.
 	/// </para>
+	/// <para>
+	/// <b>And a tower is only defence where its weapon reaches.</b> The rule above was written
+	/// with "production and defence are deliberately absent — a tower that walks off to the
+	/// frontier is a tower not defending anything". badland-ridges falsified the second half of
+	/// that sentence. The economy had been pushed out correctly — four refineries at 7.07, 11.05,
+	/// 13.42 and 13.42 cells from the yard — while every defence took the default 2–14 ring,
+	/// which <c>FindBuildLocation</c> answers with the nearest legal cell. All three the bot ever
+	/// built landed on top of the yard: <c>gtwr</c> at 1.41 cells (105s), <c>gtwr</c> at 2.24
+	/// (130s), <c>sam</c> at 2.83 (250s) — 1,850 credits, and a <c>gtwr</c> reaches 6 cells, so
+	/// not one of them covered a single outer refinery. The nearest tower was 10.20 cells from
+	/// the closest one it missed and 12.08 from the other two.
+	/// </para>
+	/// <para>
+	/// Enemy <c>e3</c> then walked up to the refineries and killed all four harvesters at 670s,
+	/// 686s, 696s and 699s, at 8.54 to 10.05 cells from that nearest tower — 2.5 to 4.1 cells
+	/// outside its reach, against a rocket soldier that also reaches 6 and could therefore stand
+	/// where nothing answered it. The bot held four refineries and zero harvesters for 733 of the
+	/// match's 1,453 seconds. Income went from 23.2 credits a second over the first 662s to 0.76
+	/// over the last 791s, a 96.7% collapse, and the build log shows one 623-second gap with
+	/// nothing completed between 662s and 1,285s.
+	/// </para>
+	/// <para>
+	/// So defence expands too, and <see cref="CoveringRole"/> is how. A covering structure is
+	/// looked for on the ring the economy has already reached and walked inward only as far as
+	/// its own weapon can still reach that ring — below that it has stopped being cover and is
+	/// just a building. This works because <c>gtwr</c>, <c>gun</c>, <c>atwr</c> and <c>sam</c>
+	/// all require buildable area without giving any: out at the frontier the only legal cells
+	/// are the ones beside the outer refineries and power plants, which is exactly where the
+	/// tower is wanted. The ladder still ends at <see cref="Default"/>, so a cramped base puts
+	/// its tower up at home rather than leaving 600 credits stuck in the queue.
+	/// </para>
 	/// <para>ZERO OpenRA dependencies by design — see <see cref="DefensiveLogic"/>.</para>
 	/// </remarks>
 	public static class BasePlacementLogic
@@ -108,8 +153,9 @@ namespace AutoCnC.Reference.Logic
 		/// Six cells is deliberately less than the default ring is wide. The point is to move the
 		/// frontier, not to abandon the base: a refinery six cells beyond the last one still sits
 		/// inside the previous ring's outer edge, so it stays connected to the buildable area
-		/// — a structure needs one — and stays close enough that <see cref="Modes.RunHomeMode"/>
-		/// has somewhere useful to send a harvester under fire.
+		/// — a structure needs one — and stays close enough that <c>HarvesterMode</c> has
+		/// somewhere useful to send a harvester under fire, and somewhere to search outward from
+		/// when the ground under it is finished.
 		/// </remarks>
 		public const int RingStepCells = 6;
 
@@ -222,6 +268,107 @@ namespace AutoCnC.Reference.Logic
 			=> Ladder(RingFor(item, owned, roles));
 
 		/// <summary>
+		/// The rings to try for <paramref name="item"/>, treating covering structures as a class
+		/// that follows the economy out rather than one that stays home.
+		/// </summary>
+		/// <remarks>
+		/// A structure named by <paramref name="covering"/> is looked for on the frontier the
+		/// expanding roles have already reached, and the ladder is floored at the closest ring
+		/// from which its weapon still covers that frontier. Anything else falls through to the
+		/// three-argument overload unchanged, so this can only move towers.
+		/// </remarks>
+		public static IReadOnlyList<PlacementRing> LadderFor(
+			string item,
+			IReadOnlyDictionary<string, int> owned,
+			IReadOnlyList<ExpandingRole> expanding,
+			IReadOnlyList<CoveringRole> covering)
+		{
+			var ring = CoveringRingFor(item, owned, expanding, covering, out var floor);
+
+			return ring == null
+				? LadderFor(item, owned, expanding)
+				: Ladder(ring.Value, floor);
+		}
+
+		/// <summary>
+		/// The furthest ring any expanding role has actually reached — where the economy <em>is</em>,
+		/// not where the next one is going.
+		/// </summary>
+		public static PlacementRing FrontierRing(
+			IReadOnlyDictionary<string, int> owned,
+			IReadOnlyList<ExpandingRole> roles)
+		{
+			var frontier = Default;
+			if (roles == null)
+				return frontier;
+
+			for (var i = 0; i < roles.Count; i++)
+			{
+				var role = roles[i];
+				if (role.Candidates == null)
+					continue;
+
+				var home = role.HomeCount < 1 ? 1 : role.HomeCount;
+
+				// The ring the most recently placed one asked for. RingFor uses "+ 1" because it
+				// is siting the next structure; the frontier is the last one that landed.
+				var ring = RingAt(CountOf(owned, role.Candidates) - home);
+				if (ring.MinRangeCells > frontier.MinRangeCells)
+					frontier = ring;
+			}
+
+			return frontier;
+		}
+
+		/// <summary>
+		/// Where a covering structure should be looked for, or null if it is not one, is the one
+		/// staying home, or has nothing out there to cover yet.
+		/// </summary>
+		/// <param name="floorMinCells">
+		/// The closest near edge worth trying: any nearer and the structure's weapon no longer
+		/// reaches the frontier it was bought to cover.
+		/// </param>
+		public static PlacementRing? CoveringRingFor(
+			string item,
+			IReadOnlyDictionary<string, int> owned,
+			IReadOnlyList<ExpandingRole> expanding,
+			IReadOnlyList<CoveringRole> covering,
+			out int floorMinCells)
+		{
+			floorMinCells = DefaultMinRangeCells;
+
+			if (string.IsNullOrEmpty(item) || covering == null)
+				return null;
+
+			for (var i = 0; i < covering.Count; i++)
+			{
+				var role = covering[i];
+				if (role.Candidates == null || !Contains(role.Candidates, item))
+					continue;
+
+				// The first of each kind guards the base itself. Nothing else does, and a base
+				// whose every tower is on the frontier loses its yard to the first thing that
+				// walks past them.
+				var home = role.HomeCount < 0 ? 0 : role.HomeCount;
+				if (CountOf(owned, role.Candidates) < home)
+					return null;
+
+				// Nothing has expanded yet, so there is no frontier to cover and home is correct.
+				var frontier = FrontierRing(owned, expanding);
+				if (frontier.MinRangeCells <= DefaultMinRangeCells)
+					return null;
+
+				var reach = role.ReachCells < 0 ? 0 : role.ReachCells;
+				var floor = frontier.MinRangeCells - reach;
+				floorMinCells = floor < DefaultMinRangeCells ? DefaultMinRangeCells : floor;
+
+				return frontier;
+			}
+
+			return null;
+		}
+
+		/// <summary>
 		/// <paramref name="target"/>, then progressively closer bands, ending at <see cref="Default"/>.
 		/// </summary>
 		/// <remarks>
@@ -236,16 +383,41 @@ namespace AutoCnC.Reference.Logic
 		/// </para>
 		/// </remarks>
 		public static IReadOnlyList<PlacementRing> Ladder(PlacementRing target)
+			=> Ladder(target, DefaultMinRangeCells);
+
+		/// <summary>
+		/// <paramref name="target"/>, walked inward no further than <paramref name="floorMinCells"/>,
+		/// still ending at <see cref="Default"/> so anything already paid for has somewhere to go.
+		/// </summary>
+		/// <remarks>
+		/// The floor is what makes a covering ring mean something. Without it the ladder slides
+		/// all the way to two cells and puts the tower back on the yard — which is the behaviour
+		/// that left four refineries at 7.07 to 13.42 cells guarded by two <c>gtwr</c> at 1.41
+		/// and 2.24 cells, each of which reaches 6.
+		/// <para>
+		/// The floor is a rung in its own right, because it is the closest placement that still
+		/// covers anything. <see cref="Default"/> follows it regardless: a tower at home beats
+		/// 600 credits wedged in the Support queue with nowhere legal to stand.
+		/// </para>
+		/// </remarks>
+		public static IReadOnlyList<PlacementRing> Ladder(PlacementRing target, int floorMinCells)
 		{
 			if (target.MinRangeCells <= DefaultMinRangeCells || target.MaxRangeCells <= DefaultMaxRangeCells)
 				return [Default];
 
+			var floor = floorMinCells < DefaultMinRangeCells ? DefaultMinRangeCells : floorMinCells;
+			if (floor > target.MinRangeCells)
+				floor = target.MinRangeCells;
+
 			var rungs = new List<PlacementRing>();
 
 			for (var min = target.MinRangeCells;
-				min > DefaultMinRangeCells && rungs.Count < MaxLadderRungs - 1;
+				min > floor && rungs.Count < MaxLadderRungs - 1;
 				min -= LadderStepCells)
 				rungs.Add(new PlacementRing(min, target.MaxRangeCells));
+
+			if (floor > DefaultMinRangeCells && rungs.Count < MaxLadderRungs - 1)
+				rungs.Add(new PlacementRing(floor, target.MaxRangeCells));
 
 			rungs.Add(Default);
 

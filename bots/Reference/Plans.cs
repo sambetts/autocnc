@@ -282,6 +282,13 @@ namespace AutoCnC.Reference
 		/// </remarks>
 		public static IReadOnlyList<string> AntiAirStructures { get; } = ["atwr", "sam"];
 
+		/// <summary>The cheap ground tower, per faction.</summary>
+		/// <remarks>
+		/// Both reach exactly 6 cells, which is the number that matters: see
+		/// <see cref="CoveringRoles"/>.
+		/// </remarks>
+		public static IReadOnlyList<string> GuardTowers { get; } = ["gtwr", "gun"];
+
 		/// <summary>Units whose armament can target aircraft.</summary>
 		/// <remarks>
 		/// One entry, and that is the point: <c>e3</c> is the only anti-air unit this bot can
@@ -404,15 +411,49 @@ namespace AutoCnC.Reference
 		/// and every plan here builds four or five anyway.
 		/// </para>
 		/// <para>
-		/// Production and defence are deliberately absent. A barracks wants its rally point
-		/// inside the base, and a tower that walks off to the frontier is a tower not defending
-		/// anything.
+		/// Production is deliberately absent: a barracks wants its rally point inside the base.
+		/// Defence used to be absent too, on the grounds that a tower on the frontier is a tower
+		/// defending nothing. That was wrong, and <see cref="CoveringRoles"/> is the correction.
 		/// </para>
 		/// </remarks>
 		public static IReadOnlyList<ExpandingRole> ExpandingRoles { get; } =
 		[
 			new(Refineries, 1),
 			new(PowerPlants, PowerPlantsAtHome),
+		];
+
+		/// <summary>
+		/// Structures that follow the economy out, because they are only defence where their
+		/// weapon reaches, and how far each one reaches.
+		/// </summary>
+		/// <remarks>
+		/// <see cref="ExpandingRoles"/> pushes the economy outward and does it well: on
+		/// badland-ridges the four refineries stood 7.07, 11.05, 13.42 and 13.42 cells from the
+		/// construction yard. Defence took the default 2–14 ring, and <c>FindBuildLocation</c>
+		/// answers that with the nearest legal cell, so all three defences the bot ever built
+		/// went up on top of the yard — <c>gtwr</c> at 1.41 cells (105s), <c>gtwr</c> at 2.24
+		/// (130s), <c>sam</c> at 2.83 (250s). That is 1,850 credits, 7.9% of the 23,450 the bot
+		/// spent all match, buying cover for the one part of the base nothing attacked until
+		/// 1,320s.
+		/// <para>
+		/// A <c>gtwr</c> reaches 6 cells. From the nearest tower the three outer refineries were
+		/// 10.20, 12.08 and 12.08 cells away, so no tower covered any of them. Enemy <c>e3</c>
+		/// killed all four harvesters at 670s, 686s, 696s and 699s, 8.54 to 10.05 cells from that
+		/// tower, and a rocket soldier reaches 6 cells too — it stood where nothing could answer
+		/// and shot the economy to pieces. The bot then held four refineries and no harvester for
+		/// 733 of 1,453 seconds; income fell from 23.2 credits a second to 0.76.
+		/// </para>
+		/// <para>
+		/// Reach is the pessimistic member of each pair so the rule is safe either way round:
+		/// <c>gtwr</c> and <c>gun</c> are both 6, while <c>atwr</c> is 7 on the ground against
+		/// <c>sam</c>'s 10. One of each stays home, because the yard, the barracks and the
+		/// vehicle factory still need something over them and nothing else provides it.
+		/// </para>
+		/// </remarks>
+		public static IReadOnlyList<CoveringRole> CoveringRoles { get; } =
+		[
+			new(GuardTowers, 6, 1),
+			new(AntiAirStructures, 7, 1),
 		];
 	}
 }

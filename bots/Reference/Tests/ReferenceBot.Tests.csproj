@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>AutoCnC.Reference.Tests</RootNamespace>
+    <AssemblyName>AutoCnC.Reference.Tests</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+
+    <!-- Tests live in the workspace, not beside the installed bot. -->
+    <OutputPath>bin\</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      Only the pure decision layer is under test. Logic/ has no OpenRA dependency by design, so it
+      compiles and runs without the engine; Modes/ does not and is deliberately left out.
+    -->
+    <Compile Include="..\Logic\*.cs" LinkBase="Logic" />
+    <Compile Include="..\Plans.cs" LinkBase="" />
+    <Compile Include="*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="AutoCnC.Core" Version="$(AutoCnCVersion)" />
+    <!--
+      The SDK is referenced for compilation only. Its runtime assets drag the engine in, which the
+      pure logic does not need and which must never be copied into the workspace.
+    -->
+    <PackageReference Include="AutoCnC.Sdk" Version="$(AutoCnCVersion)" ExcludeAssets="runtime" />
+
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="NUnit" Version="4.2.2" />
+    <PackageReference Include="NUnit3TestAdapter" Version="4.6.0" />
+  </ItemGroup>
+
+</Project>

@@ -7,7 +7,7 @@
     and start a game running it against a test AI.
 
     Because bots consume AutoC&C as NuGet packages, a bot does not have to live in this
-    repository — pass a path to one anywhere on disk. You can also pass a prebuilt .dll, which is
+    repository - pass a path to one anywhere on disk. You can also pass a prebuilt .dll, which is
     played straight out of its own folder with nothing copied anywhere.
 
     Pass -Map to skip the menus entirely: the game boots into that map, seats the requested AI
@@ -53,7 +53,7 @@
 
     The turbo speeds run VSync-off, because the engine draws one frame per logic tick and the
     refresh rate would otherwise be the real limit. What you actually get past that is down to
-    the machine — /speed in-game reports the difference, as does debug.log. maximum gains more
+    the machine - /speed in-game reports the difference, as does debug.log. maximum gains more
     than its timestep suggests: at 1ms the loop has no spare time to sleep away.
 
 .PARAMETER Telemetry
@@ -63,7 +63,7 @@
 
 .PARAMETER BattleLog
     Where the match writes the battle log: the players in the game, every event your side could
-    actually react to — enemies coming into view, hits taken, units lost and killed — and every
+    actually react to - enemies coming into view, hits taken, units lost and killed - and every
     doctrine the bot switched to and why.
     Defaults to autocnc-battle.csv in the OpenRA logs folder. Pass 'none' to record nothing.
 
@@ -150,8 +150,8 @@ $botDir = Join-Path $binDir 'bots'
 
 <#
     Works out what the caller handed us:
-      Project  — build it, then play whatever the build produced
-      Assembly — a prebuilt .dll, or a folder of them, played where it already sits
+      Project  - build it, then play whatever the build produced
+      Assembly - a prebuilt .dll, or a folder of them, played where it already sits
 #>
 function Resolve-BotSource([string]$nameOrPath) {
     function New-ProjectSource($project) {
@@ -212,7 +212,7 @@ if ($source.Kind -eq 'Project') {
         if ($LASTEXITCODE -ne 0) { throw 'Pack failed.' }
     }
 
-    # A local pack keeps its version number, and NuGet keys its cache on id and version alone —
+    # A local pack keeps its version number, and NuGet keys its cache on id and version alone -
     # so without this a bot silently compiles against whichever SDK was extracted first, which is
     # the opposite of what a script called "run the code I just wrote" should do.
     $cache = if ($env:NUGET_PACKAGES) { $env:NUGET_PACKAGES } else { Join-Path $HOME '.nuget/packages' }
@@ -223,7 +223,7 @@ if ($source.Kind -eq 'Project') {
 }
 
 # ---------------------------------------------------------------------------
-# 3. Optionally test the bot's strategy — no game needed
+# 3. Optionally test the bot's strategy - no game needed
 # ---------------------------------------------------------------------------
 if ($Test) {
     if ($source.Kind -ne 'Project') { throw 'A prebuilt .dll has no tests to run; drop -Test, or pass the project instead.' }
@@ -354,7 +354,7 @@ if ($Map -and $Opponents -gt 0) {
         "Launch.BotFaction=$BotFaction"
     )
 
-    Write-Host "==> Opponent: $($level.name) — $($level.summary)" -ForegroundColor Cyan
+    Write-Host "==> Opponent: $($level.name) - $($level.summary)" -ForegroundColor Cyan
     if ($Opponents -gt 1) { Write-Host "    $Opponents of them." -ForegroundColor DarkGray }
 }
 
@@ -373,7 +373,7 @@ $gameArgs = @(
 )
 
 # Name the platform on every launch, not just the headless one. Game.Platform is a saved setting,
-# so whatever was used last time is what a launch that stays quiet about it inherits — which is how
+# so whatever was used last time is what a launch that stays quiet about it inherits - which is how
 # a single headless battle used to make every rendered battle afterwards run with no window. Saying
 # it out loud each time also repairs a profile that a previous build already wrote Headless into,
 # because the engine erases any setting equal to its default.

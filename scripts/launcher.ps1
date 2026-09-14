@@ -7,7 +7,7 @@
     working on, pick a map and an opponent, and play. Everything it does, it does by running
     these scripts, so anything you can do there you can also do here.
 
-    Windows only — it is a Windows Forms app. On Linux and macOS use run-doctrine.ps1 directly,
+    Windows only - it is a Windows Forms app. On Linux and macOS use run-doctrine.ps1 directly,
     which takes exactly the same options.
 
 .PARAMETER NoBuild

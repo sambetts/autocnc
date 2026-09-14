@@ -37,6 +37,15 @@ namespace AutoCnC.Launcher
 	/// The launcher deliberately owns no build or launch logic of its own: everything it does is
 	/// something you could type into a terminal, which keeps the window and the command line
 	/// honest about each other and means a fix to a script fixes both.
+	/// <para>
+	/// Arguments are bound by name from the script's own parameter metadata, aliases included:
+	/// <c>CommandInfo.Parameters</c> is keyed by real parameter names only, so matching against it
+	/// alone rejected documented aliases such as <c>-Doctrine</c>. That metadata is also null when
+	/// PowerShell cannot parse the script at all — Windows PowerShell reads a BOM-less file as ANSI
+	/// and chokes on characters Core handles fine — which used to be reported as an unknown
+	/// parameter, blaming the button for a syntax error further down the file. Now the parse error
+	/// itself is reported.
+	/// </para>
 	/// </remarks>
 	public sealed class ScriptRunner
 	{
@@ -51,16 +60,29 @@ namespace AutoCnC.Launcher
 			"$job = @((ConvertFrom-Json -InputObject $env:AUTOCNC_SCRIPT_JOB))\n" +
 			"$script = [string]$job[0]\n" +
 			"$command = Get-Command -Name $script -CommandType ExternalScript\n" +
+			"$declared = $command.Parameters\n" +
+			"if ($null -eq $declared -or $declared.Count -eq 0) {\n" +
+			"    $parseTokens = $null\n" +
+			"    $parseErrors = $null\n" +
+			"    [void][System.Management.Automation.Language.Parser]::ParseFile($script, [ref]$parseTokens, [ref]$parseErrors)\n" +
+			"    if ($parseErrors -and $parseErrors.Count -gt 0) {\n" +
+			"        throw \"$script is not valid PowerShell $($PSVersionTable.PSVersion): $($parseErrors[0].Message) (line $($parseErrors[0].Extent.StartLineNumber))\"\n" +
+			"    }\n" +
+			"    throw \"$script exposes no parameter metadata.\"\n" +
+			"}\n" +
 			"$parameters = @{}\n" +
 			"for ($i = 1; $i -lt $job.Count; $i++) {\n" +
 			"    $name = ([string]$job[$i]).TrimStart('-')\n" +
-			"    $metadata = $command.Parameters[$name]\n" +
+			"    $metadata = $declared[$name]\n" +
+			"    if ($null -eq $metadata) {\n" +
+			"        $metadata = @($declared.Values | Where-Object { $_.Aliases -contains $name })[0]\n" +
+			"    }\n" +
 			"    if ($null -eq $metadata) { throw \"Unknown parameter '-$name' for $script.\" }\n" +
 			"    if ($metadata.ParameterType -eq [System.Management.Automation.SwitchParameter]) {\n" +
-			"        $parameters[$name] = $true\n" +
+			"        $parameters[$metadata.Name] = $true\n" +
 			"    } else {\n" +
 			"        if (++$i -ge $job.Count) { throw \"Parameter '-$name' needs a value.\" }\n" +
-			"        $parameters[$name] = [string]$job[$i]\n" +
+			"        $parameters[$metadata.Name] = [string]$job[$i]\n" +
 			"    }\n" +
 			"}\n" +
 			"& $command @parameters\n"));

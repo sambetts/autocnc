@@ -50,7 +50,7 @@ if ($LASTEXITCODE -ne 0) { throw "Pack failed with exit code $LASTEXITCODE" }
 <#
     Drops the locally packed AutoC&C packages out of NuGet's global cache.
 
-    A local pack keeps its version number, and NuGet keys its cache on id and version alone — so
+    A local pack keeps its version number, and NuGet keys its cache on id and version alone - so
     the second time you build a bot it silently reuses the copy it extracted the first time, and
     compiles against an SDK from whenever that was. The symptom is a bot that will not see a type
     you just added, which reads as a mistake in the bot.

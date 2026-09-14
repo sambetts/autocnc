@@ -37,7 +37,7 @@ if (-not (Test-Path $launcher)) {
 $modSearchPaths = "$(Join-Path $repoRoot 'mods'),$(Join-Path $engineDir 'mods')"
 
 # No embedded quotes. PowerShell quotes each array element as needed when it builds the native
-# command line, so adding our own would be passed through as literal characters — OpenRA would
+# command line, so adding our own would be passed through as literal characters - OpenRA would
 # then see a path containing quote marks, decide it isn't rooted, and resolve it against bin/.
 $gameArgs = @(
     $launcher,

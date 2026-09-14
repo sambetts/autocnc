@@ -5,7 +5,7 @@
 .DESCRIPTION
     This is the highest-value check in the project. It constructs every actor in the mod, so it
     catches missing trait dependencies, unsatisfied Requires<T> constraints, conditions that are
-    consumed but never granted, and non-canonical YAML formatting — none of which the C#
+    consumed but never granted, and non-canonical YAML formatting - none of which the C#
     compiler can see.
 #>
 [CmdletBinding()]

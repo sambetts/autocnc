@@ -51,8 +51,9 @@ namespace AutoCnC.Reference.Logic
 			if (state.RepairAvailable && state.HealthPercent <= tuning.RetreatBelowHealthPercent)
 				return UnitDecision.Retreat($"health {state.HealthPercent}% <= {tuning.RetreatBelowHealthPercent}%");
 
-			// 2. Engage, but never chase beyond the leash: the whole point of a defensive unit
-			//    is that it cannot be baited away from what it is guarding.
+			// 2. Engage, but never chase beyond the leash, and never chase anything that cannot
+			//    be caught: the whole point of a defensive unit is that it cannot be baited
+			//    away from what it is guarding.
 			{
 				var target = SelectTarget(state, tuning);
 				if (target.HasValue)
@@ -71,6 +72,11 @@ namespace AutoCnC.Reference.Logic
 		/// <summary>
 		/// Picks the best threat to engage, or null if none is worth engaging.
 		/// </summary>
+		/// <remarks>
+		/// Two things are filtered out rather than merely deprioritised, because both cost
+		/// movement that can never end in a shot: a target whose engagement would carry us past
+		/// the leash, and any aircraft not already inside weapon range.
+		/// </remarks>
 		public static ThreatSnapshot? SelectTarget(in DefensiveState state, in DefensiveTuning tuning)
 		{
 			var threats = state.Threats;
@@ -86,9 +92,18 @@ namespace AutoCnC.Reference.Logic
 				if (!t.IsAttackable)
 					continue;
 
+				var withinWeaponRange = t.DistanceUnits <= state.WeaponRangeUnits;
+
+				// Movement only pays if the target can be caught, and an aircraft cannot.
+				// Every aircraft in the ruleset outruns every ground unit this side fields,
+				// so a step taken toward one ends with the aircraft somewhere else and us
+				// standing on whatever ground it happened to be over. Shoot the ones that
+				// come to us — our reach is the longer of the two — and ignore the rest.
+				if (!withinWeaponRange && t.Kind == ThreatKind.Aircraft)
+					continue;
+
 				// Would engaging this drag us off our post? If so, ignore it entirely.
 				var reachDistance = state.DistanceFromAnchorUnits + t.DistanceUnits;
-				var withinWeaponRange = t.DistanceUnits <= state.WeaponRangeUnits;
 				if (!withinWeaponRange && reachDistance > tuning.LeashRadiusUnits)
 					continue;
 
@@ -120,10 +135,16 @@ namespace AutoCnC.Reference.Logic
 
 			score += t.Kind switch
 			{
+				// An aircraft that is actually in range outranks everything, because the shot
+				// is both scarce and perishable: almost nothing on this side can shoot upwards
+				// at all, and the target is crossing our envelope several times faster than we
+				// can turn to follow it. A tank still in range next evaluation is a shot kept;
+				// an aircraft is not. SelectTarget has already discarded the unreachable ones,
+				// so this weight only ever applies to a shot we can take right now.
+				ThreatKind.Aircraft => 2_000,
 				ThreatKind.Defence => 1_500,
 				ThreatKind.Vehicle => 1_200,
 				ThreatKind.Infantry => 1_000,
-				ThreatKind.Aircraft => 800,
 				ThreatKind.Economy => 600,
 				ThreatKind.Structure => 200,
 				_ => 0,

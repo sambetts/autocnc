@@ -324,7 +324,75 @@ starting field, and two power plants, because the first two go up before there i
 expand to and a base whose every plant is on the frontier browns out the moment the frontier is
 raided.
 
-## Layout
+## You cannot catch an aeroplane
+
+The ladder worked. On the fifth badland-ridges every structure that was meant to move outward
+moved: refineries landed at 7.1, 13.4, 13.4 and 11.1 cells from the yard at (13, 82), and the
+power plants that opened that ground at 2.0, 7.1, 13.5 and 7.1 — against a base where nothing had
+ever exceeded 7.07 cells. Per-harvester income held up better for it, 733 credits per 100 seconds
+at 550s against 438 the round before. Anti-air held too: 22 `e3` and a `sam`, and the rocket
+soldiers killed two `orca` at 577s and 613s. Nothing that had been fixed came undone.
+
+The bot lost anyway, and the reason is four decisions taken in the same second.
+
+At **544s, twenty-one of its twenty-two rocket soldiers — the entire army, 6,300 credits — were
+each ordered to attack the same aircraft, actor 482, at distances of 8,602 to 12,440 world
+units.** An `e3` has one armament: `Rockets`, reaching **6,144 units**. Every one of those orders
+was an order to walk. By 556s the same twenty-one were reporting the same target at 4,468–8,335
+units: they had crossed four cells of open ground north-east of the barracks, and the ground they
+stopped on was tiberium.
+
+`e1`, `e2`, `e3` and `e6` all carry `DamagedByTerrain`. The battle log records it happening in
+plain arithmetic — `damage=200 health=95`, then `damage=1600 hits=8 health=60`, then `health=24`,
+then nothing:
+
+| | 564s | 566s | 572s | 581s | 586s | 594–604s |
+|---|---|---|---|---|---|---|
+| `e3` lost to `world` | 1 | 3 | 1 | 2 | 3 | 5 |
+
+**Fifteen rocket soldiers, 4,500 credits, killed by the map in forty seconds, at (19–21, 76–79),
+with no enemy involved.** That is 38% of every unit this bot lost all match and **56% of the
+8,100 credits it ever spent on an army** — and the bot's entire lifetime income was about 14,000.
+Cabal lost nothing to it.
+
+Everything after that is the funeral. The army stood at 33 units and 7,500 at 540s; it was 24 and
+4,800 at 600s and 3 and 300 at 660s. Cabal walked in at 585s (`6_enemy_at_the_base`), killed three
+harvesters between 600s and 660s, and the fleet went four to one. Income stopped, and from 604s
+the bot completed exactly one more building in six minutes. From 780s `orca` and `a10` took the
+base apart unopposed — `hand`, `nuke`, `gtwr`, `afld`, `hq`, `fact` and three `proc` — which is
+what "no air defence" looks like from the outside. The air defence had been built. It was lying in
+a tiberium field.
+
+**An aircraft cannot be caught, so walking at one is movement that can never end in a shot.**
+`orca` moves 4.541 cells per game second and `a10` 9.106, against `e3` at 0.952, `e1` at 1.318 and
+the fastest thing this bot can field, `bggy`, at 4.15. There is no ground unit in the ruleset that
+can close on an aircraft. By the time the soldier arrives the aircraft is elsewhere and the
+soldier is standing wherever it used to be.
+
+`DefensiveLogic.SelectTarget` had no idea. Its only distance rule was the leash, and
+`DefensiveMode` scales that off the unit's own reach — `LeashRadiusUnits = range * 3`, so a 6-cell
+rocket carries an 18-cell leash. An aircraft twelve cells away is comfortably inside it. Across
+the match **62 aircraft engagements were ordered and 43 of them, 69%, were beyond the firing
+unit's own weapon range**; 59 of the 62 fell in the single minute after 540s and 42 named actor
+482.
+
+Two lines of the same rule now:
+
+- **An aircraft outside weapon range is not a target at all.** Not scored low — filtered, like a
+  threat beyond the leash, because the cost is the same and it is movement rather than a shot. It
+  degrades gracefully by construction: the unit stays on its anchor and still fires at anything
+  overhead, and it loses nothing by waiting, because an `orca` has to close to 4.75 cells to
+  attack and the rocket reaches 6. The defender wins that race by standing still.
+- **An aircraft inside weapon range is now the top class, at 2,000 against the vehicle's 1,200.**
+  The old table had it at 800, below infantry — exactly backwards. The shot is scarce, because
+  almost nothing on this side can shoot upwards at all, and it is perishable, because the target
+  crosses the envelope in a second or two while a tank will still be there next evaluation.
+
+Nine tests in [`DefensiveLogicTests`](Tests/DefensiveLogicTests.cs) fail against the logic this
+match was fought with, including one that replays the exact distances from 544s. Two more exist to
+stop the rule growing: a ground target at the same nine cells must still be engaged, so this stays
+a statement about catchability rather than a quiet shrinking of the leash.
+
 
 ```
 Reference/
@@ -344,6 +412,7 @@ Reference/
 │   │                                 open ground for it land as far out as is legal)
 │   ├── TrainUnitsMode.cs        ←   trains units from ctx.ProductionPlan
 │   ├── DefensiveMode.cs         ←   holds ground, won't be baited, retreats to repair
+│   │                                (and never walks at an aircraft — see DefensiveLogic)
 │   ├── AttackBaseMode.cs        ←   pushes a base, never chases
 │   ├── EnemyBaseSightings.cs    ←   where this side last saw their base
 │   ├── RunHomeMode.cs           ←   flees to a refinery when threatened

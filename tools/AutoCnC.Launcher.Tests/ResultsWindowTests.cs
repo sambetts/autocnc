@@ -182,7 +182,7 @@ namespace AutoCnC.Launcher.Tests
 			Assert.That(latest[0], Is.EqualTo("#2"));
 			Assert.That(latest.Skip(2), Is.EqualTo(new[]
 			{
-				"Won", "Feedback provided", "1:30", "12", "1200", "4", "2300", "8", "15", "300", "Rendered"
+				"Won", "Feedback provided", "1:30", "12", "31", "1200", "4100", "4", "2300", "8", "15", "300", "Rendered"
 			}));
 			Assert.That(window.RecordedSessions.Items[1].SubItems[3].Text, Is.EqualTo("No feedback yet"));
 			Assert.That(window.HistorySummaryText, Does.Contain("1 provided, 1 missing"));
@@ -344,7 +344,8 @@ namespace AutoCnC.Launcher.Tests
 						new TrainingPlayerResult
 						{
 							Name = "You", Outcome = outcome, Units = 12, ArmyValue = 1200,
-							Buildings = 4, BaseValue = 2300, Killed = 8, Lost = 15, Cash = 300
+							Buildings = 4, BaseValue = 2300, Killed = 8, Lost = 15, Cash = 300,
+							PeakUnits = 31, PeakArmyValue = 4100, PeakBuildings = 9, PeakBaseValue = 5200
 						}
 					]
 				};

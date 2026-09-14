@@ -360,7 +360,9 @@ namespace AutoCnC.Launcher
 			var battle = run.Manifest.Battle;
 			var score = result?.Players is { Count: > 0 }
 				? string.Join("; ", result.Players.Select(p =>
-					$"{p.Name}: {p.Outcome ?? "undecided"}, army={p.ArmyValue}, buildings={p.Buildings}, killed={p.Killed}, lost={p.Lost}, cash={p.Cash}"))
+					$"{p.Name}: {p.Outcome ?? "undecided"}, army={p.ArmyValue} (peak {p.PeakArmyValue}), " +
+					$"units={p.Units} (peak {p.PeakUnits}), buildings={p.Buildings} (peak {p.PeakBuildings}), " +
+					$"killed={p.Killed}, lost={p.Lost}, cash={p.Cash}"))
 				: "no final score was recorded";
 			var playerFeedback = string.IsNullOrWhiteSpace(result?.PlayerFeedback)
 				? "No player assessment was provided."

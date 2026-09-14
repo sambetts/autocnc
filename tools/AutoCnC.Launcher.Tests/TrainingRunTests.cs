@@ -536,7 +536,7 @@ namespace AutoCnC.Launcher.Tests
 			run.Finish("finished", match, battle);
 
 			var loaded = TrainingRun.Load(run.RunDirectory);
-			Assert.That(loaded.Manifest.SchemaVersion, Is.EqualTo(5));
+			Assert.That(loaded.Manifest.SchemaVersion, Is.EqualTo(6));
 			Assert.That(loaded.Manifest.Result.Outcome, Is.EqualTo("Won"));
 			Assert.That(loaded.Manifest.Performance.SimulationSpeed, Is.EqualTo(100));
 			Assert.That(loaded.Manifest.Performance.TicksPerSecond, Is.EqualTo(2500));
@@ -693,6 +693,141 @@ namespace AutoCnC.Launcher.Tests
 			});
 		}
 
+		/// <remarks>
+		/// The engine destroys everything a beaten player owns the moment they lose, and keeps
+		/// recording until the survivors finish, so the closing rows of a defeat are uniformly
+		/// zero. Scoring from them made every lost battle look identical — which is exactly the
+		/// comparison the history and the trend charts exist to make.
+		/// </remarks>
+		[Test]
+		public void DefeatIsScoredFromTheMomentItWasDecidedRatherThanTheWipeThatFollows()
+		{
+			var run = NewRun();
+			WriteContestedBattle(run);
+
+			var match = new MatchLog();
+			match.Watch(run.TelemetryPath);
+			Assert.That(match.Refresh(), Is.True);
+			var battle = new BattleEventLog();
+			battle.Watch(run.BattleLogPath);
+			Assert.That(battle.Refresh(), Is.True);
+
+			run.Finish("finished", match, battle);
+			var you = run.Manifest.Result.Players.Single(player => player.Name == "Commander");
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(run.Manifest.Result.Outcome, Is.EqualTo("Lost"));
+				Assert.That(you.Units, Is.EqualTo(3));
+				Assert.That(you.ArmyValue, Is.EqualTo(900));
+				Assert.That(you.Buildings, Is.EqualTo(4));
+				Assert.That(you.BaseValue, Is.EqualTo(5200));
+				Assert.That(you.Cash, Is.EqualTo(120));
+				Assert.That(you.Killed, Is.EqualTo(11));
+				Assert.That(you.Lost, Is.EqualTo(24));
+				Assert.That(you.PeakUnits, Is.EqualTo(20));
+				Assert.That(you.PeakArmyValue, Is.EqualTo(8000));
+				Assert.That(you.PeakBuildings, Is.EqualTo(12));
+				Assert.That(you.PeakBaseValue, Is.EqualTo(15000));
+			});
+		}
+
+		/// <remarks>
+		/// The samples that say how a lost battle actually went are still in the run's own
+		/// telemetry, so a history recorded by an older launcher is worth rescoring rather than
+		/// leaving as a column of zeros. Nothing is written back: the run is evidence.
+		/// </remarks>
+		[Test]
+		public void BattlesRecordedBeforeTheFixAreRescoredFromTheirOwnTelemetry()
+		{
+			var run = NewRun();
+			WriteContestedBattle(run);
+
+			var match = new MatchLog();
+			match.Watch(run.TelemetryPath);
+			match.Refresh();
+			var battle = new BattleEventLog();
+			battle.Watch(run.BattleLogPath);
+			battle.Refresh();
+			run.Finish("finished", match, battle);
+
+			// Exactly what an older launcher left behind: the final sample of a clean sweep.
+			var stale = run.Manifest.Result.Players.Single(player => player.Name == "Commander");
+			stale.Units = 0;
+			stale.ArmyValue = 0;
+			stale.Buildings = 0;
+			stale.BaseValue = 0;
+			stale.PeakUnits = 0;
+			stale.PeakArmyValue = 0;
+			stale.PeakBuildings = 0;
+			stale.PeakBaseValue = 0;
+			run.Manifest.SchemaVersion = 5;
+			run.Save();
+
+			var loaded = TrainingRun.Load(run.RunDirectory);
+			var you = loaded.Manifest.Result.Players.Single(player => player.Name == "Commander");
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(you.Units, Is.EqualTo(3));
+				Assert.That(you.ArmyValue, Is.EqualTo(900));
+				Assert.That(you.PeakUnits, Is.EqualTo(20));
+				Assert.That(you.PeakArmyValue, Is.EqualTo(8000));
+				Assert.That(you.PeakBaseValue, Is.EqualTo(15000));
+			});
+		}
+
+		/// <remarks>
+		/// Rescoring reads the run's telemetry, and a run whose evidence has been cleared out
+		/// must still open. Losing the numbers is a disappointment; losing the session is a bug.
+		/// </remarks>
+		[Test]
+		public void ALegacyRunWithoutTelemetryStillLoads()
+		{
+			var run = NewRun();
+			WriteContestedBattle(run);
+
+			var match = new MatchLog();
+			match.Watch(run.TelemetryPath);
+			match.Refresh();
+			var battle = new BattleEventLog();
+			battle.Watch(run.BattleLogPath);
+			battle.Refresh();
+			run.Finish("finished", match, battle);
+			run.Manifest.SchemaVersion = 4;
+			run.Save();
+			File.Delete(run.TelemetryPath);
+
+			var loaded = TrainingRun.Load(run.RunDirectory);
+
+			Assert.That(loaded, Is.Not.Null);
+			Assert.That(loaded.Manifest.Result.Players, Has.Count.EqualTo(2));
+		}
+
+		/// <summary>A battle the local player builds up in, is ground down in, then loses.</summary>
+		static void WriteContestedBattle(TrainingRun run)
+		{
+			File.WriteAllText(run.TelemetryPath,
+				"seconds,player,faction,bot,colour,units,army,buildings,basevalue,assets,cash,killed,lost,buildingskilled,buildingslost,state\n" +
+				"0,Commander,gdi,0,C82020,0,0,5,6000,6000,3000,0,0,0,0,Undefined\n" +
+				"0,Watson,nod,1,12B572,0,0,5,6000,6000,3000,0,0,0,0,Undefined\n" +
+				"10,Commander,gdi,0,C82020,20,8000,12,15000,23000,900,7,2,1,0,Undefined\n" +
+				"10,Watson,nod,1,12B572,14,6100,11,13000,19100,400,2,7,0,1,Undefined\n" +
+				"20,Commander,gdi,0,C82020,3,900,4,5200,6100,120,11,24,3,8,Undefined\n" +
+				"20,Watson,nod,1,12B572,18,9400,9,11000,20400,650,24,11,8,3,Undefined\n" +
+
+				// Defeat, and the clean sweep that comes with it.
+				"21,Commander,gdi,0,C82020,0,0,0,0,0,0,11,24,3,8,Lost\n" +
+				"21,Watson,nod,1,12B572,18,9400,9,11000,20400,650,24,11,8,3,Won\n" +
+				"30,Commander,gdi,0,C82020,0,0,0,0,0,0,11,24,3,8,Lost\n" +
+				"30,Watson,nod,1,12B572,18,9400,9,11000,20400,700,24,11,8,3,Won\n");
+			File.WriteAllText(run.BattleLogPath,
+				"seconds,event,player,actor,actorid,otherplayer,otheractor,otheractorid,x,y,detail\n" +
+				"0,player,Commander,,,,,,,,faction=gdi bot=0 colour=C82020 side=you\n" +
+				"0,player,Watson,,,,,,,,faction=nod bot=1 colour=12B572 side=enemy\n" +
+				"21,over,Commander,,,,,,,,result=Lost\n");
+		}
+
 		TrainingRun NewRun() =>
 			TrainingRun.Create(project, new TrainingBattleConfiguration
 			{
@@ -704,7 +839,6 @@ namespace AutoCnC.Launcher.Tests
 				GameSpeed = "maximum",
 				ExecutionMode = BattleExecutionModes.Rendered
 			}, runs);
-
 		static void Complete(TrainingRun run, string outcome, int duration, int army,
 			int opponentArmy, int opponents = 1)
 		{

@@ -27,6 +27,8 @@ namespace AutoCnC.Launcher.Tests
 		string root;
 		LauncherSettings settings;
 
+		string PromptHistoryRoot => Path.Combine(root, "prompt-history");
+
 		[SetUp]
 		public void SetUp()
 		{
@@ -63,7 +65,8 @@ namespace AutoCnC.Launcher.Tests
 
 		MainForm Window()
 		{
-			var window = new MainForm(settings, trainingRunsRoot: Path.Combine(root, "runs")) { ShowInTaskbar = false };
+			var window = new MainForm(settings, trainingRunsRoot: Path.Combine(root, "runs"),
+				promptHistoryRoot: PromptHistoryRoot) { ShowInTaskbar = false };
 			window.Show();
 			window.Size = DeviceSize(new Size(1200, 850), window.DeviceDpi);
 			window.PerformLayout();
@@ -565,6 +568,46 @@ namespace AutoCnC.Launcher.Tests
 			};
 			run.Save();
 			return run;
+		}
+
+		[Test]
+		public void AdoptingANextRoundPromptArchivesTheOneItReplaces()
+		{
+			var run = RecordedFeedbackRun(BattleExecutionModes.Rendered);
+			WritePreparedEvidence(run);
+			var previous = string.Join(Environment.NewLine,
+			[
+				"Improve the bot. Edit only files under {workspace}.",
+				"Read {gameGuide} and {gameRules}.",
+				"Evidence: {fightManifest}, {battleLog}, {telemetry}, {decisionTrace}.",
+				"Fight: {battle}. Result: {result}. Revision: {sourceRevision}.",
+				"{nextPromptContract}"
+			]);
+			var proposed = previous.Replace("Improve the bot.", "Improve the bot's economy first.",
+				StringComparison.Ordinal);
+			settings.AgentPromptTemplate = previous;
+			run.AgentStarted("fake-agent");
+			run.AgentFinished(0, 1, proposed);
+			settings.LastTrainingRunDirectory = run.RunDirectory;
+
+			using var window = Window();
+			window.SelectStation(2);
+			Assert.That(window.SelectTrainingBattle(run), Is.True);
+			Descendants(window).OfType<Button>().Single(button => button.Text == "Agent workspace").PerformClick();
+			window.OwnedForms.OfType<ImprovementWindow>().Single().SubmitNextPrompt();
+
+			var archive = new PromptHistory(PromptHistoryRoot);
+			var revisions = archive.Read().Revisions;
+			Assert.That(settings.AgentPromptTemplate, Is.EqualTo(proposed));
+			Assert.That(revisions.Select(revision => revision.Origin), Is.EqualTo(new[] { "baseline", "manual" }));
+
+			// The prompt in use when the archive was empty has to be backfilled, or the first
+			// recorded revision is a change from nothing and nobody can see what it changed.
+			Assert.That(archive.TextOf(revisions[0]), Is.EqualTo(previous));
+			Assert.That(archive.TextOf(revisions[1]), Is.EqualTo(proposed));
+			Assert.That(revisions[1].RunId, Is.EqualTo(run.Manifest.Id));
+			Assert.That(revisions[1].Bot, Is.EqualTo("ReferenceBot"));
+			Assert.That(revisions[1].BattleOutcome, Is.EqualTo("Lost"));
 		}
 
 		[Test]

@@ -45,6 +45,17 @@ namespace AutoCnC.Launcher
 		public string Error { get; set; }
 	}
 
+	/// <summary>
+	/// One side's numbers from a finished battle.
+	/// </summary>
+	/// <remarks>
+	/// The headline figures are taken from the moment the match was decided rather than from its
+	/// final instant. A beaten player has every actor they own destroyed by the engine the moment
+	/// they lose, and the match carries on being recorded until the survivors are done, so the
+	/// last instant of a defeat is uniformly zero and says nothing about how the battle went. The
+	/// peaks sit alongside them because a bot that massed forty units and then threw them away is
+	/// a different problem from one that never built a fifth.
+	/// </remarks>
 	public sealed class TrainingPlayerResult
 	{
 		public string Name { get; set; }
@@ -57,6 +68,10 @@ namespace AutoCnC.Launcher
 		public int Cash { get; set; }
 		public int Killed { get; set; }
 		public int Lost { get; set; }
+		public int PeakUnits { get; set; }
+		public int PeakArmyValue { get; set; }
+		public int PeakBuildings { get; set; }
+		public int PeakBaseValue { get; set; }
 	}
 
 	public sealed class TrainingBattleResult
@@ -127,7 +142,7 @@ namespace AutoCnC.Launcher
 
 	public sealed class TrainingRunManifest
 	{
-		public int SchemaVersion { get; set; } = 5;
+		public int SchemaVersion { get; set; } = 6;
 		public string Id { get; set; }
 		public string Status { get; set; }
 		public DateTime CreatedUtc { get; set; }
@@ -259,6 +274,7 @@ namespace AutoCnC.Launcher
 
 			var run = new TrainingRun(full, manifest);
 			run.InferLegacyFailure();
+			run.RescoreLegacyResult();
 			return run;
 		}
 
@@ -273,20 +289,15 @@ namespace AutoCnC.Launcher
 
 			foreach (var player in matchLog.Players)
 			{
-				var last = player.Samples.LastOrDefault();
-				result.Players.Add(new TrainingPlayerResult
+				var scored = new TrainingPlayerResult
 				{
 					Name = player.Name,
 					IsBot = player.IsBot,
-					Outcome = player.Outcome,
-					Units = last.Units,
-					ArmyValue = last.Army,
-					Buildings = last.Buildings,
-					BaseValue = last.BaseValue,
-					Cash = last.Cash,
-					Killed = last.Killed,
-					Lost = last.Lost
-				});
+					Outcome = player.Outcome
+				};
+
+				Score(scored, player);
+				result.Players.Add(scored);
 			}
 
 			result.Outcome = result.Players
@@ -306,6 +317,62 @@ namespace AutoCnC.Launcher
 			if (File.Exists(CancellationPath))
 				File.Delete(CancellationPath);
 			Save();
+		}
+
+		/// <summary>Fills in one side's figures from its recorded samples.</summary>
+		static void Score(TrainingPlayerResult result, MatchPlayer player)
+		{
+			var decided = player.LastContested;
+			result.Units = decided.Units;
+			result.ArmyValue = decided.Army;
+			result.Buildings = decided.Buildings;
+			result.BaseValue = decided.BaseValue;
+			result.Cash = decided.Cash;
+			result.Killed = decided.Killed;
+			result.Lost = decided.Lost;
+			result.PeakUnits = player.Peak.Units;
+			result.PeakArmyValue = player.Peak.Army;
+			result.PeakBuildings = player.Peak.Buildings;
+			result.PeakBaseValue = player.Peak.BaseValue;
+		}
+
+		/// <summary>
+		/// Rescores a run recorded before the figures were taken at the moment of defeat.
+		/// </summary>
+		/// <remarks>
+		/// Older manifests stored the very last sample, which for any loss is the engine's clean
+		/// sweep of a beaten player: zero units, zero army, zero buildings, every time. The
+		/// samples that would say otherwise are still sitting in the run's own telemetry, so
+		/// rather than leave a history of zeros behind, it is read back and rescored in memory.
+		/// Nothing is written: the run on disk is evidence of a battle that has already been
+		/// fought, and re-reading it costs a few milliseconds per run.
+		/// </remarks>
+		void RescoreLegacyResult()
+		{
+			if (Manifest.SchemaVersion >= 6 || Manifest.Result?.Players is not { Count: > 0 } players)
+				return;
+
+			var log = new MatchLog();
+			log.Watch(TelemetryPath);
+			try
+			{
+				if (!log.Refresh() || log.IsEmpty)
+					return;
+			}
+			catch (UnauthorizedAccessException)
+			{
+				// A history of zeros is a poor result but a readable one. Refusing to open the run
+				// at all because its evidence is locked away would be worse.
+				return;
+			}
+
+			foreach (var player in players)
+			{
+				var recorded = log.Players.FirstOrDefault(p =>
+					string.Equals(p.Name, player.Name, StringComparison.Ordinal));
+				if (recorded != null && recorded.Samples.Count > 0)
+					Score(player, recorded);
+			}
 		}
 
 		void LoadPerformance()

@@ -257,13 +257,20 @@ Watching at 20x tells you who won. It does not tell you *when* it was lost, and 
 the question. So every match records one row per player per second of game time to a CSV, and the
 launcher graphs it live in the **results window** it opens when the battle starts: units, army
 value, buildings, base value and kills, one line per player in that player's colour, with the
-final numbers and the result underneath.
+numbers as the battle was decided and the result underneath.
 
 ```
 seconds,player,faction,bot,colour,units,army,buildings,basevalue,assets,cash,killed,lost,buildingskilled,buildingslost,state
 765,Commander,gdi,0,C82020,0,0,0,0,0,0,72,180,0,9,Lost
 765,HAL 9001,gdi,1,FF7A22,63,32980,27,29500,74580,332,180,73,9,0,Won
 ```
+
+Note the zeros on the losing row, and do not read anything into them. Defeat is not a bookkeeping
+event: the engine destroys every actor a beaten player owns the moment they lose, and recording
+continues while the survivors finish. The closing rows of every defeat therefore look identical,
+whether the bot was overrun in four minutes or held out for sixteen. The row before the `state`
+column changes is the one worth reading, which is why the launcher scores a battle from there and
+keeps the peak of each figure beside it.
 
 The curves say things a match never quite does. An army count that climbs steadily to 60 and then
 falls off a cliff at 9:30 is a bot that fought the wrong fight once, not one that
@@ -583,7 +590,9 @@ Fight and rules JSON are shown as collapsible trees. When the run finishes, the 
 entire replacement prompt template in **Next prompt***. Edit and approve it in manual mode, or let
 continuous mode accept a valid template automatically. The launcher inserts that round's paths,
 evidence, result, and source revision through required placeholders. This replaces rather than
-appends, so the prompt can get more focused without growing indefinitely. While a build, fight, or
+appends, so the prompt can get more focused without growing indefinitely. Each adopted template is
+kept in `%LOCALAPPDATA%\AutoCnC\PromptHistory` as a numbered file, so a loop left running overnight
+still leaves a readable trail of how its prompt changed. While a build, fight, or
 improvement is running, the launcher taskbar icon shows indeterminate progress.
 
 If improvement stops with a build error, it no longer dead-ends. The Improvement window

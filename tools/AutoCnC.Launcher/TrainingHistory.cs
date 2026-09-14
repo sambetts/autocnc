@@ -156,7 +156,11 @@ namespace AutoCnC.Launcher
 				BaseValue = opponents.Sum(player => player.BaseValue),
 				Cash = opponents.Sum(player => player.Cash),
 				Killed = opponents.Sum(player => player.Killed),
-				Lost = opponents.Sum(player => player.Lost)
+				Lost = opponents.Sum(player => player.Lost),
+				PeakUnits = opponents.Sum(player => player.PeakUnits),
+				PeakArmyValue = opponents.Sum(player => player.PeakArmyValue),
+				PeakBuildings = opponents.Sum(player => player.PeakBuildings),
+				PeakBaseValue = opponents.Sum(player => player.PeakBaseValue)
 			};
 
 		static string BotIdentity(string botPath)

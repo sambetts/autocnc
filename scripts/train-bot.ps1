@@ -128,7 +128,7 @@ if (-not (Test-Path -LiteralPath $promptFile)) {
     $result = $manifest.Result
     $score = if ($result.Players) {
         ($result.Players | ForEach-Object {
-            "$($_.Name): $($_.Outcome), army=$($_.ArmyValue), buildings=$($_.Buildings), killed=$($_.Killed), lost=$($_.Lost), cash=$($_.Cash)"
+            "$($_.Name): $($_.Outcome), army=$($_.ArmyValue) (peak $($_.PeakArmyValue)), units=$($_.Units) (peak $($_.PeakUnits)), buildings=$($_.Buildings) (peak $($_.PeakBuildings)), killed=$($_.Killed), lost=$($_.Lost), cash=$($_.Cash)"
         }) -join '; '
     } else {
         'no final score was recorded'

@@ -324,8 +324,13 @@ visibility-filtered battle log, and a decision trace there; the launcher copies 
 and result into the same run. Headless additionally writes `performance.json` (ticks/second,
 effective multiplier, wall time and result), which the launcher folds into the manifest.
 Completed manifests are reduced to chronological local-versus-opponent KPI samples for the Results
-window's iteration charts. The duration series colors each point by outcome. This avoids the old
-fixed-path/one-deep-rotation limit and makes iterations directly comparable.
+window's iteration charts. Those KPIs are taken from the last sample before the engine settled each
+player's fate, with the peak of each figure alongside them, because defeat destroys everything a
+beaten player owns and recording continues afterwards — scoring the final sample would make every
+loss identically zero. Manifests written before schema 6 are rescored in memory from their own
+telemetry on load, leaving the run's evidence on disk untouched. The duration series colors each
+point by outcome. This avoids the old fixed-path/one-deep-rotation limit and makes iterations
+directly comparable.
 
 The three runtime records have intentionally different trust boundaries:
 
@@ -383,7 +388,10 @@ template between machine-readable marker lines. The player can edit and approve 
 automatically. Approval replaces the saved template; required placeholders preserve fresh
 workspace, evidence, result, and recursive next-template contract values without accumulating
 additive guidance. `docs/agent-prompt-template.md` is the repository default, while an approved
-replacement is user state. Script queue activity is mirrored to Windows taskbar indeterminate
+replacement is user state. Since approval overwrites that state, each adopted template is also
+appended to `%LOCALAPPDATA%\AutoCnC\PromptHistory` as a numbered file plus an `index.json` of
+provenance, which is the only record of how the prompt evolved across a long continuous loop.
+Script queue activity is mirrored to Windows taskbar indeterminate
 progress and cleared on every terminal state.
 
 `train-bot.ps1` records agent and verification phases in `agent-status.json`.

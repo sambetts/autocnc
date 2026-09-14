@@ -5,8 +5,8 @@
 //  Try it with:  /mode group 2 HarvesterEscortMode
 //
 //  Shows the sense -> decide -> act split. The judgement below is simple enough
-//  to inline, but for anything meatier put it in AutoCnC.Core as a pure
-//  function so you can unit-test it without launching the game.
+//  to inline, but for anything meatier put it in a pure function so the rule can
+//  be read on its own, without the engine in the way.
 //
 //  Licence: GPL-3.0-or-later, like everything that links against OpenRA. See LICENSE
 //  and NOTICE.md. Modes you write and distribute inherit the same terms.

@@ -63,7 +63,7 @@ namespace AutoCnC.Launcher
 				AutoSize = true,
 				MaximumSize = new Size(500, 0),
 				ForeColor = SystemColors.GrayText,
-				Text = "A new folder containing a C# solution, bot, starter doctrine, mode, and tests will be created."
+				Text = "A new folder containing a C# solution, bot, starter doctrine, and mode will be created."
 			};
 			grid.Controls.Add(hint, 1, 2);
 			grid.SetColumnSpan(hint, 2);

@@ -5,7 +5,7 @@
 //  Written for harvesters:  /mode type harv RunHomeMode
 //
 //  Copy this file, rename the class, and it appears in-game after a rebuild.
-//  Check your work fast with:  dotnet test src/AutoCnC.Core.Tests
+//  Check your work by fighting with it:  ./scripts/run-bot.ps1 -Map tiberium-rift.oramap
 //
 //  Licence: GPL-3.0-or-later, like everything that links against OpenRA. See LICENSE
 //  and NOTICE.md. Modes you write and distribute inherit the same terms.

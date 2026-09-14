@@ -2,11 +2,11 @@
 
 ## The problem
 
-Unit behaviour should be **player-authored code** that is easy to write, easy to test, and safe
-in multiplayer. Those goals pull against each other:
+Unit behaviour should be **player-authored code** that is easy to write, easy to reason about, and
+safe in multiplayer. Those goals pull against each other:
 
 - *Easy to write* wants full engine access.
-- *Easy to test* wants no engine at all.
+- *Easy to reason about* wants no engine at all.
 - *Safe in multiplayer* wants code that cannot desync a lockstep simulation — and, once players
   are writing it, code an opponent never has to execute.
 
@@ -141,7 +141,7 @@ per-unit override  >  control group  >  unit type  >  all
 ```
 
 Resolved by `ModeAssignments`, which is pure and lives in the engine-free assembly so the rules
-are directly testable.
+are directly verifiable.
 
 ---
 
@@ -150,15 +150,15 @@ are directly testable.
 ### `AutoCnC.Core` references nothing
 
 A folder convention is a comment; a missing assembly reference is a compiler error. Because the
-core cannot reach `Actor` or `World`, its logic is necessarily pure — and pure logic tests in
-milliseconds without building the engine. To feed new information into a decision you must add
-it to the state struct, which keeps the boundary intact by construction.
+core cannot reach `Actor` or `World`, its logic is necessarily pure — and the platform's own logic
+tests run in milliseconds without building the engine. To feed new information into a decision you
+must add it to the state struct, which keeps the boundary intact by construction.
 
-Note this is now a *testability* guarantee, not a networking one.
+Note this is now a *testability* guarantee for the platform, not a networking one.
 
 ### `OnTick` returns a decision instead of acting
 
-Decisions are inert data, so they can be asserted in tests, logged, rendered as a debug overlay,
+Decisions are inert data, so they can be asserted against, logged, rendered as a debug overlay,
 and — critically — **compared between ticks** so the executor can suppress duplicate orders.
 An earlier revision had modes call actuators directly; that made duplicate suppression
 impossible.
@@ -209,17 +209,22 @@ condition linter. Forcing `HoldFire` is inert — `Damaged()` returns early belo
 
 ---
 
-## Testing strategy
+## Verification strategy
 
 | Layer | How it is verified | Cost |
 |---|---|---|
 | `AutoCnC.Core` | NUnit tests, no engine | milliseconds |
 | Trait/YAML wiring | `./scripts/lint.ps1` — constructs every actor | ~1 min |
 | Engine integration | Compile against pinned engine binaries | seconds |
+| Battle bots | A recorded fight, not a test suite | one match |
 
 The YAML lint is worth more than it sounds: it instantiates every actor in the mod, catching
 unsatisfied `Requires<T>`, conditions consumed but never granted, and malformed trait fields —
 none of which the C# compiler can see.
+
+Bots are deliberately outside the test story. A bot is judged by whether it wins, which no
+assertion can tell you, so the evidence a fight records is the verification and improvement agents
+are told not to spend their budget writing unit tests.
 
 ---
 
@@ -303,9 +308,9 @@ one, so nothing is ever inherited from whatever ran last.
 The launcher remains a front end over scripts rather than a second build system:
 
 ```
-New bot        -> scripts/new-bot.ps1 -> standalone solution + package references + tests
-Deploy / Fight -> scripts/run-bot.ps1 -> test, build, install, optionally launch
-Improve        -> scripts/train-bot.ps1 -> local coding agent -> test, build, install
+New bot        -> scripts/new-bot.ps1 -> standalone solution + package references
+Deploy / Fight -> scripts/run-bot.ps1 -> build, install, optionally launch
+Improve        -> scripts/train-bot.ps1 -> local coding agent -> build, install
 ```
 
 `scripts/authoring-api.version` is the compatibility contract between that UI and those scripts.
@@ -338,8 +343,10 @@ AI improvement is explicit and optional. Before invoking a configured local comm
 snapshots the workspace while excluding git metadata and generated output. The command runs from
 the bot workspace with an evidence-grounded prompt. The default Copilot configuration grants
 access to the run's `evidence/` directory, while the source snapshot and authoritative run state
-remain outside its allowed paths. The wrapper independently runs the bot tests and deployment
-build; the launcher streams the raw ANSI terminal output as colored UTF-8 spans into a dedicated
+remain outside its allowed paths. The prompt tells the agent to spend its budget on battle logic
+rather than unit tests, because a bot is judged by a recorded fight and not by an assertion. The
+wrapper independently runs the deployment build; the launcher streams the raw ANSI terminal output
+as colored UTF-8 spans into a dedicated
 Improvement window and exposes the exact prompt, guide, resolved rules, fight manifest, and
 file-level change set in adjacent tabs. Plain build logs use the same stream with styling removed.
 It can restore the pre-agent snapshot. Proving ground and the recorded-session history expose
@@ -364,7 +371,7 @@ Continuous mode is a small explicit state machine over the existing script queue
 Improving -> Fighting. Headless is the default execution mode, with Rendered selectable for
 watching/debugging. It creates a fresh durable run and source snapshot on every pass, automatically
 accepts only a valid complete next-round prompt, and stops on user request or any non-zero game,
-agent, test, or build exit. Headless also treats 90 nominal game minutes without a result as a
+agent, or build exit. Headless also treats 90 nominal game minutes without a result as a
 failed stalemate (configurable with `-MaxGameSeconds`). Stop writes the run's cancellation sentinel
 first, allowing the world, evidence writers and replay recorder to close cleanly before process-tree
 termination is used as a fallback. It deliberately has no player-assessment pause.
@@ -380,7 +387,7 @@ replacement is user state. Script queue activity is mirrored to Windows taskbar 
 progress and cleared on every terminal state.
 
 `train-bot.ps1` records agent and verification phases in `agent-status.json`.
-`verify-bot.ps1` owns the shared clean/test/build/deploy check, so initial verification and the
+`verify-bot.ps1` owns the shared clean/build/deploy check, so initial verification and the
 no-agent retry path cannot drift. A failed agent attempt is archived under `evidence/attempts`;
 recovery keeps the current source edits and prepends the archived failure context to the next
 agent prompt. The original source snapshot remains outside agent-visible evidence.

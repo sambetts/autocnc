@@ -18,7 +18,7 @@
     as a direct child of OutputDirectory before anything is removed.
 
 .PARAMETER NoBuild
-    Creates the bot without building or running its starter tests.
+    Creates the bot without building the generated solution.
 
 .EXAMPLE
     ./scripts/new-bot.ps1 -Name "First Contact"
@@ -241,7 +241,6 @@ try {
         '__AUTOCNC_BOT_IDENTIFIER__' = $identifier
         '__AUTOCNC_BOT_ROOT_NAMESPACE__' = $rootNamespace
         '__AUTOCNC_BOT_PROJECT_GUID__' = ([guid]::NewGuid().ToString('D').ToUpperInvariant())
-        '__AUTOCNC_TEST_PROJECT_GUID__' = ([guid]::NewGuid().ToString('D').ToUpperInvariant())
         '__AUTOCNC_REPOSITORY_PATH_XML__' = (ConvertTo-XmlText $repoRoot)
         '__AUTOCNC_PACKAGES_PATH_XML__' = (ConvertTo-XmlText $packagesPath)
         '__AUTOCNC_REPOSITORY_PATH_JSON__' = (ConvertTo-JsonStringContent $repoRoot)
@@ -283,7 +282,6 @@ finally {
 
 $projectPath = Join-Path $destination "$identifier.csproj"
 $solutionPath = Join-Path $destination "$identifier.sln"
-$testProjectPath = Join-Path $destination "Tests\$identifier.Tests.csproj"
 
 Write-Host "==> Created battle bot '$displayName'" -ForegroundColor Green
 Write-Host "    Project: $projectPath"
@@ -293,12 +291,6 @@ if (-not $NoBuild) {
     & dotnet build $solutionPath -c Debug --nologo -v minimal
     if ($LASTEXITCODE -ne 0) {
         throw "Generated solution build failed with exit code $LASTEXITCODE. The scaffold remains at '$destination'."
-    }
-
-    Write-Host '==> Running starter tests' -ForegroundColor Cyan
-    & dotnet test $testProjectPath -c Debug --no-build --no-restore --nologo -v minimal
-    if ($LASTEXITCODE -ne 0) {
-        throw "Generated bot tests failed with exit code $LASTEXITCODE. The scaffold remains at '$destination'."
     }
 }
 else {

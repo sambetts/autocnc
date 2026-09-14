@@ -41,6 +41,8 @@ namespace AutoCnC.Launcher
 				return null;
 
 			return Directory.EnumerateFiles(full, "*.csproj", SearchOption.TopDirectoryOnly)
+				// New bots have no test project, but one made before they were dropped still can,
+				// and picking it as the bot would deploy a test assembly into the game.
 				.Where(p => !p.EndsWith(".Tests.csproj", StringComparison.OrdinalIgnoreCase))
 				.OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
 				.FirstOrDefault();

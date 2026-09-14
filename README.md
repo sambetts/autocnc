@@ -55,7 +55,7 @@ composition, timing, map control — is often decided by who clicks faster. Auto
 strategy and deletes the clicking.
 
 It is also, deliberately, a **programming game**. Your army is a codebase. A bad mode loses
-games in ways you can profile, unit-test and fix.
+games in ways you can read, profile and fix.
 
 ---
 
@@ -134,7 +134,7 @@ Candidates are alternatives for one role — `powr` or `nuke` both mean "a power
 plan works as either faction without checking.
 
 ```powershell
-./scripts/new-bot.ps1 -Name MyBot # create a standalone solution, project, mode and tests
+./scripts/new-bot.ps1 -Name MyBot # create a standalone solution, project and mode
 ./scripts/launcher.ps1            # select MyBot, deploy it, and fight
 ```
 
@@ -269,7 +269,6 @@ autocnc/
 │       ├── Doctrines/               #     Opening, Scout, Defence, Attack
 │       ├── Modes/                   #     BuildBase, TrainUnits, Defensive, AttackBase…
 │       ├── Logic/                   #     pure decision functions
-│       └── Tests/                   #     fast, no game needed
 │
 ├── mods/autocnc/                    # mod manifest and rules
 ├── docs/                            # getting-started / writing-bots / architecture
@@ -312,7 +311,7 @@ Cloned without `--recursive`? `git submodule update --init --depth 1`
 ### The launcher
 
 `./scripts/launcher.ps1` opens a window over the whole authoring loop. **New bot** creates a
-standalone C# solution with the AutoC&C dependencies, a starter doctrine and mode, and tests.
+standalone C# solution with the AutoC&C dependencies, a starter doctrine and a mode.
 **Open code** hands that solution to your configured editor, **Deploy bot** builds and installs it,
 and **Run fight** boots straight into the selected match with the bot loaded — no menus, lobby, or
 `/bot` command. The **Execution** selector chooses **Headless** (the default, CPU-speed training
@@ -344,14 +343,14 @@ Improvement is optional. Edit normally with **Open code**, or press **Analyze & 
 fight. In manual mode, the selected battle also accepts your assessment of why it won or lost; that
 assessment is stored with the run and added to its next agent prompt. The launcher snapshots the bot
 source, invokes a configurable local coding-agent command (GitHub Copilot CLI by default), gives it
-only the bot and that run's evidence, then independently tests, builds, and deploys the result.
+only the bot and that run's evidence, then independently builds and deploys the result.
 **Agent workspace** opens a dedicated window with live colored terminal progress plus the exact
 prompt, game guide, resolved unit/weapon stats, fight manifest, and changed files;
 **Restore previous iteration** puts the exact pre-agent source back.
 
 Check **Continuous improvement** before starting to repeat Fight -> analyze and improve -> Fight
 until **Stop**. Continuous mode cannot pause for a player assessment; it automatically adopts a
-valid next-round prompt from the agent and stops on any failed battle, agent run, test, or build.
+valid next-round prompt from the agent and stops on any failed battle, agent run, or build.
 
 Resolved rules and fight JSON use lazy, collapsible trees rather than raw text. At the end of an
 improvement the agent drafts an entirely new prompt template in **Next prompt***. In manual mode the
@@ -361,7 +360,7 @@ inserted through required placeholders. Long-running launcher work also shows an
 progress bar on its Windows taskbar icon.
 
 Agent and independent-verification failures are separate states. A failed verification exposes
-**Retry verification**, which cleans generated output before retesting, plus **Fix failed
+**Retry verification**, which cleans generated output before rebuilding, plus **Fix failed
 improvement** for asking the agent to repair genuine source failures from the archived transcript.
 
 It runs the scripts below and shows you their output, so it never does anything you could not
@@ -369,7 +368,7 @@ have typed yourself. Windows only; elsewhere use the command it wraps, which tak
 options:
 
 ```powershell
-./scripts/run-bot.ps1 -Map tiberium-rift.oramap -Difficulty Hard -ExecutionMode Headless -Test
+./scripts/run-bot.ps1 -Map tiberium-rift.oramap -Difficulty Hard -ExecutionMode Headless
 ./scripts/run-bot.ps1 -Map tiberium-rift.oramap -Difficulty Hard -ExecutionMode Rendered -GameSpeed maximum
 ```
 
@@ -407,7 +406,7 @@ dotnet test src/AutoCnC.Core.Tests   # logic — ~20ms, no engine
 | **4 — Training** | Bot scaffolding, durable fight evidence, optional reversible coding-agent improvements ✅ |
 | **5 — Ecosystem** | Bot vs bot arena, replay regression tests, bot sharing |
 
-Verified: platform and bot build independently, the repository test suites pass, `--check-yaml`
+Verified: platform and bot build independently, the platform test suites pass, `--check-yaml`
 reports 0 errors, and the reference bot plays a full game — deploying, building, scouting,
 pushing, and turtling when its base is hit.
 

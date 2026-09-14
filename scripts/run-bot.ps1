@@ -85,9 +85,6 @@
     Maximum nominal game seconds before a headless match is treated as a failed stalemate.
     Defaults to 5400 (90 game minutes). Pass 0 for no limit.
 
-.PARAMETER Test
-    Run the bot's unit tests first and stop if they fail.
-
 .PARAMETER NoLaunch
     Build and install only; don't start the game.
 
@@ -132,7 +129,6 @@ param(
     [string]$PerformanceReport,
     [ValidateRange(0, [int]::MaxValue)]
     [int]$MaxGameSeconds = 5400,
-    [switch]$Test,
     [switch]$NoLaunch,
     [ValidateSet('Debug', 'Release')]
     [string]$Configuration = 'Release'
@@ -173,9 +169,7 @@ function Resolve-BotSource([string]$nameOrPath) {
             }
         }
 
-        # A bot folder also contains a Tests project; we want the bot itself.
-        $project = Get-ChildItem $item.FullName -Filter *.csproj |
-            Where-Object { $_.Name -notmatch '\.Tests\.csproj$' } | Select-Object -First 1
+        $project = Get-ChildItem $item.FullName -Filter *.csproj | Select-Object -First 1
 
         if ($project) { return New-ProjectSource $project }
         if (Get-ChildItem $item.FullName -Filter *.dll) { return New-AssemblySource $item }
@@ -223,21 +217,7 @@ if ($source.Kind -eq 'Project') {
 }
 
 # ---------------------------------------------------------------------------
-# 3. Optionally test the bot's strategy - no game needed
-# ---------------------------------------------------------------------------
-if ($Test) {
-    if ($source.Kind -ne 'Project') { throw 'A prebuilt .dll has no tests to run; drop -Test, or pass the project instead.' }
-
-    $tests = Get-ChildItem $source.Project.Directory.FullName -Recurse -Filter *.Tests.csproj
-    foreach ($testProject in $tests) {
-        Write-Host "==> Testing $($testProject.BaseName)" -ForegroundColor Cyan
-        dotnet test $testProject.FullName -c $Configuration --nologo -v quiet
-        if ($LASTEXITCODE -ne 0) { throw 'Bot tests failed. Fix them before playing.' }
-    }
-}
-
-# ---------------------------------------------------------------------------
-# 4. Build and install
+# 3. Build and install
 # ---------------------------------------------------------------------------
 
 # Where the game should load the bot from. Naming the exact assembly rather than a bot name
@@ -270,7 +250,7 @@ if ($NoLaunch) {
 }
 
 # ---------------------------------------------------------------------------
-# 5. Work out who you are fighting
+# 4. Work out who you are fighting
 # ---------------------------------------------------------------------------
 function Resolve-Difficulty([string]$requested) {
     $table = Get-Content (Join-Path $PSScriptRoot 'difficulties.json') -Raw | ConvertFrom-Json
@@ -359,7 +339,7 @@ if ($Map -and $Opponents -gt 0) {
 }
 
 # ---------------------------------------------------------------------------
-# 6. Play it
+# 5. Play it
 # ---------------------------------------------------------------------------
 
 # No embedded quotes: PowerShell quotes each array element as needed when it builds the native

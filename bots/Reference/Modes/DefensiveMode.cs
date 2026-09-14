@@ -23,8 +23,8 @@ namespace AutoCnC.Reference.Modes
 	/// </summary>
 	/// <remarks>
 	/// Reference implementation of the sense/decide/act pattern. Note how little happens here —
-	/// the judgement lives in <see cref="DefensiveLogic"/>, which has no engine dependency and is
-	/// unit-tested directly.
+	/// the judgement lives in <see cref="DefensiveLogic"/>, which has no engine dependency and can
+	/// be read on its own.
 	/// </remarks>
 	public sealed class DefensiveMode : UnitMode
 	{

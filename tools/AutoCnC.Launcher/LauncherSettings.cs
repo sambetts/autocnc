@@ -35,7 +35,6 @@ namespace AutoCnC.Launcher
 		public int Opponents { get; set; } = 1;
 		public string Faction { get; set; } = "Random";
 		public string BotFaction { get; set; } = "Random";
-		public bool RunTests { get; set; }
 		public bool ContinuousImprovement { get; set; }
 		public string LastTrainingRunDirectory { get; set; }
 		public string SelectedTrainingRunDirectory { get; set; }

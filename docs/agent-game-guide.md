@@ -23,8 +23,8 @@ it as authoritative context alongside the source and the evidence from one compl
   assignments for one coherent strategy.
 - An `IUnitMode` controls one unit instance. It senses through `ModeContext`, delegates judgement
   to plain C# logic where practical, and returns a `UnitDecision`.
-- Keep the decision layer pure and engine-free. Pure state-to-decision functions are fast to test
-  and make strategy changes explainable.
+- Keep the decision layer pure and engine-free. Pure state-to-decision functions are easy to reason
+  about and make strategy changes explainable.
 - A doctrine switch changes plans and assignments for the whole side. Switches are rate-limited;
   do not create rules that oscillate between doctrines.
 
@@ -91,11 +91,11 @@ it as authoritative context alongside the source and the evidence from one compl
    relevant time range or events.
 3. Prefer one coherent, measurable improvement over unrelated strategy rewrites.
 4. Preserve faction portability unless the bot explicitly declares itself faction-specific.
-5. Add or update focused tests for changed pure decision logic.
-6. Keep existing tests meaningful; do not weaken assertions merely to make a change pass.
-7. Build and test the bot after editing. Fix failures before finishing.
-8. Do not launch another game. The player decides when to run the next evaluation fight.
-9. Do not optimize solely for one random event. Favor rules that generalize to another match on
+5. Spend the budget on battle logic. Do not write unit tests or add a test project: a bot is
+   measured by the next fight, not by a suite.
+6. Build the bot after editing. Fix failures before finishing.
+7. Do not launch another game. The player decides when to run the next evaluation fight.
+8. Do not optimize solely for one random event. Favor rules that generalize to another match on
    the same game mechanics.
-10. End with a concise explanation of the diagnosis, files changed, expected behavioral effect,
-    and verification performed.
+9. End with a concise explanation of the diagnosis, files changed, expected behavioral effect,
+   and verification performed.

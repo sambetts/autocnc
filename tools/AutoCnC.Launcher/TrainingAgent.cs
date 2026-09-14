@@ -262,7 +262,7 @@ namespace AutoCnC.Launcher
 			}
 
 			var phase = verification
-				? "independent build/test verification"
+				? "independent build verification"
 				: "the coding-agent process";
 			var transcript = string.IsNullOrEmpty(archivedTranscript)
 				? "No previous transcript was captured."
@@ -282,10 +282,10 @@ namespace AutoCnC.Launcher
 
 				Reported failure: {message}
 
-				First reproduce the failure with the bot's build and test commands. Repair the current
-				changes until every test and build exits successfully. If generated `bin`/`obj` output
-				is corrupt, clean it and rerun before diagnosing source. Only revisit the strategic
-				change if the tests prove its behavior is wrong.
+				First reproduce the failure with the bot's build command. Repair the current changes
+				until the build exits successfully. If generated `bin`/`obj` output is corrupt, clean
+				it and rebuild before diagnosing source. Only revisit the strategic change if the
+				build proves it cannot compile as written. Do not add unit tests.
 				""";
 		}
 
@@ -296,7 +296,7 @@ namespace AutoCnC.Launcher
 		/// <para>
 		/// Nothing went wrong, so there is nothing to diagnose — and saying otherwise is expensive
 		/// as well as untrue, because an agent told to investigate a failure will go and read a
-		/// transcript, rerun the tests and reason about a fault that does not exist before it
+		/// transcript, rebuild and reason about a fault that does not exist before it
 		/// starts on the work you actually wanted.
 		/// </para>
 		/// <para>
@@ -336,7 +336,7 @@ namespace AutoCnC.Launcher
 
 				{edits} Read the current state of any file you intend to change rather than assuming
 				it is the last known-good version. Finish or replace that work as the task below
-				requires, and make sure the build and tests pass before you are done.
+				requires, and make sure the build passes before you are done.
 				{transcript}
 				""";
 		}

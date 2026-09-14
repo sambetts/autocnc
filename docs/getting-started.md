@@ -35,8 +35,8 @@ On **Windows ARM64**, the pinned OpenRA dependencies do not include ARM64 Window
 Install the **Windows x64 .NET 8 Runtime** alongside ARM64 .NET
 ([download](https://dotnet.microsoft.com/download/dotnet/8.0), choose **.NET Runtime**, **Windows**,
 **x64**). An x64 SDK is not needed. Games, headless battles, replays, YAML linting and rule
-exports then use that runtime automatically under Windows' x64 emulation. Compilation, bot
-tests and the graphical launcher continue using your normal .NET installation.
+exports then use that runtime automatically under Windows' x64 emulation. Compilation and the
+graphical launcher continue using your normal .NET installation.
 
 The scripts find an x64 runtime through `DOTNET_ROOT_X64`, the registered .NET installation,
 or the standard `C:\Program Files\dotnet\x64` directory. For a custom installation, set
@@ -88,7 +88,7 @@ Build complete. Next: ./scripts/launch.ps1
 ```
 
 That opens **Battle Command**, the battle launcher (Windows). In **Bot bay**, press **New bot…** to create a standalone C#
-solution with a starter doctrine, mode, pure logic, and tests. **Open code** opens that solution
+solution with a starter doctrine, a mode and pure logic. **Open code** opens that solution
 for normal manual editing, **Build & deploy** builds and installs it, and **Deploy & fight** starts the game,
 seats the AI, and loads your bot before the first tick.
 
@@ -460,7 +460,7 @@ Create your own from the small starter template:
 ```powershell
 ./scripts/new-bot.ps1 -Name MyRush
 cd bots/MyRush
-dotnet test .\Tests\MyRush.Tests.csproj
+dotnet build .\MyRush.sln
 ```
 
 The launcher's **New bot…** button performs the same operation and selects the new project.
@@ -474,18 +474,15 @@ b.Train("Infantry", "e1").Until(10);   // what to train
 b.Assign<DefensiveMode>().ToAll();     // how units behave
 ```
 
-And `MyRush/Logic/StarterLogic.cs` keeps combat decisions pure and testable:
+And `MyRush/Logic/StarterLogic.cs` keeps combat decisions pure:
 
 ```csharp
 if (!state.HasWeapon)
     return UnitDecision.Continue;
 ```
 
-That rule is a pure function of what your side can see, so you can test it without a game:
-
-```powershell
-dotnet test bots/MyRush/Tests
-```
+That rule is a pure function of what your side can see, so you can read it and say what it will do
+before the match starts.
 
 Point the launcher at `bots/MyRush/MyRush.csproj` and press **Deploy & fight**. It is loaded
 before the first tick, so there is nothing to type — but if you want to check, or to take a hand:
@@ -505,29 +502,24 @@ Full guide: [writing-bots.md](writing-bots.md).
 **Write your modes before the match, then commit to them.** The battle is the test of what you
 wrote, not a live coding session — so there is no mid-match code editing by design.
 
-That makes the fast feedback loop the tests, not the game:
-
-```powershell
-dotnet test src/AutoCnC.Core.Tests           # milliseconds, no game, no engine build
-```
-
-To make your own logic testable that way, put the judgement in a pure function under your bot's
-`Logic/` folder and call it from `OnTick`. `StarterLogic` and the reference bot's logic classes
-are worked examples. Details are in [writing-bots.md](writing-bots.md).
+That makes the fast feedback loop a fight, not a suite. A bot is judged by whether it wins, which
+no assertion can tell you, so nothing here asks you to write unit tests for one — put the
+judgement in a pure function under your bot's `Logic/` folder and call it from `OnTick` so the
+rule is readable on its own. `StarterLogic` and the reference bot's logic classes are worked
+examples. Details are in [writing-bots.md](writing-bots.md).
 
 Full loop:
 
 ```powershell
 # 1. edit your bot's *.cs in your IDE
-dotnet test bots/MyRush/Tests              # 2. check the logic
-./scripts/launcher.ps1                     # 3. Deploy & fight from the command deck
+./scripts/launcher.ps1                     # 2. Deploy & fight from the command deck
 ```
 
-**Deploy & fight** builds your bot and starts the game in one step, and runs its tests on the way past if
-you tick **Run its tests first**. From a terminal that whole loop is one line:
+**Deploy & fight** builds your bot and starts the game in one step. From a terminal that whole
+loop is one line:
 
 ```powershell
-./scripts/run-bot.ps1 -Test -Map tiberium-rift.oramap -Difficulty Hard
+./scripts/run-bot.ps1 -Map tiberium-rift.oramap -Difficulty Hard
 ```
 
 Every launcher fight is durable under `%LOCALAPPDATA%\AutoCnC\TrainingRuns`: manifest, telemetry,
@@ -570,7 +562,7 @@ feedback, or cancel. Feedback stays with the selected battle in its manifest and
 editing an older battle does not attach its observations to the newest fight. Recorded battles
 from prebuilt bots can also be annotated, although those bots cannot be AI-trained.
 
-The launcher snapshots source first, the wrapper reruns tests and deploys after the agent exits,
+The launcher snapshots source first, the wrapper rebuilds and deploys after the agent exits,
 and **Agent workspace** opens a dedicated Improvement window that streams its colored terminal
 progress. The same window exposes the exact prompt, shared game guide, fight manifest, changed
 files, and `game-rules.json`—a generated snapshot of units, health, armor, movement, build data,
@@ -584,7 +576,7 @@ always improving from the battle just fought and automatically accepting each va
 prompt, regardless of an older manual selection. Switch Execution to **Rendered** when you
 want to watch the same loop. It never pauses for feedback; review those battles from **History &
 trends** after stopping. Feedback actions are locked only while an operation is running, not merely
-because the repeat checkbox is selected. A failed game, agent command, test, or build stops the loop instead of advancing
+because the repeat checkbox is selected. A failed game, agent command, or build stops the loop instead of advancing
 with an unverified bot.
 
 Fight and rules JSON are shown as collapsible trees. When the run finishes, the agent drafts an
@@ -594,9 +586,9 @@ evidence, result, and source revision through required placeholders. This replac
 appends, so the prompt can get more focused without growing indefinitely. While a build, fight, or
 improvement is running, the launcher taskbar icon shows indeterminate progress.
 
-If improvement stops with a build or test error, it no longer dead-ends. The Improvement window
+If improvement stops with a build error, it no longer dead-ends. The Improvement window
 states whether the coding agent or independent verification failed. **Retry verification** cleans
-generated output and retests without invoking AI. If the source genuinely needs work, **Fix failed
+generated output and rebuilds without invoking AI. If the source genuinely needs work, **Fix failed
 improvement** starts a recovery attempt with the previous transcript and current edits; **Restore
 previous iteration** discards the attempt.
 

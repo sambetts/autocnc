@@ -72,9 +72,6 @@ jobs:
       - name: Build reference battle bot
         run: dotnet build bots/Reference/ReferenceBot.sln -c Release -v minimal --nologo
 
-      - name: Test reference battle bot
-        run: dotnet test bots/Reference/ReferenceBot.sln -c Release --nologo
-
       - name: Export resolved agent rules
         env:
           ENGINE_DIR: ${{ github.workspace }}/engine

@@ -15,10 +15,11 @@ Treat the guide as authoritative for game mechanics, fair information access, an
   workspace.
 - Preserve the public SDK boundary and existing project conventions.
 - Make evidence-based changes rather than arbitrary tuning.
-- Add or update focused tests for changed pure strategy logic.
-- Run the bot's tests and build before finishing. Do not stop while either command is failing; fix
-  failures and rerun until both exit successfully. The host will clean generated output and run
-  them again independently.
+- Spend the whole budget on battle logic. Do not write unit tests or add a test project: this is a
+  game bot, and the next fight is what measures it.
+- Build the bot before finishing. Do not stop while the build is failing; fix failures and rebuild
+  until it exits successfully. The host will clean generated output and build it again
+  independently.
 - Do not launch another game. Finish after the code is ready for the next fight.
 
 ## Evidence
@@ -37,11 +38,11 @@ Source revision before the fight: `{sourceRevision}`
 
 ## Work
 
-1. Read the bot source and tests.
+1. Read the bot source.
 2. Locate the decisive weakness by correlating telemetry turning points with nearby battle events
    and decisions.
 3. State the concrete weakness and evidence.
-4. Implement the smallest coherent improvement and focused tests.
-5. Run the relevant tests and build, fixing failures before finishing.
+4. Implement the smallest coherent improvement to the battle logic.
+5. Build the bot, fixing failures before finishing.
 
 {nextPromptContract}

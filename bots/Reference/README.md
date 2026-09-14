@@ -13,8 +13,8 @@ the match needs. This one has four, and moves between them as the battle turns.
 | `Attack` | Tech, more production, the whole army pushes | Army worth 6000 and their base is known, including straight out of a siege that has lifted |
 
 The rules are in [`Logic/ReferenceBotLogic.cs`](Logic/ReferenceBotLogic.cs) — a pure function of
-`BattleState`, so the interesting half of the bot is tested without a game running. The wiring is
-in [`ReferenceBot.cs`](ReferenceBot.cs).
+`BattleState`, so the interesting half of the bot can be read and reasoned about without a game
+running. The wiring is in [`ReferenceBot.cs`](ReferenceBot.cs).
 
 `ScoutMode` ends its own doctrine: the moment it sees an enemy structure it calls
 `ctx.SwitchDoctrine`, rather than waiting for the bot's next assessment to notice. It also records
@@ -82,8 +82,7 @@ Three plan-level faults, all now fixed in [`Plans.cs`](Plans.cs):
 - **`Until(n)` counts every candidate a step lists.** The only rocket step the bot had was
   `new("Infantry", ["e3", "e1"], 6)` in `DefenceTrain`, sitting under a step that had just bought
   ten `e1`. It was satisfied before it could fire and never bought a rocket. Anti-air steps now
-  name `e3` and nothing else, and a test asserts no anti-air step can be satisfied by a
-  ground-only unit.
+  name `e3` and nothing else, so a ground-only unit can never satisfy one.
 - **Anti-air belonged to one doctrine.** `atwr`/`sam` were only in `DefenceBuild`, and Defence was
   not entered until 770s of a 995-second match. Static anti-air is now in a shared `HomeDefence`
   fragment that every plan includes.
@@ -135,7 +134,7 @@ and the fourth until 841s.
 
 The steps name `harv` and nothing else, for the same reason the anti-air steps name `e3` and
 nothing else: `Until(n)` counts every candidate a step lists, so `["harv", "ltnk"]` would be
-satisfied by tanks and buy no income at all. A test asserts it.
+satisfied by tanks and buy no income at all.
 
 ## A field is finite, and three refineries on one field is one field
 
@@ -182,7 +181,7 @@ Two things keep it honest rather than clever:
 
 - **The step is narrower than the band.** Six cells against a twelve-cell ring, so consecutive
   rings overlap. A Tiberian Dawn structure has to sit in buildable area, so a refinery that
-  cannot reach the last one is a refinery that never gets placed. A test asserts the overlap.
+  cannot reach the last one is a refinery that never gets placed.
 - **The near edge is capped.** Without a ceiling the fourth refinery asks for open ground twenty
   cells out, finds nothing legal, and falls back — which is the old behaviour with extra steps.
   The far edge carries on growing; the near edge stops at sixteen.
@@ -242,10 +241,10 @@ So the ladder in [`Plans.cs`](Plans.cs) now buys income first, and buys enough o
 
 [`Logic/EconomyPlanLogic.cs`](Logic/EconomyPlanLogic.cs) is the rule written down. An ordering
 mistake in a plan has no symptom — `BaseBuildLogic` walks the list top down and every rung looks
-reasonable on its own — so the tests state it directly over the shipped plans: income reaches its
+reasonable on its own — so the rule is stated directly over the shipped plans: income reaches its
 target before any vehicle factory, before any tech, for less than the opening bank, and a refinery
-is cheaper than a factory plus a harvester. Every one of those assertions fails against the plan
-this match was fought with.
+is cheaper than a factory plus a harvester. The plan this match was fought with breaks every one
+of those.
 
 ## A ring is an ambition; a ladder is what you can reach
 
@@ -302,10 +301,10 @@ in `LadderStepCells` steps and leaves the far edge where the ambition put it: re
 rung that matches anything is the furthest-out band this base can legally build in — which is the
 question worth asking. The step is two cells rather than six, and that inequality is the mechanism:
 a ladder descending a whole ring per rung would have exactly two rungs and no middle, which is the
-behaviour being replaced. A test asserts `LadderStepCells < RingStepCells`, and another asserts
-every ring a shipped plan can ask for yields at least three rungs. The last rung is always the
-default ring, so this can only ever do better than what it replaces — the rungs in between are
-extra chances and the fallback is unchanged.
+behaviour being replaced. `LadderStepCells` is therefore deliberately smaller than `RingStepCells`,
+which is what makes every ring a shipped plan can ask for yield at least three rungs. The last rung
+is always the default ring, so this can only ever do better than what it replaces — the rungs in
+between are extra chances and the fallback is unchanged.
 
 **Only some structures can move the frontier at all.** A Tiberian Dawn cell is buildable when it
 is close enough to a structure carrying `GivesBuildableArea`. Of everything this bot builds,
@@ -351,7 +350,6 @@ Reference/
 │   ├── HarvesterEscortMode.cs   ←   guards a harvester
 │   └── ScoutMode.cs             ←   wanders, runs from anything armed
 ├── Logic/                       ← pure decision functions, no engine
-└── Tests/                       ← fast tests, no game needed
 ```
 
 ## Start your own
@@ -359,7 +357,7 @@ Reference/
 ```powershell
 ./scripts/new-bot.ps1 -Name MyBot
 cd bots/MyBot
-dotnet test .\Tests\MyBot.Tests.csproj
+dotnet build .\MyBot.sln
 ```
 
 Then in game: `/bots` to see it, `/bot MyBot` to load it, `/why` to ask what it is thinking.
@@ -369,15 +367,6 @@ A bot builds against AutoC&C **binaries**, so it can live in its own repository:
 ```powershell
 dotnet build /p:AutoCnCPath=C:\games\autocnc
 ```
-
-## Test without launching the game
-
-```powershell
-dotnet test Tests
-```
-
-The tests assert against the plans the doctrines actually declare and the rules `Reassess`
-actually runs, so they verify the real strategy rather than a copy that can drift out of date.
 
 ## Licence
 

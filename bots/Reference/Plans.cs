@@ -2,9 +2,9 @@
 //  ReferencePlans — what each of ReferenceBot's doctrines builds and trains.
 //
 //  Deliberately a plain static class with no interfaces and no engine types, so
-//  the plans can be read (and unit-tested) without loading anything from OpenRA.
-//  Each doctrine's Configure is implemented in terms of these lists, so the
-//  tests and the shipped strategy cannot drift apart.
+//  the plans can be read (and reasoned about) without loading anything from OpenRA.
+//  Each doctrine's Configure is implemented in terms of these lists, so the rules
+//  written down here and the shipped strategy cannot drift apart.
 //
 //  Build steps say "until N of these exist" and count what is already standing,
 //  so they are cumulative rather than sequential: a doctrine whose plan extends
@@ -15,7 +15,6 @@
 // ============================================================================
 
 using System.Collections.Generic;
-using System.Linq;
 using AutoCnC.Core;
 using AutoCnC.Reference.Logic;
 
@@ -272,14 +271,14 @@ namespace AutoCnC.Reference
 		];
 
 		/// <summary>Structures this bot builds from the yard's Support queue rather than Building.</summary>
-		/// <remarks>Used by tests to prove every defence step is reachable from some driven queue.</remarks>
+		/// <remarks>Every defence step must be reachable from one of the queues the bot drives.</remarks>
 		public static IReadOnlyList<string> SupportQueueStructures { get; } =
 			["gtwr", "gun", "atwr", "sam"];
 
 		/// <summary>Structures whose armament can target aircraft.</summary>
 		/// <remarks>
-		/// Used by tests to prove no doctrine ships a build plan with nothing that shoots
-		/// upwards. Everything else this bot builds is ground-only.
+		/// No doctrine should ship a build plan with nothing that shoots upwards. Everything else
+		/// this bot builds is ground-only.
 		/// </remarks>
 		public static IReadOnlyList<string> AntiAirStructures { get; } = ["atwr", "sam"];
 
@@ -294,8 +293,8 @@ namespace AutoCnC.Reference
 		/// <remarks>
 		/// One entry, and that is also the point: <c>harv</c> is the only income this bot has,
 		/// it comes from the same vehicle queue as the tanks and needs only a refinery, and both
-		/// factions build it. Used by tests to prove no plan leaves income to the free harvester
-		/// a refinery hands out.
+		/// factions build it. No plan should leave income to the free harvester a refinery hands
+		/// out.
 		/// </remarks>
 		public static IReadOnlyList<string> HarvesterUnits { get; } = ["harv"];
 
@@ -306,8 +305,8 @@ namespace AutoCnC.Reference
 		/// <remarks>
 		/// Both cost 2,000 and both need <c>proc</c>, which is why a refinery is the cheaper
 		/// harvester until one of these is standing: 1,500 for a refinery and its free actor
-		/// against 2,000 plus 1,100 for the first bought one. Used by tests to prove the income
-		/// rungs of every build plan come before the factory rather than behind it.
+		/// against 2,000 plus 1,100 for the first bought one. The income rungs of every build
+		/// plan belong before the factory rather than behind it.
 		/// </remarks>
 		public static IReadOnlyList<string> VehicleFactories { get; } = ["weap", "afld"];
 
@@ -315,7 +314,7 @@ namespace AutoCnC.Reference
 		/// <remarks>
 		/// <c>hq</c> earns nothing. It is worth having — <c>mtnk</c>, <c>ltnk</c>, <c>e2</c> and
 		/// <c>atwr</c> all need <c>anyhq</c> — but not at the price of the refinery it displaced
-		/// at 167s on badland-ridges. Used by tests to prove income leads tech in every plan.
+		/// at 167s on badland-ridges. Income leads tech in every plan.
 		/// </remarks>
 		public static IReadOnlyList<string> TechStructures { get; } = ["hq", "eye", "tmpl"];
 
@@ -415,17 +414,5 @@ namespace AutoCnC.Reference
 			new(Refineries, 1),
 			new(PowerPlants, PowerPlantsAtHome),
 		];
-
-		/// <summary>Every build plan any doctrine declares, for tests that check them all.</summary>
-		public static IReadOnlyList<IReadOnlyList<BuildStep>> AllBuildPlans { get; } =
-			[OpeningBuild, ScoutBuild, DefenceBuild, AttackBuild];
-
-		/// <summary>Every production plan any doctrine declares, for tests that check them all.</summary>
-		public static IReadOnlyList<IReadOnlyList<ProductionStep>> AllProductionPlans { get; } =
-			[OpeningTrain, ScoutTrain, DefenceTrain, AttackTrain];
-
-		/// <summary>Every build step any doctrine declares, for tests that check them all.</summary>
-		public static IEnumerable<BuildStep> AllBuildSteps =>
-			OpeningBuild.Concat(ScoutBuild).Concat(DefenceBuild).Concat(AttackBuild);
 	}
 }

@@ -22,7 +22,7 @@ music or screenshots are bundled. The dossier illustration is original vector dr
 
 ## The player loop
 
-- **Bot bay:** create or select a bot, open its code, choose pre-battle tests, build and deploy.
+- **Bot bay:** create or select a bot, open its code, build and deploy.
 - **Proving ground:** configure map, AI difficulty, opponent count, factions, execution mode
   and speed. A leading **Your battle feedback** section shows the last battle's feedback state
   and offers a dedicated review action. Manual rendered battles ask for optional observations;

@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Independently cleans, tests, builds, and deploys a bot improvement.
+    Independently cleans, builds, and deploys a bot improvement.
 
 .DESCRIPTION
     Shared by train-bot.ps1 and the launcher's Retry verification action. Generated output is
@@ -20,7 +20,6 @@ param(
 $ErrorActionPreference = 'Stop'
 $project = (Resolve-Path -LiteralPath $BattleBot).Path
 $run = (Resolve-Path -LiteralPath $RunDirectory).Path
-$workspace = Split-Path -Parent $project
 $transcript = Join-Path $run 'agent-transcript.txt'
 $statusFile = Join-Path $run 'agent-status.json'
 $runBot = Join-Path $PSScriptRoot 'run-bot.ps1'
@@ -54,18 +53,14 @@ function Write-AgentStatus {
 Write-AgentStatus -State 'running' -Phase 'verification' -AgentExitCode 0
 
 try {
-    $verifyProjects = @($project) + @(Get-ChildItem $workspace -Recurse -Filter *.Tests.csproj |
-        Select-Object -ExpandProperty FullName)
-    foreach ($verifyProject in $verifyProjects) {
-        Write-Host "==> Cleaning $([IO.Path]::GetFileNameWithoutExtension($verifyProject))" -ForegroundColor Cyan
-        & dotnet clean $verifyProject -c $Configuration --nologo -v quiet 2>&1 |
-            Tee-Object -FilePath $transcript -Append
-        if ($LASTEXITCODE -ne 0) {
-            throw "Could not clean generated output for $verifyProject."
-        }
+    Write-Host "==> Cleaning $([IO.Path]::GetFileNameWithoutExtension($project))" -ForegroundColor Cyan
+    & dotnet clean $project -c $Configuration --nologo -v quiet 2>&1 |
+        Tee-Object -FilePath $transcript -Append
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not clean generated output for $project."
     }
 
-    & $runBot -BattleBot $project -Test -NoLaunch -Configuration $Configuration 2>&1 |
+    & $runBot -BattleBot $project -NoLaunch -Configuration $Configuration 2>&1 |
         Tee-Object -FilePath $transcript -Append
     if ($LASTEXITCODE -ne 0) {
         throw "Post-agent verification exited with code $LASTEXITCODE."

@@ -55,8 +55,8 @@ namespace AutoCnC.Reference
 		/// </summary>
 		/// <remarks>
 		/// The rules themselves live in <see cref="ReferenceBotLogic"/>, which has no engine
-		/// reference anywhere near it — so the interesting half of this bot is tested by writing
-		/// down a situation and asserting the doctrine, in milliseconds, with no game running.
+		/// reference anywhere near it — so the interesting half of this bot is a plain function
+		/// of a situation, readable on its own with no game running.
 		/// Change the strategy there, not here.
 		/// </remarks>
 		public override DoctrineDecision Reassess(in BattleState state) =>

@@ -77,20 +77,15 @@ eyes on.
 
 There are a few conveniences on top — `BaseUnderAttack`, `BlindToEnemy`, `Winning` — and no
 engine types anywhere, which is the point: the deciding half of a bot is a pure function you can
-test without a game.
+read on its own.
 
 ```csharp
-[Test]
-public void LosingBuildingsSwitchesToDefence()
-{
-    var s = BattleState.Empty with { Doctrine = "Opening", BuildingsLost = 1 };
-
-    Assert.That(MyBotLogic.Decide(s).Doctrine, Is.EqualTo("Defence"));
-}
+public static Assessment Decide(BattleState s) =>
+    s.BuildingsLost > 0 ? new("Defence") : new(s.Doctrine);
 ```
 
 A match where the base starts falling over twenty minutes in takes twenty minutes to reproduce,
-and three lines to write down. See `bots/Reference/Tests/ReferenceBotLogicTests.cs`.
+and three lines to write down. See `bots/Reference/Logic/ReferenceBotLogic.cs`.
 
 ### Switching is rate-limited for you
 
@@ -196,20 +191,20 @@ you'd expect. A player can still override anything live with `/mode`.
 ```powershell
 ./scripts/new-bot.ps1 -Name MyBot
 cd bots/MyBot
-dotnet test .\Tests\MyBot.Tests.csproj
+dotnet build .\MyBot.sln
 ```
 
 The launcher exposes the same operation as **New bot…** and selects the generated project
 immediately. The starter is intentionally small rather than a copy of `Reference`: one doctrine,
-one sense/decide/act mode, pure logic, and tests you can safely evolve.
+one sense/decide/act mode, and pure logic you can safely evolve.
 
 Build and play in one command:
 
 ```powershell
-./scripts/run-bot.ps1 -BattleBot MyBot -Test
+./scripts/run-bot.ps1 -BattleBot MyBot
 ```
 
-That tests your strategy, builds it, installs it where the platform scans, and launches the game.
+That builds your strategy, installs it where the platform scans, and launches the game.
 
 ### A bot is a normal NuGet consumer
 
@@ -273,7 +268,7 @@ second hand-maintained stats database.
 
 **Open code** is the normal manual path. **Analyze & improve** is optional: it snapshots the
 editable bot files, invokes the configured local coding agent (GitHub Copilot CLI by default), and
-then runs the bot's tests and deployment build independently. **Agent workspace** opens a
+then runs the bot's deployment build independently. **Agent workspace** opens a
 dedicated window that streams the agent's colored terminal progress and exposes the exact prompt
 and all shared context before and after the run. Review the changed files before fighting again.
 **Restore previous iteration** restores modified and deleted files
@@ -308,14 +303,14 @@ the opponents' total, plus an outcome-colored duration line.
 
 Checking **Continuous improvement** starts a stateful Fight -> improve -> Fight loop. Every cycle
 still has its own source revision, evidence, reversible snapshot, independent verification, and
-result. A valid agent-authored next prompt is accepted automatically; any battle, agent, test, or
+result. A valid agent-authored next prompt is accepted automatically; any battle, agent, or
 build failure stops the loop. Each automatic improvement uses the battle just fought, rather than
 an older manually selected battle. The loop never pauses for feedback. Once it stops, its recorded
 battles can be reviewed from history; leaving the repeat checkbox selected does not disable
 feedback while idle.
 
 An agent exit and a host verification failure are recorded separately. Verification always cleans
-the bot's generated `bin`/`obj` output before testing. If it still fails, **Retry verification**
+the bot's generated `bin`/`obj` output before building. If it still fails, **Retry verification**
 repeats that cheap check without spending another agent run; **Fix failed improvement** archives
 the failed transcript and asks the agent to repair the current changes. **Restore previous
 iteration** remains the escape hatch back to the pre-agent snapshot.
@@ -391,19 +386,14 @@ public override UnitDecision OnTick(Actor self, ModeContext ctx)
         Threats: ctx.SenseThreats(radius),
         /* ... */);
 
-    return DefensiveLogic.Decide(state, tuning);   // decide (pure, testable)
+    return DefensiveLogic.Decide(state, tuning);   // decide (pure, engine-free)
 }
 ```
 
-Then test your strategy in milliseconds, with no engine and no game:
-
-```powershell
-dotnet test bots/MyBot/Tests
-```
-
-The reference bot's tests assert against the plans its doctrines actually declare, and against
-the rules its `Reassess` actually runs, so they verify the real shipped strategy rather than a
-copy that can drift.
+Keeping the judgement in a pure function is what makes a strategy change explainable: the inputs
+are plain integers, so you can read the rule and say what it will do before the match starts.
+The reference bot states its economy and placement rules directly over the plans its doctrines
+declare, so the rule and the shipped strategy cannot drift apart.
 
 ---
 

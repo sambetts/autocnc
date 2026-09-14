@@ -93,7 +93,6 @@ namespace AutoCnC.Launcher
 
 		TextBox repositoryBox;
 		TextBox botBox;
-		CheckBox runTestsBox;
 		ComboBox mapBox;
 		ComboBox difficultyBox;
 		Label difficultySummary;
@@ -245,15 +244,13 @@ namespace AutoCnC.Launcher
 			{
 				AutoSize = true,
 				ForeColor = SystemColors.GrayText,
-				Text = "Select a C# project to build, test and improve. A prebuilt .dll can fight, but cannot be AI-trained.",
+				Text = "Select a C# project to build and improve. A prebuilt .dll can fight, but cannot be AI-trained.",
 				MaximumSize = new Size(530, 0),
 				Margin = new Padding(3, 12, 3, 12)
 			};
 
 			var options = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, Margin = new Padding(0) };
-			runTestsBox = new CheckBox { Text = "Run its tests first", AutoSize = true };
 			newBotButton = SmallButton("New bot…", NewBot);
-			newBotButton.Margin = new Padding(16, 0, 0, 0);
 
 			var useReference = new LinkLabel
 			{
@@ -268,7 +265,6 @@ namespace AutoCnC.Launcher
 					botBox.Text = repo.ReferenceBot;
 			};
 
-			options.Controls.Add(runTestsBox);
 			options.Controls.Add(newBotButton);
 			options.Controls.Add(useReference);
 
@@ -760,7 +756,6 @@ namespace AutoCnC.Launcher
 			botBox.Text = rememberedBot ?? repo?.ReferenceBot ?? string.Empty;
 			LoadLastTrainingRun();
 			RefreshResultsHistory(reload: true);
-			runTestsBox.Checked = settings.RunTests;
 			continuousBox.Checked = settings.ContinuousImprovement;
 			opponentsBox.Value = Math.Clamp(settings.Opponents, opponentsBox.Minimum, opponentsBox.Maximum);
 			Select(factionBox, settings.Faction);
@@ -988,9 +983,6 @@ namespace AutoCnC.Launcher
 
 			// A replay is only complete once the game that recorded it has exited.
 			replayButton.Enabled = !busy && repo != null && NewestReplay() != null;
-
-			// Tests come from a project's Tests folder, so a prebuilt assembly has none to run.
-			runTestsBox.Enabled = !busy && !IsPrebuilt();
 
 			// Continuous training must keep the bot and battle configuration stable between its
 			// fight and improvement stages. Stop is outside these groups and remains available.
@@ -1470,9 +1462,6 @@ namespace AutoCnC.Launcher
 						"-PerformanceReport", activeRun.PerformancePath
 					]);
 			}
-
-			if (runTestsBox.Checked && !IsPrebuilt())
-				arguments.Add("-Test");
 
 			if (!play)
 				arguments.Add("-NoLaunch");
@@ -2200,7 +2189,6 @@ namespace AutoCnC.Launcher
 			settings.Opponents = (int)opponentsBox.Value;
 			settings.Faction = ((FactionChoice)factionBox.SelectedItem).Value;
 			settings.BotFaction = ((FactionChoice)botFactionBox.SelectedItem).Value;
-			settings.RunTests = runTestsBox.Checked;
 			settings.ContinuousImprovement = continuousBox.Checked;
 			settings.LastTrainingRunDirectory = lastRun?.RunDirectory;
 			settings.SelectedTrainingRunDirectory = trainingRun?.RunDirectory;

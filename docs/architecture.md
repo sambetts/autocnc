@@ -319,8 +319,13 @@ visibility-filtered battle log, and a decision trace there; the launcher copies 
 and result into the same run. Headless additionally writes `performance.json` (ticks/second,
 effective multiplier, wall time and result), which the launcher folds into the manifest.
 Completed manifests are reduced to chronological local-versus-opponent KPI samples for the Results
-window's iteration charts. The duration series colors each point by outcome. This avoids the old
-fixed-path/one-deep-rotation limit and makes iterations directly comparable.
+window's iteration charts. Those KPIs are taken from the last sample before the engine settled each
+player's fate, with the peak of each figure alongside them, because defeat destroys everything a
+beaten player owns and recording continues afterwards — scoring the final sample would make every
+loss identically zero. Manifests written before schema 6 are rescored in memory from their own
+telemetry on load, leaving the run's evidence on disk untouched. The duration series colors each
+point by outcome. This avoids the old fixed-path/one-deep-rotation limit and makes iterations
+directly comparable.
 
 The three runtime records have intentionally different trust boundaries:
 

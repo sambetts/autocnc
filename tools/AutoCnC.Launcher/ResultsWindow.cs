@@ -23,8 +23,8 @@ namespace AutoCnC.Launcher
 		static readonly (string Heading, int Width)[] SessionColumns =
 		[
 			("Battle", 55), ("Recorded", 140), ("Result", 80), ("User feedback", 135), ("Duration", 75),
-			("Units", 65), ("Army", 80), ("Buildings", 75), ("Base", 80), ("Kills", 65),
-			("Losses", 65), ("Cash", 75), ("Execution", 85)
+			("Units", 65), ("Peak units", 80), ("Army", 80), ("Peak army", 85), ("Buildings", 75),
+			("Base", 80), ("Kills", 65), ("Losses", 65), ("Cash", 75), ("Execution", 85)
 		];
 
 		readonly MatchLog liveLog;
@@ -157,21 +157,25 @@ namespace AutoCnC.Launcher
 
 			iterationCharts =
 			[
-				new IterationChart("Final units", iteration => iteration.LocalPlayer.Units,
+				new IterationChart("Units when decided", iteration => iteration.LocalPlayer.Units,
 					iteration => iteration.Opponents.Units) { Dock = DockStyle.Fill },
-				new IterationChart("Final army value", iteration => iteration.LocalPlayer.ArmyValue,
+				new IterationChart("Peak units", iteration => iteration.LocalPlayer.PeakUnits,
+					iteration => iteration.Opponents.PeakUnits) { Dock = DockStyle.Fill },
+				new IterationChart("Army when decided", iteration => iteration.LocalPlayer.ArmyValue,
 					iteration => iteration.Opponents.ArmyValue) { Dock = DockStyle.Fill },
-				new IterationChart("Final buildings", iteration => iteration.LocalPlayer.Buildings,
-					iteration => iteration.Opponents.Buildings) { Dock = DockStyle.Fill },
-				new IterationChart("Final base value", iteration => iteration.LocalPlayer.BaseValue,
+				new IterationChart("Peak army value", iteration => iteration.LocalPlayer.PeakArmyValue,
+					iteration => iteration.Opponents.PeakArmyValue) { Dock = DockStyle.Fill },
+				new IterationChart("Base when decided", iteration => iteration.LocalPlayer.BaseValue,
 					iteration => iteration.Opponents.BaseValue) { Dock = DockStyle.Fill },
+				new IterationChart("Peak base value", iteration => iteration.LocalPlayer.PeakBaseValue,
+					iteration => iteration.Opponents.PeakBaseValue) { Dock = DockStyle.Fill },
 				new IterationChart("Final kills", iteration => iteration.LocalPlayer.Killed,
 					iteration => iteration.Opponents.Killed) { Dock = DockStyle.Fill },
 				new IterationChart("Battle duration", iteration => iteration.DurationSeconds,
 					outcomePoints: true) { Dock = DockStyle.Fill }
 			];
 
-			var trendGrid = ChartGrid();
+			var trendGrid = ChartGrid(rows: 4);
 			for (var index = 0; index < iterationCharts.Length; index++)
 				trendGrid.Controls.Add(iterationCharts[index], index % 2, index / 2);
 
@@ -341,7 +345,8 @@ namespace AutoCnC.Launcher
 					$"#{choice.Number}", run.Manifest.CreatedUtc.ToLocalTime().ToString("g"),
 					run.Manifest.Result?.Outcome ?? run.Manifest.Status, BattleFeedback.Status(run),
 					run.HasRecordedBattle ? Csv.Clock(run.Manifest.Result.DurationSeconds) : "-",
-					player?.Units.ToString() ?? "-", player?.ArmyValue.ToString() ?? "-",
+					player?.Units.ToString() ?? "-", player?.PeakUnits.ToString() ?? "-",
+					player?.ArmyValue.ToString() ?? "-", player?.PeakArmyValue.ToString() ?? "-",
 					player?.Buildings.ToString() ?? "-", player?.BaseValue.ToString() ?? "-",
 					player?.Killed.ToString() ?? "-", player?.Lost.ToString() ?? "-",
 					player?.Cash.ToString() ?? "-", run.IsHeadless ? "Headless" : "Rendered"
@@ -350,6 +355,7 @@ namespace AutoCnC.Launcher
 					Tag = choice,
 					ToolTipText = $"{run.Manifest.Id}\nMap: {run.Manifest.Battle?.Map}\n" +
 						$"Difficulty: {run.Manifest.Battle?.Difficulty}; opponents: {run.Manifest.Battle?.Opponents}\n" +
+						"Units, army, buildings, base and cash are as they stood when the battle was decided.\n" +
 						BattleFeedback.Description(run)
 				};
 				sessions.Items.Add(item);
@@ -626,19 +632,19 @@ namespace AutoCnC.Launcher
 			parts.Add($"{label}: {Csv.Clock(first)} -> {Csv.Clock(last)} ({direction}).");
 		}
 
-		static TableLayoutPanel ChartGrid()
+		static TableLayoutPanel ChartGrid(int rows = 3)
 		{
 			var grid = new TableLayoutPanel
 			{
 				Dock = DockStyle.Fill,
 				ColumnCount = 2,
-				RowCount = 3,
+				RowCount = rows,
 				BackColor = Paper
 			};
 			grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
 			grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-			for (var index = 0; index < 3; index++)
-				grid.RowStyles.Add(new RowStyle(SizeType.Percent, 100f / 3));
+			for (var index = 0; index < rows; index++)
+				grid.RowStyles.Add(new RowStyle(SizeType.Percent, 100f / rows));
 			return grid;
 		}
 
@@ -711,7 +717,10 @@ namespace AutoCnC.Launcher
 				for (var row = 0; row < Math.Min(rows, players.Count); row++)
 				{
 					var player = players[row];
-					var last = player.Samples[^1];
+
+					// Not the final sample: a beaten player has everything they own destroyed the
+					// moment they lose, so the closing scoreline would read zero across the board.
+					var last = player.LastContested;
 					var y = line + 8 + row * line;
 					using var brush = new SolidBrush(player.Colour);
 					using var clipped = new StringFormat(StringFormatFlags.NoWrap)

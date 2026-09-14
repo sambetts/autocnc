@@ -303,15 +303,20 @@ what a round changed. A template identical to the one before it is not recorded.
 the archive back, so editing or deleting it only loses history; it changes no behaviour.
 
 **History & trends** lists every compatible recorded session for the selected bot, newest first,
-with explicit provided/missing feedback status, outcome, duration, and the local side's final stats.
+with explicit provided/missing feedback status, outcome, duration, and the local side's stats as
+they stood when the battle was decided, alongside the peaks it reached. Neither figure is the final
+instant of the match: the engine destroys everything a beaten player owns the moment they lose and
+carries on recording, so the last sample of any defeat is uniformly zero and says nothing about how
+the battle went. Runs recorded by an earlier launcher are rescored from their own telemetry on load.
 Select a row to read or edit its feedback, watch that battle's replay, or open its charts.
 Right-click **Train from this battle** to open AI training with that recording selected.
 **Delete session** permanently removes a completed run and its saved evidence after confirmation,
 including its feedback and restore snapshots, but never deletes the current bot source or original
 OpenRA replay. History, training selection, and trends refresh immediately.
 Incomplete and unrecorded sessions remain visible without invented zero-value stats. The **Trends**
-tab compares final units, army value, buildings, base value, and kills for the local side against
-the opponents' total, plus an outcome-colored duration line.
+tab pairs units, army value and base value as the battle was decided with the peak each reached,
+alongside kills and an outcome-colored duration line, comparing the local side against the
+opponents' total.
 
 Checking **Continuous improvement** starts a stateful Fight -> improve -> Fight loop. Every cycle
 still has its own source revision, evidence, reversible snapshot, independent verification, and

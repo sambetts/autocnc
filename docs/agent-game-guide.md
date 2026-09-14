@@ -69,7 +69,12 @@ it as authoritative context alongside the source and the evidence from one compl
 
 ## Reading a training run
 
-- `fight.json` identifies the bot source revision, match configuration, result, and final scores.
+- `fight.json` identifies the bot source revision, match configuration, result, and scores. The
+  scores are the state of each side when the match was decided, plus the peak units, army value,
+  buildings and base value each one reached. They are deliberately not the final instant: a
+  defeated player has every actor they own destroyed at once, so that instant reads zero for every
+  loss regardless of how the battle went. Compare peaks to judge whether a bot failed to build an
+  army or built one and squandered it.
 - `game-rules.json` is generated from OpenRA's resolved runtime rules. Query it for actor health,
   armor, movement, sight, build data and armaments, plus weapon reload, burst, fire cycle,
   shots-per-game-second, range, projectile, damage, target, and armor-modifier fields. Tiberian

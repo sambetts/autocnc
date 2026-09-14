@@ -325,8 +325,11 @@ up afterwards for as long as you want to read them.
 
 - **Results** graphs every player's units, army value, buildings, base value and kills as the
   battle runs, so you can see the moment a bot lost rather than just the fact that it did.
-  **History & trends** plots those final KPIs across every iteration and colors battle duration by
-  win or loss, so faster wins and slower losses are visible. Select any battle to inspect it.
+  **History & trends** plots those KPIs across every iteration — as they stood when each battle
+  was decided, and at their peak — and colors battle duration by win or loss, so faster wins and
+  slower losses are visible. Neither figure is the final instant of the match: a defeated player
+  has everything they own destroyed at once, so that instant is zero for every loss alike. Select
+  any battle to inspect it.
 - **Output** carries the **battle log**: who is playing, and then every event your side could
   actually react to — an enemy coming into view, a hit taken, a unit lost, a kill — each one
   naming the players on both ends of it. It is filtered by the same visibility rule

@@ -28,23 +28,64 @@ namespace AutoCnC.Launcher
 		int Assets,
 		int Cash,
 		int Killed,
-		int Lost);
+		int Lost,
+		string State);
+
+	/// <summary>The high-water mark of everything a player can hold but also lose.</summary>
+	public readonly record struct MatchPeak(int Units, int Army, int Buildings, int BaseValue);
 
 	/// <summary>One side of the match, and how it went.</summary>
 	public sealed class MatchPlayer
 	{
+		readonly List<MatchSample> samples = [];
+
 		public string Name { get; init; }
 		public bool IsBot { get; init; }
 		public Color Colour { get; init; }
-		public List<MatchSample> Samples { get; } = [];
+
+		public IReadOnlyList<MatchSample> Samples => samples;
 
 		/// <summary>The engine's win state as of the last sample: Won, Lost or Undefined.</summary>
-		public string Outcome { get; set; }
+		public string Outcome => samples.Count == 0 ? null : samples[^1].State;
 
-		public bool HasResult =>
-			!string.IsNullOrEmpty(Outcome) && !string.Equals(Outcome, "Undefined", StringComparison.OrdinalIgnoreCase);
+		/// <summary>
+		/// The last sample taken while this player was still in the fight.
+		/// </summary>
+		/// <remarks>
+		/// Defeat is not a quiet bookkeeping event: the engine destroys every actor a beaten
+		/// player owns, and the match keeps running — and keeps being sampled — for as long as
+		/// the survivors need to finish. Read the final row of a lost match and it says nothing
+		/// but zero: no units, no army, no buildings, no base, whether the player was overrun in
+		/// four minutes or held out for sixteen. This is the row before that happened, which is
+		/// the one worth comparing, and for a winner it is the same picture as the last row.
+		/// </remarks>
+		public MatchSample LastContested { get; private set; }
+
+		/// <summary>The most this player ever held, which losing it all afterwards cannot erase.</summary>
+		public MatchPeak Peak { get; private set; }
+
+		public bool HasResult => Decided(Outcome);
 
 		public string Label => IsBot ? $"{Name} (bot)" : Name;
+
+		internal void Add(MatchSample sample)
+		{
+			samples.Add(sample);
+			Peak = new MatchPeak(
+				Math.Max(Peak.Units, sample.Units),
+				Math.Max(Peak.Army, sample.Army),
+				Math.Max(Peak.Buildings, sample.Buildings),
+				Math.Max(Peak.BaseValue, sample.BaseValue));
+
+			// The first sample is kept regardless, so a player who is somehow already decided when
+			// recording starts reports the figures it does have rather than a row of zeros.
+			if (samples.Count == 1 || !Decided(sample.State))
+				LastContested = sample;
+		}
+
+		/// <summary>True once the engine has settled this player's fate one way or the other.</summary>
+		static bool Decided(string state) =>
+			!string.IsNullOrEmpty(state) && !string.Equals(state, "Undefined", StringComparison.OrdinalIgnoreCase);
 	}
 
 	/// <summary>
@@ -163,9 +204,7 @@ namespace AutoCnC.Launcher
 					players.Add(player);
 				}
 
-				player.Outcome = Field("state");
-
-				player.Samples.Add(new MatchSample(
+				player.Add(new MatchSample(
 					seconds,
 					Csv.Number(Field("units")),
 					Csv.Number(Field("army")),
@@ -174,7 +213,8 @@ namespace AutoCnC.Launcher
 					Csv.Number(Field("assets")),
 					Csv.Number(Field("cash")),
 					Csv.Number(Field("killed")),
-					Csv.Number(Field("lost"))));
+					Csv.Number(Field("lost")),
+					Field("state")));
 			}
 		}
 	}

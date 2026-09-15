@@ -93,9 +93,10 @@ namespace AutoCnC.Launcher.Tests
 		[Test]
 		public void DefaultsWithoutASessionUpgradeToAPinnedOne()
 		{
+			// The stdin-era default, which is what a player who improved a bot before conversations
+			// existed has saved. Without the upgrade every turn would open a new session.
 			var withoutSession = new[]
 			{
-				"-p", "{prompt}",
 				"--allow-all-tools",
 				"--no-ask-user",
 				"--no-custom-instructions",
@@ -107,6 +108,28 @@ namespace AutoCnC.Launcher.Tests
 
 			Assert.That(upgraded, Does.Contain("--session-id"));
 			Assert.That(upgraded, Does.Contain("{sessionId}"));
+
+			// The prompt stays off the command line, where it no longer fits.
+			Assert.That(upgraded, Does.Not.Contain("-p"));
+			Assert.That(TrainingAgent.UpgradePromptChannel(upgraded, null),
+				Is.EqualTo(TrainingAgent.DefaultStdin));
+		}
+
+		[Test]
+		public void APromptEraDefaultAlsoUpgradesToAPinnedSession()
+		{
+			var promptOnCommandLine = new[]
+			{
+				"-p", "{prompt}",
+				"--allow-all-tools",
+				"--no-ask-user",
+				"--no-custom-instructions",
+				"--no-remote-export",
+				"--add-dir", "{evidence}"
+			};
+
+			Assert.That(TrainingAgent.UpgradeDefaultArguments("copilot", promptOnCommandLine),
+				Does.Contain("--session-id"));
 		}
 
 		[Test]

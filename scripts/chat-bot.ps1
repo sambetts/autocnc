@@ -10,7 +10,8 @@
     The agent is invoked with the run's own agent-command.json, so a customised agent — a
     different model, extra allowed directories — answers questions as the same agent that does
     the improving. Only {prompt} differs: it carries the message instead of the round's evidence
-    packet.
+    packet, and travels whichever channel that configuration uses for the prompt — standard input
+    by default, since that is where the improvement round sends it.
 
     Talking does not build, verify or deploy. The agent can still edit the bot if asked to; run
     verify-bot.ps1 afterwards when it has.
@@ -95,7 +96,6 @@ if (Test-Path -LiteralPath $configurationPath) {
     $agent = [pscustomobject]@{
         command = 'copilot'
         arguments = @(
-            '-p', '{prompt}',
             '--session-id', '{sessionId}',
             '--allow-all-tools',
             '--no-ask-user',
@@ -103,6 +103,7 @@ if (Test-Path -LiteralPath $configurationPath) {
             '--no-remote-export',
             '--add-dir', '{evidence}'
         )
+        stdin = '{prompt}'
     }
 }
 
@@ -112,6 +113,18 @@ if (-not $agent.command) {
 
 $workspace = Split-Path -Parent $project
 $arguments = @($agent.arguments)
+$agentStdin = if ($agent.PSObject.Properties['stdin'] -and $agent.stdin) { [string]$agent.stdin } else { $null }
+
+# The message travels the channel the prompt travels, whichever that is. A configuration that
+# names {prompt} in its arguments keeps carrying it there; everything else gets it on standard
+# input, which is where the improvement round puts it and the only channel a long message cannot
+# overflow.
+$carriesPrompt = @($arguments) + @($agentStdin) | Where-Object { $_ } | Where-Object {
+    $_.Contains('{prompt}') -or $_.Contains('{promptFile}')
+}
+if (-not $carriesPrompt) {
+    $agentStdin = '{prompt}'
+}
 
 # Copilot-specific repairs, applied only to Copilot so a provider-neutral configuration is not
 # handed flags its agent has never heard of.
@@ -140,14 +153,21 @@ $replacements = [ordered]@{
     '{sessionId}' = $sessionId
 }
 
-$agentArguments = foreach ($argument in $arguments) {
-    $resolved = [string]$argument
+function Expand-AgentPlaceholders {
+    param([string]$Text)
+
     foreach ($pair in $replacements.GetEnumerator()) {
-        $resolved = $resolved.Replace($pair.Key, $pair.Value)
+        $Text = $Text.Replace($pair.Key, $pair.Value)
     }
 
-    $resolved
+    $Text
 }
+
+$agentArguments = foreach ($argument in $arguments) {
+    Expand-AgentPlaceholders ([string]$argument)
+}
+
+$agentInput = if ($agentStdin) { Expand-AgentPlaceholders $agentStdin } else { $null }
 
 $transcript = Join-Path $run 'agent-chat-turn.txt'
 Set-Content -LiteralPath $transcript -Value "=== You ==="
@@ -162,7 +182,15 @@ Add-Content -LiteralPath $transcript -Value "=== Agent ==="
 
 Push-Location $workspace
 try {
-    & $agent.command @agentArguments 2>&1 | Tee-Object -FilePath $transcript -Append
+    # Windows PowerShell pipes to native commands as ASCII by default, which would quietly mangle
+    # every non-ASCII character in the message.
+    $OutputEncoding = [Text.UTF8Encoding]::new($false)
+    if ($null -ne $agentInput) {
+        $agentInput | & $agent.command @agentArguments 2>&1 | Tee-Object -FilePath $transcript -Append
+    } else {
+        & $agent.command @agentArguments 2>&1 | Tee-Object -FilePath $transcript -Append
+    }
+
     $exitCode = $LASTEXITCODE
 } finally {
     Pop-Location

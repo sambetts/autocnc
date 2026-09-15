@@ -758,7 +758,8 @@ namespace AutoCnC.Launcher.Tests
 			using var results = new ResultsWindow(new MatchLog());
 			using var output = new OutputWindow(new BattleEventLog());
 			using var improvement = new ImprovementWindow();
-			using var agent = new AgentSettingsDialog("copilot", TrainingAgent.DefaultArguments);
+			using var agent = new AgentSettingsDialog("copilot", TrainingAgent.DefaultArguments,
+				TrainingAgent.DefaultStdin);
 			using var newBot = new NewBotDialog(root);
 			Form[] windows = [results, output, improvement, agent, newBot];
 			for (var index = 0; index < windows.Length; index++)

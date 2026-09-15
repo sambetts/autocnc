@@ -13,6 +13,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace AutoCnC.Launcher
 {
@@ -20,6 +21,10 @@ namespace AutoCnC.Launcher
 	{
 		public string Command { get; set; }
 		public List<string> Arguments { get; set; } = [];
+
+		/// <summary>Text written to the agent's standard input, or null when it takes none.</summary>
+		[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+		public string Stdin { get; set; }
 	}
 
 	/// <summary>Builds the constrained evidence packet passed to a local coding agent.</summary>
@@ -48,9 +53,19 @@ namespace AutoCnC.Launcher
 
 		static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
+		/// <summary>
+		/// The rendered prompt goes in on standard input rather than in <c>-p</c>.
+		/// </summary>
+		/// <remarks>
+		/// Windows caps a process command line at 32,767 characters. The prompt inlines the
+		/// mechanics gospel and passed that on its own, so every improvement died before the agent
+		/// started with Windows' misleading "The filename or extension is too long". Standard input
+		/// has no such limit, and the prompt is only going to keep growing.
+		/// </remarks>
+		public const string DefaultStdin = "{prompt}";
+
 		public static readonly string[] DefaultArguments =
 		[
-			"-p", "{prompt}",
 			"--session-id", "{sessionId}",
 			"--allow-all-tools",
 			"--no-ask-user",
@@ -59,48 +74,52 @@ namespace AutoCnC.Launcher
 			"--add-dir", "{evidence}"
 		];
 
-		static readonly string[] PreviousDefaultArguments =
+		/// <summary>Copilot defaults from earlier rounds, newest first, upgraded on load.</summary>
+		static readonly string[][] SupersededDefaultArguments =
 		[
-			"-p", "{prompt}",
-			"--allow-all-tools",
-			"--no-ask-user",
-			"--no-custom-instructions",
-			"--no-remote-export",
-			"--add-dir", "{evidence}"
-		];
-
-		static readonly string[] EarlierDefaultArguments =
-		[
-			"-p", "{prompt}",
-			"--allow-all-tools",
-			"--no-ask-user",
-			"--no-color",
-			"--no-custom-instructions",
-			"--no-remote-export",
-			"--screen-reader",
-			"--add-dir", "{evidence}"
-		];
-
-		static readonly string[] OlderDefaultArguments =
-		[
-			"-p", "{prompt}",
-			"--allow-all-tools",
-			"--no-ask-user",
-			"--no-color",
-			"--no-custom-instructions",
-			"--no-remote-export",
-			"--add-dir", "{evidence}"
-		];
-
-		static readonly string[] InitialDefaultArguments =
-		[
-			"-p", "{prompt}",
-			"--allow-all-tools",
-			"--no-ask-user",
-			"--no-color",
-			"--no-custom-instructions",
-			"--no-remote-export",
-			"--silent"
+			[
+				"--allow-all-tools",
+				"--no-ask-user",
+				"--no-custom-instructions",
+				"--no-remote-export",
+				"--add-dir", "{evidence}"
+			],
+			[
+				"-p", "{prompt}",
+				"--allow-all-tools",
+				"--no-ask-user",
+				"--no-custom-instructions",
+				"--no-remote-export",
+				"--add-dir", "{evidence}"
+			],
+			[
+				"-p", "{prompt}",
+				"--allow-all-tools",
+				"--no-ask-user",
+				"--no-color",
+				"--no-custom-instructions",
+				"--no-remote-export",
+				"--screen-reader",
+				"--add-dir", "{evidence}"
+			],
+			[
+				"-p", "{prompt}",
+				"--allow-all-tools",
+				"--no-ask-user",
+				"--no-color",
+				"--no-custom-instructions",
+				"--no-remote-export",
+				"--add-dir", "{evidence}"
+			],
+			[
+				"-p", "{prompt}",
+				"--allow-all-tools",
+				"--no-ask-user",
+				"--no-color",
+				"--no-custom-instructions",
+				"--no-remote-export",
+				"--silent"
+			]
 		];
 
 		public static string[] UpgradeDefaultArguments(string command, string[] arguments)
@@ -111,13 +130,31 @@ namespace AutoCnC.Launcher
 			if (!string.Equals(command, "copilot", StringComparison.OrdinalIgnoreCase))
 				return arguments;
 
-			return arguments.SequenceEqual(PreviousDefaultArguments, StringComparer.Ordinal) ||
-				arguments.SequenceEqual(EarlierDefaultArguments, StringComparer.Ordinal) ||
-				arguments.SequenceEqual(OlderDefaultArguments, StringComparer.Ordinal) ||
-				arguments.SequenceEqual(InitialDefaultArguments, StringComparer.Ordinal)
+			return SupersededDefaultArguments.Any(superseded =>
+				arguments.SequenceEqual(superseded, StringComparer.Ordinal))
 				? [.. DefaultArguments]
 				: arguments;
 		}
+
+		/// <summary>Whether an argument carries the prompt itself, rather than a path to it.</summary>
+		public static bool CarriesPrompt(IEnumerable<string> arguments) =>
+			arguments is not null && arguments.Any(argument =>
+				argument is not null &&
+				(argument.Contains("{prompt}", StringComparison.Ordinal) ||
+					argument.Contains("{promptFile}", StringComparison.Ordinal)));
+
+		/// <summary>
+		/// Settles which channel carries the prompt, given a possibly older saved configuration.
+		/// </summary>
+		/// <remarks>
+		/// The prompt travels through exactly one channel. A configuration that still names it in
+		/// its arguments keeps doing so, because that is what the player asked for and only they
+		/// know whether their agent reads standard input. Everything else gets it on standard
+		/// input, which is the only channel that a growing prompt cannot overflow.
+		/// </remarks>
+		public static string UpgradePromptChannel(string[] arguments, string stdin) =>
+			CarriesPrompt(arguments) ? null :
+			string.IsNullOrWhiteSpace(stdin) ? DefaultStdin : stdin;
 
 		public static void PrepareContext(TrainingRun run, string gameGuidePath, string mechanicsPath,
 			string gameRulesPath, string promptTemplate, string recoveryContext = null)
@@ -151,13 +188,13 @@ namespace AutoCnC.Launcher
 
 		public static void Prepare(TrainingRun run, string gameGuidePath, string mechanicsPath,
 			string gameRulesPath, string promptTemplate, string command, IReadOnlyList<string> arguments,
-			string recoveryContext = null)
+			string stdin = null, string recoveryContext = null)
 		{
 			if (string.IsNullOrWhiteSpace(command))
 				throw new InvalidOperationException("The agent command is empty.");
 
 			PrepareContext(run, gameGuidePath, mechanicsPath, gameRulesPath, promptTemplate, recoveryContext);
-			WriteConfiguration(run, command, arguments);
+			WriteConfiguration(run, command, arguments, stdin);
 		}
 
 		/// <summary>
@@ -170,13 +207,17 @@ namespace AutoCnC.Launcher
 		/// configured.
 		/// </remarks>
 		public static void WriteConfiguration(TrainingRun run, string command,
-			IReadOnlyList<string> arguments)
+			IReadOnlyList<string> arguments, string stdin = null)
 		{
 			if (string.IsNullOrWhiteSpace(command))
 				throw new InvalidOperationException("The agent command is empty.");
 
 			var configuration = new TrainingAgentConfiguration { Command = command.Trim() };
 			configuration.Arguments.AddRange(arguments is { Count: > 0 } ? arguments : DefaultArguments);
+
+			// Resolved here rather than trusted from the caller, so a configuration that names the
+			// prompt nowhere still hands it over instead of starting the agent empty-handed.
+			configuration.Stdin = UpgradePromptChannel([.. configuration.Arguments], stdin);
 			Directory.CreateDirectory(run.RunDirectory);
 			File.WriteAllText(run.AgentConfigurationPath,
 				JsonSerializer.Serialize(configuration, JsonOptions));

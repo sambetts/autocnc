@@ -117,7 +117,8 @@ namespace AutoCnC.Launcher
 				// The improvement round is what normally records which agent this fight uses, and
 				// talking can come first. Written here too so an early question reaches the agent
 				// the player configured rather than a stock one.
-				TrainingAgent.WriteConfiguration(run, settings.AgentCommand, settings.AgentArguments);
+				TrainingAgent.WriteConfiguration(run, settings.AgentCommand, settings.AgentArguments,
+					settings.AgentStdin);
 
 				// Through a file rather than an argument. A message is prose the player wrote:
 				// it has newlines and quotes in it, and every layer between here and the agent —

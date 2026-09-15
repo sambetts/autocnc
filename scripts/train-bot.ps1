@@ -8,11 +8,17 @@
     captures a reversible source snapshot before invoking this script.
 
     Agent configuration is provider-neutral JSON:
-      { "command": "copilot", "arguments": ["-p", "{prompt}", "--allow-all-tools"] }
+      {
+        "command": "copilot",
+        "arguments": ["--allow-all-tools", "--add-dir", "{evidence}"],
+        "stdin": "{prompt}"
+      }
 
     Supported placeholders are {prompt}, {promptFile}, {project}, {workspace}, {evidence},
-    {sessionId}, and {run}. The built-in Copilot configuration grants access to {evidence}, but
-    not to the launcher's reversible source snapshot stored elsewhere in the run.
+    {sessionId}, and {run}, in both arguments and stdin. The rendered prompt is larger than Windows
+    allows on a command line, so the built-in Copilot configuration sends it in on standard input.
+    The built-in configuration grants access to {evidence}, but not to the launcher's reversible
+    source snapshot stored elsewhere in the run.
 
     {sessionId} pins one agent conversation per fight, so this round, any repair that follows it,
     and anything chat-bot.ps1 sends before or after share the same memory.
@@ -243,7 +249,6 @@ if (Test-Path -LiteralPath $configurationPath) {
     $agent = [pscustomobject]@{
         command = 'copilot'
         arguments = @(
-            '-p', '{prompt}',
             '--session-id', '{sessionId}',
             '--allow-all-tools',
             '--no-ask-user',
@@ -251,6 +256,10 @@ if (Test-Path -LiteralPath $configurationPath) {
             '--no-remote-export',
             '--add-dir', '{evidence}'
         )
+
+        # Windows caps a command line at 32,767 characters and the rendered prompt is larger than
+        # that on its own, so it goes in on standard input instead of in -p.
+        stdin = '{prompt}'
     }
 }
 
@@ -268,13 +277,36 @@ $replacements = [ordered]@{
     '{sessionId}' = $sessionId
 }
 
-$agentArguments = foreach ($argument in @($agent.arguments)) {
-    $resolved = [string]$argument
+function Expand-AgentPlaceholders {
+    param([string]$Text)
+
     foreach ($pair in $replacements.GetEnumerator()) {
-        $resolved = $resolved.Replace($pair.Key, $pair.Value)
+        $Text = $Text.Replace($pair.Key, $pair.Value)
     }
 
-    $resolved
+    $Text
+}
+
+$agentArguments = foreach ($argument in @($agent.arguments)) {
+    Expand-AgentPlaceholders ([string]$argument)
+}
+
+$agentInput = if ($agent.PSObject.Properties['stdin'] -and $agent.stdin) {
+    Expand-AgentPlaceholders ([string]$agent.stdin)
+} else {
+    $null
+}
+
+# CreateProcess rejects a command line over 32,767 characters, and Windows reports it as the
+# thoroughly misleading "The filename or extension is too long". A prompt that has outgrown argv
+# belongs on standard input, so say so rather than letting the agent die at the starting line.
+$commandLineLength = $agent.command.Length +
+    [int](@($agentArguments) | Measure-Object -Property Length -Sum).Sum +
+    (3 * @($agentArguments).Count)
+if ($commandLineLength -ge 32767) {
+    throw ("The agent command line is $commandLineLength characters, over the 32,767 Windows " +
+        'limit. Pass the prompt on standard input ("stdin": "{prompt}") or as a path ' +
+        '({promptFile}) instead of putting {prompt} in the arguments.')
 }
 
 Set-Content -LiteralPath $transcript -Value "=== Agent: $($agent.command) ==="
@@ -284,9 +316,17 @@ Write-AgentStatus -State 'running' -Phase 'agent'
 
 Push-Location $workspace
 try {
+    # Windows PowerShell pipes to native commands as ASCII by default, which would quietly mangle
+    # every non-ASCII character in the prompt.
+    $OutputEncoding = [Text.UTF8Encoding]::new($false)
     $agentFailure = $null
     try {
-        & $agent.command @agentArguments 2>&1 | Tee-Object -FilePath $transcript -Append
+        if ($null -ne $agentInput) {
+            $agentInput | & $agent.command @agentArguments 2>&1 | Tee-Object -FilePath $transcript -Append
+        } else {
+            & $agent.command @agentArguments 2>&1 | Tee-Object -FilePath $transcript -Append
+        }
+
         $agentExitCode = $LASTEXITCODE
     } catch {
         $agentExitCode = if ($LASTEXITCODE) { $LASTEXITCODE } else { 1 }

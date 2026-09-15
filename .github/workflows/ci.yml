@@ -38,6 +38,13 @@ jobs:
       - name: Test AutoCnC.Core
         run: dotnet test src/AutoCnC.Core.Tests/AutoCnC.Core.Tests.csproj -c Release --nologo
 
+      # The platform has test suites; battle bots deliberately do not, because a bot is judged by
+      # whether it wins. An improvement round once re-created the reference bot's suite after the
+      # rule was removed from the prompt half that rounds rewrite, so the rule is now checked.
+      - name: Check no battle bot has tests
+        shell: pwsh
+        run: ./scripts/check-bot-tests.ps1
+
   # Full verification: build the pinned engine, compile our traits against it, then run
   # OpenRA's own YAML linter, which constructs every actor in the mod.
   mod-build:

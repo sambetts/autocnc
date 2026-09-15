@@ -26,6 +26,23 @@ something a bad round can overwrite.
   `Build("powr", "nuke")` means build whichever faction's power plant is available.
 - Distances in engine-facing mode code are world units; 1024 world units equal one map cell.
 
+## How a bot is measured
+
+- A bot is judged by whether it wins, which no assertion can tell you. The verification for a
+  strategy change is the next recorded fight and the evidence it leaves behind.
+- **Do not write unit tests, and do not add a test project to a bot workspace.** Not for changed
+  strategy logic, not for a helper you extracted, not to show a change is safe. Budget spent on a
+  suite is budget not spent on battle logic, and the suite measures nothing the next fight does not
+  measure better.
+- This rule is here, in the half no round can rewrite, because it has already been lost once. It
+  was stated only in the evolving half; a round replaced that half without it, and the round after
+  re-created the reference bot's test project. Independent verification now **fails** when a bot
+  workspace contains one, so a round that adds tests does not finish.
+- Keeping the decision layer pure is still worth doing, because it makes strategy readable and
+  explainable — but the reason is legibility, not testability.
+- An invariant worth remembering belongs in prose beside the code it constrains, which is what the
+  next round actually reads.
+
 ## Economy, and the harvester trap
 
 - Cash comes from harvesters returning resources to refineries. A plan that loses every harvester

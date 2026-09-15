@@ -23,6 +23,7 @@ $run = (Resolve-Path -LiteralPath $RunDirectory).Path
 $transcript = Join-Path $run 'agent-transcript.txt'
 $statusFile = Join-Path $run 'agent-status.json'
 $runBot = Join-Path $PSScriptRoot 'run-bot.ps1'
+$checkBotTests = Join-Path $PSScriptRoot 'check-bot-tests.ps1'
 
 if ([IO.Path]::GetExtension($project) -ne '.csproj') {
     throw "Verification requires a battle bot project (.csproj): $project"
@@ -53,6 +54,14 @@ function Write-AgentStatus {
 Write-AgentStatus -State 'running' -Phase 'verification' -AgentExitCode 0
 
 try {
+    # A round is not allowed to spend the budget on a test suite, so catch it here rather than
+    # letting it land and be discovered a round later. Cheap, and it fails before the build.
+    & $checkBotTests -Path (Split-Path -Parent $project) 2>&1 |
+        Tee-Object -FilePath $transcript -Append
+    if ($LASTEXITCODE -ne 0) {
+        throw 'The bot workspace contains a test project. Battle bots are verified by fighting, not by assertions.'
+    }
+
     Write-Host "==> Cleaning $([IO.Path]::GetFileNameWithoutExtension($project))" -ForegroundColor Cyan
     & dotnet clean $project -c $Configuration --nologo -v quiet 2>&1 |
         Tee-Object -FilePath $transcript -Append

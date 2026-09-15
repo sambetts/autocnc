@@ -394,10 +394,9 @@ Two lines of the same rule now:
   almost nothing on this side can shoot upwards at all, and it is perishable, because the target
   crosses the envelope in a second or two while a tank will still be there next evaluation.
 
-Five tests in [`DefensiveLogicTests`](Tests/DefensiveLogicTests.cs) hold this rule in place,
-including one that replays the exact distance from 544s. One exists to stop the rule growing: a
-ground target at the same 8,602 units must still be engaged, so this stays a statement about
-catchability rather than a quiet shrinking of the leash.
+The rule has a deliberate boundary. A *ground* target at that same 8,602 units must still be
+engaged, so this stays a statement about what can be caught rather than a quiet shrinking of the
+leash.
 
 ## A rule that can stop a harvester and cannot start one
 
@@ -474,11 +473,9 @@ guide's fairness rules, so the search is expressed **entirely in move orders** �
 `ScoutMode` looks for a base it cannot see. Nothing here knows where tiberium is; it knows only
 that a harvester which is idle and motionless is worth nothing where it stands.
 
-Seven of the fourteen tests in [`HarvesterLogicTests`](Tests/HarvesterLogicTests.cs) fail against
-the rule this match was fought with, including one that replays `damage=30 health=99` from 354s.
-The rest are guards that must not become vacuous: a moving harvester must survive fifty evaluations
-untouched, a stationary one with a live activity must never be interrupted, and a harvester wedged
-in the corner of the map must still be given somewhere to go on every single stall.
+Three properties keep the ladder honest and must not become vacuous: a moving harvester survives
+fifty evaluations untouched, a stationary one with a live activity is never interrupted, and a
+harvester wedged in the corner of the map is still given somewhere to go on every single stall.
 
 ## A tower is only defence where its weapon reaches
 
@@ -568,12 +565,10 @@ whole map are the ones beside the outer refineries and the power plants that ope
 them. The radius band is not an approximation of "next to the economy" — out there it is the same
 set.
 
-Five of the fourteen tests in [`BasePlacementLogicTests`](Tests/BasePlacementLogicTests.cs) fail
-against the rule this match was fought with, including one that asserts the first rung plus the
-tower's reach clears the 13-cell refinery. The other nine are guards that must not become vacuous:
-the economy's own ladder must be byte-identical to what it was, an unfloored ladder must still be
-the original sequence, every covering ladder must still end at the default ring, and the first
-tower of each kind must still stay home.
+The first rung plus the tower's reach has to clear the 13-cell refinery. Four properties bound the
+rule and must not become vacuous: the economy's own ladder stays byte-identical to what it was, an
+unfloored ladder is still the original sequence, every covering ladder still ends at the default
+ring, and the first tower of each kind still stays home.
 
 ## Forty-six units is one army; five speed classes is five attacks
 
@@ -651,13 +646,11 @@ five-cell `ArrivedRadius`, and it is a unit standing inside that radius which ca
 exactly that and cancelled the attack for 27 `e3` who were still seventeen cells short. A lone fast
 unit can no longer reach the spot to do it.
 
-Eleven of the twenty-eight tests in
-[`AssaultStagingLogicTests`](Tests/AssaultStagingLogicTests.cs) fail against the rule this match was
-fought with, including one that asserts a unit still waiting after twelve evaluations — the `e1`-to-`e3`
-gap. Four more fail when the guards are disabled. The rest are guards that must not become vacuous:
-an unarmed or immobile unit must never be marched anywhere, a side that has never seen their base
-must get no staging opinion at all, an out-of-range threat must not be shot at, and the staging
-point must stay outside every static defence in the ruleset.
+A unit is still waiting after twelve evaluations — that is the `e1`-to-`e3` gap, and it is the
+point of the rule. Four properties bound it and must not become vacuous: an unarmed or immobile
+unit is never marched anywhere, a side that has never seen their base gets no staging opinion at
+all, an out-of-range threat is not shot at, and the staging point stays outside every static
+defence in the ruleset.
 
 
 ```
@@ -689,7 +682,6 @@ Reference/
 │   ├── HarvesterEscortMode.cs   ←   guards a harvester
 │   └── ScoutMode.cs             ←   wanders, runs from anything armed
 ├── Logic/                       ← pure decision functions, no engine
-└── Tests/                       ← the pure decision functions, without the engine
 ```
 
 ## Start your own
@@ -708,10 +700,14 @@ A bot builds against AutoC&C **binaries**, so it can live in its own repository:
 dotnet build /p:AutoCnCPath=C:\games\autocnc
 ```
 
-`Logic/` has no engine dependency, so the decision layer runs without a game:
+`Logic/` has no engine dependency, so the decision layer is plain C# you can read and reason about
+without a game in front of you.
+
+There is no test project here, and adding one is not an improvement. A bot is judged by whether it
+wins, which no assertion can tell you, so the verification is a recorded fight:
 
 ```powershell
-dotnet test .\ReferenceBot.sln
+./scripts/run-bot.ps1 -Map tiberium-rift.oramap
 ```
 
 ## Licence

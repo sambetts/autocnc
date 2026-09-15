@@ -211,6 +211,20 @@ namespace AutoCnC.Reference
 		/// spent 3,300 credits on eleven scout buggies over badland-ridges and never once bought
 		/// income.
 		/// </para>
+		/// <para>
+		/// <b>Saturation leads the tanks for a reason that cost the next match.</b> It used to sit
+		/// below <c>new("Vehicle", ["mtnk", "ltnk"], 4)</c>, and a floor of four tanks is never
+		/// permanently met because tanks die — so the vehicle queue stuck on that rung and the
+		/// saturation step underneath it was unreachable for the whole game. The war factory
+		/// stood at 362s and produced five <c>mtnk</c> and three <c>jeep</c> in the 816 seconds
+		/// that followed: 5,700 credits of armour and <b>zero</b> harvesters. Every harvester the
+		/// bot ever owned was a refinery's free actor, the fleet sat at four from 229s to 828s,
+		/// and when three of them died between 828s and 844s nothing could replace them — income
+		/// went from 37.1 credits a second in the window to 780s to 1.6, then to zero for the
+		/// last 338 seconds. A harvester also outranks a tank on the numbers: 1,100 against 900,
+		/// and the four <c>mtnk</c> this displaces killed so little that the bot finished 28
+		/// kills to 75 losses.
+		/// </para>
 		/// </remarks>
 		public static IReadOnlyList<ProductionStep> OpeningTrain { get; } =
 		[
@@ -220,9 +234,9 @@ namespace AutoCnC.Reference
 			new("Vehicle", ["harv"], HarvesterCore),   // then income, before anything that shoots
 			new("Infantry", ["e1"], RifleCore),
 			new("Infantry", ["e2"], 4),
+			new("Vehicle", ["harv"], HarvesterSaturation),  // ...and all of the income, before any of the armour
 			new("Vehicle", ["mtnk", "ltnk"], 4),
 			new("Infantry", ["e3"], 12),
-			new("Vehicle", ["harv"], HarvesterSaturation),
 			new("Vehicle", ["mtnk", "ltnk"], int.MaxValue),
 			new("Infantry", ["e3"], int.MaxValue),
 		];
@@ -367,14 +381,20 @@ namespace AutoCnC.Reference
 		/// because the other side rebuilt from thirteen buildings to thirty-eight and grew its
 		/// army from 7,250 at 900s to 70,200 while this one never once exceeded 7,800.
 		/// </para>
+		/// <para>
+		/// Saturation sits directly under the floor rather than under the tank rung, for the same
+		/// reason it does in <see cref="OpeningTrain"/>: a floor of eight tanks is never
+		/// permanently met, so anything below it never fires. A push that has already been fought
+		/// once needs the income to pay for the next one more than it needs tank number five.
+		/// </para>
 		/// </remarks>
 		public static IReadOnlyList<ProductionStep> AttackTrain { get; } =
 		[
 			new("Vehicle", ["harv"], HarvesterCore),   // replace what the last push cost us
+			new("Vehicle", ["harv"], HarvesterSaturation),
 			new("Vehicle", ["mtnk", "ltnk"], 8),
 			new("Infantry", ["e3"], 8),
 			new("Infantry", ["e1", "e2"], RifleCore),
-			new("Vehicle", ["harv"], HarvesterSaturation),
 			new("Vehicle", ["mtnk", "ltnk"], int.MaxValue),
 			new("Infantry", ["e3"], int.MaxValue),
 		];

@@ -55,9 +55,12 @@ namespace AutoCnC.Reference.Logic
 	public static class AttackBaseLogic
 	{
 		public static UnitDecision Decide(in AssaultState state, in AssaultTuning tuning)
-			=> Decide(state, tuning, ApproachOrders.None);
+			=> Decide(state, tuning, ApproachOrders.None, WeaponRole.Unknown);
 
 		public static UnitDecision Decide(in AssaultState state, in AssaultTuning tuning, in ApproachOrders approach)
+			=> Decide(state, tuning, approach, WeaponRole.Unknown);
+
+		public static UnitDecision Decide(in AssaultState state, in AssaultTuning tuning, in ApproachOrders approach, WeaponRole role)
 		{
 			// 0. An unarmed unit cannot assault anything. Leave it alone rather than marching it
 			//    into the enemy base to die. See the equivalent guard in DefensiveLogic.
@@ -69,7 +72,7 @@ namespace AutoCnC.Reference.Logic
 				return UnitDecision.Retreat($"health {state.HealthPercent}% <= {tuning.RetreatBelowHealthPercent}%");
 
 			if (!state.HasObjective)
-				return Approach(state, approach);
+				return Approach(state, approach, role);
 
 			// 2. In range of the objective: hit it. The objective always wins over distractions.
 			if (state.DistanceToObjectiveUnits <= state.WeaponRangeUnits)
@@ -78,7 +81,7 @@ namespace AutoCnC.Reference.Logic
 			// 3. Opportunistic fire only — strictly targets already inside weapon range, so
 			//    taking the shot costs us no forward progress.
 			{
-				var blocker = SelectBlocker(state, tuning);
+				var blocker = SelectBlocker(state, tuning, role);
 				if (blocker.HasValue)
 					return UnitDecision.Attack(blocker.Value.ActorId, $"clearing {blocker.Value.Kind} en route");
 			}
@@ -111,13 +114,13 @@ namespace AutoCnC.Reference.Logic
 		/// back when there is no assault left to be baited off is not.
 		/// </para>
 		/// </remarks>
-		static UnitDecision Approach(in AssaultState state, in ApproachOrders approach)
+		static UnitDecision Approach(in AssaultState state, in ApproachOrders approach, WeaponRole role)
 		{
 			if (approach.HasTarget && state.CanMove)
 				return UnitDecision.AttackMoveTo(approach.X, approach.Y,
 					$"nothing in sight, closing on their base, {approach.DistanceUnits}u out");
 
-			var target = SelectLastStandTarget(state);
+			var target = SelectLastStandTarget(state, role);
 			if (target.HasValue)
 				return UnitDecision.Attack(target.Value.ActorId,
 					$"nowhere to push, engaging {target.Value.Kind} at {target.Value.DistanceUnits}u");
@@ -137,6 +140,10 @@ namespace AutoCnC.Reference.Logic
 		/// chase.
 		/// </remarks>
 		public static ThreatSnapshot? SelectLastStandTarget(in AssaultState state)
+			=> SelectLastStandTarget(state, WeaponRole.Unknown);
+
+		/// <inheritdoc cref="SelectLastStandTarget(in AssaultState)"/>
+		public static ThreatSnapshot? SelectLastStandTarget(in AssaultState state, WeaponRole role)
 		{
 			var threats = state.Threats;
 			if (threats == null || threats.Count == 0)
@@ -154,7 +161,7 @@ namespace AutoCnC.Reference.Logic
 				if (t.DistanceUnits > state.WeaponRangeUnits)
 					continue;
 
-				var score = ScoreBlocker(t);
+				var score = ScoreBlocker(t, role);
 				if (score > bestScore || (score == bestScore && best.HasValue && t.ActorId < best.Value.ActorId))
 				{
 					bestScore = score;
@@ -170,6 +177,10 @@ namespace AutoCnC.Reference.Logic
 		/// is worth interrupting the advance for.
 		/// </summary>
 		public static ThreatSnapshot? SelectBlocker(in AssaultState state, in AssaultTuning tuning)
+			=> SelectBlocker(state, tuning, WeaponRole.Unknown);
+
+		/// <inheritdoc cref="SelectBlocker(in AssaultState, in AssaultTuning)"/>
+		public static ThreatSnapshot? SelectBlocker(in AssaultState state, in AssaultTuning tuning, WeaponRole role)
 		{
 			var threats = state.Threats;
 			if (threats == null || threats.Count == 0)
@@ -189,14 +200,22 @@ namespace AutoCnC.Reference.Logic
 					continue;
 
 				var isDefence = t.Kind == ThreatKind.Defence;
+
+				// A harvester cannot shoot back, so the two filters below used to discard it —
+				// and that is how a push walks straight past the thing paying for the army it is
+				// fighting. Shooting one costs no forward progress at all, because every
+				// candidate here is already inside weapon range; the only thing that changes is
+				// what a unit with nothing else to shoot does with the shot.
+				var isEconomy = t.Kind == ThreatKind.Economy;
+
 				if (isDefence && !tuning.ClearDefencesEnRoute)
 					continue;
-				if (!isDefence && !t.CanHitUs && !tuning.ReturnFireWhileAdvancing)
+				if (!isDefence && !isEconomy && !t.CanHitUs && !tuning.ReturnFireWhileAdvancing)
 					continue;
-				if (!isDefence && !t.CanHitUs)
+				if (!isDefence && !isEconomy && !t.CanHitUs)
 					continue;
 
-				var score = ScoreBlocker(t);
+				var score = ScoreBlocker(t, role);
 				if (score > bestScore || (score == bestScore && best.HasValue && t.ActorId < best.Value.ActorId))
 				{
 					bestScore = score;
@@ -207,7 +226,7 @@ namespace AutoCnC.Reference.Logic
 			return best;
 		}
 
-		static int ScoreBlocker(in ThreatSnapshot t)
+		static int ScoreBlocker(in ThreatSnapshot t, WeaponRole role)
 		{
 			var score = 0;
 
@@ -217,6 +236,29 @@ namespace AutoCnC.Reference.Logic
 
 			if (t.CanHitUs)
 				score += 5_000;
+
+			// An enemy harvester is worth far more than the 1,100 credits it costs to replace:
+			// it is the income that pays for everything currently shooting at us, and a side
+			// whose economy is intact rebuilds an army faster than a push can raze it. Cabal
+			// finished badland-ridges with 147 units and 70,960 of army; in 3,957 engagement
+			// orders this bot aimed at an enemy harvester exactly once.
+			//
+			// The weight is bounded so it can never displace a shot at something that shoots
+			// back. MatchBonus tops out at 3,000 and health and distance add at most 132, so an
+			// economy target reaches 1,500 + 3,000 + 132 = 4,632, while the *worst* total a
+			// CanHitUs target can score is 5,000 + 600 (AntiArmour against Infantry, the lowest
+			// entry in the table) = 5,600. A defence starts at 10,000 either way. An enemy
+			// harvester therefore only ever wins when the alternative is not shooting at all,
+			// which is exactly "kill their economy on the way past".
+			if (t.Kind == ThreatKind.Economy)
+				score += 1_500;
+
+			// What this unit's warhead can do to that armour. A push is a mixed force standing
+			// in the same place, so this is how the work gets divided without anyone
+			// coordinating it: the rockets take the tower and the tank, the rifles take the
+			// infantry defending them. An e1 firing on a gtwr does 10% damage, which is not an
+			// assault, it is a delay.
+			score += WeaponMatchLogic.MatchBonus(role, t.Kind);
 
 			score += 100 - Clamp(t.HealthPercent, 0, 100);
 			score += (32 * 1024 - Clamp(t.DistanceUnits, 0, 32 * 1024)) / 1024;

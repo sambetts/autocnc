@@ -29,6 +29,7 @@ namespace AutoCnC.Reference.Modes
 	public sealed class DefensiveMode : UnitMode
 	{
 		DefensiveTuning tuning = DefensiveTuning.Default;
+		WeaponRole role = WeaponRole.Unknown;
 		bool recovering;
 
 		public override void OnEnter(Actor self, ModeContext ctx)
@@ -42,6 +43,11 @@ namespace AutoCnC.Reference.Modes
 					TetherRadiusUnits = range * 2,
 					LeashRadiusUnits = range * 3
 				};
+
+			// What this unit's warhead is for. Sensed once here rather than every evaluation:
+			// an actor's armament does not change, and the pure logic that reads it must not be
+			// handed an engine type to look it up from.
+			role = WeaponMatchLogic.RoleOf(self.Info.Name);
 
 			recovering = false;
 
@@ -63,7 +69,7 @@ namespace AutoCnC.Reference.Modes
 				Threats: ctx.SenseThreats(SenseRadius(ctx)));
 
 			// --- Decide ------------------------------------------------------------
-			var decision = DefensiveLogic.Decide(state, tuning);
+			var decision = DefensiveLogic.Decide(state, tuning, role);
 
 			// Hysteresis, so a unit that limps to the repair bay stays long enough to actually be
 			// repaired instead of oscillating in and out of combat at the retreat threshold.

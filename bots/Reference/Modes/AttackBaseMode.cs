@@ -49,12 +49,16 @@ namespace AutoCnC.Reference.Modes
 		AssaultTuning tuning = AssaultTuning.Default;
 		MusterTuning musterTuning = MusterTuning.Default;
 		MusterWatchdog musterWatchdog = MusterWatchdog.Start;
+		WeaponRole role = WeaponRole.Unknown;
 		uint objectiveId;
 
 		public override void OnEnter(Actor self, ModeContext ctx)
 		{
 			tuning = AssaultTuning.Default;
 			musterTuning = MusterTuning.Default;
+
+			// What this unit's warhead is for. See DefensiveMode.OnEnter.
+			role = WeaponMatchLogic.RoleOf(self.Info.Name);
 
 			// Each push forms up once. Resetting here rather than latching for the unit's whole
 			// life is what makes that true: a unit that came home, rebuilt a force and set off
@@ -98,12 +102,12 @@ namespace AutoCnC.Reference.Modes
 			// than against whatever this unit can currently see, because it is the one target
 			// every unit in the push agrees on — and a rule that gathered each unit around its
 			// own nearest visible building would gather nobody.
-			var outcome = AssaultStagingLogic.Decide(state, Muster(self, ctx, state), musterWatchdog, musterTuning);
+			var outcome = AssaultStagingLogic.Decide(state, Muster(self, ctx, state), musterWatchdog, musterTuning, role);
 			musterWatchdog = outcome.Watchdog;
 			if (outcome.Decision.HasValue)
 				return outcome.Decision.Value;
 
-			return AttackBaseLogic.Decide(state, tuning, objective != null ? ApproachOrders.None : Approach(self, ctx));
+			return AttackBaseLogic.Decide(state, tuning, objective != null ? ApproachOrders.None : Approach(self, ctx), role);
 		}
 
 		/// <summary>

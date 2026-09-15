@@ -9,6 +9,7 @@
  */
 #endregion
 
+using System.Collections.Generic;
 using AutoCnC.Reference.Logic;
 using AutoCnC.Sdk;
 using AutoCnC.Core;
@@ -18,8 +19,8 @@ using OpenRA.Traits;
 namespace AutoCnC.Reference.Modes
 {
 	/// <summary>
-	/// Keeps one harvester earning: runs from a fight that is actually killing it, and restarts it
-	/// whenever it has provably stopped.
+	/// Keeps one harvester earning: runs from a fight that is actually killing it, and keeps it on
+	/// ground that still has tiberium in it.
 	/// </summary>
 	/// <remarks>
 	/// Sensing and acting only — the judgement is in <see cref="HarvesterLogic"/>, which has no
@@ -29,11 +30,13 @@ namespace AutoCnC.Reference.Modes
 	public sealed class HarvesterMode : UnitMode
 	{
 		readonly HarvesterTuning tuning = HarvesterTuning.Default;
+		readonly List<FieldOption> fields = [];
 		HarvesterWatchdog watchdog = HarvesterWatchdog.Start;
 
 		public override void OnEnter(Actor self, ModeContext ctx)
 		{
 			watchdog = HarvesterWatchdog.Start;
+			fields.Clear();
 		}
 
 		public override UnitDecision OnTick(Actor self, ModeContext ctx)
@@ -55,12 +58,6 @@ namespace AutoCnC.Reference.Modes
 			var bounds = ctx.World.Map.Bounds;
 			var here = self.Location;
 
-			// Scanning the map is a scan, not a lookup, so only ask once the harvester has
-			// actually run out of work. A harvester that is still cutting never gets here.
-			var field = watchdog.StillEvaluations >= tuning.StallEvaluations
-				? ctx.FindNearestResourceField(tuning.MinFieldCells)
-				: null;
-
 			var state = new HarvesterState(
 				HealthPercent: ctx.HealthPercent,
 				CanMove: ctx.CanMove,
@@ -77,14 +74,31 @@ namespace AutoCnC.Reference.Modes
 				MapMinX: bounds.Left,
 				MapMinY: bounds.Top,
 				MapMaxX: bounds.Left + bounds.Width - 1,
-				MapMaxY: bounds.Top + bounds.Height - 1,
-				HasKnownField: field != null,
-				FieldX: field?.NearestX ?? 0,
-				FieldY: field?.NearestY ?? 0,
-				FieldDistanceUnits: field?.DistanceUnits ?? 0);
+				MapMaxY: bounds.Top + bounds.Height - 1);
+
+			// Scanning the map is a scan, not a lookup, so the rule decides when it is worth
+			// paying for: on a stall, or once a review window has gone by. The scan is centred on
+			// the refinery rather than on the harvester, because what a field costs to work is the
+			// round trip to the refinery, not how close the harvester happens to be right now.
+			//
+			// The state has to be built first. Whether this evaluation is a stall is a fact about
+			// where the harvester is standing *now* against where it was last time, so the test
+			// cannot be answered from the watchdog alone — and answering it from the watchdog
+			// alone is what made the stall case unreachable for an entire match.
+			fields.Clear();
+			if (HarvesterLogic.ShouldScan(watchdog, state, tuning))
+			{
+				var found = ctx.FindResourceFields(tuning.MinFieldCells, tuning.MaxFieldsConsidered, home);
+				for (var i = 0; i < found.Count; i++)
+				{
+					// Copied, not retained: sensing methods reuse their buffers.
+					var f = found[i];
+					fields.Add(new FieldOption(f.NearestX, f.NearestY, f.CenterX, f.CenterY, f.CellCount, f.TotalDensity, f.DistanceUnits));
+				}
+			}
 
 			// --- Decide ------------------------------------------------------------
-			var outcome = HarvesterLogic.Decide(state, watchdog, tuning);
+			var outcome = HarvesterLogic.Decide(state, watchdog, tuning, fields);
 			watchdog = outcome.Watchdog;
 			return outcome.Decision;
 		}

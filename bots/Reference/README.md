@@ -35,7 +35,10 @@ A push also **forms up before it goes in**. Units in this mod run from 0.952 cel
 4.15, so sending each one at the enemy the instant the doctrine flips is not one attack but one per
 speed class. `AttackBaseMode` gathers the army 14 cells short of the remembered sighting — outside
 every static defence in the ruleset — and releases it when the crowd around it stops growing, or
-when a hard cap says the rest are not coming. See [`Logic/AssaultStagingLogic.cs`](Logic/AssaultStagingLogic.cs).
+when a hard cap says the rest are not coming. It walks there under an **attack-move**, and stops to
+fight anything that comes inside its own weapon range on the way, because the march to the staging
+point is the longest leg of the push and the ground it crosses is not safe.
+See [`Logic/AssaultStagingLogic.cs`](Logic/AssaultStagingLogic.cs).
 
 ## A bot must not talk over its own modes
 
@@ -464,14 +467,18 @@ driving. They were parked.
   `DefensiveLogic` already uses before it asserts `Hold`.
 - **The restart is a ladder, not a demand.** First the cheap explanation: go to the refinery and
   unload. Still stopped once it is there, and the ground the refinery was placed on is finished —
-  so walk outward on a widening octagon, 6 cells then 11, 16, 21 and 24, rotating direction each
-  time and clamped to the map, until the harvester finds something to cut. Sustained normal
-  behaviour folds the ladder back to the near ring.
+  so walk outward on a widening octagon, rotating direction each time and clamped to the map, until
+  the harvester finds something to cut. Sustained normal behaviour folds the ladder back to the
+  near ring.
 
-There is no resource-sensing API and reading the resource layer under shroud would breach the
-guide's fairness rules, so the search is expressed **entirely in move orders** — the same way
-`ScoutMode` looks for a base it cannot see. Nothing here knows where tiberium is; it knows only
-that a harvester which is idle and motionless is worth nothing where it stands.
+This section used to end by asserting that *"there is no resource-sensing API and reading the
+resource layer under shroud would breach the guide's fairness rules"*. **Both halves were wrong**,
+and the sentence outlived its own truth for several rounds while the harvesters it described starved.
+`ModeContext` exposes `FindResourceFields`, `FindNearestResourceField`, `ResourceAt`, `HasResource`
+and `CanHarvest`; every one of them is shroud-filtered, so a cell this side has never explored reads
+as empty exactly as it does for a human player, and using them is ordinary play. Naming a field is
+now the mechanism — see *A harvester that never stops* — and the blind octagon survives only as the
+shroud case, for a harvester that knows of no field anywhere because nothing has scouted one.
 
 Three properties keep the ladder honest and must not become vacuous: a moving harvester survives
 fifty evaluations untouched, a stationary one with a live activity is never interrupted, and a
@@ -653,6 +660,196 @@ all, an out-of-range threat is not shot at, and the staging point stays outside 
 defence in the ruleset.
 
 
+## A move order is an order not to fight
+
+Everything above held, and the whole chain completed for the first time: `afld` at **542s**, three
+`bggy` scouts at 578/596/622s, *their base has been found* at **630s**, `Attack` at **660s**. The
+bot found the enemy and ran its attack doctrine — something it had never once done two rounds ago.
+The economy held with it: four `proc` by 361s, `hq` at 419s, income **23.9/s to 660s** (15,750
+credits earned on top of the 7,500 bank), which is **8.5 credits per harvester-second** against the
+5/s floor that means a harvester is not driving. `HarvesterMode` issued nothing at all before 747s,
+which is what a working harvester looks like — the watchdog only speaks when one is stuck. `world`
+killed nothing, the furthest structure stood 13.45 cells out (`nuke` at (3,73)), both queues were
+driven, and five doctrine switches in 1,192s is not thrash.
+
+Then the army walked into their field army and was destroyed in twenty seconds.
+
+| second | units | army | lost | killed | event |
+|---|---|---|---|---|---|
+| 660 | 38 | 9,000 | 2 | 0 | `Attack`: *army worth 9000 and their base is known* |
+| 671 | 40 | 10,050 | 2 | 0 | all forty ordered `MoveTo(46,50)` — *forming up 45,716u short of their base* |
+| 688 | 40 | 10,050 | 3 | 0 | eight `e1` shelled by an unseen `msam`, `seen=0` |
+| 690 | 40 | 10,050 | 3 | 0 | contact at (44,59) and (31,54), 33–38 cells out |
+| 695 | 31 | 9,150 | 12 | 1 | |
+| 700 | 28 | 8,850 | 15 | 2 | |
+| 705 | 17 | 5,550 | 25 | 3 | |
+| 710 | **3** | **900** | 39 | 3 | `Attack` → `Opening`: *army down to 900* |
+
+**43 units and 10,950 credits died between 643s and 718s for 3 kills:**
+
+| | count | cost |
+|---|---|---|
+| `e3` | 27 | 8,100 |
+| `e1` | 12 | 1,200 |
+| `bggy` | 3 | 900 |
+| `ltnk` | 1 | 750 |
+| **total** | **43** | **10,950** — **41.9%** of the 26,150 the bot spent all match |
+
+The bot never recovered. It held 0 units for 470 of the remaining 482 seconds and was demolished
+building by building; the four harvesters `msam` killed from 720s and the 6.5/s income after are
+that collapse, not a second cause.
+
+The tell is in the order census. `AttackBaseMode` issued **96 decisions all match, and 80 of them
+were `MoveTo` — *forming up Nu short of their base***. Exactly **nine** units ever received an
+order that permits engaging: three `e1` at 688s, five `e3` at 698–700s and one `ltnk` at 689s. Those
+nine made **all three kills** — the `ltnk` under `AttackMoveTo` took a `jeep` at 690s and an `apc`
+at 699s, and a released `e3` took a `jeep` at 701s. The other thirty-one were still executing the
+`MoveTo` issued at 671s and dealt **no damage whatsoever** while dying at point-blank range.
+
+The killers make it airtight. `e3` rockets reach **6 cells**; the `e1` M16 and `e2` Grenade that
+killed twenty-six of them reach **4**. Every one of those rocket troopers could have shot first and
+not one of them did, because a unit executing a move activity is a unit that has been told to walk,
+not to fight. `AttackBaseLogic.Approach` had already written this down — *"attack-move rather than
+move, because the whole point is to arrive able to fight"* — and applied it only to the short leg
+after the muster. The 44-cell leg before it, the one that crosses the map, was a plain walk.
+
+[`AssaultStagingLogic`](Logic/AssaultStagingLogic.cs) now makes the march a fight:
+
+- **The walk to the staging point is an `AttackMoveTo`.** The destination is still fixed before the
+  unit sets off, so nothing it meets can redirect it — this is not a breach of the never-chase rule,
+  it is the same sentence `AttackBaseLogic` already applied to the leg that follows.
+- **A unit in contact stops and fights through.** `SelectLastStandTarget` is the same weapon-range
+  filter the `WaitForTheRest` branch has always used, so a unit pauses only while something is
+  already inside its own reach and resumes the instant it is not. It can never become a chase, and
+  it can never become a stop: the restarting path is the branch it fell out of.
+- **`FightWhileFormingUp` is a knob with the old behaviour as its off position**, which keeps this
+  a statement about the bot's own rule rather than about the engine's auto-targeting.
+- **Fighting through does not spend the army's patience**, for the same reason walking does not: a
+  unit still crossing the map must not burn the clock that measures how long the arrivals have
+  been waiting for it.
+
+Two properties bound the rule and must not become vacuous: an unarmed unit in contact still gets no
+staging opinion at all, and a unit that fought through must not have spent the clock that measures
+how long the rest have been waiting.
+
+**Verify next round** with the recipe-2 census: `AttackBaseMode, MoveTo` should be **zero**, replaced
+by `AttackBaseMode, AttackMoveTo` and `AttackBaseMode, Attack` with *fighting through* reasons — and
+the kill count during the push should no longer be in single figures.
+
+## A harvester that never stops is never asked whether it should move
+
+Everything above held on badland-ridges seven. `world` killed nothing at all, so no unit walked at
+an aircraft. The four `proc` went up at 7.07, 13.15, 13.42 and 13.04 cells from the yard, all four
+before `hq` (269s) and `weap` (362s), so income still led tech and the ladder still reached past ten
+cells. `BuildBaseMode` placed from both queues — `gtwr` at 105s and 130s, `atwr` at 360s, all from
+`Support`. Thirty-one `e3` were trained and aircraft accounted for 20 of 75 losses rather than 67 of
+159. `AttackBaseMode` asked for `Scout` at 530s and **got** it. The bot was ahead on army at 480s:
+10,640 against 8,700, 43 units against 39.
+
+It then earned 27,760 credits in 1,178 seconds — 23.6 a second — against a winner who finished with
+40,800 of army still standing, 36 buildings, 86 units and 880 in the bank, having lost 78 units of
+its own. Cash read 0 or 1 at every assessment from 480s onward. **Two separate mechanisms held the
+fleet at four harvesters and then let it decay in place**, and between them they are the whole
+match.
+
+### The fleet never grew, because a floor of four tanks is never met
+
+Every harvester the bot has ever owned is still a refinery's free actor. `harv` appears in the build
+log exactly four times — 51s, 117s, 155s and 229s — and each is the same second as a `proc`. The
+vehicle factory stood at **362s** and a second at 635s, and in the 816 seconds that followed the
+`Vehicle` queue was given nine orders: five `mtnk` and three `jeep`, 5,700 credits of armour and
+**zero** harvesters.
+
+The step that blocked it is one line of [`Plans.cs`](Plans.cs). `OpeningTrain` read
+
+```
+new("Vehicle", ["mtnk", "ltnk"], 4),     ← never satisfied
+...
+new("Vehicle", ["harv"], HarvesterSaturation),   ← therefore never reached
+```
+
+and `Until(n)` counts what is **standing**. Five `mtnk` were built and five died — at 480s, twice at
+720s and twice at 780s — so four were never alive at once, so the rung never cleared and everything
+under it was unreachable for the entire match. `AttackTrain` had the same shape with a floor of
+eight. The harvester saturation step, which the previous round added specifically to be the
+replacement rule, was vacuous exactly when it was needed: three harvesters died at 828s, 832s and
+844s, the fourth at 1125s, and nothing the bot owned could build another one. Income went 37.1
+credits a second in the window to 780s, to 1.6, to **zero for the last 338 seconds**.
+
+Four more harvesters bought at 362s, earning even the depressed 6.3 credits a second each, are
+20,563 credits over the remaining 816 seconds — **74% of everything this bot earned all match** —
+against the 3,600 of medium tanks they displace, which between them killed so little that the bot
+finished 28 kills to 75 losses.
+
+Both plans now put saturation directly under the harvester floor and above the first tank rung.
+
+### The fleet decayed in place, because the field rule only ran on a stall
+
+`HarvesterMode` received **13 decisions in 1,178 seconds**. Twelve were flee orders, correctly
+triggered — the lowest was 3% health. The thirteenth, and the only one that has anything to do with
+where the tiberium is, came at 839s, after the base was already being overrun, and read *"no
+tiberium in sight, searching 6 cells out"*.
+
+The income curve is what the fleet was doing while nothing was being decided:
+
+| | 180s | 240s | 300s | 360s | 480s | 540s | 600s | 720s |
+|---|---|---|---|---|---|---|---|---|
+| harvesters | 3 | 4 | 4 | 4 | 4 | 4 | 4 | 4 |
+| credits per second, per harvester | **15.9** | 14.2 | 10.0 | 8.6 | 7.5 | 6.3 | 6.7 | **4.8** |
+
+Nothing was lost until 828s, and the fleet never changed size. That 70% fall is one thing: the
+ground near the refineries running out while the harvesters stay inside the engine's own bubble,
+driving further each trip for less. Holding the 180s rate would have been worth another 15,792
+credits over 360–780s — 57% of lifetime income — with no extra harvester at all.
+
+The rule could not see it. [`HarvesterLogic`](Logic/HarvesterLogic.cs) asked the resource layer
+**only when the stall watchdog had fired**, and the watchdog counts consecutive evaluations of
+*idle and standing on the same cell*. A harvester grinding the last scraps of a dying patch is
+neither: it is driving, cutting and unloading, exactly as it does on a rich one, just for a tenth of
+the money. The one mechanism this bot had for leaving a dead field could only fire on a symptom the
+dying field does not produce.
+
+So the field is now **chosen on a clock, not recovered after a crash**:
+
+- **Every `ReviewEvaluations` (32) the harvester asks which field it should be on**, through
+  `ctx.FindResourceFields`, and holds the answer in its watchdog. A stall still forces the question
+  immediately; it is a backstop now rather than the mechanism.
+- **The scan is centred on the refinery, not the harvester.** What a field costs to work is the
+  round trip to the refinery — a `harv` moves 1.758 cells a game second — and not how near the
+  harvester happens to be when the question is asked.
+- **A field is worth what is left in it, discounted by the drive.** `Score` is
+  `TotalDensity × Scale / (Scale + DistanceUnits)` with `Scale` at 12 cells, so a field three times
+  as far must hold four times as much to win. It is scale-free in density on purpose: nothing here
+  knows what a full cell is worth in this mod, so no threshold pretends to.
+- **A field is worked out when the scan stops returning it.** `FindResourceFields` only reports
+  patches of at least `MinFieldCells`, so a patch ground down to scattered cells simply disappears,
+  which is a mod-independent way of noticing that the ground under a harvester has gone. That, and
+  only that, forces a reassignment.
+- **Moving costs twice.** A different field has to score `SwitchScoreMultiplier` (2×) the one we are
+  on before the harvester crosses to it. That margin is the whole anti-dither mechanism: after a
+  switch the new field is the best one, so the field just left cannot immediately beat it twice
+  over.
+- **Identity is the patch centre; the order names the nearest cell.** The centre is what stays put
+  between scans while the near edge is cut away, and aiming at a field's centre drives the harvester
+  through it to the far side.
+
+Reading the resource layer is fair play and always was — those reads are shroud-filtered, so a cell
+this side has never explored reads as empty exactly as it does for a human player. An earlier
+version of the paragraph above claimed the opposite and it was wrong; see the note under *A rule
+that can stop a harvester*.
+
+Two properties bound the rule and must not become vacuous: a harvester on the only field on the map
+is never given a pointless order, and a working harvester whose field is still the best one is left
+completely alone.
+
+**Verify next round** with recipes 1 and 2. The recipe-2 census should show `harv` receiving *tens*
+of decisions rather than thirteen, dominated by `HarvesterMode, Harvest` with *picking a field*,
+*field worked out* and *field thinning to N* reasons rather than *hurt at N%*; a run still dominated
+by *no tiberium in sight* means the bot is not scouting, not that the map is mined out. The recipe-1
+build log should contain `harv` rows at seconds that are **not** `proc` seconds, starting shortly
+after the first `weap`/`afld`. And the per-harvester income table above is the real test: recompute
+it, and the 15.9 → 4.8 collapse should be gone.
+
 ```
 Reference/
 ├── ReferenceBot.cs              ← the bot: which doctrines, and Reassess
@@ -674,17 +871,206 @@ Reference/
 │   ├── DefensiveMode.cs         ←   holds ground, won't be baited, retreats to repair
 │   │                                (and never walks at an aircraft — see DefensiveLogic)
 │   ├── AttackBaseMode.cs        ←   pushes a base, never chases
-│   │                                (forms the army up short of their base first — see
+│   │                                (forms the army up short of their base first, and fights
+│   │                                 its way there rather than walking — see
 │   │                                 AssaultStagingLogic)
 │   ├── EnemyBaseSightings.cs    ←   where this side last saw their base
-│   ├── HarvesterMode.cs         ←   keeps a harvester earning, and restarts a stopped one
+│   ├── HarvesterMode.cs         ←   keeps a harvester earning, on ground that still has
+│   │                                tiberium in it (reviews its field on a clock — see
+│   │                                 HarvesterLogic)
 │   ├── RunHomeMode.cs           ←   template: flees to a refinery when threatened
 │   ├── HarvesterEscortMode.cs   ←   guards a harvester
 │   └── ScoutMode.cs             ←   wanders, runs from anything armed
 ├── Logic/                       ← pure decision functions, no engine
+│                                  (WeaponMatchLogic says what each warhead is good at killing,
+│                                   so a rifleman and a rocket soldier no longer share a
+│                                   target list)
 ```
 
+## Fifty-four percent of the shots were aimed at the wrong armour
+
+Everything that had been fixed stayed fixed, and the economy finally worked. The bot completed
+`weap` at 382s, bought four `harv` outright at 539s, 678s, 741s and 778s — the first harvesters it
+has ever *paid* for — and spent **41,780 credits, 37.5 a second**, against 14,950 and 3.6 a second
+the round before. Its longest production gap all match was 125 seconds. It scouted with a `jeep`,
+found their base at 445s, and ran the `Attack` doctrine twice. At 480s it was level with the
+winner: 41 units against 43, 9,440 army against 11,300, 15 buildings against 16.
+
+It then killed 56 and lost 93, and by 960s it had no units at all.
+
+The trade is the whole story, and the reason is what each unit chose to shoot. Cross-tabulate
+every engagement order in the trace by the firing actor and the class it named:
+
+| firing unit | → Infantry | → Vehicle | DPS vs infantry | DPS vs Heavy |
+|---|---|---|---|---|
+| `e1` | 162 | **422** | 1,875 | 125 |
+| `e3` | **284** | 133 | 319 | 1,593 |
+| `e2` | 75 | 111 | 2,500 | 850 |
+| `jeep` | 1 | 36 | 5,391 | 359 |
+| `gtwr` | 54 | **500** | 3,000 | 900 |
+| `atwr` | 43 | 177 | 2,053 | 3,948 |
+
+**706 of the 1,313 orders the mobile army ever issued — 54% — pointed a weapon at the armour
+class it is worst against.** The damage figures come straight out of `game-rules.json`: an `e1`
+rifle reads `None 150%, Light 40%, Heavy 10%`, and an `e3` rocket reads `None 28%, Light 140%,
+Heavy 140%`. They are near-perfect mirrors of each other, and the bot had them back to front.
+`e3` was also the single largest line item in the match — 33 of them at 300 credits, **9,900
+credits, 23.7% of everything the bot ever spent** — and 284 of its 459 engagements were rockets
+fired at riflemen for a fifth of their rated damage.
+
+The static defences did it too, and they are the biggest population of all: the tower with the
+machine gun preferred tanks 500 times to 54, and the tower with the missiles got its second
+choice.
+
+Meanwhile enemy infantry — `e1`, `e3` and `e2` — killed **60 of the bot's 93 losses, 65%**. The
+army that could have answered them was busy shooting armour it was three times slower at killing,
+and the army that should have been shooting armour was firing at the infantry.
+
+`DefensiveLogic.ScoreThreat` had one class table for the entire side: `Vehicle` 1,200 above
+`Infantry` 1,000, for a rifleman and a rocket soldier alike. That table is a statement about how
+dangerous a class is, which is true whoever is looking — but it was the *only* term, and the term
+it was missing is a statement about the shooter.
+
+`Logic/WeaponMatchLogic.cs` adds it. Every actor id in the ruleset that this bot or either faction
+can field is measured against `None` / `Light` / `Heavy` armour and sorted into `AntiInfantry` or
+`AntiArmour`; `DefensiveMode` and `AttackBaseMode` read `self.Info.Name` once on entry and hand
+the role to the pure scorers, which add `Effectiveness x 3000 / 100` alongside the class weight.
+In a brawl where both candidates are in range and both can shoot back, an `e3` now scores a
+vehicle 4,200 against a rifleman's 1,600, and an `e1` scores that rifleman 4,000 against the
+vehicle's 2,100.
+
+Three boundaries are arithmetic rather than hope, and each one protects a fix that already works:
+
+- **An in-range target always beats an out-of-range one.** Between two candidates that both can
+  or both cannot shoot back, the worst in-range total is 5,950 and the best out-of-range total is
+  4,481. A better matchup is never a reason to give up a shot and walk — which is the same
+  principle "You cannot catch an aeroplane" is built on.
+- **`CanHitUs` still outranks everything.** Worst total with it is 10,950; best without is 10,132.
+- **An in-range aircraft is still the top target for anything that can hurt it**: `AntiArmour`
+  scores it 5,000, above the vehicle's 4,200. The filter that discards aircraft outside weapon
+  range is untouched.
+
+`WeaponRole.Unknown` is the fallback and it is deliberately flat — every class scores the same 60
+— so an actor the table has never measured adds a constant to every candidate and the ordering
+collapses to exactly what it was before. A preference that degrades into the old behaviour cannot
+be worse than not having one.
+
+## The watchdog that could never bark
+
+Everything fixed before stayed fixed, and the weapon/armour table from the previous round worked
+exactly as designed. `gtwr` — the tower with the machine gun — went from 500 vehicle engagements
+against 54 infantry ones to **876 infantry against 194 vehicles**; `e1` went from 422-against-133
+the wrong way round to **548 infantry against 301 vehicles**; `ltnk` preferred vehicles 137 to 71;
+and `e3` still took its one aircraft shot, so the anti-air path did not collapse. Lifetime spend
+rose again, to **68,700 credits over 1,618 seconds, 42.5 a second**, from 41,780 and 37.5 the round
+before, with no production gap longer than two minutes anywhere in the match.
+
+It lost anyway, 169 units to 107, to a side that finished with 147 units, 70,960 of army and 51
+buildings standing.
+
+The income curve says where. Credits earned per 120-second bucket, from spend plus the change in
+cash:
+
+| from | 120s | 240s | 360s | 480s | 600s | 720s | 840s | **960s** | **1080s** | **1200s** | 1320s |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| credits/s | 39.5 | 44.2 | 43.9 | 34.3 | 76.2 | 82.7 | 77.6 | **31.6** | **42.9** | **39.9** | **0** |
+| harvesters | 2 | 3 | 4 | 4 | 6 | 8 | 10 | 9 | 8 | 9 | 0 |
+
+The economy did not run out of harvesters. It ran out **at its peak harvester count**. Over
+600–960s the fleet earned 78.9 credits a second with an average of eight and a half harvesters —
+9.3 each. Over 960–1320s, with the same eight and a half harvesters, it earned **38.2 a second, 4.5
+each**, which is below the line where a harvester is not driving at all. The shortfall is
+(78.9 − 38.2) × 360 = **14,650 credits, 21% of everything the bot spent all match**, and the bot's
+cash read exactly 0 at 1,020s, 1,080s, 1,140s, 1,200s and 1,260s while the winner's army went from
+18,340 to 52,980.
+
+The decision trace names the mechanism without ambiguity. Of 504 `HarvesterMode` decisions:
+
+| reason | count | action |
+|---|---|---|
+| `no tiberium in sight, searching N cells out` | **245** | `MoveTo` |
+| `hurt at N%, running to the refinery` | 176 | `MoveTo` |
+| `stopped for 4 evaluations, returning to the refinery` | 43 | `MoveTo` |
+| `field thinning to N, crossing to …` | 26 | `Harvest` |
+| `picking a field, harvesting …` | 11 | `Harvest` |
+| `stopped for 4 evaluations, re-cutting …` | **3** | `Harvest` |
+
+Every one of the 245 shroud probes happened after 840s — 12, then 73, then 73, then 87 — and 135 of
+them were the *first* rung of the ladder, six cells out, meaning the harvester was being sent on a
+short blind hop over and over rather than searching anywhere new. Against 288 stall events the
+branch that exists to answer a stall, `re-cutting`, fired **three times**. And there was no shortage
+of tiberium to name: the same trace shows `Harvest` orders at 1,119s, 1,147s, 1,189s, 1,191s, 1,199s
+and 1,232s naming fields with 106 to 168 density still in them, 8 to 45 cells out. A `MoveTo` is an
+order not to harvest, so each of those 245 orders cancelled the activity it was supposed to restart.
+
+The cause is one line, and it is an off-by-one between two different watchdogs:
+
+```csharp
+var scanned = ShouldScan(watchdog, tuning);          // the watchdog from LAST evaluation
+var seen = Observe(watchdog, state, tuning);         // ...advanced here
+var stalled = seen.StillEvaluations >= tuning.StallEvaluations;
+```
+
+`ShouldScan` tested `watchdog.StillEvaluations >= 4`. A harvester crosses the threshold when
+`Observe` raises the count *to* four, which means the incoming count was three and the stall term
+read false. Worse, it could never read true on any later evaluation either, because every branch
+that fires on a stall resets `StillEvaluations` to zero — so the incoming count never exceeded
+three, ever. **The stall term was unreachable code.** The mode asks the same question before
+deciding whether to pay for a map scan, so `fields` came back empty at precisely the moment it was
+needed; `count > 0` failed, the whole field-selection block was skipped, and the rule fell through
+to the shroud probe underneath it. The three `re-cutting` orders that did fire are the three
+occasions when the unrelated 32-evaluation review clock happened to come due in the same
+evaluation.
+
+`HarvesterLogic.ShouldScan` now takes the `HarvesterState` and tests the observation the evaluation
+is *about* to make, sharing one private `DueForScan` with `Decide` so the two cannot drift apart
+again; `HarvesterMode` builds its state before deciding whether to scan. A stalled harvester is now
+always scanned for, which means it is always handed a field.
+
+A second, smaller trap sat behind it. The `re-cutting` branch is guarded by `ProbeIndex == 0` so a
+repeated order is not issued twice — the host suppresses duplicates, so repeating one cannot restart
+anything — but with that guard closed the rule had nowhere left to go except the probe. There is now
+a `3b`: a harvester that is still stopped after a re-cut is given the best field **other** than the
+one it is on. That is a genuinely different order rather than a suppressed duplicate, `Assign` moves
+the remembered assignment with it, and the next stall excludes that field in turn, so the fleet
+works outward through what it can see instead of grinding on one dead patch. The shroud probe is now
+what it was always meant to be: the answer when a scan comes back with no field anywhere, which is a
+statement that the side has not scouted rather than that the map is mined out.
+
+### And nobody ever shot a harvester
+
+The other half of the same match. In **3,957 engagement orders** the bot aimed at an enemy harvester
+exactly **once**, by a `bggy`. `AttackBaseLogic.SelectBlocker` explains why:
+
+```csharp
+if (!isDefence && !t.CanHitUs)
+    continue;
+```
+
+A harvester is unarmed, so `CanHitUs` is false, so it was filtered out before it could be scored —
+a push walked past the thing paying for the army it was fighting. That filter is right for a tank
+that would have to be chased and wrong for a harvester standing in range, because `SelectBlocker`
+only ever considers targets already inside weapon range: taking the shot costs no forward progress
+at all. `ThreatKind.Economy` now passes the filter and scores **1,500**.
+
+That number is a bound, not a preference. `MatchBonus` tops out at 3,000 and the health and distance
+terms add at most 132, so an economy target reaches **4,632**; the *worst* total a target that is
+shooting back can score is 5,000 + 600 (AntiArmour against Infantry, the lowest entry in the
+effectiveness table) = **5,600**, and a static defence starts at 10,000 whatever else is true. An
+enemy harvester therefore only ever wins when the alternative is not shooting at all. `SelectObjective`
+is deliberately untouched: an objective is pursued with `AdvanceToObjective`, and a harvester moves
+at 1.758 cells a game second against an `e3`'s 0.952, so making one an objective would be a chase
+that can never end.
+
+### What the ruleset says cannot be done
+
+The match review also suggested selling surplus refineries for a cash boost. `UnitAction` has no
+sell, so there is no way to express it; the buildable answer to "too many refineries" is to build
+fewer, and at six `proc` for 9,000 credits — 13% of spend, each carrying a free 1,100-credit
+harvester — this bot is not yet there. Worth recording so it is not rediscovered.
+
 ## Start your own
+
 
 ```powershell
 ./scripts/new-bot.ps1 -Name MyBot

@@ -19,7 +19,8 @@ namespace AutoCnC.Reference.Logic
 		int StandoffUnits,
 		int MusterRadiusUnits,
 		int PatienceEvaluations,
-		int MaxWaitEvaluations)
+		int MaxWaitEvaluations,
+		bool FightWhileFormingUp)
 	{
 		public static MusterTuning Default { get; } = new(
 			// Shorter than this and the force is already effectively in contact: the staging
@@ -53,7 +54,13 @@ namespace AutoCnC.Reference.Logic
 			// Hard cap on standing still, about 105 seconds. The muster releases on its own
 			// long before this; this exists so that a push can never be deadlocked by one that
 			// is never going to be joined.
-			MaxWaitEvaluations: 75);
+			MaxWaitEvaluations: 75,
+
+			// Whether a unit marching to the staging point stops for what is already inside its
+			// weapon range. On by default: the march is the longest leg of the whole push, and
+			// the alternative is the one that lost badland-ridges twice over — an army crossing
+			// contested ground under a plain move order, shot for free the entire way.
+			FightWhileFormingUp: true);
 	}
 
 	/// <summary>What the staging rule decided to do with one unit.</summary>
@@ -62,7 +69,7 @@ namespace AutoCnC.Reference.Logic
 		/// <summary>No staging opinion — the normal assault rule applies.</summary>
 		NotRequired,
 
-		/// <summary>Walk to the staging point and form up.</summary>
+		/// <summary>Advance to the staging point and form up, fighting through anything in reach.</summary>
 		MoveToMuster,
 
 		/// <summary>Formed up; wait for the rest of the army.</summary>
@@ -127,6 +134,17 @@ namespace AutoCnC.Reference.Logic
 	/// which self-tunes to however many units this push actually has and cannot be wrong about
 	/// the size of an army it never counted.
 	/// </para>
+	/// <para>
+	/// Forming up fixed the arrival and then lost the army a second way. The march to the
+	/// staging point was a plain move, so the force crossed 44 cells of contested ground unable
+	/// to fight: on badland-ridges 40 units were committed at 660s, met their field army at
+	/// 690s, and were down to 3 units by 710s — 37 lost in twenty seconds for 3 kills. Of the
+	/// 40, exactly nine ever received an order that permits engaging, and those nine made all
+	/// three kills; the rest were still executing <c>MoveTo(46,50)</c> issued at 671s and dealt
+	/// no damage at all while <c>e1</c> and <c>e2</c> — whose four-cell reach is shorter than
+	/// the <c>e3</c> rockets aimed at nothing — killed them at point-blank range. So the march
+	/// is an attack-move, and a unit already in contact stops and fights through.
+	/// </para>
 	/// This type has ZERO OpenRA dependencies by design and is integer-only, so it is both
 	/// lockstep-safe and testable without booting the engine.
 	/// </remarks>
@@ -137,6 +155,14 @@ namespace AutoCnC.Reference.Logic
 			in MusterState muster,
 			in MusterWatchdog watchdog,
 			in MusterTuning tuning)
+			=> Decide(assault, muster, watchdog, tuning, WeaponRole.Unknown);
+
+		public static MusterOutcome Decide(
+			in AssaultState assault,
+			in MusterState muster,
+			in MusterWatchdog watchdog,
+			in MusterTuning tuning,
+			WeaponRole role)
 		{
 			// An unarmed unit has no business in an assault at all. AttackBaseLogic deliberately
 			// leaves it where it stands rather than marching it into the enemy base to die, and
@@ -149,13 +175,40 @@ namespace AutoCnC.Reference.Logic
 			switch (verdict)
 			{
 				case MusterVerdict.MoveToMuster:
+				{
+					// Stop and shoot what is already on top of us. The walk to the staging
+					// point is the longest leg of the whole push — 44 cells on badland-ridges
+					// — and every metre of it may be contested, because the staging point is
+					// chosen relative to their base rather than relative to safety.
+					//
+					// Bounded by SelectLastStandTarget's weapon-range filter, so this can never
+					// become the chase this mode exists to refuse: a unit stops only while
+					// something is already inside its own reach, and resumes the moment it is
+					// not. That is the same rule the WaitForTheRest branch below has always
+					// had; marching simply never got it.
+					if (tuning.FightWhileFormingUp)
+					{
+						var contact = AttackBaseLogic.SelectLastStandTarget(assault, role);
+						if (contact.HasValue)
+							return new MusterOutcome(
+								UnitDecision.Attack(contact.Value.ActorId,
+									$"forming up, fighting through {contact.Value.Kind} at {contact.Value.DistanceUnits}u"),
+								watchdog);
+					}
+
+					// Attack-move rather than move, for exactly the reason AttackBaseLogic.Approach
+					// already gives about the shorter leg that follows this one: the whole point of
+					// forming up is to arrive able to fight. The destination is fixed before the
+					// unit sets off, so nothing it meets on the way can redirect it.
+					//
 					// Deliberately does not advance the watchdog: the clocks in it measure
 					// standing still at the staging point, and a slow unit still crossing the
 					// map must not spend the army's patience on its own walk.
 					return new MusterOutcome(
-						UnitDecision.MoveTo(muster.MusterX, muster.MusterY,
+						UnitDecision.AttackMoveTo(muster.MusterX, muster.MusterY,
 							$"forming up {muster.DistanceToTargetUnits}u short of their base"),
 						watchdog);
+				}
 
 				case MusterVerdict.WaitForTheRest:
 				{
@@ -165,7 +218,7 @@ namespace AutoCnC.Reference.Logic
 					// forward progress by firing on whatever is already inside its weapon
 					// range, and the last thing this bot needs is another army that stood
 					// still under fire because it had not been told to shoot back.
-					var target = AttackBaseLogic.SelectLastStandTarget(assault);
+					var target = AttackBaseLogic.SelectLastStandTarget(assault, role);
 					if (target.HasValue)
 						return new MusterOutcome(
 							UnitDecision.Attack(target.Value.ActorId,

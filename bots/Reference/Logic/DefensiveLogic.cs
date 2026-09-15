@@ -39,6 +39,9 @@ namespace AutoCnC.Reference.Logic
 	public static class DefensiveLogic
 	{
 		public static UnitDecision Decide(in DefensiveState state, in DefensiveTuning tuning)
+			=> Decide(state, tuning, WeaponRole.Unknown);
+
+		public static UnitDecision Decide(in DefensiveState state, in DefensiveTuning tuning, WeaponRole role)
 		{
 			// 0. A unit with no weapon cannot defend anything, so this mode has nothing useful to
 			//    say about it. Bail out rather than interfering: without this, step 3 below drags
@@ -55,7 +58,7 @@ namespace AutoCnC.Reference.Logic
 			//    be caught: the whole point of a defensive unit is that it cannot be baited
 			//    away from what it is guarding.
 			{
-				var target = SelectTarget(state, tuning);
+				var target = SelectTarget(state, tuning, role);
 				if (target.HasValue)
 					return UnitDecision.Attack(target.Value.ActorId, $"engaging {target.Value.Kind} at {target.Value.DistanceUnits}u");
 			}
@@ -78,6 +81,15 @@ namespace AutoCnC.Reference.Logic
 		/// the leash, and any aircraft not already inside weapon range.
 		/// </remarks>
 		public static ThreatSnapshot? SelectTarget(in DefensiveState state, in DefensiveTuning tuning)
+			=> SelectTarget(state, tuning, WeaponRole.Unknown);
+
+		/// <inheritdoc cref="SelectTarget(in DefensiveState, in DefensiveTuning)"/>
+		/// <remarks>
+		/// The <paramref name="role"/> overload lets a unit prefer what its own warhead can
+		/// actually hurt. It only ever reorders candidates that survived the filters above;
+		/// nothing becomes engageable because of it, and nothing stops being engageable either.
+		/// </remarks>
+		public static ThreatSnapshot? SelectTarget(in DefensiveState state, in DefensiveTuning tuning, WeaponRole role)
 		{
 			var threats = state.Threats;
 			if (threats == null || threats.Count == 0)
@@ -107,7 +119,7 @@ namespace AutoCnC.Reference.Logic
 				if (!withinWeaponRange && reachDistance > tuning.LeashRadiusUnits)
 					continue;
 
-				var score = ScoreThreat(t, state.WeaponRangeUnits);
+				var score = ScoreThreat(t, state.WeaponRangeUnits, role);
 				if (score > bestScore || (score == bestScore && best.HasValue && t.ActorId < best.Value.ActorId))
 				{
 					bestScore = score;
@@ -121,7 +133,7 @@ namespace AutoCnC.Reference.Logic
 		/// <summary>
 		/// Higher is more urgent. Integer-only so the ordering is bit-identical on every client.
 		/// </summary>
-		static int ScoreThreat(in ThreatSnapshot t, int weaponRangeUnits)
+		static int ScoreThreat(in ThreatSnapshot t, int weaponRangeUnits, WeaponRole role)
 		{
 			var score = 0;
 
@@ -133,6 +145,8 @@ namespace AutoCnC.Reference.Logic
 			if (t.DistanceUnits <= weaponRangeUnits)
 				score += 5_000;
 
+			// How dangerous the class is. Unchanged, and deliberately so: this is a statement
+			// about the enemy, and it is true whoever is doing the looking.
 			score += t.Kind switch
 			{
 				// An aircraft that is actually in range outranks everything, because the shot
@@ -149,6 +163,16 @@ namespace AutoCnC.Reference.Logic
 				ThreatKind.Structure => 200,
 				_ => 0,
 			};
+
+			// ...and how much of that danger this particular weapon can do anything about. This
+			// is the term the table above cannot carry, because it is a statement about us.
+			//
+			// Weighted above the class spread on purpose. An e3 rocket does 319 damage a second
+			// to infantry and 1,593 to a vehicle; preferring the vehicle by 200 points, as the
+			// class table alone did, is not a preference proportional to a five-fold difference
+			// in outcome. It sits below the in-range bonus just as deliberately, so a better
+			// matchup is never a reason to give up a shot we already have and walk.
+			score += WeaponMatchLogic.MatchBonus(role, t.Kind);
 
 			// Finish wounded targets first: removes enemy DPS from the field fastest.
 			score += 100 - Clamp(t.HealthPercent, 0, 100);

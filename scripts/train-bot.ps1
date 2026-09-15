@@ -10,9 +10,12 @@
     Agent configuration is provider-neutral JSON:
       { "command": "copilot", "arguments": ["-p", "{prompt}", "--allow-all-tools"] }
 
-    Supported placeholders are {prompt}, {promptFile}, {project}, {workspace}, {evidence}, and
-    {run}. The built-in Copilot configuration grants access to {evidence}, but not to the
-    launcher's reversible source snapshot stored elsewhere in the run.
+    Supported placeholders are {prompt}, {promptFile}, {project}, {workspace}, {evidence},
+    {sessionId}, and {run}. The built-in Copilot configuration grants access to {evidence}, but
+    not to the launcher's reversible source snapshot stored elsewhere in the run.
+
+    {sessionId} pins one agent conversation per fight, so this round, any repair that follows it,
+    and anything chat-bot.ps1 sends before or after share the same memory.
 
 .PARAMETER BattleBot
     The bot project to edit and verify.
@@ -107,6 +110,16 @@ $workspace = Split-Path -Parent $project
 $promptFile = Join-Path $evidence 'agent-prompt.txt'
 $transcript = Join-Path $run 'agent-transcript.txt'
 $statusFile = Join-Path $run 'agent-status.json'
+
+# One conversation per fight. The improvement round, any repair that follows it, and anything the
+# player types before or after all resume this id, so the agent is the same correspondent
+# throughout rather than a stranger who has read the same files.
+$sessionId = [string]$manifest.AgentSessionId
+if (-not $sessionId) {
+    $sessionId = [guid]::NewGuid().ToString()
+    $manifest | Add-Member -NotePropertyName AgentSessionId -NotePropertyValue $sessionId -Force
+    $manifest | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $manifestPath -Encoding utf8
+}
 
 function Write-AgentStatus {
     param(
@@ -231,6 +244,7 @@ if (Test-Path -LiteralPath $configurationPath) {
         command = 'copilot'
         arguments = @(
             '-p', '{prompt}',
+            '--session-id', '{sessionId}',
             '--allow-all-tools',
             '--no-ask-user',
             '--no-custom-instructions',
@@ -251,6 +265,7 @@ $replacements = [ordered]@{
     '{workspace}' = $workspace
     '{run}' = $run
     '{evidence}' = $evidence
+    '{sessionId}' = $sessionId
 }
 
 $agentArguments = foreach ($argument in @($agent.arguments)) {

@@ -59,6 +59,18 @@ open separately, remain available after a fight and share the command-console pa
 No new multiplayer service is implied: this launcher configures local AI skirmishes;
 OpenRA's lobby is separate.
 
+The improvement window is a conversation as well as a record. Its **Chat** tab talks to the agent
+belonging to the selected fight, and there is exactly one of those: the same agent reads the
+evidence, makes the changes, repairs them when verification fails, and answers questions. So
+steering it beforehand and interrogating it afterwards are the same conversation, and it does not
+have to be told twice what it already did. The box stays open while the agent works. A message
+typed during a round is shown as waiting and delivered in order the moment the agent is free,
+rather than being refused for arriving at an inconvenient time — the thought you have while
+watching a transcript scroll is usually the one worth keeping. Enter sends and Shift+Enter starts a
+line. Talking is available where starting another round is not, including before any evidence has
+been read and after the agent's changes are already in the workspace. Stopping the operation
+discards queued messages along with it.
+
 ## Visual system and implementation
 
 | Role | Treatment |

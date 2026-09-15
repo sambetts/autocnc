@@ -41,6 +41,7 @@ namespace AutoCnC.Launcher
 		public string RunBotScript => Path.Combine(ScriptsDir, "run-bot.ps1");
 		public string NewBotScript => Path.Combine(ScriptsDir, "new-bot.ps1");
 		public string TrainBotScript => Path.Combine(ScriptsDir, "train-bot.ps1");
+		public string ChatBotScript => Path.Combine(ScriptsDir, "chat-bot.ps1");
 		public string VerifyBotScript => Path.Combine(ScriptsDir, "verify-bot.ps1");
 		public string LaunchScript => Path.Combine(ScriptsDir, "launch.ps1");
 		public string BuildScript => Path.Combine(ScriptsDir, "build.ps1");

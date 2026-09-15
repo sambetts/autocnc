@@ -142,9 +142,21 @@ namespace AutoCnC.Launcher
 
 	public sealed class TrainingRunManifest
 	{
-		public int SchemaVersion { get; set; } = 6;
+		public int SchemaVersion { get; set; } = 7;
 		public string Id { get; set; }
 		public string Status { get; set; }
+
+		/// <summary>
+		/// The coding agent's conversation, shared by every turn this fight ever produces.
+		/// </summary>
+		/// <remarks>
+		/// One id per fight rather than one per attempt, so the improvement round, the repair that
+		/// follows a failure, and anything the player types before or after all land in the same
+		/// conversation. An agent that already remembers what it changed and why does not have to
+		/// be re-taught it, and the player is talking to the same correspondent throughout instead
+		/// of to a stranger who has read the same files.
+		/// </remarks>
+		public string AgentSessionId { get; set; }
 		public DateTime CreatedUtc { get; set; }
 		public DateTime? CompletedUtc { get; set; }
 		public string BotPath { get; set; }
@@ -191,6 +203,9 @@ namespace AutoCnC.Launcher
 		public string AgentConfigurationPath => Path.Combine(RunDirectory, "agent-command.json");
 		public string AgentTranscriptPath => Path.Combine(RunDirectory, "agent-transcript.txt");
 		public string AgentStatusPath => Path.Combine(RunDirectory, "agent-status.json");
+		public string ChatPath => Path.Combine(RunDirectory, "agent-chat.jsonl");
+		public string ChatMessagePath => Path.Combine(RunDirectory, "agent-chat-message.txt");
+		public string ChatTranscriptPath => Path.Combine(RunDirectory, "agent-chat-turn.txt");
 		public string AttemptsDirectory => Path.Combine(EvidenceDirectory, "attempts");
 		public string SnapshotDirectory => Path.Combine(RunDirectory, "source-before-agent");
 		public string SnapshotManifestPath => Path.Combine(RunDirectory, "source-before-agent.json");
@@ -216,6 +231,18 @@ namespace AutoCnC.Launcher
 			(Manifest.Agent == null || Manifest.Agent.ChangeCount == 0 ||
 				Manifest.Agent.RestoredUtc != null || Manifest.Agent.Cancelled ||
 				Manifest.Agent.ExitCode is int exitCode && exitCode != 0);
+
+		/// <summary>
+		/// True when the player can hold a conversation with this fight's coding agent.
+		/// </summary>
+		/// <remarks>
+		/// Deliberately weaker than <see cref="CanImprove"/>. Talking is how you steer a round
+		/// before it starts and interrogate it after it ends, so it has to be available in states
+		/// where starting another round is not: with the evidence still unread, and once the
+		/// agent's changes are already in the workspace and there is nothing left to do but ask it
+		/// what it did.
+		/// </remarks>
+		public bool CanChat => IsEditable;
 
 		TrainingRun(string directory, TrainingRunManifest manifest)
 		{
@@ -509,6 +536,40 @@ namespace AutoCnC.Launcher
 
 			return JsonSerializer.Deserialize<TrainingAgentExecutionStatus>(
 				File.ReadAllText(AgentStatusPath), JsonOptions);
+		}
+
+		/// <summary>
+		/// The id of the coding agent's conversation for this fight, created on first use.
+		/// </summary>
+		/// <remarks>
+		/// Created here rather than when the fight is recorded because most fights are never
+		/// improved, and a session id handed to nothing is a promise of a conversation that does
+		/// not exist. Asking for it is what brings it into being, so the first person to speak —
+		/// the player typing before the round, or the round itself — is the one who opens it.
+		/// </remarks>
+		public string EnsureAgentSessionId()
+		{
+			if (!string.IsNullOrWhiteSpace(Manifest.AgentSessionId))
+				return Manifest.AgentSessionId;
+
+			Manifest.AgentSessionId = Guid.NewGuid().ToString();
+			try
+			{
+				Save();
+			}
+			catch (IOException)
+			{
+				Manifest.AgentSessionId = null;
+				throw;
+			}
+			catch (UnauthorizedAccessException)
+			{
+				Manifest.AgentSessionId = null;
+				throw;
+			}
+
+			ExportFightManifest();
+			return Manifest.AgentSessionId;
 		}
 
 		public void AgentStarted(string command, string recoveryTranscript = null,

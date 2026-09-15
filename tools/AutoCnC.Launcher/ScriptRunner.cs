@@ -18,12 +18,21 @@ using System.Text.Json;
 
 namespace AutoCnC.Launcher
 {
+	/// <summary>What a queued job is, when that changes how its ending is handled.</summary>
+	public enum ScriptJobKind
+	{
+		Generic,
+		Improvement,
+		Chat
+	}
+
 	/// <summary>One thing to run: a repository script, with arguments.</summary>
 	public sealed class ScriptJob
 	{
 		public string Title { get; init; }
 		public string ScriptPath { get; init; }
 		public IReadOnlyList<string> Arguments { get; init; } = [];
+		public ScriptJobKind Kind { get; init; } = ScriptJobKind.Generic;
 		public bool PreserveColor { get; init; }
 		public string CancellationFile { get; init; }
 		public Action<TerminalLine> Output { get; init; }

@@ -21,9 +21,14 @@ namespace AutoCnC.Launcher
 	{
 		readonly TabControl views;
 		readonly TabPage progressTab;
+		readonly TabPage chatTab;
 		readonly TabPage promptTab;
 		readonly TabPage nextPromptTab;
 		readonly RichTextBox progress;
+		readonly RichTextBox conversation;
+		readonly TextBox chatInput;
+		readonly Button sendChat;
+		readonly Label chatStatus;
 		readonly TextBox prompt;
 		readonly TextBox gameGuide;
 		readonly JsonTreeView gameRules;
@@ -35,13 +40,27 @@ namespace AutoCnC.Launcher
 		readonly Button applyNextPrompt;
 		readonly Font boldProgressFont;
 		readonly TerminalTextParser transcriptParser = new();
+		readonly TerminalTextParser chatParser = new();
 		readonly TaskbarProgress taskbarProgress = new();
 
 		bool liveOutputStarted;
+		bool chatStreaming;
 		TrainingRun shownRun;
+		AgentConversation chat;
 		internal TrainingRun ShownRun => shownRun;
 
 		public event Action<TrainingRun, string> NextPromptAccepted;
+
+		/// <summary>Raised when the window begins showing a different run.</summary>
+		/// <remarks>
+		/// The conversation belongs to the run, not to the window, and the window is handed a run
+		/// from four different directions. Announcing the change is what keeps the Chat tab from
+		/// showing one fight's history beside another fight's transcript.
+		/// </remarks>
+		public event Action<TrainingRun> ShownRunChanged;
+
+		/// <summary>Raised when the player has something to say to the agent.</summary>
+		public event Action<TrainingRun, string> MessageSent;
 
 		internal string AgentProgressText => progress.Text;
 		internal string AgentPromptText => prompt.Text;
@@ -50,6 +69,10 @@ namespace AutoCnC.Launcher
 		internal string SelectedView => views.SelectedTab?.Text;
 		internal string NextPromptText => nextPrompt.Text;
 		internal bool CanAcceptNextPrompt => applyNextPrompt.Enabled;
+		internal string ConversationText => conversation.Text;
+		internal string ChatStatusText => chatStatus.Text;
+		internal string ChatInputText { get => chatInput.Text; set => chatInput.Text = value; }
+		internal bool CanSendChat => sendChat.Enabled;
 		internal Color ProgressColorAt(int index)
 		{
 			progress.Select(index, 1);
@@ -87,6 +110,68 @@ namespace AutoCnC.Launcher
 			progressTab = new TabPage("Progress") { BackColor = Paper, Padding = new Padding(2) };
 			progressTab.Controls.Add(progress);
 			progressTab.Controls.Add(summary);
+
+			conversation = new RichTextBox
+			{
+				Dock = DockStyle.Fill,
+				ReadOnly = true,
+				DetectUrls = false,
+				BorderStyle = BorderStyle.None,
+				BackColor = Paper,
+				ForeColor = Ink,
+				Font = new Font(FontFamily.GenericMonospace, 9f),
+				HideSelection = false
+			};
+
+			chatInput = new TextBox
+			{
+				Dock = DockStyle.Fill,
+				Multiline = true,
+				ScrollBars = ScrollBars.Vertical,
+				BackColor = CommandTheme.Field,
+				ForeColor = Ink,
+				MaxLength = AgentConversation.MaxMessageLength,
+				Font = new Font(FontFamily.GenericMonospace, 9f)
+			};
+			chatInput.TextChanged += (_, _) => UpdateChatControls();
+			chatInput.KeyDown += ChatInputKeyDown;
+
+			sendChat = new ActionButton { Text = "Send", Enabled = false };
+			sendChat.Click += (_, _) => SubmitChatMessage();
+
+			chatStatus = new Label
+			{
+				Dock = DockStyle.Fill,
+				AutoSize = false,
+				ForeColor = Faded,
+				TextAlign = ContentAlignment.MiddleLeft,
+				Padding = new Padding(4, 0, 4, 0)
+			};
+
+			var chatComposer = new TableLayoutPanel
+			{
+				Dock = DockStyle.Bottom,
+				ColumnCount = 2,
+				RowCount = 2,
+				Height = 104,
+				Padding = new Padding(6, 4, 6, 4),
+				BackColor = CommandTheme.Surface
+			};
+			chatComposer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+			chatComposer.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+			chatComposer.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+			chatComposer.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+			chatComposer.Controls.Add(chatInput, 0, 0);
+			chatComposer.Controls.Add(sendChat, 1, 0);
+			chatComposer.Controls.Add(chatStatus, 0, 1);
+			chatComposer.SetColumnSpan(chatStatus, 2);
+
+			chatTab = new TabPage("Chat") { BackColor = Paper, Padding = new Padding(2) };
+			chatTab.Controls.Add(conversation);
+			chatTab.Controls.Add(chatComposer);
+			chatTab.Controls.Add(Heading(
+				"Talk to this fight's agent. It remembers every round and every message. " +
+				"Enter sends, Shift+Enter starts a line."));
 
 			prompt = TextPane();
 			gameGuide = TextPane();
@@ -150,6 +235,7 @@ namespace AutoCnC.Launcher
 
 			views = new CommandTabs { Dock = DockStyle.Fill };
 			views.TabPages.Add(progressTab);
+			views.TabPages.Add(chatTab);
 			views.TabPages.Add(promptTab);
 			views.TabPages.Add(Page("Game guide", gameGuide));
 			views.TabPages.Add(Page("Units & weapons", gameRules));
@@ -161,7 +247,7 @@ namespace AutoCnC.Launcher
 
 		public void StartAgentRun(TrainingRun run)
 		{
-			shownRun = run;
+			SetShownRun(run);
 			LoadInputs(run);
 			changes.Items.Clear();
 			progress.Clear();
@@ -175,11 +261,12 @@ namespace AutoCnC.Launcher
 			views.SelectedTab = progressTab;
 			Text = "AutoC&C — Improvement (running)";
 			taskbarProgress.SetBusy(Handle, busy: true);
+			UpdateChatControls();
 		}
 
 		public void StartVerificationRun(TrainingRun run)
 		{
-			shownRun = run;
+			SetShownRun(run);
 			LoadInputs(run);
 			progress.Clear();
 			transcriptParser.Reset();
@@ -188,6 +275,7 @@ namespace AutoCnC.Launcher
 			views.SelectedTab = progressTab;
 			Text = "AutoC&C — Improvement (verifying)";
 			taskbarProgress.SetBusy(Handle, busy: true);
+			UpdateChatControls();
 		}
 
 		public void AppendAgentOutput(TerminalLine line)
@@ -203,7 +291,7 @@ namespace AutoCnC.Launcher
 
 		public void CompleteAgentRun(TrainingRun run)
 		{
-			shownRun = run;
+			SetShownRun(run);
 			LoadInputs(run);
 			LoadChanges(run);
 
@@ -220,11 +308,12 @@ namespace AutoCnC.Launcher
 			LoadNextPrompt(run);
 			Text = "AutoC&C — Improvement (finished)";
 			taskbarProgress.SetBusy(Handle, busy: false);
+			UpdateChatControls();
 		}
 
 		public void ShowAgentRun(TrainingRun run, bool promptFirst = false)
 		{
-			shownRun = run;
+			SetShownRun(run);
 			LoadInputs(run);
 			LoadChanges(run);
 
@@ -245,6 +334,7 @@ namespace AutoCnC.Launcher
 			LoadNextPrompt(run);
 			views.SelectedTab = promptFirst ? promptTab : progressTab;
 			taskbarProgress.SetBusy(Handle, result?.ExitCode == null && result?.StartedUtc != null);
+			UpdateChatControls();
 		}
 
 		public void MarkNextPromptSaved()
@@ -259,6 +349,160 @@ namespace AutoCnC.Launcher
 			var suggestion = nextPrompt.Text.Trim();
 			if (shownRun != null && suggestion.Length > 0)
 				NextPromptAccepted?.Invoke(shownRun, suggestion);
+		}
+
+		/// <summary>Shows the conversation belonging to the run on display.</summary>
+		public void ShowConversation(AgentConversation conversation)
+		{
+			chat = conversation;
+			chatStreaming = false;
+			RefreshChat();
+		}
+
+		void SetShownRun(TrainingRun run)
+		{
+			var changed = !ReferenceEquals(shownRun, run);
+			shownRun = run;
+			if (changed)
+				ShownRunChanged?.Invoke(run);
+		}
+
+		/// <summary>Redraws what has been said and what is still waiting to be said.</summary>
+		public void RefreshChat()
+		{
+			RenderConversation();
+			UpdateChatControls();
+		}
+
+		/// <summary>Starts a live block for the turn now being answered.</summary>
+		public void BeginChatTurn()
+		{
+			chatStreaming = true;
+			chatParser.Reset();
+			RenderConversation();
+			UpdateChatControls();
+		}
+
+		public void AppendChatOutput(TerminalLine line)
+		{
+			if (!chatStreaming)
+				return;
+
+			AppendTo(conversation, line, scroll: true);
+		}
+
+		/// <summary>Closes the live block once the finished turn has been recorded.</summary>
+		public void EndChatTurn()
+		{
+			chatStreaming = false;
+			RefreshChat();
+		}
+
+		internal void SubmitChatMessage()
+		{
+			var message = AgentConversation.Normalize(chatInput.Text);
+			if (shownRun == null || message.Length == 0)
+				return;
+
+			chatInput.Clear();
+			MessageSent?.Invoke(shownRun, message);
+		}
+
+		void ChatInputKeyDown(object sender, KeyEventArgs e)
+		{
+			if (e.KeyCode != Keys.Enter || e.Shift)
+				return;
+
+			// Suppressed as well as handled: without this the newline still reaches the box and
+			// the next message starts with a blank line nobody typed.
+			e.Handled = true;
+			e.SuppressKeyPress = true;
+			if (sendChat.Enabled)
+				SubmitChatMessage();
+		}
+
+		void UpdateChatControls()
+		{
+			var hasRun = shownRun?.CanChat == true;
+			var typed = AgentConversation.Normalize(chatInput.Text).Length > 0;
+			chatInput.Enabled = hasRun;
+			sendChat.Enabled = hasRun && typed;
+
+			if (!hasRun)
+			{
+				chatStatus.Text = shownRun == null
+					? "Select a battle to talk about its bot."
+					: "This session has no editable bot workspace to talk about.";
+				return;
+			}
+
+			var waiting = chat?.PendingCount ?? 0;
+			chatStatus.Text = chat?.IsBusy == true
+				? waiting == 0
+					? "The agent is answering…"
+					: $"The agent is answering — {waiting} message(s) waiting behind it."
+				: waiting > 0
+					? $"{waiting} message(s) will be delivered when the agent is free."
+					: "The agent answers when it is free; it is safe to type while it works.";
+		}
+
+		void RenderConversation()
+		{
+			conversation.Clear();
+			if (chat == null)
+			{
+				AppendChatNote("Nothing has been said yet.");
+				return;
+			}
+
+			foreach (var entry in chat.History)
+				AppendChatEntry(entry);
+
+			foreach (var waiting in chat.Pending)
+				AppendChatNote("Waiting to send: " + waiting);
+
+			if (chatStreaming)
+				AppendChatHeading("Agent", CommandTheme.Green);
+
+			conversation.SelectionStart = conversation.TextLength;
+			conversation.ScrollToCaret();
+		}
+
+		void AppendChatEntry(AgentChatEntry entry)
+		{
+			var (who, color) = entry.Speaker switch
+			{
+				AgentChatSpeaker.Player => ("You", CommandTheme.Amber),
+				AgentChatSpeaker.Agent => ("Agent", CommandTheme.Green),
+				_ => ("Launcher", Faded)
+			};
+
+			AppendChatHeading(
+				entry.Deferred && entry.Speaker == AgentChatSpeaker.Player
+					? who + " (sent once the agent was free)"
+					: who,
+				color);
+			AppendChatBody(entry.Text, entry.Speaker == AgentChatSpeaker.Launcher ? Faded : Ink);
+		}
+
+		void AppendChatNote(string text) => AppendChatBody(text, Faded);
+
+		void AppendChatHeading(string text, Color color)
+		{
+			conversation.SelectionStart = conversation.TextLength;
+			conversation.SelectionLength = 0;
+			conversation.SelectionColor = color;
+			conversation.SelectionFont = boldProgressFont;
+			conversation.AppendText(text + Environment.NewLine);
+		}
+
+		void AppendChatBody(string text, Color color)
+		{
+			conversation.SelectionStart = conversation.TextLength;
+			conversation.SelectionLength = 0;
+			conversation.SelectionColor = color;
+			conversation.SelectionFont = conversation.Font;
+			conversation.AppendText((text ?? "") + Environment.NewLine + Environment.NewLine);
 		}
 
 		void ValidateNextPromptDraft()
@@ -344,29 +588,31 @@ namespace AutoCnC.Launcher
 			progress.ScrollToCaret();
 		}
 
-		void Append(TerminalLine line, bool scroll)
+		void Append(TerminalLine line, bool scroll) => AppendTo(progress, line, scroll);
+
+		void AppendTo(RichTextBox target, TerminalLine line, bool scroll)
 		{
-			progress.SelectionStart = progress.TextLength;
-			progress.SelectionLength = 0;
+			target.SelectionStart = target.TextLength;
+			target.SelectionLength = 0;
 			var hasAnsiStyle = line.Spans.Any(span =>
 				span.Style.Foreground.HasValue || span.Style.Bold);
 			var fallback = hasAnsiStyle ? default : SemanticStyle(line.PlainText);
 
 			foreach (var span in line.Spans)
 			{
-				progress.SelectionColor = span.Style.Foreground ?? fallback.Foreground ?? Ink;
-				progress.SelectionFont = span.Style.Bold || fallback.Bold ? boldProgressFont : progress.Font;
-				progress.AppendText(span.Text);
+				target.SelectionColor = span.Style.Foreground ?? fallback.Foreground ?? Ink;
+				target.SelectionFont = span.Style.Bold || fallback.Bold ? boldProgressFont : target.Font;
+				target.AppendText(span.Text);
 			}
 
-			progress.SelectionColor = Ink;
-			progress.SelectionFont = progress.Font;
-			progress.AppendText(Environment.NewLine);
+			target.SelectionColor = Ink;
+			target.SelectionFont = target.Font;
+			target.AppendText(Environment.NewLine);
 
 			if (scroll)
 			{
-				progress.SelectionStart = progress.TextLength;
-				progress.ScrollToCaret();
+				target.SelectionStart = target.TextLength;
+				target.ScrollToCaret();
 			}
 		}
 

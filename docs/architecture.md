@@ -311,6 +311,7 @@ The launcher remains a front end over scripts rather than a second build system:
 New bot        -> scripts/new-bot.ps1 -> standalone solution + package references
 Deploy / Fight -> scripts/run-bot.ps1 -> build, install, optionally launch
 Improve        -> scripts/train-bot.ps1 -> local coding agent -> build, install
+Chat           -> scripts/chat-bot.ps1 -> same agent session, one message
 ```
 
 `scripts/authoring-api.version` is the compatibility contract between that UI and those scripts.
@@ -415,6 +416,19 @@ progress and cleared on every terminal state.
 no-agent retry path cannot drift. A failed agent attempt is archived under `evidence/attempts`;
 recovery keeps the current source edits and prepends the archived failure context to the next
 agent prompt. The original source snapshot remains outside agent-visible evidence.
+
+A prompt-mode agent answers and exits, so the launcher's conversation continuity is not a process
+that stays up but a session id pinned per fight in `manifest.json` and bound to `{sessionId}` in
+the provider-neutral agent command. Every turn resumes it: the improvement round, the repair that
+follows a failed one, and each message sent through `chat-bot.ps1`. The agent that is asked what it
+changed is therefore the agent that changed it, with the round still in its context. Turns share the
+single script queue, which is what makes typing during a round safe — two processes resuming one
+session would interleave into it, so a message typed while the agent is busy is recorded, held, and
+delivered in order when it is free. Queued messages are delivered ahead of the next continuous
+training stage, and whether a battle had just finished is carried across that turn so delivering one
+cannot cost the loop its next step. What was said is appended to `agent-chat.jsonl` beside the run,
+so a conversation outlives the launcher session. Stopping discards what is queued: those questions
+were written for a situation the player has just called off.
 
 `BattleSetup` is listed *ahead of* `LobbyCommands` in `mod.yaml`, which matters for exactly one
 reason: the engine starts a launched map by issuing a hardcoded `option gamespeed default` from

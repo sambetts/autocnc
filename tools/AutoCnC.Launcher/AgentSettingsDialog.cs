@@ -80,7 +80,10 @@ namespace AutoCnC.Launcher
 			grid.Controls.Add(argumentsBox, 0, 3);
 			grid.Controls.Add(new Label
 			{
-				Text = "Use {prompt} or {promptFile}. Also available: {project}, {workspace}, {evidence}, and {run}.",
+				Text = "Use {prompt} or {promptFile}. Also available: {project}, {workspace}, " +
+					"{evidence}, {sessionId}, and {run}." + Environment.NewLine +
+					"{sessionId} keeps every round and every chat message in one agent conversation; " +
+					"drop it and the agent forgets between turns.",
 				AutoSize = true,
 				ForeColor = SystemColors.GrayText,
 				Margin = new Padding(0, 6, 0, 6)

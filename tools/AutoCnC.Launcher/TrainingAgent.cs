@@ -51,6 +51,7 @@ namespace AutoCnC.Launcher
 		public static readonly string[] DefaultArguments =
 		[
 			"-p", "{prompt}",
+			"--session-id", "{sessionId}",
 			"--allow-all-tools",
 			"--no-ask-user",
 			"--no-custom-instructions",
@@ -63,6 +64,16 @@ namespace AutoCnC.Launcher
 			"-p", "{prompt}",
 			"--allow-all-tools",
 			"--no-ask-user",
+			"--no-custom-instructions",
+			"--no-remote-export",
+			"--add-dir", "{evidence}"
+		];
+
+		static readonly string[] EarlierDefaultArguments =
+		[
+			"-p", "{prompt}",
+			"--allow-all-tools",
+			"--no-ask-user",
 			"--no-color",
 			"--no-custom-instructions",
 			"--no-remote-export",
@@ -70,7 +81,7 @@ namespace AutoCnC.Launcher
 			"--add-dir", "{evidence}"
 		];
 
-		static readonly string[] EarlierDefaultArguments =
+		static readonly string[] OlderDefaultArguments =
 		[
 			"-p", "{prompt}",
 			"--allow-all-tools",
@@ -102,6 +113,7 @@ namespace AutoCnC.Launcher
 
 			return arguments.SequenceEqual(PreviousDefaultArguments, StringComparer.Ordinal) ||
 				arguments.SequenceEqual(EarlierDefaultArguments, StringComparer.Ordinal) ||
+				arguments.SequenceEqual(OlderDefaultArguments, StringComparer.Ordinal) ||
 				arguments.SequenceEqual(InitialDefaultArguments, StringComparer.Ordinal)
 				? [.. DefaultArguments]
 				: arguments;
@@ -126,6 +138,7 @@ namespace AutoCnC.Launcher
 				throw new InvalidOperationException("The saved agent prompt is invalid: " + error);
 
 			Directory.CreateDirectory(run.EvidenceDirectory);
+			run.EnsureAgentSessionId();
 			File.Copy(gameGuidePath, run.GameGuidePath, true);
 			File.Copy(mechanicsPath, run.MechanicsPath, true);
 			if (!string.Equals(Path.GetFullPath(gameRulesPath), Path.GetFullPath(run.GameRulesPath),
@@ -144,9 +157,27 @@ namespace AutoCnC.Launcher
 				throw new InvalidOperationException("The agent command is empty.");
 
 			PrepareContext(run, gameGuidePath, mechanicsPath, gameRulesPath, promptTemplate, recoveryContext);
+			WriteConfiguration(run, command, arguments);
+		}
+
+		/// <summary>
+		/// Records which agent this fight talks to, without preparing a whole evidence packet.
+		/// </summary>
+		/// <remarks>
+		/// Split out because a conversation can start before the first improvement round — steering
+		/// the agent before it reads anything is most of the value of talking early — and without
+		/// this the first message would fall back to a stock agent rather than the one the player
+		/// configured.
+		/// </remarks>
+		public static void WriteConfiguration(TrainingRun run, string command,
+			IReadOnlyList<string> arguments)
+		{
+			if (string.IsNullOrWhiteSpace(command))
+				throw new InvalidOperationException("The agent command is empty.");
 
 			var configuration = new TrainingAgentConfiguration { Command = command.Trim() };
 			configuration.Arguments.AddRange(arguments is { Count: > 0 } ? arguments : DefaultArguments);
+			Directory.CreateDirectory(run.RunDirectory);
 			File.WriteAllText(run.AgentConfigurationPath,
 				JsonSerializer.Serialize(configuration, JsonOptions));
 		}

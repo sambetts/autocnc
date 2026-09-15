@@ -9,8 +9,11 @@
 #endregion
 
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading;
+using System.Windows.Forms;
 using NUnit.Framework;
 
 namespace AutoCnC.Launcher.Tests
@@ -77,6 +80,90 @@ namespace AutoCnC.Launcher.Tests
 			finally
 			{
 				Directory.Delete(root, true);
+			}
+		}
+
+		[Test]
+		public void TheChatTabShowsWhatWasSaidAndKeepsAcceptingWhileTheAgentWorks()
+		{
+			var root = Path.Combine(Path.GetTempPath(), "AutoCnC Chat Window",
+				Guid.NewGuid().ToString("N"));
+			var workspace = Path.Combine(root, "Bot");
+			Directory.CreateDirectory(workspace);
+			var project = Path.Combine(workspace, "Bot.csproj");
+			File.WriteAllText(project, "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+
+			try
+			{
+				var run = TrainingRun.Create(project, new TrainingBattleConfiguration(),
+					Path.Combine(root, "runs"));
+				var conversation = new AgentConversation(run);
+
+				using var window = new ImprovementWindow();
+				window.ShowInTaskbar = false;
+				window.Size = new System.Drawing.Size(900, 600);
+				window.Show();
+				window.ShowAgentRun(run);
+				window.ShowConversation(conversation);
+
+				Assert.That(window.CanSendChat, Is.False, "an empty box has nothing to send");
+
+				string sent = null;
+				window.MessageSent += (_, message) => sent = message;
+				window.ChatInputText = "Focus on the economy.";
+				Assert.That(window.CanSendChat, Is.True);
+				window.SubmitChatMessage();
+
+				Assert.That(sent, Is.EqualTo("Focus on the economy."));
+				Assert.That(window.ChatInputText, Is.Empty, "the box clears once it is sent");
+
+				// What the launcher does with it: queued behind a round that is still running.
+				conversation.Post(sent, agentBusy: true);
+				window.RefreshChat();
+
+				Assert.That(window.ConversationText, Does.Contain("Focus on the economy."));
+				Assert.That(window.ConversationText, Does.Contain("Waiting to send"));
+				Assert.That(window.ChatStatusText, Does.Contain("1 message(s) will be delivered"));
+
+				conversation.TryStartNext(out _);
+				window.BeginChatTurn();
+				Assert.That(window.ChatStatusText, Does.Contain("answering"));
+
+				conversation.Complete("Economy first; it never built a refinery.");
+				window.EndChatTurn();
+
+				Assert.That(window.ConversationText, Does.Contain("never built a refinery"));
+				Assert.That(window.ConversationText, Does.Not.Contain("Waiting to send"));
+
+				// A composer that lays out to nothing is a chat tab you cannot type into, and
+				// every assertion above would still pass.
+				var tabs = Descendants(window).OfType<TabControl>().Single();
+				tabs.SelectedTab = tabs.TabPages.Cast<TabPage>().Single(page => page.Text == "Chat");
+				window.PerformLayout();
+
+				var box = Descendants(window).OfType<TextBox>()
+					.Single(text => text.MaxLength == AgentConversation.MaxMessageLength);
+				var send = Descendants(window).OfType<ActionButton>()
+					.Single(button => button.Text == "Send");
+				Assert.That(box.Width, Is.GreaterThan(80));
+				Assert.That(box.Height, Is.GreaterThan(box.Font.Height));
+				Assert.That(send.Width, Is.GreaterThan(0));
+				Assert.That(tabs.SelectedTab.ClientRectangle.Width,
+					Is.GreaterThan(box.Width), "the composer must sit inside the tab");
+			}
+			finally
+			{
+				Directory.Delete(root, true);
+			}
+		}
+
+		static IEnumerable<Control> Descendants(Control control)
+		{
+			foreach (Control child in control.Controls)
+			{
+				yield return child;
+				foreach (var grandchild in Descendants(child))
+					yield return grandchild;
 			}
 		}
 	}

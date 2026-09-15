@@ -92,6 +92,17 @@ namespace AutoCnC.Launcher
 		bool battleRunning;
 		bool battleFinished;
 
+		/// <summary>
+		/// A battle finished and the cycle has not yet acted on it.
+		/// </summary>
+		/// <remarks>
+		/// Separate from <see cref="battleRunning"/> because a queued conversation turn runs
+		/// between the battle ending and continuous training deciding what to do about it. Reading
+		/// the live flag after that turn would see a battle that is no longer running and conclude
+		/// none had finished, quietly dropping the improvement it was supposed to trigger.
+		/// </remarks>
+		bool battleJustCompleted;
+
 		TextBox repositoryBox;
 		TextBox botBox;
 		ComboBox mapBox;
@@ -643,6 +654,9 @@ namespace AutoCnC.Launcher
 				improvementWindow.FormClosing += ImprovementWindowClosing;
 				improvementWindow.FormClosed += (_, _) => improvementWindow = null;
 				improvementWindow.NextPromptAccepted += AcceptNextPrompt;
+				improvementWindow.MessageSent += SendAgentMessage;
+				improvementWindow.ShownRunChanged += shown =>
+					improvementWindow?.ShowConversation(ConversationFor(shown));
 			}
 
 			improvementWindow.Show(this, 0.05f, 0.9f);
@@ -650,6 +664,9 @@ namespace AutoCnC.Launcher
 			if (created && run != null &&
 				(run.Manifest.Agent != null || File.Exists(run.PromptPath)))
 				improvementWindow.ShowAgentRun(run);
+
+			if (improvementWindow.ShownRun == null && run != null)
+				improvementWindow.ShowConversation(ConversationFor(run));
 			return improvementWindow;
 		}
 
@@ -695,7 +712,8 @@ namespace AutoCnC.Launcher
 		}
 
 		/// <summary>True while the running job is the improvement agent rather than a battle.</summary>
-		bool ImprovementRunning() => runner.IsRunning && activeJob?.Output != null;
+		bool ImprovementRunning() => runner.IsRunning &&
+			activeJob?.Kind == ScriptJobKind.Improvement;
 
 		static TableLayoutPanel Grid(int columns)
 		{
@@ -1666,6 +1684,7 @@ namespace AutoCnC.Launcher
 					"-AgentConfiguration", run.AgentConfigurationPath
 				],
 				PreserveColor = true,
+				Kind = ScriptJobKind.Improvement,
 				Output = AppendImprovementOutput,
 				Completed = code => FinishImprovement(run, code)
 			});
@@ -1810,6 +1829,7 @@ namespace AutoCnC.Launcher
 					"-RunDirectory", run.RunDirectory
 				],
 				PreserveColor = true,
+				Kind = ScriptJobKind.Improvement,
 				Output = AppendImprovementOutput,
 				Completed = code => FinishImprovement(run, code)
 			});
@@ -2033,10 +2053,24 @@ namespace AutoCnC.Launcher
 		{
 			if (queue.Count == 0)
 			{
-				var completedBattle = battleRunning;
-				var automatedBattle = continuousLoop.IsRunning;
-				if (completedBattle)
+				if (battleRunning)
+				{
+					battleJustCompleted = true;
 					StopWatchingBattle("finished");
+				}
+
+				var automatedBattle = continuousLoop.IsRunning;
+
+				// The conversation goes ahead of the next stage. An answer asked for during a
+				// round is worth most before the next one starts, not after it has already
+				// overwritten the evidence the question was about. Whether a battle had just
+				// finished is remembered across the turn, so delivering a message cannot cost
+				// continuous training its next step.
+				if (StartQueuedConversation())
+					return;
+
+				var completedBattle = battleJustCompleted;
+				battleJustCompleted = false;
 
 				if (completedBattle &&
 					continuousLoop.BattleCompleted() == ContinuousTrainingAction.Improve)
@@ -2122,9 +2156,22 @@ namespace AutoCnC.Launcher
 				InvokeJobCompleted(completed, exitCode);
 				StopWatchingBattle("stopped");
 				continuousLoop.Stop();
+				battleJustCompleted = false;
 				Status("Stopped.");
 				stopRequested = false;
 				UpdateEnabledState();
+				return;
+			}
+
+			// A question that could not be answered is not a reason to tear down a training cycle.
+			// It failed on its own and says so in the conversation; the work it interrupted was
+			// going to carry on regardless, and cancelling that would punish the player for asking.
+			if (exitCode != 0 && completed?.Kind == ScriptJobKind.Chat)
+			{
+				RouteJobOutput(completed, $"=== Finished with exit code {exitCode} ===");
+				InvokeJobCompleted(completed, exitCode);
+				Status("The agent could not answer. See the Chat tab in the improvement window.");
+				RunNext();
 				return;
 			}
 
@@ -2134,9 +2181,10 @@ namespace AutoCnC.Launcher
 				InvokeJobCompleted(completed, exitCode);
 				StopWatchingBattle("failed");
 				continuousLoop.Stop();
-				Status($"Stopped with exit code {exitCode}. See the {(completed?.Output == null ? "output" : "improvement")} window.");
+				battleJustCompleted = false;
+				Status($"Stopped with exit code {exitCode}. See the {(completed?.Kind == ScriptJobKind.Generic ? "output" : "improvement")} window.");
 				queue.Clear();
-				if (completed?.Output == null)
+				if (completed?.Kind == ScriptJobKind.Generic)
 					ShowOutputWindow();
 				else if (improvementWindow == null && trainingRun != null)
 					ShowImprovementWindow().ShowAgentRun(trainingRun);
@@ -2186,6 +2234,11 @@ namespace AutoCnC.Launcher
 			stopRequested = runner.IsRunning;
 			continuousLoop.Stop();
 			queue.Clear();
+
+			// Queued questions go with it. They were written for a situation the player has just
+			// called off, and delivering them afterwards would answer a conversation that no
+			// longer applies.
+			ClearQueuedConversation();
 			runner.Stop();
 			Status("Stopping…");
 		}

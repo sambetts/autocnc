@@ -540,8 +540,9 @@ equally supported paths:
 
 1. **Open code** — make the next change yourself, deploy, and fight again.
 2. **Analyze & improve** — let a configured local coding agent inspect that evidence and edit the
-   bot. GitHub Copilot CLI is the default, but **Agent settings** accepts any executable and
-   argument list using `{prompt}` or `{promptFile}`.
+   bot. GitHub Copilot CLI is the default, but **Agent settings** accepts any executable, argument
+   list, and standard input using `{prompt}` or `{promptFile}`. The rendered prompt is too large
+   for a Windows command line, so it is piped to the agent on standard input by default.
 
 In **AI training**, **Train from battle** explicitly selects the evidence to use. The picker shows
 the battle number, recorded time, outcome, and duration; the details below show the map, execution

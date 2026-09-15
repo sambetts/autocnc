@@ -1227,12 +1227,14 @@ namespace AutoCnC.Launcher
 
 		void ConfigureAgent()
 		{
-			using var dialog = new AgentSettingsDialog(settings.AgentCommand, settings.AgentArguments);
+			using var dialog = new AgentSettingsDialog(settings.AgentCommand, settings.AgentArguments,
+				settings.AgentStdin);
 			if (dialog.ShowDialog(this) != DialogResult.OK)
 				return;
 
 			settings.AgentCommand = dialog.AgentCommand;
 			settings.AgentArguments = dialog.AgentArguments;
+			settings.AgentStdin = dialog.AgentStdin;
 			PersistSettings();
 		}
 
@@ -1629,7 +1631,7 @@ namespace AutoCnC.Launcher
 					: TrainingAgent.BuildCancellationContext(previousAgent, archivedTranscript);
 				TrainingAgent.Prepare(run, repo.AgentGameGuide, repo.AgentMechanics, run.GameRulesPath,
 					CurrentPromptTemplate(), settings.AgentCommand, settings.AgentArguments,
-					recoveryContext);
+					settings.AgentStdin, recoveryContext);
 				run.AgentStarted(settings.AgentCommand, archivedTranscript, recovering);
 			}
 			catch (InvalidOperationException ex)

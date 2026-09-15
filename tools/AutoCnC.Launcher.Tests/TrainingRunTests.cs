@@ -11,6 +11,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Text.Json;
 using NUnit.Framework;
 
 namespace AutoCnC.Launcher.Tests
@@ -146,12 +147,34 @@ namespace AutoCnC.Launcher.Tests
 			Assert.That(File.Exists(run.FightManifestPath), Is.True);
 			Assert.That(File.ReadAllText(run.AgentConfigurationPath), Does.Contain("other-agent"));
 			Assert.That(File.ReadAllText(run.AgentConfigurationPath), Does.Contain("{promptFile}"));
+			Assert.That(File.ReadAllText(run.AgentConfigurationPath), Does.Not.Contain("Stdin"),
+				"an agent handed the prompt as a path is not also fed it on standard input");
 
 			TrainingAgent.Prepare(run, gameGuide, mechanics, gameRules,
 				promptTemplate, "copilot", TrainingAgent.DefaultArguments);
 			Assert.That(File.ReadAllText(run.AgentConfigurationPath), Does.Contain("{evidence}"));
 			Assert.That(File.ReadAllText(run.AgentConfigurationPath), Does.Not.Contain("--no-color"));
 			Assert.That(run.SnapshotDirectory, Does.Not.StartWith(run.EvidenceDirectory));
+		}
+
+		/// <summary>
+		/// The rendered prompt is bigger than the 32,767 characters Windows allows on a command
+		/// line, so it has to be handed over on standard input.
+		/// </summary>
+		[Test]
+		public void TheCopilotPromptIsHandedOverOnStandardInputRatherThanInArgv()
+		{
+			var run = NewRun();
+
+			TrainingAgent.Prepare(run, gameGuide, mechanics, gameRules, promptTemplate,
+				"copilot", TrainingAgent.DefaultArguments);
+
+			var configuration = JsonSerializer.Deserialize<TrainingAgentConfiguration>(
+				File.ReadAllText(run.AgentConfigurationPath));
+			Assert.That(configuration.Stdin, Is.EqualTo("{prompt}"));
+			Assert.That(configuration.Arguments, Does.Not.Contain("-p"));
+			Assert.That(TrainingAgent.CarriesPrompt(configuration.Arguments), Is.False,
+				"nothing in argv may carry a prompt that can outgrow the command line");
 		}
 
 		/// <summary>
@@ -591,6 +614,50 @@ namespace AutoCnC.Launcher.Tests
 			Assert.That(upgraded, Does.Not.Contain("--screen-reader"));
 			Assert.That(upgraded, Does.Not.Contain("--no-color"));
 			Assert.That(upgraded, Does.Not.Contain("--silent"));
+		}
+
+		/// <summary>
+		/// Windows caps a command line at 32,767 characters, and the prompt outgrew that once the
+		/// mechanics gospel was inlined into it. Every saved <c>-p {prompt}</c> configuration was
+		/// therefore failing before the agent started, with Windows' misleading "The filename or
+		/// extension is too long", so loading one has to move the prompt to standard input.
+		/// </summary>
+		[Test]
+		public void CopilotDefaultsThatPassedThePromptInArgvUpgradeToStandardInput()
+		{
+			var previous = new[]
+			{
+				"-p", "{prompt}",
+				"--allow-all-tools",
+				"--no-ask-user",
+				"--no-custom-instructions",
+				"--no-remote-export",
+				"--add-dir", "{evidence}"
+			};
+
+			var upgraded = TrainingAgent.UpgradeDefaultArguments("copilot", previous);
+
+			Assert.That(upgraded, Does.Not.Contain("-p"));
+			Assert.That(upgraded, Does.Not.Contain("{prompt}"));
+			Assert.That(upgraded, Does.Contain("--add-dir"), "the evidence grant survives the upgrade");
+			Assert.That(TrainingAgent.UpgradePromptChannel(upgraded, null),
+				Is.EqualTo(TrainingAgent.DefaultStdin));
+		}
+
+		/// <summary>
+		/// The prompt travels through exactly one channel, so a configuration that already names it
+		/// in its arguments must not also be fed it on standard input.
+		/// </summary>
+		[Test]
+		public void AnAgentGivenThePromptInItsArgumentsIsNotAlsoFedItOnStandardInput()
+		{
+			Assert.That(TrainingAgent.UpgradePromptChannel(["--input", "{promptFile}"], null), Is.Null);
+			Assert.That(TrainingAgent.UpgradePromptChannel(["--input", "{promptFile}"], "{prompt}"), Is.Null);
+			Assert.That(TrainingAgent.UpgradePromptChannel(["-p", "{prompt}"], "{prompt}"), Is.Null);
+			Assert.That(TrainingAgent.UpgradePromptChannel(TrainingAgent.DefaultArguments, null),
+				Is.EqualTo("{prompt}"));
+			Assert.That(TrainingAgent.UpgradePromptChannel(TrainingAgent.DefaultArguments, "{promptFile}"),
+				Is.EqualTo("{promptFile}"), "a deliberate choice of channel is kept");
 		}
 
 		[Test]

@@ -20,6 +20,7 @@ namespace AutoCnC.Launcher
 	{
 		readonly TextBox commandBox;
 		readonly TextBox argumentsBox;
+		readonly TextBox stdinBox;
 
 		public string AgentCommand => commandBox.Text.Trim();
 		public string[] AgentArguments => argumentsBox.Lines
@@ -27,7 +28,9 @@ namespace AutoCnC.Launcher
 			.Where(line => line.Length > 0)
 			.ToArray();
 
-		public AgentSettingsDialog(string command, string[] arguments)
+		public string AgentStdin => stdinBox.Text.Trim() is { Length: > 0 } stdin ? stdin : null;
+
+		public AgentSettingsDialog(string command, string[] arguments, string stdin)
 		{
 			Text = "Improvement agent";
 			Font = CommandTheme.Body;
@@ -36,8 +39,8 @@ namespace AutoCnC.Launcher
 			MinimizeBox = false;
 			MaximizeBox = false;
 			ShowInTaskbar = false;
-			MinimumSize = new Size(620, 430);
-			Size = new Size(720, 500);
+			MinimumSize = new Size(620, 480);
+			Size = new Size(720, 550);
 			Padding = new Padding(12);
 
 			commandBox = new TextBox { Dock = DockStyle.Fill, Text = command ?? "copilot" };
@@ -50,23 +53,32 @@ namespace AutoCnC.Launcher
 				Font = new Font(FontFamily.GenericMonospace, 9f),
 				Lines = arguments is { Length: > 0 } ? arguments : TrainingAgent.DefaultArguments
 			};
+			stdinBox = new TextBox
+			{
+				Dock = DockStyle.Fill,
+				Font = new Font(FontFamily.GenericMonospace, 9f),
+				Text = stdin ?? ""
+			};
 
 			var reset = new ActionButton { Text = "Use GitHub Copilot CLI defaults", AutoSize = true };
 			reset.Click += (_, _) =>
 			{
 				commandBox.Text = "copilot";
 				argumentsBox.Lines = TrainingAgent.DefaultArguments;
+				stdinBox.Text = TrainingAgent.DefaultStdin;
 			};
 
 			var ok = new ActionButton { Text = "Save", Primary = true, AutoSize = true, DialogResult = DialogResult.OK };
 			ok.Click += Validate;
 			var cancel = new ActionButton { Text = "Cancel", AutoSize = true, DialogResult = DialogResult.Cancel };
 
-			var grid = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 6 };
+			var grid = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 8 };
 			grid.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 			grid.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 			grid.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 			grid.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+			grid.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+			grid.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 			grid.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 			grid.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 			grid.Controls.Add(new Label { Text = "Command:", AutoSize = true }, 0, 0);
@@ -80,11 +92,20 @@ namespace AutoCnC.Launcher
 			grid.Controls.Add(argumentsBox, 0, 3);
 			grid.Controls.Add(new Label
 			{
-				Text = "Use {prompt} or {promptFile}. Also available: {project}, {workspace}, {evidence}, and {run}.",
+				Text = "Standard input:",
+				AutoSize = true,
+				Margin = new Padding(0, 10, 0, 3)
+			}, 0, 4);
+			grid.Controls.Add(stdinBox, 0, 5);
+			grid.Controls.Add(new Label
+			{
+				Text = "Use {prompt} or {promptFile}. Also available: {project}, {workspace}, {evidence}, and {run}." +
+					Environment.NewLine +
+					"A rendered prompt is far larger than Windows allows on a command line, so send it in on standard input.",
 				AutoSize = true,
 				ForeColor = SystemColors.GrayText,
 				Margin = new Padding(0, 6, 0, 6)
-			}, 0, 4);
+			}, 0, 6);
 
 			var buttons = new FlowLayoutPanel
 			{
@@ -95,7 +116,7 @@ namespace AutoCnC.Launcher
 			buttons.Controls.Add(cancel);
 			buttons.Controls.Add(ok);
 			buttons.Controls.Add(reset);
-			grid.Controls.Add(buttons, 0, 5);
+			grid.Controls.Add(buttons, 0, 7);
 
 			Controls.Add(grid);
 			AcceptButton = ok;
@@ -106,11 +127,12 @@ namespace AutoCnC.Launcher
 		void Validate(object sender, EventArgs e)
 		{
 			if (AgentCommand.Length > 0 &&
-				AgentArguments.Any(a => a.Contains("{prompt}", StringComparison.Ordinal) ||
-					a.Contains("{promptFile}", StringComparison.Ordinal)))
+				(TrainingAgent.CarriesPrompt(AgentArguments) ||
+					TrainingAgent.CarriesPrompt([AgentStdin])))
 				return;
 
-			MessageBox.Show(this, "Set a command and include {prompt} or {promptFile} in its arguments.",
+			MessageBox.Show(this,
+				"Set a command and include {prompt} or {promptFile} in its arguments or standard input.",
 				"AutoC&C", MessageBoxButtons.OK, MessageBoxIcon.Warning);
 			DialogResult = DialogResult.None;
 		}

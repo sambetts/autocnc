@@ -329,11 +329,13 @@ repeats that cheap check without spending another agent run; **Fix failed improv
 the failed transcript and asks the agent to repair the current changes. **Restore previous
 iteration** remains the escape hatch back to the pre-agent snapshot.
 
-The agent command is provider-neutral and configurable as one argument per line. It supports
-`{prompt}`, `{promptFile}`, `{project}`, `{workspace}`, `{evidence}`, and `{run}` placeholders.
-The default Copilot command grants file access only to the bot workspace and `{evidence}`, keeping
-the restore snapshot outside the agent's allowed paths. The equivalent terminal entry point is
-`scripts/train-bot.ps1`.
+The agent command is provider-neutral and configurable as one argument per line, plus a standard
+input line. Both support the `{prompt}`, `{promptFile}`, `{project}`, `{workspace}`, `{evidence}`,
+and `{run}` placeholders. The prompt itself goes in on standard input: it inlines the mechanics
+gospel, so it is already larger than the 32,767 characters Windows allows on a command line, and
+an agent asked to take it in `-p` never starts. The default Copilot command grants file access only
+to the bot workspace and `{evidence}`, keeping the restore snapshot outside the agent's allowed
+paths. The equivalent terminal entry point is `scripts/train-bot.ps1`.
 
 ---
 

@@ -40,6 +40,7 @@ namespace AutoCnC.Launcher
 		public string SelectedTrainingRunDirectory { get; set; }
 		public string AgentCommand { get; set; } = "copilot";
 		public string[] AgentArguments { get; set; } = TrainingAgent.DefaultArguments;
+		public string AgentStdin { get; set; } = TrainingAgent.DefaultStdin;
 		public string AgentPromptTemplate { get; set; }
 
 		[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -61,6 +62,8 @@ namespace AutoCnC.Launcher
 						new LauncherSettings();
 					settings.AgentArguments = TrainingAgent.UpgradeDefaultArguments(
 						settings.AgentCommand, settings.AgentArguments);
+					settings.AgentStdin = TrainingAgent.UpgradePromptChannel(
+						settings.AgentArguments, settings.AgentStdin);
 					return settings;
 				}
 			}

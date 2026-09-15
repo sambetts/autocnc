@@ -58,7 +58,7 @@ namespace AutoCnC.Launcher
 
 		public event Action<TrainingRun> FeedbackRequested;
 		public event Action<TrainingRun> ReplayRequested;
-		public event Action<TrainingRun> DeleteRequested;
+		public event Action<IReadOnlyList<TrainingRun>> DeleteRequested;
 		public event Action<TrainingRun> TrainRequested;
 
 		internal bool CanReviewFeedback => reviewFeedback.Enabled;
@@ -67,9 +67,22 @@ namespace AutoCnC.Launcher
 		internal bool CanTrainFromBattle => trainFromBattle.Enabled;
 		internal string FeedbackText => feedbackPreview.Text;
 		internal string FeedbackActionText => reviewFeedback.Text;
+		internal string DeleteActionText => deleteSession.Text;
+		internal string DeleteMenuText => deleteFromMenu.Text;
 		internal string HistorySummaryText => historySummary.Text;
 		internal ListView RecordedSessions => sessions;
 		internal TrainingRun SelectedRun => selectedRun;
+
+		/// <summary>
+		/// Every battle the deletion actions target, newest first. Falls back to the battle shown by the
+		/// picker so the charts tab still has something to act on when no row is highlighted.
+		/// </summary>
+		internal IReadOnlyList<TrainingRun> SelectedRuns =>
+			sessions.SelectedItems.Count > 0
+				? sessions.SelectedItems.Cast<ListViewItem>()
+					.Select(item => ((RecordedBattleChoice)item.Tag).Run).ToList()
+				: selectedRun == null ? [] : [selectedRun];
+
 		internal int SelectedBattleIndex
 		{
 			get => battlePicker.SelectedIndex;
@@ -193,16 +206,21 @@ namespace AutoCnC.Launcher
 			sessions = new ListView
 			{
 				Dock = DockStyle.Fill, View = View.Details, FullRowSelect = true,
-				MultiSelect = false, HideSelection = false, ShowItemToolTips = true,
+				MultiSelect = true, HideSelection = false, ShowItemToolTips = true,
 				BackColor = CommandTheme.Field, ForeColor = Ink, BorderStyle = BorderStyle.FixedSingle,
-				AccessibleName = "Recorded battles"
+				AccessibleName = "Recorded battles",
+				AccessibleDescription = "Ctrl-click or shift-click to pick several sessions, then right-click to delete them together."
 			};
 			foreach (var (heading, width) in SessionColumns)
 				sessions.Columns.Add(heading, width);
 			sessions.SelectedIndexChanged += (_, _) =>
 			{
-				if (!loadingBattles && sessions.SelectedItems.Count > 0)
-					battlePicker.SelectedIndex = ((RecordedBattleChoice)sessions.SelectedItems[0].Tag).Number - 1;
+				if (loadingBattles)
+					return;
+				var primary = PrimarySelection();
+				if (primary != null)
+					battlePicker.SelectedIndex = ((RecordedBattleChoice)primary.Tag).Number - 1;
+				UpdateFeedbackState();
 			};
 			sessions.ItemActivate += (_, _) => ShowBattle();
 			sessionMenu = new ContextMenuStrip();
@@ -246,7 +264,7 @@ namespace AutoCnC.Launcher
 			{
 				Text = "&Delete session", ForeColor = CommandTheme.Danger,
 				AccessibleName = "Delete selected recorded session",
-				AccessibleDescription = "Permanently delete this session and its saved evidence after confirmation.",
+				AccessibleDescription = "Permanently delete every selected session and its saved evidence after confirmation.",
 				Margin = new Padding(4, 0, 3, 0)
 			};
 			deleteSession.Click += (_, _) => RequestSessionDeletion();
@@ -409,8 +427,9 @@ namespace AutoCnC.Launcher
 
 		internal void RequestSessionDeletion()
 		{
-			if (selectedRun != null && deleteSession.Enabled)
-				DeleteRequested?.Invoke(selectedRun);
+			var runs = SelectedRuns;
+			if (runs.Count > 0 && deleteSession.Enabled)
+				DeleteRequested?.Invoke(runs);
 		}
 
 		internal void RequestTraining()
@@ -419,13 +438,36 @@ namespace AutoCnC.Launcher
 				TrainRequested?.Invoke(selectedRun);
 		}
 
+		/// <summary>
+		/// The row the single-battle actions follow: whichever highlighted row has focus, so a
+		/// multi-row selection keeps showing the battle the user landed on.
+		/// </summary>
+		ListViewItem PrimarySelection()
+		{
+			if (sessions.FocusedItem is { Selected: true } focused)
+				return focused;
+			return sessions.SelectedItems.Count > 0 ? sessions.SelectedItems[0] : null;
+		}
+
+		/// <summary>
+		/// Right-clicking inside an existing multi-row selection keeps it, so the menu can act on every
+		/// highlighted session. Right-clicking elsewhere collapses the selection onto that row.
+		/// </summary>
 		internal void SelectContextBattle(Point location)
 		{
 			var item = sessions.GetItemAt(location.X, location.Y);
-			sessions.SelectedItems.Clear();
 			if (item == null)
+			{
+				sessions.SelectedItems.Clear();
 				return;
-			item.Selected = true;
+			}
+
+			if (!item.Selected)
+			{
+				sessions.SelectedItems.Clear();
+				item.Selected = true;
+			}
+
 			item.Focused = true;
 			battlePicker.SelectedIndex = ((RecordedBattleChoice)item.Tag).Number - 1;
 		}
@@ -538,12 +580,18 @@ namespace AutoCnC.Launcher
 				: Summary(shownLog, finished);
 			result.ForeColor = shownLog.IsDecided ? Ink : Faded;
 			loadingBattles = true;
-			foreach (ListViewItem item in sessions.Items)
+			var rows = sessions.Items.Cast<ListViewItem>().ToList();
+			var match = rows.FirstOrDefault(item => SameRun(((RecordedBattleChoice)item.Tag).Run, selectedRun));
+			if (match?.Selected != true)
 			{
-				item.Selected = SameRun(((RecordedBattleChoice)item.Tag).Run, selectedRun);
-				if (item.Selected && sessions.IsHandleCreated)
-					item.EnsureVisible();
+				foreach (var item in rows)
+					item.Selected = ReferenceEquals(item, match);
+				if (match != null)
+					match.Focused = true;
 			}
+
+			if (match != null && sessions.IsHandleCreated)
+				match.EnsureVisible();
 			loadingBattles = false;
 			UpdateFeedbackState();
 			UpdateTitle();
@@ -564,16 +612,23 @@ namespace AutoCnC.Launcher
 
 		void UpdateFeedbackState()
 		{
+			var targeted = SelectedRuns;
 			reviewFeedback.Text = BattleFeedback.ActionText(selectedRun);
 			reviewFeedback.Enabled = !operationBusy && BattleFeedback.CanReview(selectedRun);
 			replay.Enabled = !operationBusy && selectedRun?.HasRecordedBattle == true &&
 				File.Exists(selectedRun.ReplayPath);
 			statistics.Enabled = selectedRun != null;
-			deleteSession.Enabled = !operationBusy && selectedRun?.CanDelete == true;
+			deleteSession.Text = targeted.Count > 1 ? $"&Delete {targeted.Count} sessions" : "&Delete session";
+			deleteFromMenu.Text = targeted.Count > 1 ? $"Delete {targeted.Count} sessions" : "Delete session";
+			deleteSession.Enabled = !operationBusy && targeted.Count > 0 && targeted.All(run => run.CanDelete);
 			deleteFromMenu.Enabled = deleteSession.Enabled;
-			trainFromBattle.Enabled = !operationBusy && selectedRun?.HasImprovementEvidence == true;
+			deleteFromMenu.ToolTipText = deleteSession.Enabled || targeted.Count == 0 ? null
+				: "Sessions still running a battle or improvement cannot be deleted. Deselect them and try again.";
+			trainFromBattle.Enabled = !operationBusy && targeted.Count == 1 &&
+				selectedRun?.HasImprovementEvidence == true;
 			feedbackStatus.Text = (selectedRun == null ? "" : $"Battle #{battlePicker.SelectedIndex + 1} / ") +
-				BattleFeedback.Status(selectedRun) + (operationBusy ? " / Operation in progress" : "");
+				BattleFeedback.Status(selectedRun) + (targeted.Count > 1 ? $" / {targeted.Count} sessions selected" : "") +
+				(operationBusy ? " / Operation in progress" : "");
 			feedbackStatus.ForeColor = selectedRun?.HasPlayerFeedback == true ? CommandTheme.Green : CommandTheme.Amber;
 			feedbackPreview.Text = selectedRun?.HasPlayerFeedback == true
 				? selectedRun.Manifest.Result.PlayerFeedback : BattleFeedback.Description(selectedRun, operationBusy);

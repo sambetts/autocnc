@@ -307,7 +307,9 @@ Select a row to read or edit its feedback, watch that battle's replay, or open i
 Right-click **Train from this battle** to open AI training with that recording selected.
 **Delete session** permanently removes a completed run and its saved evidence after confirmation,
 including its feedback and restore snapshots, but never deletes the current bot source or original
-OpenRA replay. History, training selection, and trends refresh immediately.
+OpenRA replay. Ctrl-click or shift-click several rows to delete them together in one confirmed
+action; right-clicking inside an existing selection keeps it. History, training selection, and
+trends refresh immediately.
 Incomplete and unrecorded sessions remain visible without invented zero-value stats. The **Trends**
 tab pairs units, army value and base value as the battle was decided with the peak each reached,
 alongside kills and an outcome-colored duration line, comparing the local side against the

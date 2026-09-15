@@ -49,7 +49,9 @@ improvement provides a protected save-and-improve, evidence-only, or cancel deci
 the agent starts. Continuous training stays unattended, with review available after it stops.
 Right-clicking **Train from this battle** selects that row in AI training without invoking an
 agent. A separate **Delete session** command requires confirmation and removes the run's saved
-evidence and restore snapshots, leaving current bot source untouched. It is disabled during
+evidence and restore snapshots, leaving current bot source untouched. The table is multi-select, so
+a right-click inside a highlighted block deletes every session in it behind one confirmation rather
+than forcing a row-by-row cull. It is disabled during
 operations; selection and trends update after deletion. The latest-fight readout stays independent
 of the manually selected training battle.
 The result charts, battle log and agent workspace still

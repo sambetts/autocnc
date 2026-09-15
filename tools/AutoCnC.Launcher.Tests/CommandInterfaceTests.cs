@@ -433,6 +433,64 @@ namespace AutoCnC.Launcher.Tests
 		}
 
 		[Test]
+		public void SeveralSelectedSessionsAreDeletedBehindOneConfirmation()
+		{
+			var oldest = RecordedFeedbackRun(BattleExecutionModes.Rendered);
+			var middle = RecordedFeedbackRun(BattleExecutionModes.Rendered);
+			var latest = RecordedFeedbackRun(BattleExecutionModes.Rendered);
+			settings.LastTrainingRunDirectory = latest.RunDirectory;
+			using var window = Window();
+			var history = OpenHistory(window);
+			Assert.That(history.RecordedSessions.Items.Count, Is.EqualTo(3));
+
+			history.RecordedSessions.Items[0].Selected = true;
+			history.RecordedSessions.Items[1].Selected = true;
+			Assert.That(history.SelectedRuns.Select(run => run.RunDirectory),
+				Is.EqualTo(new[] { latest.RunDirectory, middle.RunDirectory }));
+			Assert.That(history.DeleteActionText, Is.EqualTo("&Delete 2 sessions"));
+
+			var confirmations = new List<string>();
+			Assert.That(window.DeleteRecordedSessions(history.SelectedRuns, message =>
+			{
+				confirmations.Add(message);
+				return true;
+			}), Is.True);
+
+			Assert.That(confirmations.Count, Is.EqualTo(1), "One confirmation covers the whole selection.");
+			Assert.That(confirmations[0], Does.Contain("Permanently delete 2 recorded sessions?"));
+			Assert.That(confirmations[0], Does.Contain("cannot be undone"));
+			Assert.That(Directory.Exists(latest.RunDirectory), Is.False);
+			Assert.That(Directory.Exists(middle.RunDirectory), Is.False);
+			Assert.That(File.Exists(oldest.ManifestPath), Is.True);
+			Assert.That(history.RecordedSessions.Items.Count, Is.EqualTo(1));
+			Assert.That(history.HistorySummaryText, Does.Contain("1 recorded session(s)"));
+			Assert.That(history.DeleteActionText, Is.EqualTo("&Delete session"));
+			Assert.That(window.SelectedTrainingRun.RunDirectory, Is.EqualTo(oldest.RunDirectory));
+			Assert.That(settings.LastTrainingRunDirectory, Is.EqualTo(oldest.RunDirectory));
+			Assert.That(settings.SelectedTrainingRunDirectory, Is.EqualTo(oldest.RunDirectory));
+		}
+
+		[Test]
+		public void ALockedSessionKeepsItsRowWhileTheRestOfTheSelectionGoes()
+		{
+			var locked = RecordedFeedbackRun(BattleExecutionModes.Rendered);
+			var deletable = RecordedFeedbackRun(BattleExecutionModes.Rendered);
+			File.WriteAllText(locked.TelemetryPath, "locked");
+			settings.LastTrainingRunDirectory = deletable.RunDirectory;
+			using var window = Window();
+			var history = OpenHistory(window);
+			using (File.Open(locked.TelemetryPath, FileMode.Open, FileAccess.Read, FileShare.None))
+				Assert.That(() => window.DeleteRecordedSessions([deletable, locked], _ => true),
+					Throws.InstanceOf<IOException>());
+
+			Assert.That(Directory.Exists(deletable.RunDirectory), Is.False);
+			Assert.That(File.Exists(locked.ManifestPath), Is.True);
+			Assert.That(history.RecordedSessions.Items.Count, Is.EqualTo(1));
+			Assert.That(window.SelectedTrainingRun.RunDirectory, Is.EqualTo(locked.RunDirectory));
+			Assert.That(settings.LastTrainingRunDirectory, Is.EqualTo(locked.RunDirectory));
+		}
+
+		[Test]
 		public void DeletingTheLatestSessionPreservesAnOlderTrainingSelection()
 		{
 			var older = RecordedFeedbackRun(BattleExecutionModes.Rendered);

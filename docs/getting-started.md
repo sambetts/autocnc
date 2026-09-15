@@ -552,10 +552,13 @@ workspace, restore, and **Open run** all use that selection. The latest-battle r
 ground stays unchanged. The launcher remembers your training selection separately.
 
 To remove a completed recording, select it in **History & trends** and choose **Delete session**
-(also available in the row's context menu). Confirming permanently removes that session's feedback,
+(also available in the row's context menu). Ctrl-click or shift-click to pick several rows first
+and the command becomes **Delete N sessions**, removing the whole selection behind one
+confirmation. Confirming permanently removes those sessions' feedback,
 stats, saved logs and replay copy, agent history, and restore snapshots, and updates the trends.
-The current bot source, other sessions, and original OpenRA replay are untouched. Deletion and
-training-battle selection are disabled while an operation is running.
+The current bot source, other sessions, and original OpenRA replay are untouched. Deletion is
+blocked while any selected session is still running its battle or improvement, and both deletion
+and training-battle selection are disabled while an operation is running.
 
 **Your battle feedback** is at the top of **Proving ground**, with a matching action in **AI
 training**. After a manual rendered battle, the launcher asks what you noticed about the win or

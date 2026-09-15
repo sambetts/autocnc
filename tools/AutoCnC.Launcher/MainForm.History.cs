@@ -2,6 +2,7 @@
 // Licensed under GPL-3.0-or-later. See LICENSE.
 
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
 using System.Linq;
@@ -138,12 +139,13 @@ namespace AutoCnC.Launcher
 			Status("Training battle selected. Watch its replay or choose Analyze & improve.");
 		}
 
-		void ConfirmDeleteRecordedSession(TrainingRun run)
+		void ConfirmDeleteRecordedSessions(IReadOnlyList<TrainingRun> runs)
 		{
+			var caption = runs?.Count > 1 ? "Delete recorded sessions" : "Delete recorded session";
 			try
 			{
-				DeleteRecordedSession(run, message => MessageBox.Show(resultsWindow ?? (IWin32Window)this,
-					message, "Delete recorded session", MessageBoxButtons.YesNo, MessageBoxIcon.Warning,
+				DeleteRecordedSessions(runs, message => MessageBox.Show(resultsWindow ?? (IWin32Window)this,
+					message, caption, MessageBoxButtons.YesNo, MessageBoxIcon.Warning,
 					MessageBoxDefaultButton.Button2) == DialogResult.Yes);
 			}
 			catch (IOException ex)
@@ -170,57 +172,127 @@ namespace AutoCnC.Launcher
 
 		void ReportSessionDeletionFailure(string detail)
 		{
-			var message = "Could not delete the recorded session. Close any files using its folder and try again.\n\n" + detail;
+			var message = "Could not delete every selected session. Close any files using their folders and try again.\n\n" + detail;
 			Append(message);
-			Status("Session deletion failed. Its history entry has not been removed.");
+			Status("Session deletion failed. Any session still listed has not been removed.");
 			MessageBox.Show(resultsWindow ?? (IWin32Window)this, message, "Delete recorded session",
 				MessageBoxButtons.OK, MessageBoxIcon.Error);
 		}
 
-		internal bool DeleteRecordedSession(TrainingRun run, Func<string, bool> confirm)
+		internal bool DeleteRecordedSession(TrainingRun run, Func<string, bool> confirm) =>
+			DeleteRecordedSessions(run == null ? [] : [run], confirm);
+
+		/// <summary>
+		/// Deletes every chosen session behind one confirmation. Sessions already removed are committed
+		/// even when a later one fails, so a locked folder cannot resurrect the rows before it.
+		/// </summary>
+		internal bool DeleteRecordedSessions(IReadOnlyList<TrainingRun> runs, Func<string, bool> confirm)
 		{
 			ArgumentNullException.ThrowIfNull(confirm);
-			if (OperationInProgress || run?.CanDelete != true || !RunMatchesSelectedBot(run))
+			if (runs == null || runs.Count == 0 || OperationInProgress ||
+				runs.Any(run => run?.CanDelete != true || !RunMatchesSelectedBot(run)))
 				throw new InvalidOperationException("Finish or stop the current operation before deleting a completed session.");
 
-			var message = $"Permanently delete the recorded session from {run.Manifest.CreatedUtc.ToLocalTime():g}?\n\n" +
-				$"Session: {run.Manifest.Id}\nResult: {run.Manifest.Result?.Outcome ?? run.Manifest.Status}\n\n" +
-				"This removes its feedback, statistics, logs, replay copy, agent history, and restore snapshots. " +
-				"It also removes the session from trends. This cannot be undone.\n\n" +
-				"Your bot's current source, other sessions, and the original OpenRA replay will not be changed.";
-			if (!confirm(message))
+			if (!confirm(DeletionConfirmation(runs)))
 				return false;
 			if (OperationInProgress)
 				throw new InvalidOperationException("An operation started while confirmation was open. Stop it before deleting the session.");
 
-			run.Delete(trainingRunsRoot);
-			loadedHistory = loadedHistory.WithoutRun(run);
-			if (SamePath(lastRun?.RunDirectory, run.RunDirectory))
+			var deleted = new List<TrainingRun>();
+			try
+			{
+				foreach (var run in runs)
+				{
+					run.Delete(trainingRunsRoot);
+					deleted.Add(run);
+				}
+			}
+			finally
+			{
+				if (deleted.Count > 0)
+					ForgetDeletedSessions(deleted);
+			}
+
+			return true;
+		}
+
+		void ForgetDeletedSessions(IReadOnlyList<TrainingRun> deleted)
+		{
+			var lastRemoved = false;
+			var trainingRemoved = false;
+			foreach (var run in deleted)
+			{
+				loadedHistory = loadedHistory.WithoutRun(run);
+				if (SamePath(lastRun?.RunDirectory, run.RunDirectory))
+				{
+					lastRun = null;
+					lastRemoved = true;
+				}
+
+				if (SamePath(trainingRun?.RunDirectory, run.RunDirectory))
+				{
+					trainingRun = null;
+					trainingRemoved = true;
+				}
+
+				if (SamePath(matchLog.Path, run.TelemetryPath))
+				{
+					matchTimer.Stop();
+					matchLog.Watch(null);
+					battleLog.Watch(null);
+					battleFinished = false;
+					outputWindow?.ClearBattle();
+				}
+
+				if (SamePath(improvementWindow?.ShownRun?.RunDirectory, run.RunDirectory))
+					improvementWindow.Close();
+			}
+
+			if (lastRemoved)
 			{
 				lastRun = loadedHistory.Runs.LastOrDefault();
 				settings.LastTrainingRunDirectory = lastRun?.RunDirectory;
 			}
-			if (SamePath(trainingRun?.RunDirectory, run.RunDirectory))
+
+			if (trainingRemoved)
 			{
 				trainingRun = loadedHistory.Runs.LastOrDefault();
 				settings.SelectedTrainingRunDirectory = trainingRun?.RunDirectory;
 			}
-			if (SamePath(matchLog.Path, run.TelemetryPath))
-			{
-				matchTimer.Stop();
-				matchLog.Watch(null);
-				battleLog.Watch(null);
-				battleFinished = false;
-				outputWindow?.ClearBattle();
-			}
-			if (SamePath(improvementWindow?.ShownRun?.RunDirectory, run.RunDirectory))
-				improvementWindow.Close();
 
 			PersistSettings();
 			RefreshResultsHistory(reload: true);
 			UpdateEnabledState();
-			Status("Recorded session deleted. Your bot's source is unchanged.");
-			return true;
+			Status(deleted.Count > 1
+				? $"{deleted.Count} recorded sessions deleted. Your bot's source is unchanged."
+				: "Recorded session deleted. Your bot's source is unchanged.");
+		}
+
+		string DeletionConfirmation(IReadOnlyList<TrainingRun> runs)
+		{
+			if (runs.Count == 1)
+			{
+				var run = runs[0];
+				return $"Permanently delete the recorded session from {run.Manifest.CreatedUtc.ToLocalTime():g}?\n\n" +
+					$"Session: {run.Manifest.Id}\nResult: {run.Manifest.Result?.Outcome ?? run.Manifest.Status}\n\n" +
+					"This removes its feedback, statistics, logs, replay copy, agent history, and restore snapshots. " +
+					"It also removes the session from trends. This cannot be undone.\n\n" +
+					"Your bot's current source, other sessions, and the original OpenRA replay will not be changed.";
+			}
+
+			const int Listed = 12;
+			var numbers = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+			for (var index = 0; index < loadedHistory.Runs.Count; index++)
+				numbers[loadedHistory.Runs[index].RunDirectory] = index + 1;
+			var lines = runs.Take(Listed).Select(run =>
+				$"#{(numbers.TryGetValue(run.RunDirectory, out var number) ? number.ToString() : "?")} / " +
+				$"{run.Manifest.CreatedUtc.ToLocalTime():g} / {run.Manifest.Result?.Outcome ?? run.Manifest.Status}");
+			return $"Permanently delete {runs.Count} recorded sessions?\n\n" +
+				string.Join("\n", lines) +
+				(runs.Count > Listed ? $"\n... and {runs.Count - Listed} more." : "") + "\n\n" +
+				"This removes their feedback, statistics, logs, replay copies, agent history, and restore snapshots. " +
+				"It also removes the sessions from trends. This cannot be undone.\n\n" +
+				"Your bot's current source, other sessions, and the original OpenRA replays will not be changed.";
 		}
 	}
 }

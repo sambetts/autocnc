@@ -559,7 +559,7 @@ namespace AutoCnC.Launcher
 				resultsWindow.FormClosed += (_, _) => resultsWindow = null;
 				resultsWindow.FeedbackRequested += run => ReviewBattleFeedback(run);
 				resultsWindow.ReplayRequested += run => WatchReplay(run);
-				resultsWindow.DeleteRequested += ConfirmDeleteRecordedSession;
+				resultsWindow.DeleteRequested += ConfirmDeleteRecordedSessions;
 				resultsWindow.TrainRequested += TrainFromHistory;
 			}
 

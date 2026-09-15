@@ -9,6 +9,7 @@
 #endregion
 
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
@@ -26,6 +27,23 @@ namespace AutoCnC.Launcher.Tests
 		sealed class CaptureHost : Form
 		{
 			protected override bool ShowWithoutActivation => true;
+		}
+
+		/// <summary>
+		/// Hosts the window without activating it, so its lists have real handles. A handle-less
+		/// <see cref="ListView"/> reports no selection at all, which would hide every multi-select bug.
+		/// </summary>
+		static CaptureHost Hosted(ResultsWindow window)
+		{
+			var host = new CaptureHost { ShowInTaskbar = false };
+			window.TopLevel = false;
+			window.FormBorderStyle = FormBorderStyle.None;
+			window.Dock = DockStyle.Fill;
+			host.Controls.Add(window);
+			host.Show();
+			host.ClientSize = new Size(1100 * host.DeviceDpi / 96, 760 * host.DeviceDpi / 96);
+			window.Show();
+			return host;
 		}
 
 		string root;
@@ -78,11 +96,12 @@ namespace AutoCnC.Launcher.Tests
 			using var window = new ResultsWindow(new MatchLog());
 			window.SetHistory(TrainingHistory.FromRuns([first, latest]), latest, busy: false);
 			window.SelectedBattleIndex = 0;
-			TrainingRun requested = null;
-			window.DeleteRequested += run => requested = run;
+			IReadOnlyList<TrainingRun> requested = null;
+			window.DeleteRequested += runs => requested = runs;
 			Assert.That(window.CanDeleteSession, Is.True);
+			Assert.That(window.DeleteActionText, Is.EqualTo("&Delete session"));
 			window.RequestSessionDeletion();
-			Assert.That(requested, Is.SameAs(first));
+			Assert.That(requested, Is.EqualTo(new[] { first }));
 
 			window.SetOperationState(busy: true);
 			requested = null;
@@ -91,6 +110,105 @@ namespace AutoCnC.Launcher.Tests
 			Assert.That(requested, Is.Null);
 			window.SetHistory(TrainingHistory.Empty, null, busy: false);
 			Assert.That(window.CanDeleteSession, Is.False);
+		}
+
+		[Test]
+		public void SeveralSessionsCanBeSelectedAndDeletedInOneRequest()
+		{
+			var first = NewRun();
+			var second = NewRun();
+			var third = NewRun();
+			using var window = new ResultsWindow(new MatchLog()) { ShowInTaskbar = false };
+			using var host = Hosted(window);
+			window.SetHistory(TrainingHistory.FromRuns([first, second, third]), third, busy: false);
+			window.ShowRecordedSessions();
+			Assert.That(window.RecordedSessions.MultiSelect, Is.True);
+
+			window.RecordedSessions.Items[1].Selected = true;
+			Assert.That(window.SelectedRuns, Is.EqualTo(new[] { third, second }), "Newest first, as listed.");
+			Assert.That(window.DeleteActionText, Is.EqualTo("&Delete 2 sessions"));
+			Assert.That(window.DeleteMenuText, Is.EqualTo("Delete 2 sessions"));
+			Assert.That(window.CanDeleteSession, Is.True);
+			Assert.That(window.CanTrainFromBattle, Is.False, "Training only ever uses one battle.");
+
+			IReadOnlyList<TrainingRun> requested = null;
+			window.DeleteRequested += runs => requested = runs;
+			window.RequestSessionDeletion();
+			Assert.That(requested, Is.EqualTo(new[] { third, second }));
+
+			window.SetHistory(TrainingHistory.FromRuns([first]), null, busy: false);
+			Assert.That(window.SelectedRuns, Is.EqualTo(new[] { first }));
+			Assert.That(window.DeleteActionText, Is.EqualTo("&Delete session"));
+		}
+
+		[Test]
+		public void AMultiSelectionSurvivesTheBattleItFollowsButNotAPickerChange()
+		{
+			var first = NewRun();
+			var second = NewRun();
+			var third = NewRun();
+			using var window = new ResultsWindow(new MatchLog()) { ShowInTaskbar = false };
+			using var host = Hosted(window);
+			window.SetHistory(TrainingHistory.FromRuns([first, second, third]), third, busy: false);
+			window.ShowRecordedSessions();
+			window.RecordedSessions.Items[1].Selected = true;
+
+			Assert.That(window.SelectedRun, Is.SameAs(third), "The shown battle stays the row that had focus.");
+			Assert.That(window.SelectedRuns.Count, Is.EqualTo(2));
+
+			window.SelectedBattleIndex = 0;
+			Assert.That(window.SelectedRuns, Is.EqualTo(new[] { first }),
+				"Choosing another battle from the picker collapses the selection onto it.");
+			Assert.That(window.SelectedRun, Is.SameAs(first));
+		}
+
+		[Test]
+		public void RightClickingInsideAMultiSelectionKeepsItButCollapsesElsewhere()
+		{
+			var first = NewRun();
+			var second = NewRun();
+			var third = NewRun();
+			using var window = new ResultsWindow(new MatchLog()) { ShowInTaskbar = false };
+			using var host = Hosted(window);
+			window.SetHistory(TrainingHistory.FromRuns([first, second, third]), third, busy: false);
+			window.ShowRecordedSessions();
+			window.RecordedSessions.Items[1].Selected = true;
+			Assert.That(window.SelectedRuns.Count, Is.EqualTo(2));
+
+			window.SelectContextBattle(RowPoint(window.RecordedSessions.Items[1]));
+			Assert.That(window.SelectedRuns, Is.EqualTo(new[] { third, second }),
+				"Right-clicking a highlighted row keeps the whole batch for the menu.");
+			Assert.That(window.SelectedRun, Is.SameAs(second), "Single-battle actions follow the clicked row.");
+			Assert.That(window.DeleteMenuText, Is.EqualTo("Delete 2 sessions"));
+
+			window.SelectContextBattle(RowPoint(window.RecordedSessions.Items[2]));
+			Assert.That(window.SelectedRuns, Is.EqualTo(new[] { first }),
+				"Right-clicking outside the batch collapses onto that row.");
+			Assert.That(window.DeleteMenuText, Is.EqualTo("Delete session"));
+		}
+
+		static Point RowPoint(ListViewItem item) =>
+			new(item.Bounds.Left + 4, item.Bounds.Top + item.Bounds.Height / 2);
+
+		[Test]
+		public void ARunningBattleInTheSelectionBlocksTheWholeDeletion()
+		{
+			var finished = NewRun();
+			var live = NewRun(completed: false);
+			using var window = new ResultsWindow(new MatchLog()) { ShowInTaskbar = false };
+			using var host = Hosted(window);
+			window.SetHistory(TrainingHistory.FromRuns([finished, live]), live, busy: false);
+			window.ShowRecordedSessions();
+			window.SelectedBattleIndex = 0;
+			Assert.That(window.CanDeleteSession, Is.True);
+
+			window.RecordedSessions.Items[0].Selected = true;
+			Assert.That(window.SelectedRuns.Count, Is.EqualTo(2));
+			Assert.That(window.CanDeleteSession, Is.False);
+			IReadOnlyList<TrainingRun> requested = null;
+			window.DeleteRequested += runs => requested = runs;
+			window.RequestSessionDeletion();
+			Assert.That(requested, Is.Null);
 		}
 
 		[Test]

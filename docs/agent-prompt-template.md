@@ -1,5 +1,13 @@
 Improve the AutoC&C battle bot in `{workspace}` using evidence from its latest completed fight.
 
+## Mechanics and SDK reference
+
+Everything in this section is injected from version control and generated from the compiled
+assemblies. It is authoritative: if a member is not listed, it does not exist. Do not spend the
+budget rediscovering it, and do not copy it into the prompt you propose at the end.
+
+{gameMechanics}
+
 ## Required context
 
 Read the game and bot guide first: `{gameGuide}`

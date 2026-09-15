@@ -48,6 +48,7 @@ namespace AutoCnC.Launcher
 		public string DifficultiesFile => Path.Combine(ScriptsDir, "difficulties.json");
 		public string AuthoringApiFile => Path.Combine(ScriptsDir, "authoring-api.version");
 		public string AgentGameGuide => Path.Combine(Root, "docs", "agent-game-guide.md");
+		public string AgentMechanics => Path.Combine(Root, "docs", "agent-mechanics.md");
 		public string AgentPromptTemplate => Path.Combine(Root, "docs", "agent-prompt-template.md");
 
 		public string ReferenceBot => Path.Combine(Root, "bots", "Reference", "ReferenceBot.csproj");

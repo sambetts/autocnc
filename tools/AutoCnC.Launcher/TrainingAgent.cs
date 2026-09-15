@@ -33,6 +33,7 @@ namespace AutoCnC.Launcher
 		static readonly string[] RequiredPromptPlaceholders =
 		[
 			"{workspace}",
+			"{gameMechanics}",
 			"{gameGuide}",
 			"{gameRules}",
 			"{fightManifest}",
@@ -106,14 +107,17 @@ namespace AutoCnC.Launcher
 				: arguments;
 		}
 
-		public static void PrepareContext(TrainingRun run, string gameGuidePath, string gameRulesPath,
-			string promptTemplate, string recoveryContext = null)
+		public static void PrepareContext(TrainingRun run, string gameGuidePath, string mechanicsPath,
+			string gameRulesPath, string promptTemplate, string recoveryContext = null)
 		{
 			if (!run.IsEditable)
 				throw new InvalidOperationException("AI improvement requires a battle bot project, not a prebuilt assembly.");
 
 			if (!File.Exists(gameGuidePath))
 				throw new FileNotFoundException("The agent game guide is missing.", gameGuidePath);
+
+			if (!File.Exists(mechanicsPath))
+				throw new FileNotFoundException("The mechanics and SDK gospel is missing.", mechanicsPath);
 
 			if (!File.Exists(gameRulesPath))
 				throw new FileNotFoundException("The resolved game-rules snapshot is missing.", gameRulesPath);
@@ -123,6 +127,7 @@ namespace AutoCnC.Launcher
 
 			Directory.CreateDirectory(run.EvidenceDirectory);
 			File.Copy(gameGuidePath, run.GameGuidePath, true);
+			File.Copy(mechanicsPath, run.MechanicsPath, true);
 			if (!string.Equals(Path.GetFullPath(gameRulesPath), Path.GetFullPath(run.GameRulesPath),
 				StringComparison.OrdinalIgnoreCase))
 				File.Copy(gameRulesPath, run.GameRulesPath, true);
@@ -131,14 +136,14 @@ namespace AutoCnC.Launcher
 				RenderPrompt(run, promptTemplate, recoveryContext));
 		}
 
-		public static void Prepare(TrainingRun run, string gameGuidePath, string gameRulesPath,
-			string promptTemplate, string command, IReadOnlyList<string> arguments,
+		public static void Prepare(TrainingRun run, string gameGuidePath, string mechanicsPath,
+			string gameRulesPath, string promptTemplate, string command, IReadOnlyList<string> arguments,
 			string recoveryContext = null)
 		{
 			if (string.IsNullOrWhiteSpace(command))
 				throw new InvalidOperationException("The agent command is empty.");
 
-			PrepareContext(run, gameGuidePath, gameRulesPath, promptTemplate, recoveryContext);
+			PrepareContext(run, gameGuidePath, mechanicsPath, gameRulesPath, promptTemplate, recoveryContext);
 
 			var configuration = new TrainingAgentConfiguration { Command = command.Trim() };
 			configuration.Arguments.AddRange(arguments is { Count: > 0 } ? arguments : DefaultArguments);
@@ -197,8 +202,51 @@ namespace AutoCnC.Launcher
 			return null;
 		}
 
-		public static bool ValidatePromptTemplate(string template, out string error)
+		/// <summary>
+		/// Puts <c>{gameMechanics}</c> back into a template that has lost it, or never had it.
+		/// </summary>
+		/// <remarks>
+		/// <para>
+		/// Two kinds of template arrive without it: one saved before the prompt was split into a
+		/// gospel half and a learned half, and one proposed by a round that simply forgot. Both are
+		/// otherwise good work — an evolved template can be many rounds of learning — so repairing
+		/// them beats rejecting them, and rejecting them is worse than it sounds: the player meets
+		/// it as a modal refusal at the moment they press the button.
+		/// </para>
+		/// <para>
+		/// Inserted above the first section so the mechanics are read before any advice that might
+		/// contradict them, and below the opening line so the task still comes first.
+		/// </para>
+		/// </remarks>
+		public static string EnsureMechanicsPlaceholder(string template)
 		{
+			if (string.IsNullOrWhiteSpace(template) ||
+				template.Contains("{gameMechanics}", StringComparison.Ordinal))
+				return template;
+
+			var lines = SplitLines(template).ToList();
+			string[] reference =
+			[
+				"## Mechanics and SDK reference",
+				"",
+				"{gameMechanics}",
+				""
+			];
+
+			var at = lines.FindIndex(line => line.StartsWith("## ", StringComparison.Ordinal));
+			if (at < 0)
+				at = lines.FindIndex(line =>
+					string.Equals(line.Trim(), NextPromptContractPlaceholder, StringComparison.Ordinal));
+
+			if (at < 0)
+				lines.AddRange(reference);
+			else
+				lines.InsertRange(at, reference);
+
+			return string.Join(Environment.NewLine, lines);
+		}
+
+		public static bool ValidatePromptTemplate(string template, out string error)		{
 			if (string.IsNullOrWhiteSpace(template))
 			{
 				error = "The prompt is empty.";
@@ -386,9 +434,36 @@ namespace AutoCnC.Launcher
 					Environment.NewLine + playerFeedback),
 				("{sourceRevision}", run.Manifest.SourceRevision),
 
+				// Inlined rather than referenced: the gospel is the half of the prompt the agent
+				// must not be free to skip or to contradict, and a path in a prompt is only a
+				// suggestion. Second to last so the contract's placeholders stay literal.
+				("{gameMechanics}", Mechanics(run)),
+
 				// This must stay last so placeholders inside the contract remain literal.
 				(NextPromptContractPlaceholder, NextPromptContract())
 			];
+		}
+
+		/// <summary>
+		/// The mechanics and SDK gospel, read from the copy kept with the fight.
+		/// </summary>
+		/// <remarks>
+		/// Reading the run's own copy rather than the repository keeps a rendered prompt honest
+		/// when it is re-read months later: it shows the gospel that fight was actually given, not
+		/// whatever the working tree says today.
+		/// </remarks>
+		static string Mechanics(TrainingRun run)
+		{
+			try
+			{
+				if (File.Exists(run.MechanicsPath))
+					return File.ReadAllText(run.MechanicsPath).Trim();
+			}
+			catch (IOException)
+			{
+			}
+
+			return "The mechanics and SDK reference could not be read for this run.";
 		}
 
 		static string NormalizeSuggestedPrompt(string template, TrainingRun run)
@@ -450,7 +525,8 @@ namespace AutoCnC.Launcher
 				lines.Add(NextPromptContractPlaceholder);
 			}
 
-			return string.Join(Environment.NewLine, lines).Trim();
+			return EnsureMechanicsPlaceholder(
+				string.Join(Environment.NewLine, lines).Trim()).Trim();
 		}
 
 		static bool IsPathPlaceholder(string placeholder) =>
@@ -482,6 +558,19 @@ namespace AutoCnC.Launcher
 			for the next improvement round. Replace this prompt rather than adding advice to it.
 			Optimize the next prompt to reduce analysis overhead and improve recommendation quality,
 			using what this run taught you.
+
+			The prompt has two halves and you are only writing one of them. The mechanics and SDK
+			reference above is **gospel**: it is injected from version control by the launcher, it is
+			generated from the compiled assemblies, and it is not yours to edit. Your template is the
+			**learned** half — how to read this bot's evidence, what has already been diagnosed, and
+			what to try next.
+
+			So do not restate game mechanics, the `ModeContext` surface, `UnitAction` values,
+			`UnitDecision` factories or engine constants in your template. Write {gameMechanics} on a
+			line by itself where that reference belongs and the launcher will insert the current one.
+			Copying those facts into your template is how they go stale: a template that claimed "there
+			is no resource/tiberium sensing API" outlived the API by many rounds and steered every one
+			of them away from the fix its harvesters needed.
 
 			The template must retain these placeholders exactly so the launcher can insert fresh data:
 			{{string.Join(", ", RequiredPromptPlaceholders)}}

@@ -72,6 +72,13 @@ jobs:
       - name: Build reference battle bot
         run: dotnet build bots/Reference/ReferenceBot.sln -c Release -v minimal --nologo
 
+      # The improvement agent treats the SDK surface in docs/agent-mechanics.md as gospel, so a
+      # stale copy actively steers it wrong: a hand-maintained one once claimed the resource API
+      # did not exist for several rounds after it shipped. Generated, therefore checked.
+      - name: Check the agent SDK reference is current
+        shell: pwsh
+        run: ./scripts/export-agent-api.ps1 -Check
+
       - name: Export resolved agent rules
         env:
           ENGINE_DIR: ${{ github.workspace }}/engine

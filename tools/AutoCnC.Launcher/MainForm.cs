@@ -1627,7 +1627,7 @@ namespace AutoCnC.Launcher
 				var recoveryContext = recovering
 					? TrainingAgent.BuildRecoveryContext(previousAgent, archivedTranscript)
 					: TrainingAgent.BuildCancellationContext(previousAgent, archivedTranscript);
-				TrainingAgent.Prepare(run, repo.AgentGameGuide, run.GameRulesPath,
+				TrainingAgent.Prepare(run, repo.AgentGameGuide, repo.AgentMechanics, run.GameRulesPath,
 					CurrentPromptTemplate(), settings.AgentCommand, settings.AgentArguments,
 					recoveryContext);
 				run.AgentStarted(settings.AgentCommand, archivedTranscript, recovering);
@@ -1770,6 +1770,7 @@ namespace AutoCnC.Launcher
 				return;
 			}
 
+			promptTemplate = TrainingAgent.EnsureMechanicsPlaceholder(promptTemplate);
 			if (!TrainingAgent.ValidatePromptTemplate(promptTemplate, out var error))
 			{
 				AppendImprovementOutput("The agent's next-round prompt was invalid; continuing with the current prompt. " + error);
@@ -1855,14 +1856,14 @@ namespace AutoCnC.Launcher
 			if (!File.Exists(run.GameRulesPath))
 				AgentRulesExporter.Export(repo, run.GameRulesPath);
 
-			TrainingAgent.PrepareContext(run, repo.AgentGameGuide, run.GameRulesPath,
-				CurrentPromptTemplate());
+			TrainingAgent.PrepareContext(run, repo.AgentGameGuide, repo.AgentMechanics,
+				run.GameRulesPath, CurrentPromptTemplate());
 		}
 
 		string CurrentPromptTemplate()
 		{
 			if (!string.IsNullOrWhiteSpace(settings.AgentPromptTemplate))
-				return settings.AgentPromptTemplate;
+				return MigrateTemplate(settings.AgentPromptTemplate);
 
 			if (!File.Exists(repo.AgentPromptTemplate))
 				throw new FileNotFoundException("The default agent prompt template is missing.",
@@ -1889,11 +1890,32 @@ namespace AutoCnC.Launcher
 			return template;
 		}
 
+		/// <summary>
+		/// Adds <c>{gameMechanics}</c> to a template saved before the prompt was split into a
+		/// gospel half and a learned half.
+		/// </summary>
+		/// <remarks>
+		/// Without this every saved template is suddenly invalid, and the player's evolved prompt —
+		/// often the work of many rounds — is refused at the moment they press Improve.
+		/// </remarks>
+		string MigrateTemplate(string template)
+		{
+			var migrated = TrainingAgent.EnsureMechanicsPlaceholder(template);
+			if (ReferenceEquals(migrated, template))
+				return template;
+
+			RecordPromptRevision(migrated, PromptOrigin.Baseline);
+			settings.AgentPromptTemplate = migrated;
+			PersistSettings();
+			return migrated;
+		}
+
 		void AcceptNextPrompt(TrainingRun run, string promptTemplate)
 		{
 			if (run == null)
 				return;
 
+			promptTemplate = TrainingAgent.EnsureMechanicsPlaceholder(promptTemplate);
 			if (!TrainingAgent.ValidatePromptTemplate(promptTemplate, out var error))
 			{
 				MessageBox.Show(improvementWindow,

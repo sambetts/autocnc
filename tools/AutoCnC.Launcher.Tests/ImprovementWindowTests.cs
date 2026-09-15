@@ -28,22 +28,25 @@ namespace AutoCnC.Launcher.Tests
 			Directory.CreateDirectory(workspace);
 			var project = Path.Combine(workspace, "Bot.csproj");
 			var guide = Path.Combine(root, "guide.md");
+			var mechanics = Path.Combine(root, "mechanics.md");
 			var rules = Path.Combine(root, "rules.json");
 			var template = string.Join(Environment.NewLine,
 			[
-				"Edit only files under {workspace}.", "{gameGuide}", "{gameRules}", "{fightManifest}", "{battleLog}",
+				"Edit only files under {workspace}.", "{gameMechanics}", "{gameGuide}", "{gameRules}",
+				"{fightManifest}", "{battleLog}",
 				"{telemetry}", "{decisionTrace}", "{battle}", "{result}", "{sourceRevision}",
 				"{nextPromptContract}"
 			]);
 			File.WriteAllText(project, "<Project Sdk=\"Microsoft.NET.Sdk\" />");
 			File.WriteAllText(guide, "# Rules\nUse visible information.");
+			File.WriteAllText(mechanics, "# Mechanics\nModeContext exposes FindResourceFields.");
 			File.WriteAllText(rules, "{\"actors\":[{\"id\":\"mtnk\",\"hitPoints\":45000}]}");
 
 			try
 			{
 				var run = TrainingRun.Create(project, new TrainingBattleConfiguration(),
 					Path.Combine(root, "runs"));
-				TrainingAgent.PrepareContext(run, guide, rules, template);
+				TrainingAgent.PrepareContext(run, guide, mechanics, rules, template);
 				run.AgentStarted("fake-agent");
 
 				using var window = new ImprovementWindow();

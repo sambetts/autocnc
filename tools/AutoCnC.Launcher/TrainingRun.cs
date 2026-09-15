@@ -186,6 +186,7 @@ namespace AutoCnC.Launcher
 		public string CancellationPath => Path.Combine(RunDirectory, "cancel.request");
 		public string PromptPath => Path.Combine(EvidenceDirectory, "agent-prompt.txt");
 		public string GameGuidePath => Path.Combine(EvidenceDirectory, "game-guide.md");
+		public string MechanicsPath => Path.Combine(EvidenceDirectory, "mechanics.md");
 		public string GameRulesPath => Path.Combine(EvidenceDirectory, "game-rules.json");
 		public string AgentConfigurationPath => Path.Combine(RunDirectory, "agent-command.json");
 		public string AgentTranscriptPath => Path.Combine(RunDirectory, "agent-transcript.txt");

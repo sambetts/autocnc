@@ -338,11 +338,27 @@ The three runtime records have intentionally different trust boundaries:
 - the battle log is restricted to what the side could observe;
 - the decision trace records the bot's assessments and orders, but is write-only to bot code.
 
-Agent context adds two generated resources. `game-guide.md` is the shared explanation of mechanics,
-SDK semantics, and improvement constraints. `game-rules.json` is exported by
+Agent context adds three generated resources. `game-guide.md` is the shared explanation of mechanics,
+SDK semantics, and improvement constraints. `mechanics.md` is the **gospel** half of the prompt —
+game invariants plus a `ModeContext`/`UnitDecision` surface generated from the compiled assemblies
+by `scripts/export-agent-api.ps1`. `game-rules.json` is exported by
 `--export-agent-rules` directly from OpenRA's `ModData.DefaultRules`, after manifest inheritance
 and AutoC&C overrides have resolved. It is therefore a snapshot of the source of truth rather than
 a parallel unit-stats model.
+
+The improvement prompt has two halves, and only one of them evolves. The **learned** half is the
+template the agent rewrites each round: how to read this bot's evidence, what has been diagnosed,
+what to try next. The **gospel** half is injected by the launcher from version control through the
+`{gameMechanics}` placeholder, and the agent is told not to restate it.
+
+The split exists because a self-rewriting prompt cannot be trusted to carry facts. A round once
+inlined "there is no resource/tiberium sensing API" under the heading "do not rediscover this"; it
+was true when written, the API shipped later, and every subsequent round still read it, believed
+it, and steered away from the one fix its harvesters needed. Gospel is therefore generated rather
+than typed, injected rather than copied, and CI fails when the committed reference no longer
+matches the assemblies. A template that arrives without the placeholder — saved before the split,
+or proposed by a forgetful round — is repaired rather than refused, because an evolved template can
+represent many rounds of work.
 
 AI improvement is explicit and optional. Before invoking a configured local command, the launcher
 snapshots the workspace while excluding git metadata and generated output. The command runs from

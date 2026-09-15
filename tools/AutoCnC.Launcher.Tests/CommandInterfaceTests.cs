@@ -259,8 +259,10 @@ namespace AutoCnC.Launcher.Tests
 			WriteEvidence(latest);
 			older.SetPlayerFeedback("Historical battle observation.");
 			Write("docs\\agent-game-guide.md", "# Test game guide");
+			Write("docs\\agent-mechanics.md", "# Test mechanics");
 			settings.AgentPromptTemplate =
 				"Improve the bot. Edit only files under {workspace}. Read {gameGuide} and {gameRules}.\n" +
+				"Mechanics: {gameMechanics}\n" +
 				"Use {fightManifest}, {battleLog}, {telemetry}, {decisionTrace}.\n" +
 				"Battle: {battle}. Result: {result}. Revision: {sourceRevision}.\n{nextPromptContract}";
 			Assert.That(TrainingAgent.ValidatePromptTemplate(settings.AgentPromptTemplate, out var error), Is.True, error);
@@ -636,6 +638,7 @@ namespace AutoCnC.Launcher.Tests
 			var previous = string.Join(Environment.NewLine,
 			[
 				"Improve the bot. Edit only files under {workspace}.",
+				"Mechanics: {gameMechanics}",
 				"Read {gameGuide} and {gameRules}.",
 				"Evidence: {fightManifest}, {battleLog}, {telemetry}, {decisionTrace}.",
 				"Fight: {battle}. Result: {result}. Revision: {sourceRevision}.",

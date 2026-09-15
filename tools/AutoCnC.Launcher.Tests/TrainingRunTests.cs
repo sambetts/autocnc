@@ -23,6 +23,7 @@ namespace AutoCnC.Launcher.Tests
 		string project;
 		string runs;
 		string gameGuide;
+		string mechanics;
 		string gameRules;
 		string promptTemplate;
 
@@ -33,10 +34,12 @@ namespace AutoCnC.Launcher.Tests
 			workspace = Path.Combine(root, "My Bot");
 			runs = Path.Combine(root, "runs");
 			gameGuide = Path.Combine(root, "agent-game-guide.md");
+			mechanics = Path.Combine(root, "agent-mechanics.md");
 			gameRules = Path.Combine(root, "game-rules.json");
 			promptTemplate = string.Join(Environment.NewLine,
 			[
 				"Improve the bot. Edit only files under {workspace}.",
+				"Mechanics: {gameMechanics}",
 				"Read {gameGuide} and {gameRules}.",
 				"Evidence: {fightManifest}, {battleLog}, {telemetry}, {decisionTrace}.",
 				"Fight: {battle}. Result: {result}. Revision: {sourceRevision}.",
@@ -49,6 +52,7 @@ namespace AutoCnC.Launcher.Tests
 			File.WriteAllText(Path.Combine(workspace, "Strategy.custom"), "custom before");
 			File.WriteAllText(Path.Combine(workspace, "Notes.md"), "keep me");
 			File.WriteAllText(gameGuide, "# Test game guide\nOnly use visible enemy information.");
+			File.WriteAllText(mechanics, "# Test mechanics\nModeContext exposes FindResourceFields.");
 			File.WriteAllText(gameRules, "{\"actors\":[{\"id\":\"e1\",\"hitPoints\":50}]}");
 			Directory.CreateDirectory(Path.Combine(workspace, "bin"));
 			File.WriteAllText(Path.Combine(workspace, "bin", "ignored.txt"), "build output");
@@ -128,7 +132,7 @@ namespace AutoCnC.Launcher.Tests
 		{
 			var run = NewRun();
 
-			TrainingAgent.Prepare(run, gameGuide, gameRules,
+			TrainingAgent.Prepare(run, gameGuide, mechanics, gameRules,
 				promptTemplate,
 				"other-agent", ["--input", "{promptFile}"]);
 
@@ -143,11 +147,94 @@ namespace AutoCnC.Launcher.Tests
 			Assert.That(File.ReadAllText(run.AgentConfigurationPath), Does.Contain("other-agent"));
 			Assert.That(File.ReadAllText(run.AgentConfigurationPath), Does.Contain("{promptFile}"));
 
-			TrainingAgent.Prepare(run, gameGuide, gameRules,
+			TrainingAgent.Prepare(run, gameGuide, mechanics, gameRules,
 				promptTemplate, "copilot", TrainingAgent.DefaultArguments);
 			Assert.That(File.ReadAllText(run.AgentConfigurationPath), Does.Contain("{evidence}"));
 			Assert.That(File.ReadAllText(run.AgentConfigurationPath), Does.Not.Contain("--no-color"));
 			Assert.That(run.SnapshotDirectory, Does.Not.StartWith(run.EvidenceDirectory));
+		}
+
+		/// <summary>
+		/// The mechanics and SDK reference is gospel, and gospel that arrives as a file path is
+		/// only a suggestion. It has to be in the prompt the agent is actually handed.
+		/// </summary>
+		[Test]
+		public void TheMechanicsGospelIsInlinedIntoThePromptRatherThanLinked()
+		{
+			var run = NewRun();
+
+			TrainingAgent.PrepareContext(run, gameGuide, mechanics, gameRules, promptTemplate);
+
+			var rendered = File.ReadAllText(run.PromptPath);
+			Assert.That(rendered, Does.Contain("ModeContext exposes FindResourceFields"),
+				"the gospel text itself must appear in the rendered prompt");
+			Assert.That(rendered, Does.Contain("Mechanics: # Test mechanics"),
+				"the placeholder must be substituted where the template put it");
+			Assert.That(File.ReadAllText(run.MechanicsPath), Is.EqualTo(File.ReadAllText(mechanics)),
+				"the fight keeps its own copy, so an old prompt still shows the gospel it was given");
+		}
+
+		/// <summary>
+		/// A template that has lost the gospel placeholder is repaired rather than refused. An
+		/// evolved prompt can be many rounds of work, and the player meets a refusal as a modal at
+		/// the moment they press the button.
+		/// </summary>
+		[Test]
+		public void ATemplateMissingTheMechanicsPlaceholderIsRepaired()
+		{
+			var legacy = string.Join(Environment.NewLine,
+			[
+				"Improve the bot. Edit only files under {workspace}.",
+				"## Evidence",
+				"{gameGuide} {gameRules} {fightManifest} {battleLog} {telemetry} {decisionTrace}",
+				"{battle} {result} {sourceRevision}",
+				"{nextPromptContract}"
+			]);
+
+			Assert.That(TrainingAgent.ValidatePromptTemplate(legacy, out var before), Is.False);
+			Assert.That(before, Does.Contain("{gameMechanics}"));
+
+			var repaired = TrainingAgent.EnsureMechanicsPlaceholder(legacy);
+
+			Assert.That(TrainingAgent.ValidatePromptTemplate(repaired, out _), Is.True);
+			Assert.That(repaired, Does.Contain("{gameMechanics}"));
+			Assert.That(repaired.IndexOf("{gameMechanics}", StringComparison.Ordinal),
+				Is.LessThan(repaired.IndexOf("## Evidence", StringComparison.Ordinal)),
+				"the gospel must be read before any advice that could contradict it");
+			Assert.That(TrainingAgent.EnsureMechanicsPlaceholder(repaired), Is.EqualTo(repaired),
+				"repairing twice must not insert it twice");
+		}
+
+		/// <summary>
+		/// An agent that pastes the injected gospel into its proposal would pin today's SDK surface
+		/// into a template that outlives it — the precise way "there is no resource/tiberium sensing
+		/// API" survived the API by several rounds.
+		/// </summary>
+		[Test]
+		public void GospelCopiedIntoAProposalIsFoldedBackIntoThePlaceholder()
+		{
+			var run = NewRun();
+			TrainingAgent.PrepareContext(run, gameGuide, mechanics, gameRules, promptTemplate);
+
+			var gospel = File.ReadAllText(run.MechanicsPath).Trim();
+			var proposal = string.Join(Environment.NewLine,
+			[
+				TrainingAgent.NextPromptBegin,
+				"Edit only files under {workspace}.",
+				gospel,
+				"{gameGuide} {gameRules} {fightManifest} {battleLog} {telemetry} {decisionTrace}",
+				"{battle} {result} {sourceRevision}",
+				"{nextPromptContract}",
+				TrainingAgent.NextPromptEnd
+			]);
+
+			var extracted = TrainingAgent.FindSuggestedNextPrompt(
+				proposal.Split(Environment.NewLine), run);
+
+			Assert.That(extracted, Does.Contain("{gameMechanics}"));
+			Assert.That(extracted, Does.Not.Contain("ModeContext exposes FindResourceFields"),
+				"a pasted copy must collapse back to the placeholder so it cannot go stale");
+			Assert.That(TrainingAgent.ValidatePromptTemplate(extracted, out _), Is.True);
 		}
 
 		[Test]
@@ -239,12 +326,12 @@ namespace AutoCnC.Launcher.Tests
 		public void ApprovedReplacementTemplateUsesFreshValuesNextRound()
 		{
 			var first = NewRun();
-			TrainingAgent.PrepareContext(first, gameGuide, gameRules, promptTemplate);
+			TrainingAgent.PrepareContext(first, gameGuide, mechanics, gameRules, promptTemplate);
 			var replacement = promptTemplate + Environment.NewLine +
 				"Begin with the earliest economy divergence before reviewing combat.";
 
 			var second = NewRun();
-			TrainingAgent.PrepareContext(second, gameGuide, gameRules, replacement);
+			TrainingAgent.PrepareContext(second, gameGuide, mechanics, gameRules, replacement);
 			var rendered = File.ReadAllText(second.PromptPath);
 
 			Assert.That(rendered, Does.Contain("earliest economy divergence"));
@@ -260,7 +347,7 @@ namespace AutoCnC.Launcher.Tests
 
 			run.SetPlayerFeedback("I expanded too late and never recovered map control.");
 			Assert.That(File.ReadAllText(run.FightManifestPath), Does.Contain("never recovered map control"));
-			TrainingAgent.PrepareContext(run, gameGuide, gameRules, promptTemplate);
+			TrainingAgent.PrepareContext(run, gameGuide, mechanics, gameRules, promptTemplate);
 
 			var loaded = TrainingRun.Load(run.RunDirectory);
 			Assert.That(loaded.Manifest.Result.PlayerFeedback,
@@ -296,7 +383,7 @@ namespace AutoCnC.Launcher.Tests
 			Assert.That(TrainingRun.Load(second.RunDirectory).Manifest.ReplayWatchedUtc, Is.Null);
 
 			reloaded.SetPlayerFeedback("The replay showed the harvester was left exposed.");
-			TrainingAgent.PrepareContext(reloaded, gameGuide, gameRules, promptTemplate);
+			TrainingAgent.PrepareContext(reloaded, gameGuide, mechanics, gameRules, promptTemplate);
 			Assert.That(File.ReadAllText(reloaded.FightManifestPath), Does.Contain("harvester was left exposed"));
 			Assert.That(File.ReadAllText(reloaded.PromptPath), Does.Contain("harvester was left exposed"));
 			Assert.That(TrainingAgent.RenderPrompt(second, promptTemplate), Does.Not.Contain("harvester was left exposed"));
@@ -442,7 +529,7 @@ namespace AutoCnC.Launcher.Tests
 		public void FailedAttemptIsArchivedAndRecoveryPromptTargetsItsVerificationError()
 		{
 			var run = NewRun();
-			TrainingAgent.PrepareContext(run, gameGuide, gameRules, promptTemplate);
+			TrainingAgent.PrepareContext(run, gameGuide, mechanics, gameRules, promptTemplate);
 			run.AgentStarted("agent");
 			File.WriteAllText(run.AgentTranscriptPath,
 				"agent output" + Environment.NewLine + "=== Verification ===" +
@@ -452,7 +539,7 @@ namespace AutoCnC.Launcher.Tests
 
 			var transcript = run.ArchiveAgentAttempt();
 			var recovery = TrainingAgent.BuildRecoveryContext(run.Manifest.Agent, transcript);
-			TrainingAgent.PrepareContext(run, gameGuide, gameRules, promptTemplate, recovery);
+			TrainingAgent.PrepareContext(run, gameGuide, mechanics, gameRules, promptTemplate, recovery);
 			run.AgentStarted("agent", transcript);
 
 			Assert.That(File.Exists(transcript), Is.True);
@@ -578,7 +665,7 @@ namespace AutoCnC.Launcher.Tests
 
 			var cancellation = TrainingAgent.BuildCancellationContext(loaded.Manifest.Agent,
 				transcript);
-			TrainingAgent.PrepareContext(loaded, gameGuide, gameRules, promptTemplate, cancellation);
+			TrainingAgent.PrepareContext(loaded, gameGuide, mechanics, gameRules, promptTemplate, cancellation);
 			var prompt = File.ReadAllText(loaded.PromptPath);
 			Assert.Multiple(() =>
 			{

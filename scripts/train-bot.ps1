@@ -80,6 +80,18 @@ if (-not (Test-Path -LiteralPath $gameGuide)) {
     Copy-Item -LiteralPath $sharedGuide -Destination $gameGuide
 }
 
+# The gospel half of the prompt: mechanics and the generated SDK surface. Kept with the fight so a
+# rendered prompt still shows the reference that fight was actually given.
+$mechanics = Join-Path $evidence 'mechanics.md'
+if (-not (Test-Path -LiteralPath $mechanics)) {
+    $sharedMechanics = Join-Path $repoRoot 'docs\agent-mechanics.md'
+    if (-not (Test-Path -LiteralPath $sharedMechanics)) {
+        throw "Agent mechanics reference not found: $sharedMechanics"
+    }
+
+    Copy-Item -LiteralPath $sharedMechanics -Destination $mechanics
+}
+
 $gameRules = Join-Path $evidence 'game-rules.json'
 if (-not (Test-Path -LiteralPath $gameRules)) {
     & (Join-Path $PSScriptRoot 'export-agent-rules.ps1') -Output $gameRules
@@ -146,9 +158,21 @@ After finishing the code improvement, propose an entirely new, standalone prompt
 next improvement round. Replace this prompt rather than adding advice to it. Optimize the next
 prompt to reduce analysis overhead and improve recommendation quality.
 
+The prompt has two halves and you are only writing one of them. The mechanics and SDK reference
+above is gospel: it is injected from version control, generated from the compiled assemblies, and
+is not yours to edit. Your template is the learned half — how to read this bot's evidence, what has
+already been diagnosed, and what to try next.
+
+So do not restate game mechanics, the ``ModeContext`` surface, ``UnitAction`` values,
+``UnitDecision`` factories or engine constants in your template. Write {gameMechanics} on a line by
+itself where that reference belongs and the launcher will insert the current one. Copying those
+facts into your template is how they go stale: a template that claimed "there is no
+resource/tiberium sensing API" outlived the API by many rounds and steered every one of them away
+from the fix its harvesters needed.
+
 The template must retain these placeholders exactly:
-{workspace}, {gameGuide}, {gameRules}, {fightManifest}, {battleLog}, {telemetry}, {decisionTrace},
-{battle}, {result}, {sourceRevision}, {nextPromptContract}
+{workspace}, {gameMechanics}, {gameGuide}, {gameRules}, {fightManifest}, {battleLog}, {telemetry},
+{decisionTrace}, {battle}, {result}, {sourceRevision}, {nextPromptContract}
 
 Do not replace any placeholder with a path or value from this fight, even where the rendered prompt
 above shows that value.
@@ -179,6 +203,9 @@ accept a valid template automatically.
         '{battle}' = "map=$($battle.Map), difficulty=$($battle.Difficulty), opponents=$($battle.Opponents), faction=$($battle.Faction), opponent faction=$($battle.BotFaction), speed=$($battle.GameSpeed), execution=$($battle.ExecutionMode)"
         '{result}' = "$($result.Outcome) after $($result.DurationSeconds) game seconds; $score`n$playerFeedback"
         '{sourceRevision}' = [string]$manifest.SourceRevision
+
+        # Inlined, and second to last so the contract's own placeholders stay literal.
+        '{gameMechanics}' = (Get-Content -LiteralPath $mechanics -Raw).Trim()
         '{nextPromptContract}' = $nextPromptContract
     }
 

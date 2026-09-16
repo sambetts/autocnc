@@ -90,8 +90,12 @@ namespace AutoCnC.Launcher
 		/// <summary>
 		/// Starts the next queued message when nothing else is using the agent.
 		/// </summary>
+		/// <param name="finishedWith">
+		/// What the work that just ended left behind, reported alongside the turn taking its
+		/// place. Null when this message follows nothing.
+		/// </param>
 		/// <returns>True when a turn was started and the caller should stand down.</returns>
-		bool StartQueuedConversation()
+		bool StartQueuedConversation(string finishedWith = null)
 		{
 			var thread = conversation;
 			if (thread == null || thread.PendingCount == 0 || repo == null ||
@@ -144,7 +148,10 @@ namespace AutoCnC.Launcher
 			window.BeginChatTurn();
 			queue.Enqueue(new ScriptJob
 			{
-				Title = "Asking the improvement agent",
+				// Named for what it is rather than for the agent it reaches. "Improvement" in a
+				// status line is read as the improvement, and a message answered the moment a
+				// round ends would otherwise report the finished round as still running.
+				Title = "Answering your message",
 				ScriptPath = repo.ChatBotScript,
 				Arguments =
 				[
@@ -163,6 +170,12 @@ namespace AutoCnC.Launcher
 			});
 
 			RunNext();
+
+			// After RunNext, which sets the status from the job it started. What just finished is
+			// the more valuable half of the sentence and would otherwise never be said at all.
+			if (!string.IsNullOrWhiteSpace(finishedWith))
+				Status($"{finishedWith} Answering your message…");
+
 			return true;
 		}
 

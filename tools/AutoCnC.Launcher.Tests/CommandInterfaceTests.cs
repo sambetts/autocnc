@@ -305,6 +305,77 @@ namespace AutoCnC.Launcher.Tests
 			Assert.That(Named<ComboBox>(window, "Battle to train from").Enabled, Is.True);
 		}
 
+		/// <summary>
+		/// A message typed mid-round is delivered the moment the round ends, and takes the status
+		/// line with it. The round it waited for has to be reported on the way past, or twenty
+		/// minutes of work is announced as nothing but another agent being asked something —
+		/// which reads exactly like an improvement that never finished.
+		/// </summary>
+		[Test]
+		public void AMessageQueuedDuringAnImprovementReportsTheRoundItWaitedFor()
+		{
+			var run = RecordedFeedbackRun(BattleExecutionModes.Rendered);
+			WriteEvidence(run);
+			run.SetPlayerFeedback("Watched them out-expand me.");
+			Write("docs\\agent-game-guide.md", "# Test game guide");
+			Write("docs\\agent-mechanics.md", "# Test mechanics");
+			settings.AgentPromptTemplate =
+				"Improve the bot. Edit only files under {workspace}. Read {gameGuide} and {gameRules}.\n" +
+				"Mechanics: {gameMechanics}\n" +
+				"Use {fightManifest}, {battleLog}, {telemetry}, {decisionTrace}.\n" +
+				"Battle: {battle}. Result: {result}. Revision: {sourceRevision}.\n{nextPromptContract}";
+			Write("scripts\\train-bot.ps1",
+				"param([string]$BattleBot, [string]$RunDirectory, [string]$AgentConfiguration)\n" +
+				"Start-Sleep -Milliseconds 400\nexit 0\n");
+			Write("scripts\\chat-bot.ps1",
+				"param([string]$BattleBot, [string]$RunDirectory, [string]$MessageFile)\n" +
+				"Start-Sleep -Milliseconds 800\n" +
+				"$turn = \"=== You ===`n\" + (Get-Content -LiteralPath $MessageFile -Raw) + \"`n=== Agent ===`nEconomy first, then map control.\"\n" +
+				"$turn | Set-Content -LiteralPath (Join-Path $RunDirectory 'agent-chat-turn.txt')\nexit 0\n");
+			settings.LastTrainingRunDirectory = run.RunDirectory;
+
+			using var window = Window();
+			window.SelectStation(2);
+			Assert.That(window.SelectTrainingBattle(run), Is.True);
+			Descendants(window).OfType<Button>().Single(button => button.Text == "Analyze && improve").PerformClick();
+			window.SendAgentMessage(run, "Stop them expanding so fast.");
+			Assert.That(window.ActiveConversation.PendingCount, Is.EqualTo(1),
+				"a message typed during a round waits for the agent instead of racing it");
+
+			// Read together, inside one pump-free moment: the turn is live for a fixed time and
+			// both readings have to describe the same instant.
+			string reported = null;
+			string readiness = null;
+			WaitUntil(() =>
+			{
+				var status = Named<Label>(window, "Operation status").Text;
+				if (!status.Contains("Answering your message", StringComparison.Ordinal))
+					return false;
+
+				reported = status;
+				readiness = Descendants(window).OfType<BotDossier>().Single().Readiness;
+				return true;
+			});
+
+			Assert.That(reported, Does.Contain("Improvement verified and deployed"),
+				"the finished round is the half of the sentence the player is waiting for");
+			Assert.That(readiness, Does.Contain("AGENT REPLYING"));
+			Assert.That(readiness, Does.Not.Contain("OPERATION IN PROGRESS"));
+
+			// The answer must not stream into a tab nobody is looking at while Progress still
+			// shows the improvement that has already ended.
+			var workspace = window.OwnedForms.OfType<ImprovementWindow>().Single();
+			Assert.That(workspace.SelectedView, Is.EqualTo("Chat"));
+
+			WaitUntil(() => window.ActiveConversation.History
+				.Any(entry => entry.Speaker == AgentChatSpeaker.Agent));
+			Assert.That(window.ActiveConversation.History.Last().Text, Does.Contain("Economy first"));
+			WaitUntil(() => !Named<Label>(window, "Operation status").Text
+				.Contains("Answering your message", StringComparison.Ordinal));
+			Assert.That(Named<Label>(window, "Operation status").Text,
+				Does.Contain("Improvement verified and deployed"));
+		}
+
 		[Test]
 		public void TrainingReplayUsesTheSelectedBattleRatherThanTheNewestReplay()
 		{

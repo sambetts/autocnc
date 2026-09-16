@@ -333,8 +333,25 @@ namespace AutoCnC.Launcher
 			summary.Text = AgentSummary(run);
 			LoadNextPrompt(run);
 			views.SelectedTab = promptFirst ? promptTab : progressTab;
+			Text = TitleFor(run);
 			taskbarProgress.SetBusy(Handle, result?.ExitCode == null && result?.StartedUtc != null);
 			UpdateChatControls();
+		}
+
+		/// <summary>
+		/// The title for the state a run is in.
+		/// </summary>
+		/// <remarks>
+		/// A window opened after the fact has to say the same thing as the one that watched it
+		/// happen. Reopening it from the battle banner used to leave the neutral title behind,
+		/// which is the one reading that claims nothing at all about whether the agent is done.
+		/// </remarks>
+		static string TitleFor(TrainingRun run)
+		{
+			var agent = run?.Manifest.Agent;
+			return agent == null ? "AutoC&C — Improvement"
+				: agent.CompletedUtc != null ? "AutoC&C — Improvement (finished)"
+				: "AutoC&C — Improvement (running)";
 		}
 
 		public void MarkNextPromptSaved()
@@ -375,12 +392,20 @@ namespace AutoCnC.Launcher
 		}
 
 		/// <summary>Starts a live block for the turn now being answered.</summary>
+		/// <remarks>
+		/// The Chat tab is brought forward because this is the only thing still running. Left on
+		/// Progress, the window shows a finished improvement while the answer scrolls past
+		/// unseen, which reads as an agent that stopped rather than one that moved on.
+		/// </remarks>
 		public void BeginChatTurn()
 		{
 			chatStreaming = true;
 			chatParser.Reset();
 			RenderConversation();
 			UpdateChatControls();
+			views.SelectedTab = chatTab;
+			Text = "AutoC&C — Improvement (answering)";
+			taskbarProgress.SetBusy(Handle, busy: true);
 		}
 
 		public void AppendChatOutput(TerminalLine line)
@@ -396,6 +421,8 @@ namespace AutoCnC.Launcher
 		{
 			chatStreaming = false;
 			RefreshChat();
+			Text = TitleFor(shownRun);
+			taskbarProgress.SetBusy(Handle, busy: false);
 		}
 
 		internal void SubmitChatMessage()

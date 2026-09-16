@@ -244,7 +244,9 @@ namespace AutoCnC.Launcher
 		{
 			var path = botBox.Text.Trim();
 			var name = path.Length == 0 ? "No bot selected" : Path.GetFileNameWithoutExtension(path.TrimEnd('\\', '/'));
-			var readiness = busy ? battleRunning ? "IN COMBAT / evidence recording" : "OPERATION IN PROGRESS"
+			var readiness = busy ? battleRunning ? "IN COMBAT / evidence recording"
+					: AnsweringMessage ? "AGENT REPLYING / answering your message"
+					: "OPERATION IN PROGRESS"
 				: !BotExists() ? "AWAITING BOT / select a project in Bot bay"
 				: ready ? "LOADOUT SET / ready for a test fight" : "SETUP REQUIRED / check operation status";
 			var result = LastRunMatchesSelectedBot() ? lastRun?.Manifest.Result : null;

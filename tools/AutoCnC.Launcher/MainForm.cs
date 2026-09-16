@@ -715,6 +715,12 @@ namespace AutoCnC.Launcher
 		bool ImprovementRunning() => runner.IsRunning &&
 			activeJob?.Kind == ScriptJobKind.Improvement;
 
+		/// <summary>
+		/// True while the agent is answering something the player typed rather than working a
+		/// round of its own.
+		/// </summary>
+		bool AnsweringMessage => activeJob?.Kind == ScriptJobKind.Chat;
+
 		static TableLayoutPanel Grid(int columns)
 		{
 			var grid = new TableLayoutPanel
@@ -975,7 +981,6 @@ namespace AutoCnC.Launcher
 			var continuousReady = compatible && editable && continuousBox.Checked;
 			var run = trainingRun;
 			var agent = run?.Manifest.Agent;
-			var lastRunMatches = LastRunMatchesSelectedBot();
 			var trainingRunMatches = RunMatchesSelectedBot(run);
 			var stoppedImprovement = agent is { Cancelled: true };
 			var failedImprovement = !stoppedImprovement &&
@@ -1027,28 +1032,53 @@ namespace AutoCnC.Launcher
 			if (busy)
 				return;
 
+			Status(SettledStatus());
+		}
+
+		/// <summary>
+		/// What the launcher would say if nothing were running: where the last operation left the
+		/// bot, and what to do about it.
+		/// </summary>
+		/// <remarks>
+		/// Separate from <see cref="UpdateEnabledState"/> because a finished operation is worth
+		/// reporting even when something else has already started. A queued message delivered the
+		/// moment an improvement ends used to replace this outright, so a round that took twenty
+		/// minutes and succeeded said nothing at all on its way past.
+		/// </remarks>
+		string SettledStatus()
+		{
 			if (repo == null)
-				Status("Point me at your AutoC&C checkout to get started.");
-			else if (!repo.SupportsTraining)
-				Status($"This checkout uses authoring API {repo.AuthoringApiVersion}; the launcher needs {RepoLayout.RequiredAuthoringApiVersion}. Select the checkout that built this launcher.");
-			else if (!repo.EngineFetched)
-				Status("The engine submodule is missing. Run ./scripts/setup.ps1 in the repository first.");
-			else if (!BotExists())
-				Status("Choose the battle bot project or assembly you want to play.");
-			else if (mapBox.SelectedItem is not MapInfo)
-				Status("No skirmish maps available. Fetch the engine maps, then refresh the Proving ground.");
-			else if (lastRunMatches && lastRun?.Manifest.Status == "finished" && lastRun.IsEditable)
-				Status(lastRun.HasPlayerFeedback
+				return "Point me at your AutoC&C checkout to get started.";
+
+			if (!repo.SupportsTraining)
+				return $"This checkout uses authoring API {repo.AuthoringApiVersion}; the launcher needs {RepoLayout.RequiredAuthoringApiVersion}. Select the checkout that built this launcher.";
+
+			if (!repo.EngineFetched)
+				return "The engine submodule is missing. Run ./scripts/setup.ps1 in the repository first.";
+
+			if (!BotExists())
+				return "Choose the battle bot project or assembly you want to play.";
+
+			if (mapBox.SelectedItem is not MapInfo)
+				return "No skirmish maps available. Fetch the engine maps, then refresh the Proving ground.";
+
+			if (LastRunMatchesSelectedBot() && lastRun?.Manifest.Status == "finished" && lastRun.IsEditable)
+				return lastRun.HasPlayerFeedback
 					? "Fight and feedback saved. Ready to analyze and improve."
-					: "Fight saved. Add your feedback in Proving ground, or review recorded sessions in History & trends.");
-			else if (lastRun?.Manifest.Status == "improved")
-				Status("Improvement verified and deployed. Fight again to measure it.");
-			else if (lastRunMatches && lastRun?.Manifest.Status == "improvement-failed")
-				Status("Improvement failed. Fix its current changes with the agent, or restore the previous iteration.");
-			else if (lastRun?.Manifest.Status == "restored")
-				Status("The previous source iteration has been restored.");
-			else
-				Status(repo.EngineBuilt ? "Ready." : "Ready — the engine is not built yet, so the first launch will take a few minutes.");
+					: "Fight saved. Add your feedback in Proving ground, or review recorded sessions in History & trends.";
+
+			if (lastRun?.Manifest.Status == "improved")
+				return "Improvement verified and deployed. Fight again to measure it.";
+
+			if (LastRunMatchesSelectedBot() && lastRun?.Manifest.Status == "improvement-failed")
+				return "Improvement failed. Fix its current changes with the agent, or restore the previous iteration.";
+
+			if (lastRun?.Manifest.Status == "restored")
+				return "The previous source iteration has been restored.";
+
+			return repo.EngineBuilt
+				? "Ready."
+				: "Ready — the engine is not built yet, so the first launch will take a few minutes.";
 		}
 
 		void UpdateBattleBanner()
@@ -2068,7 +2098,12 @@ namespace AutoCnC.Launcher
 				// overwritten the evidence the question was about. Whether a battle had just
 				// finished is remembered across the turn, so delivering a message cannot cost
 				// continuous training its next step.
-				if (StartQueuedConversation())
+				//
+				// What the finished work left behind is handed over with it, because the turn
+				// takes the status line for as long as it runs. Without this, an improvement that
+				// took twenty minutes and succeeded was announced only as another agent being
+				// asked something, which is indistinguishable from it never having finished.
+				if (StartQueuedConversation(SettledStatus()))
 					return;
 
 				var completedBattle = battleJustCompleted;

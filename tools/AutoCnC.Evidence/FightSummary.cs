@@ -118,6 +118,18 @@ namespace AutoCnC.Evidence
 		public string OpponentPlayer { get; set; }
 		public int? Seed { get; set; }
 		public string Benchmark { get; set; }
+
+		/// <summary>
+		/// The single invocation of a benchmark this run belonged to.
+		/// </summary>
+		/// <remarks>
+		/// Without it, a comparison selects every historical run sharing a benchmark name, so
+		/// re-running <c>standard</c> against a new revision folds the previous revision's
+		/// candidates and a stale control into the same win count. The name says which set was
+		/// played; this says which sitting.
+		/// </remarks>
+		public string Batch { get; set; }
+
 		public string Arm { get; set; }
 	}
 

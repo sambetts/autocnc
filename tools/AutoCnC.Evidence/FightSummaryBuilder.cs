@@ -105,6 +105,7 @@ namespace AutoCnC.Evidence
 					OpponentPlayer = opponent,
 					Seed = manifest.Seed,
 					Benchmark = manifest.Benchmark,
+					Batch = manifest.Batch,
 					Arm = manifest.Arm
 				}
 			};

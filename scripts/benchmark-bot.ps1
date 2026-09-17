@@ -258,6 +258,7 @@ function Write-FightManifest($job, $outcome, $durationSeconds) {
             ExecutionMode = 'Headless'
             Seed = $job.Seed
             Benchmark = $set.name
+            Batch = $batch
             Arm = $job.Arm
         }
         Result = [ordered]@{
@@ -341,21 +342,59 @@ function Show-Arm($name, $results) {
     return $summary
 }
 
+<#
+    Builds one arm's bot once and returns the assembly to play.
+
+    Both arms are the same project name and install into the same folder, so letting every match
+    build it again would have several processes writing one output at once - and with -Parallel
+    that is a build failure, not a slow build. run-bot.ps1 plays a prebuilt .dll exactly where it
+    sits, so building once up front removes the race and the redundant work together.
+#>
+function Build-ArmBot([string]$bot) {
+    Write-Host "==> Building $bot" -ForegroundColor Cyan
+    & (Join-Path $repoRoot 'scripts\run-bot.ps1') -BattleBot $bot -Configuration $Configuration -NoLaunch |
+        Write-Verbose
+    if ($LASTEXITCODE -ne 0) { throw "Could not build the bot at '$bot'." }
+
+    $project = if ([IO.Path]::GetExtension($bot) -eq '.csproj') {
+        $bot
+    } else {
+        (Get-ChildItem -LiteralPath $bot -Filter *.csproj -ErrorAction SilentlyContinue |
+            Select-Object -First 1).FullName
+    }
+
+    if (-not $project) { return $bot }
+
+    $target = (dotnet msbuild $project -getProperty:TargetPath -nologo `
+            -p:Configuration=$Configuration -p:AutoCnCPath="$repoRoot" `
+            -p:BattleBotInstallDirectory="$(Join-Path $repoRoot 'engine\bin\bots')").Trim()
+
+    if (-not (Test-Path -LiteralPath $target)) { throw "The build reported '$target', which does not exist." }
+    return $target
+}
+
 # ---------------------------------------------------------------------------
 # Run the arms
 # ---------------------------------------------------------------------------
 $matchCount = $set.matches.Count * $Repeats
+
+# One id per invocation of this script. It is what keeps a re-run of the same benchmark from
+# being compared against the previous revision's runs, which would silently invalidate the
+# candidate-versus-control win count.
+$batch = "$($set.name)-$((Get-Date).ToString('yyyyMMdd-HHmmss'))-$([guid]::NewGuid().ToString('N').Substring(0,6))"
+
 Write-Host "==> Benchmark '$($set.name)': $($set.matches.Count) match(es) x $Repeats repeat(s) = $matchCount per arm" -ForegroundColor Cyan
 Write-Host "    $($set.summary)" -ForegroundColor DarkGray
+Write-Host "    Batch: $batch" -ForegroundColor DarkGray
 
 $controlWorktree = $null
 try {
-    $plan = New-MatchPlan 'candidate' $repoRoot (Resolve-Revision $repoRoot) $BattleBot
+    $plan = New-MatchPlan 'candidate' $repoRoot (Resolve-Revision $repoRoot) (Build-ArmBot $BattleBot)
 
     if ($Control) {
         $controlWorktree = New-ControlWorktree $Control
         $plan += New-MatchPlan 'control' $repoRoot (Resolve-Revision $controlWorktree) `
-            (Resolve-ControlBot $controlWorktree)
+            (Build-ArmBot (Resolve-ControlBot $controlWorktree))
     }
 
     Invoke-Arm $plan

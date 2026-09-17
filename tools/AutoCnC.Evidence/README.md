@@ -123,7 +123,10 @@ the headline metrics. A metric that falls by `RunIndex.RegressionThreshold` (15%
 is measuring — is flagged as a regression and named in the next prompt.
 
 Control-arm runs are excluded from the trend series and counted only in the benchmark comparison,
-so a control loss never reads as the candidate regressing.
+so a control loss never reads as the candidate regressing. The comparison is scoped to one
+**batch** — a single invocation of `benchmark-bot.ps1` — rather than to a benchmark name, because
+aggregating every run that ever used the name folds a previous revision's candidates and a stale
+control into the current win count, which is the exact confounding a control arm exists to remove.
 
 **History is for the improvement agent, between matches.** It is never readable by a running bot,
 never compiled into one, and must never justify a map- or opponent-specific constant in strategy

@@ -113,6 +113,7 @@ namespace AutoCnC.Evidence
 		public string LocalPlayer { get; init; }
 		public int? Seed { get; init; }
 		public string Benchmark { get; init; }
+		public string Batch { get; init; }
 		public string Arm { get; init; }
 
 		public static FightManifest Read(string path)
@@ -140,6 +141,7 @@ namespace AutoCnC.Evidence
 					Opponents = Integer(battle, "Opponents"),
 					Seed = OptionalInteger(battle, "Seed"),
 					Benchmark = Text(battle, "Benchmark"),
+					Batch = Text(battle, "Batch"),
 					Arm = Text(battle, "Arm"),
 					Outcome = Text(result, "Outcome"),
 					DurationSeconds = Integer(result, "DurationSeconds"),

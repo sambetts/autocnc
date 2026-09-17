@@ -36,6 +36,9 @@ namespace AutoCnC.Evidence
 		/// <summary>The named benchmark configuration, when the run was part of one.</summary>
 		public string Benchmark { get; set; }
 
+		/// <summary>Which single invocation of that benchmark this run belonged to.</summary>
+		public string Batch { get; set; }
+
 		/// <summary>
 		/// <c>candidate</c> or <c>control</c>.
 		/// </summary>
@@ -102,6 +105,7 @@ namespace AutoCnC.Evidence
 	public sealed class BenchmarkComparison
 	{
 		public string Name { get; set; }
+		public string Batch { get; set; }
 		public int CandidateRuns { get; set; }
 		public int CandidateWins { get; set; }
 		public int ControlRuns { get; set; }
@@ -193,6 +197,7 @@ namespace AutoCnC.Evidence
 				Difficulty = summary.Fight.Difficulty,
 				Seed = summary.Fight.Seed,
 				Benchmark = summary.Fight.Benchmark,
+				Batch = summary.Fight.Batch,
 				Arm = string.IsNullOrEmpty(summary.Fight.Arm) ? "candidate" : summary.Fight.Arm,
 				Outcome = summary.Fight.Outcome,
 				DurationSeconds = summary.Fight.DurationSeconds,
@@ -304,23 +309,34 @@ namespace AutoCnC.Evidence
 			return report;
 		}
 
-		/// <summary>Candidate against control on the most recent named benchmark.</summary>
+		/// <summary>Candidate against control within the most recent benchmark sitting.</summary>
+		/// <remarks>
+		/// Scoped to one batch, not to a benchmark name. Aggregating every run that ever used the
+		/// name would fold a previous revision's candidates and a stale control arm into the
+		/// current win count, which is precisely the confounding this artifact exists to remove.
+		/// </remarks>
 		static BenchmarkComparison Compare(RunHistory history)
 		{
-			var benchmark = history.Runs.LastOrDefault(r => !string.IsNullOrEmpty(r.Benchmark))?.Benchmark;
-			if (benchmark == null)
+			var latest = history.Runs.LastOrDefault(r => !string.IsNullOrEmpty(r.Benchmark));
+			if (latest == null)
 				return null;
 
-			var runs = history.Runs
-				.Where(r => string.Equals(r.Benchmark, benchmark, StringComparison.OrdinalIgnoreCase))
-				.ToList();
+			// A run recorded before batches existed has no batch id; those fall back to matching
+			// on name alone rather than vanishing from the comparison entirely.
+			var runs = string.IsNullOrEmpty(latest.Batch)
+				? history.Runs.Where(r =>
+					string.Equals(r.Benchmark, latest.Benchmark, StringComparison.OrdinalIgnoreCase) &&
+					string.IsNullOrEmpty(r.Batch)).ToList()
+				: history.Runs.Where(r =>
+					string.Equals(r.Batch, latest.Batch, StringComparison.OrdinalIgnoreCase)).ToList();
 
 			var candidate = runs.Where(r => !string.Equals(r.Arm, "control", StringComparison.OrdinalIgnoreCase)).ToList();
 			var control = runs.Where(r => string.Equals(r.Arm, "control", StringComparison.OrdinalIgnoreCase)).ToList();
 
 			var comparison = new BenchmarkComparison
 			{
-				Name = benchmark,
+				Name = latest.Benchmark,
+				Batch = latest.Batch,
 				CandidateRuns = candidate.Count,
 				CandidateWins = candidate.Count(Won),
 				ControlRuns = control.Count,
@@ -368,7 +384,9 @@ namespace AutoCnC.Evidence
 
 			if (report.Benchmark != null)
 				text.Append(CultureInfo.InvariantCulture,
-					$"Benchmark {report.Benchmark.Name}: {report.Benchmark.Verdict}; " +
+					$"Benchmark {report.Benchmark.Name}" +
+					$"{(report.Benchmark.Batch != null ? " batch " + report.Benchmark.Batch : "")}: " +
+					$"{report.Benchmark.Verdict}; " +
 					$"median fitness {report.Benchmark.CandidateMedianFitness:0.###} " +
 					$"against {report.Benchmark.ControlMedianFitness:0.###}.\n");
 

@@ -67,6 +67,59 @@ namespace AutoCnC.Evidence.Tests
 			Assert.That(history.Runs[0].Outcome, Is.EqualTo("Won"));
 		}
 
+		/// <summary>
+		/// A re-run of the same benchmark must not be compared against the previous sitting.
+		/// </summary>
+		/// <remarks>
+		/// Selecting every run that shares a benchmark NAME folds an earlier revision's candidates
+		/// and a stale control arm into the current win count, which is exactly the confounding
+		/// the control arm exists to remove. The batch id scopes it to one invocation.
+		/// </remarks>
+		[Test]
+		public void BenchmarkComparisonCountsOnlyTheLatestBatch()
+		{
+			var history = new RunHistory { Bot = "TestBot" };
+
+			// An older sitting of the same benchmark, which the candidate swept.
+			RunIndex.Record(history, "TestBot", Batched("old-c1", 0, "candidate", "Won", "batch-1"));
+			RunIndex.Record(history, "TestBot", Batched("old-c2", 1, "candidate", "Won", "batch-1"));
+			RunIndex.Record(history, "TestBot", Batched("old-k1", 2, "control", "Lost", "batch-1"));
+
+			// The current sitting, which went the other way.
+			RunIndex.Record(history, "TestBot", Batched("new-c1", 3, "candidate", "Lost", "batch-2"));
+			RunIndex.Record(history, "TestBot", Batched("new-k1", 4, "control", "Won", "batch-2"));
+
+			var benchmark = RunIndex.Trend(history).Benchmark;
+
+			Assert.That(benchmark.Batch, Is.EqualTo("batch-2"));
+			Assert.That(benchmark.CandidateRuns, Is.EqualTo(1), "batch-1 candidates must not be counted");
+			Assert.That(benchmark.CandidateWins, Is.EqualTo(0));
+			Assert.That(benchmark.ControlRuns, Is.EqualTo(1));
+			Assert.That(benchmark.ControlWins, Is.EqualTo(1));
+		}
+
+		/// <summary>Runs recorded before batches existed still compare, by name.</summary>
+		[Test]
+		public void RunsWithoutABatchStillCompareByBenchmarkName()
+		{
+			var history = new RunHistory { Bot = "TestBot" };
+			RunIndex.Record(history, "TestBot", Entry("run-1", 0, 40, 100, "candidate", "Won"));
+			RunIndex.Record(history, "TestBot", Entry("run-2", 1, 40, 100, "control", "Lost"));
+
+			var benchmark = RunIndex.Trend(history).Benchmark;
+
+			Assert.That(benchmark.Batch, Is.Null.Or.Empty);
+			Assert.That(benchmark.CandidateRuns, Is.EqualTo(1));
+			Assert.That(benchmark.ControlRuns, Is.EqualTo(1));
+		}
+
+		static RunHistoryEntry Batched(string id, int days, string arm, string outcome, string batch)
+		{
+			var entry = Entry(id, days, 40, 100, arm, outcome);
+			entry.Batch = batch;
+			return entry;
+		}
+
 		static RunHistoryEntry Entry(string id, int days, double creditsSpentPerSecond, double creditsLost,
 			string arm, string outcome)
 		{

@@ -875,6 +875,7 @@ Reference/
 │   │                                 its way there rather than walking — see
 │   │                                 AssaultStagingLogic)
 │   ├── EnemyBaseSightings.cs    ←   where this side last saw their base
+│   │                                (no single unit may delete it — see SightingMemoryLogic)
 │   ├── HarvesterMode.cs         ←   keeps a harvester earning, on ground that still has
 │   │                                tiberium in it (reviews its field on a clock — see
 │   │                                 HarvesterLogic)
@@ -1068,6 +1069,675 @@ The match review also suggested selling surplus refineries for a cash boost. `Un
 sell, so there is no way to express it; the buildable answer to "too many refineries" is to build
 fewer, and at six `proc` for 9,000 credits — 13% of spend, each carrying a free 1,100-credit
 harvester — this bot is not yet there. Worth recording so it is not rediscovered.
+
+## A build plan is finite; a map is not
+
+Everything fixed before stayed fixed. The stall watchdog barks: `stopped for 4 evaluations`
+appears 16 times and `field worked out, harvesting` 57, so the field rule ran on its own clock all
+match. No production gap exceeded two minutes until 1,233s, by which point the base was being
+overrun. Lifetime spend rose again — **81,450 credits over 1,586 seconds, 51.4 a second**, from
+68,700 and 42.5 the round before, and 41,780 and 37.5 the round before that. Harvesters peaked at
+ten instead of nine. `world` killed nothing. The weapon/armour table held.
+
+It lost anyway, 202 units to 136, to a side that finished with **178 units, 84,680 of army, 52
+buildings and 13,905 in hand**.
+
+The construction yard is where the match was decided, and the evidence is a silence rather than a
+mistake. Every rung of the Attack doctrine's build plan was satisfied when the fifth refinery
+landed at **744s**:
+
+| rung | wanted | standing at 744s |
+|---|---|---|
+| `proc` | 5 | 5 (51s, 117s, 169s, 245s, 744s) |
+| `nuke` | 5 | 5 (13s, 65s, 189s, 358s, 696s) |
+| `pyle`/`hand` | 2 | 2 (79s, 675s) |
+| `weap`/`afld` | 2 | 2 (338s, 521s) |
+| `hq` | 1 | 1 (271s) |
+| `gtwr` | 2 | 2 (105s, 130s) |
+| `atwr`/`sam` | 1 | 1 (174s) |
+
+The `Building` queue then issued **no planned order for the remaining 842 seconds** — 53% of the
+match. The only two it issued at all were replacements: a `proc` at 1,040s for the one an `orca`
+killed at 980s, and a `hand` at 1,255s. Buildings peaked at 22 against the winner's 52.
+
+The credits did not stop. They went somewhere that ended the match worth nothing:
+
+| after 744s | credits | share |
+|---|---|---|
+| `ltnk` ×19 | 14,250 | 37% |
+| `e3` ×41 | 12,300 | 32% |
+| `e1` ×37 | 3,700 | 10% |
+| `bggy` ×9 | 2,700 | 7% |
+| **units total** | **32,950** | **86%** |
+| `proc` ×2 (both replacements) | 3,000 | 8% |
+| `gtwr` ×3, `sam` ×1 | 2,450 | 6% |
+
+Thirty-three thousand credits of army, and the final army value was **0**.
+
+The harvesters had already filed the complaint. The distance in their own `harvesting … N cells
+out` reasons walked outward all match — median 13 cells before 300s, **23 at 600–900s**, 21
+after 1,200s, with a maximum of **52 cells, half the map** — and **331 of their 492 decisions were
+`hurt at N%, running`**, because ground that far out is ground no tower covers. Eight harvesters
+died in 42 seconds between 1,272s and 1,314s at (66–71, 8–18), and the economy never recovered. A
+refinery is not only income; it is the thing that makes a field close, and close is what makes a
+field safe.
+
+The player's own reading of the replay was the same one: *"they aggressively expanded to every
+tiberium field and their economy was nearly double ours."*
+
+So the refinery target stops being a constant. `Logic/ExpansionLogic.cs` sizes it from the
+tiberium this side has actually explored — shroud-filtered, so it rewards scouting, and
+self-limiting, so a poor map cannot turn the budget into refineries. `BuildBaseMode` consults it
+**only after `BaseConstructionLogic.ChooseNext` has answered "nothing to do" over the doctrine's
+own plan**, which is the whole safety argument: the opening is bit-for-bit what it was, no rung is
+displaced, delayed or outbid, and the branch can only fire in exactly the situation above. A power
+plant leads each refinery whenever the balance is under 50, because a plant is the cheapest thing
+this bot builds that carries `GivesBuildableArea` and so is both the power for the next refinery
+and the ground to put it on; the balance after 744s read 63, 63, 93, 63, 23, 38 and 28.
+
+Three bounds, worked out rather than guessed:
+
+- **The ceiling cannot outrun the placement ladder.** `BasePlacementLogic.RingAt` walks the near
+  edge out by `RingStepCells` (6) per refinery and clamps it at `MaxMinRangeCells` (16), so from
+  the fourth refinery onward every extra one asks for the same 16-cell near edge and the ladder
+  walks inward from there. The tenth asks for exactly the band the fourth did.
+- **Ten refineries is 15,000 credits** — less than half the 32,950 spent on units after 744s.
+- **Sixteen harvesters is the fleet ceiling**, and ten refineries hand out ten free ones, so the
+  plan pays for six: 6,600 credits against the 14,250 that went on `ltnk` alone.
+
+`TrainUnitsMode` resizes the harvester saturation rung the same way, from the refineries actually
+standing. It has to: the constant is `RefineryCore * 2` = 8, every plan reached it at 634s, and a
+base that grows past four refineries would otherwise run one harvester each — the free actor a
+refinery hands out — and never two. Only the **last** harvester rung is resized, so the floor near
+the top of each plan keeps its position and its number, and the queue cannot be monopolised any
+earlier than it already could be.
+
+Every answer is floored at what the shipped plan already wanted, and both entry points return the
+plan **by reference** when nothing is due, so a map that does not justify expansion produces
+exactly the bot that fought this match. The next trace can be grepped for `for N fields found` and
+`training harv for N refineries`; if neither literal appears, the branch never fired.
+
+## One blind unit cancelled three attacks out of four
+
+Everything above held. Lifetime spend was **65,020 credits, 46.6 a second** against 41,780 and
+37.5 the round before, with no production gap over 120 seconds and the furthest structure 13.2
+cells out. `world` killed 2 of 173 losses, so nothing was chasing aeroplanes into tiberium. The
+harvesters reported `field thinning to N` 52 times, `field worked out` 24 and `picking a field`
+12, and `no tiberium in sight` never once — the watchdog was working and the bot was scouting.
+The armour table held on all three of its predictions: `gtwr` chose Infantry 274 times to
+Vehicle 42, `atwr` chose Vehicle 87 to Infantry 41, `e3` still fired on Aircraft 8 times, and the
+two mismatched buckets fell from **54% of the mobile army's engagement orders to 32%** (179
+`e1`-at-Vehicle and 397 `e3`-at-Infantry out of 1,802).
+
+And the bot lost anyway, 154 units to 76, because it recalled its own army from inside the enemy
+base three times.
+
+`AttackBaseMode` marches on `EnemyBaseSightings`, one remembered cell shared by the whole side.
+Any unit that stood within the five-cell `ArrivedRadius` of that cell and could not see a
+structure called `Forget` — and `Forget` deleted the cell for everybody. Sensing is per-unit and
+shroud-filtered, so "I can see nothing here" is a statement about one unit behind one ridge, not
+about their base.
+
+The whole match is in the 71 `objective in range` decisions, which arrive in four bursts:
+
+| assault | entered | contact | how it ended |
+|---|---|---|---|
+| 1 | `Attack` 425s | 20 `objective in range`, 74 `clearing … en route`, 480–520s; 5 enemy buildings destroyed | two `e3` at **5,526u and 5,895u** from the remembered cell with nothing in sight at 517s → `Scout` at 520s, *nothing left to attack* |
+| 2 | `Attack` 695s | **0** and **0** | cancelled itself at 725s — the side's memory was still empty from 520s |
+| 3 | `Attack` 805s | 16 `objective in range`, 71 `clearing … en route` | the identical two decisions, at **5,160u and 5,400u** → `Scout` at 885s |
+| 4 | `Attack` 985s | 17 `objective in range` | ran to *army down to 1400* at 1,070s — the only one that ended on its own terms |
+
+In the thirty seconds after the 520s recall, all 46 remaining decisions were `DefensiveMode`:
+fifteen of them *engaging Economy at 5,526–10,765u* — the army was shooting their harvesters when
+it was called off — and eight were `ReturnToAnchor`, *drifted 8,408u > tether 8,192u*, walking
+home from sixty cells out. The 885s recall produced **666** `DefensiveMode` decisions in thirty
+seconds, and twenty `e3` died at (40–41, 58–61) in the eight seconds after that.
+
+Assault 2 is the same bug wearing different clothes. `BattleState.EnemyBaseFound` never goes back
+to false, so `ReferenceBotLogic` rule 6 ordered an attack on a host flag that was still true while
+this side's own memory was empty. The doctrine had nowhere to aim and cancelled itself thirty
+seconds later having issued no attack order at all.
+
+The price is everything the bot ever spent that moved:
+
+| | built | lost | cost |
+|---|---|---|---|
+| `e3` | 65 | 65 | 19,500 |
+| `e1` | 46 | 46 | 4,600 |
+| `mtnk` | 11 | 11 | 9,900 |
+| `jeep` | 8 | 8 | 3,200 |
+| `e2` | 12 | 12 | 1,920 |
+| **total** | **142** | **142** | **39,120 — 60.2%** of the 65,020 spent all match |
+
+Not one mobile unit the bot built survived the match. They died in one patch of no-man's land at
+(33–49, 51–61), 55–62 cells from their own yard at (82,13) and about 26 cells short of the cell
+they were marching on — `msam` took 40 of them, `a10` 13 (ten `e3` in the two seconds 605–606s),
+`htnk` 15. Ten enemy buildings fell out of the forty-eight Cabal built.
+
+[`Logic/SightingMemoryLogic.cs`](Logic/SightingMemoryLogic.cs) makes forgetting corroborated
+rather than unilateral. `EnemyBaseSightings` now stores the tick of the last sighting alongside
+the cell, `Record` refreshes it on every evaluation in which any unit can see an enemy structure,
+and `Forget` agrees only when **nobody on this side has seen one for fifteen seconds**. It returns
+whether it actually discarded anything, and `AttackBaseMode` only ends the doctrine when it did.
+
+Three bounds pin the fifteen seconds, and it has to sit inside all of them:
+
+- **Above the gap between two corroborating sightings.** A unit in contact records on every
+  evaluation and the measured cadence is about 1.4 game seconds, so this is roughly ten
+  consecutive evaluations of seeing nothing — far more than the one or two it takes a vanguard to
+  pick a new objective when the building it was shooting falls over.
+- **Far below `LostContactSeconds` (300s)**, the backstop for a base that genuinely no longer
+  exists. At 5% of it, a side that really has levelled their base still forgets the spot fifteen
+  seconds after the last thing it could see there stopped existing, and rule 4 still catches an
+  army nobody ever walks onto the crater.
+- **Above zero**, because zero is the old behaviour.
+
+A unit standing on an uncorroborated sighting now falls through to `AttackBaseLogic`'s last-stand
+branch and shoots whatever is in reach, rather than being ordered to attack-move onto its own
+cell. It has nowhere left to march either way; the difference is that the other thirty units still
+have somewhere to march.
+
+The next trace answers this in one query. `their base is not there any more` should appear only
+where the push has actually razed what it could see, `Attack` → `Scout` *nothing left to attack*
+should collapse from three, and the `objective in range` bursts should get longer instead of being
+cut off at forty seconds.
+
+## You cannot aim your way out of the wrong army
+
+Everything above held, and one of them held loudly. The corroborated sighting worked: `Attack` →
+`Scout` *nothing left to attack* **collapsed from three recalls to one**, `their base is not there
+any more` never fired, and the `objective in range` burst ran 460s–539s — **80 seconds**, twice the
+forty it used to be cut off at. The harvester watchdog held: 15 `field worked out`, 14 `field
+thinning to N`, 8 `picking a field`, `no tiberium in sight` **zero**. `gtwr` still preferred
+infantry, 222 to 173.
+
+And the armour table — the fix that halved mismatched shots last round — went **backwards**, from
+32% of the mobile army's engagement orders to **64%**: 460 `e3`-at-Infantry and 62 `e1`-at-Vehicle
+out of 812. Nothing regressed in the scorer. The bot simply had almost nothing else to aim. **A
+target scorer can only sort the army you built**, and 58% of this one was rocket infantry standing
+in front of riflemen.
+
+The match turned in two minutes. At 480s this bot led on units (38 to 34) and army (9,300 to
+8,200) and was three buildings behind. By 600s it had **seven units left**, having lost 39 and
+killed 23. Thirty-nine of its ninety losses — 43% — happened inside one five-by-four-cell patch at
+(52–56, 38–41), two to six cells short of the `nuke` at (58,39). The army arrived. It just could
+not win the fight it had walked 62 cells to start.
+
+### Two airfields, eleven orders, and nothing that fights
+
+The `Vehicle` queue was given **eleven orders in 1,403 seconds**:
+
+| | orders | delivered | cost |
+|---|---|---|---|
+| `bggy` | 5 | 5 | 1,500 |
+| `harv` | 6 | 4 | 4,400 |
+| **anything that fights** | **0** | **0** | **0** |
+
+The two `afld` that served them cost **4,000 credits, 11.6% of everything the bot ever spent**, and
+stood at 385s and 630s. `hq` stood at 318s. From `game-rules.json`, that is every prerequisite
+`arty` has — `anyhq`, `~techlevel.medium`, `Vehicle.Nod` — so **artillery was buildable for 1,018
+seconds, 73% of the match, and was ordered zero times**. The last vehicle order was at 777s. The
+next was at 1327s.
+
+The cause is rung order, and it is the exact mirror of the bug the tank rung used to have.
+`HarvesterSaturation` sat directly above the armour rung, and `ExpansionLogic.Saturate` sizes it at
+two per standing refinery — eight, on four refineries. Harvesters die: all eight were hunted down
+between 660s and 800s, at (27–30, 64–87), 14 to 17 cells from the yard at (13,82). So the rung was
+never permanently met, `UnitProductionLogic.ChooseNext` does not gate on cash, and it handed the
+vehicle queue `harv` for the rest of the game while everything below it stayed unreachable. Fixing
+"this bot never buys income" had quietly created "this bot never buys reach".
+
+What the army became instead, every line of it built and lost:
+
+| | built | lost | cost |
+|---|---|---|---|
+| `e3` | 35 | 35 | 10,500 |
+| `e1` | 26 | 26 | 2,600 |
+| `bggy` | 5 | 5 | 1,500 |
+| **total** | **66** | **66** | **14,600 — 42.5%** of the 34,350 spent all match |
+
+Not one mobile unit survived. **72% of the army budget went on `e3`**, whose warhead does **318**
+damage a second to `None` armour — the worst anti-infantry number in the ruleset — while **62% of
+the army's engagements were against infantry** (601 against 366). Nothing the bot fielded reached
+past 6 cells; enemy `arty`, which reaches 11, was its joint-largest killer at 13 of 90, level with
+`heli`. Lifetime spend was **34,350 credits, 24.5 a second**, against 65,020 and 46.6 the round
+before, and the bot bought nothing whatsoever after 782s — **44% of the match**.
+
+### The fix: a rung that reach can actually reach
+
+[`Plans.cs`](Plans.cs) gains `SiegeVehicles` — `["arty", "msam"]`, the 11-cell answer each faction
+already has — and a `SiegeCore` of four, inserted in `OpeningTrain`, `DefenceTrain` and
+`AttackTrain` (and so `ScoutTrain`) in one specific slot: **below the harvester floor and above
+harvester saturation**. That slot is the whole argument.
+
+- **Below the floor**, so income replacement still outranks everything. `HarvesterCore` is four and
+  four refineries hand out four free harvesters, so the floor is normally met by actors the bot did
+  not pay for and only fires when one dies — which is exactly when it should.
+- **Above saturation**, because saturation is the rung that can never be permanently met under
+  attack, and a rung like that starves everything beneath it. Reach now sits on the safe side of it.
+- **Neither tank is listed.** `Until(n)` counts *every* candidate a step names, so a rung written
+  `["arty", "ltnk"]` is satisfied by light tanks and buys no reach at all — the same trap that once
+  made `["e3", "e1"]` buy 125 riflemen and zero rockets. The tanks keep their own rungs below.
+
+The arithmetic the number must not cross: the rung displaces the same count of saturation
+harvesters at 1,100 each, so it has to cost **less than the income it defers**. Lifetime spend was
+34,350 over the 782 seconds the economy was alive — 43.9 a second across a fleet averaging five
+live harvesters, so roughly 8.8 a second each and about **125 seconds for a harvester to repay
+itself**. Four is the worst case at GDI prices: 4 × 900 = 3,600, which is **82 seconds** of that
+income, less than the payback period of the single harvester it defers. At Nod prices it is 2,400,
+or 55 seconds. What it buys for that: one `arty` does **5,390** a second to `None` armour where an
+`e3` does **318**, so a 600-credit artillery piece is worth seventeen 300-credit rocket soldiers —
+5,100 credits — against the infantry that was most of what this army met. It is also 1.758 cells a
+second against `e3`'s 0.952, so it arrives in half the time.
+
+Nothing else needed changing, which is the sign the slot is right. `WeaponMatchLogic.RoleOf`
+already measures both — `arty` AntiInfantry at 5,390/4,312/2,888, `msam` AntiArmour at
+577/2,405/1,154 — so the scorers divide their work the moment the units exist, and an id the table
+has never seen still falls through to a flat `Unknown`. `DefensiveMode.OnEnter` already scales
+tether and leash off the unit's own reach *specifically so artillery sits wider than a rifleman*;
+at 11 cells that is a 22-cell tether and a 33-cell leash, and anything inside 11 cells is a free
+shot needing no movement at all. A step whose candidates no driven queue can build is skipped in
+silence, so a bot with no `hq` yet simply falls through to the rungs below — a preference with a
+fallback, not a demand that can fail.
+
+The next trace answers this in one query: **`training arty` or `training msam` should appear at
+all** — they have never appeared once — and the `Vehicle` queue's order count should stop being
+five scouts and six harvesters. If artillery is built and the army still dies in one patch short of
+their base, the binding constraint has moved to how the push is staged, and `mustering` is still
+sitting at **zero decisions for the third round running**.
+
+## An economy of four free actors, three of them mining the enemy's base
+
+`msam` appeared, and that verified: seven `msam` orders, six built, **13 kills from six units** —
+2.2 each, the best ratio of anything the bot fielded, against `e3`'s 1.06 and `e1`'s 0.55. Every
+other standing diagnosis held too. And the bot lost harder than the round before, because reach was
+never the constraint: **income was, and the `Vehicle` queue bought none of it.**
+
+Lifetime spend was **38,680 credits, 30.0 a second**, against 65,020 and 46.6 two rounds earlier.
+Cash read 0 or 1 at 19 of the 22 sampled assessments from 180s to the end — **85% of the match at
+zero**. The other side held 951–5,197 in hand the whole way while growing from 12 units at 600s to
+**137**, and 20 buildings to **37**. At 480s this was an even game: 40 units and 9,140 of army
+against 29 and 11,000. Both armies then annihilated each other by 600s — 47 kills for 44 losses, a
+fair trade. Only one side could pay to rebuild.
+
+### The floor was a rung that could never fire
+
+Every plan writes the harvester floor as `HarvesterCore`, a constant equal to `RefineryCore`, which
+is four. A refinery carries a `FreeActor` harvester. So four refineries satisfy a four-harvester
+rung **four out of four**, and the floor was met by actors the bot never paid for.
+
+The evidence is exact. Every `harv` this bot ever owned was built in the same second as a `proc` —
+**51s, 117s, 174s, 263s** — and the `Vehicle` queue received **twelve orders in 1,289 seconds**:
+four `jeep`, seven `msam`, and one `harv` at **1,144s**, 248 seconds after the last harvester had
+already died.
+
+The saturation rung underneath could not rescue it, because it sits below `SiegeCore` — and siege
+vehicles die. Six `msam` built, **six lost**, so that rung was permanently unmet;
+`UnitProductionLogic.ChooseNext` returns the first unmet step, and the queue answered `msam` at
+456s, 515s, 558s, 622s, 724s, 791s and 814s without ever reaching the income beneath. **This is the
+third time the same shape has cost a match**: tanks once blocked harvesters, harvesters once
+blocked tanks, and now siege blocks harvesters. Position alone cannot protect income.
+
+It compounded at the end. The `msam` ordered at 814s, at roughly zero income, held the queue busy
+for **330 seconds** — which is the 305-second hole in the build log from 837s to 1,142s, 24% of the
+match with nothing bought at all.
+
+### And the field rule drove the fleet into their base
+
+The field score is a hyperbola: `TotalDensity × 12 cells / (12 cells + distance)`. It discounts
+distance and never refuses it. The harvesters' own reasons record where that went — 12, 17, 11 and
+18 cells out for the first four minutes, 27 to 35 cells from 447s, and at **839s** a crossing to a
+field **62 to 71 cells out at (59,35)**, nine cells from the enemy refinery at (62,37).
+
+Enemy `e3` killed three of the four harvesters at **888s, 890s and 896s**, at (45,43), (49,39) and
+(53,39) — **45 to 56 cells from this bot's own construction yard at (13,82)**. The fourth died at
+962s. Income went from **43.3 credits a second across 300–840s to 1.56 across 840–1,289s**, no
+structure was ever built again, and by 1,020s the bot had zero units.
+
+### The fix: size the floor from docking places, and cap the haul
+
+Two changes, one subsystem.
+
+[`ExpansionLogic.Reinforce`](Logic/ExpansionLogic.cs) is the mirror of the existing `Saturate`: it
+resizes the **first** harvester rung from the refineries actually standing, where `Saturate`
+resizes the last. With four refineries the floor becomes eight — two per docking bay — so the four
+free actors leave a deficit of four and the queue has to buy them. It only ever raises, so a plan
+already asking for more is returned unchanged by reference, and it does nothing with **no refinery
+standing**, because a harvester with nowhere to dock earns zero and replacing the refinery is the
+`Building` queue's job.
+
+The arithmetic it must not cross: between 300s and 840s, the window with exactly four harvesters
+up, the bot spent 23,380 credits in 540 seconds — 43.3 a second, **10.8 per harvester per second**.
+A harvester costs 1,100, so it repays in **102 seconds**. This rung can owe at most four bought
+harvesters at once — 4,400 credits, **11.4% of everything the bot spent all match**, and 102
+seconds of the income the four it already had were earning — so it can never cost more than the
+first one it buys returns. At the ceilings above (`MaxRefineries` 10, `MaxHarvesters` 16) the worst
+case is six bought and 6,600 outstanding.
+
+[`HarvesterTuning.MaxHaulCells`](Logic/HarvesterLogic.cs) is 36, and `SelectFieldExcept` is now two
+passes: best field inside the ceiling, and only if there is none, best field anywhere. **A
+preference with a fallback** — the ceiling can refuse ground, never the last ground there is. A
+harvester already assigned outside the ceiling comes home for any field inside it whatever the
+scores say, and because that test needs the assigned field outside and the candidate inside, it can
+only fire toward home and cannot dither.
+
+Why 36: a harvester moves 1.758 cells a game second, so a round trip is 1.14 × distance seconds —
+15 at the 13-cell fields this bot worked safely, 41 at 36 cells, 71 at 62. A cycle was about 65
+seconds at 10.8 credits a second, so 36 cells makes it 91 seconds and 7.7 a second, **71% of the
+near-field rate**, which is where a further field stops being an economy and becomes a commute; 62
+cells is 121 seconds and 5.8, **54%**, before any risk is counted. The bound it must not cross is
+that it has to admit every field this bot worked without losing a harvester — out to 35 cells — and
+exclude the one that killed three, which began at 61. Thirty-six is the smallest number above the
+first and the largest below the second.
+
+**The next trace answers both in one query.** `training harv for N refineries` should appear — it
+has appeared **zero** times, and `harv` was ordered exactly once all match — and `built` rows for
+`harv` should outnumber `built` rows for `proc`, which has never once been true. On the harvester
+side, `cells out is past the 36 cell haul limit` should appear whenever the fleet strays, and **no
+`lost harv` row should sit more than 40 cells from the construction yard**; all three of this
+round's did.
+
+If income recovers and the bot still loses, the next constraint is the one the player named:
+**enemy economy was never touched.** This bot killed exactly **one enemy `harv` (687s) and one
+enemy `proc` (626s)** out of 89 kills — 2.2% — and only 43 of 1,157 engagement orders were aimed at
+the `Economy` class at all. It spotted an enemy `harv` at 437s and did not kill one until 250
+seconds later.
+
+## The gather that never gathered
+
+Every standing diagnosis held, and the economy fix worked outright. `training harv for N
+refineries` appeared **15 times**, **18 `harv` were built against 5 `proc`** — the first match in
+which bought harvesters outnumbered free ones — the 36-cell haul ceiling fired 16 times, and **no
+harvester died more than 32 cells from the yard** against three at 45–56 cells the round before.
+Lifetime spend was **74,160 credits, 49.1 a second**, the highest this bot has ever managed,
+against 65,020 and 46.6. The build ladder kept climbing to **1,264s** where it used to stop at
+640s. `msam` verified again: **7 built, 62 kills, 8.9 each**, against `e3`'s 0.72.
+
+And the bot lost by more than ever, because the constraint was never economic. It held 2,472
+credits at 1,200s with six units left. **At 480s this was a won game**: 43 units to 21, 9,940 of
+army to 8,400, 15 buildings each. At 600s it was 16 units to 37 and 2,700 to 13,300, and it never
+led again. In between it lost **42 units and killed 14**.
+
+### Four hundred and fifteen walk orders, and not one gather
+
+`AssaultStagingLogic` exists to stop the army arriving a speed class at a time. In 4,385 decisions
+the trace holds **415 `MoveToMuster` orders and zero `mustering`** — the third match running, and
+this time the reason is structural rather than slow. `Observe` is reached only from the
+`WaitForTheRest` branch, so `StaleEvaluations` and `WaitedEvaluations` never advanced past zero;
+`Release` needs one of them, so **it was unreachable by either route**, and `Released` was never
+latched once. Every branch except the walk was dead code. The whole machine reduced to a one-way
+attack-move order, and the army reached its objective only by falling through
+`ObjectiveInRange`, the standoff test, or death.
+
+The cell it walked to is the fault. `MusterCell` measured the standoff back from **their** base, so
+on badland-ridges it returned **(46,48)** — 14 cells from theirs and **50.2 cells from this bot's
+own yard at (82,13)**, with the whole contested map in between. `WaitForTheRest` only fires within
+six cells of it. Nothing ever got there: the closest any unit reported was **25.8 cells short of
+their base**, 11.8 cells short of the staging cell it was walking to.
+
+So the gathering leg *was* the dangerous leg. Across the first assault (435–515s) the force was
+spread from **25.8 to 71.9 cells short of their base — 46.1 cells of column**, which is most of the
+map. Enemy `jeep` ate it: **400 credits, Light armour, 3.54 cells a second, 5,391 damage a second
+against the `None` armour every one of this bot's infantry wears.** Between 470s and 545s it killed
+**26 `e3`, 12 `e1` and 4 `e2` — 42 units and 9,640 credits, 13% of everything the bot spent all
+match — for 14 kills**, and every single one of the 42 fell to a `jeep`. The losses centre on
+**(44.8, 53.2)**: the staging cell itself.
+
+That is not a fight this bot should lose. `e3` reaches 6 cells to `jeep`'s 4 and does **1,592
+damage a second to Light armour**; twenty-six of them standing together annihilate any number of
+jeeps. Arriving one at a time, they are 300-credit targets.
+
+### The fix: legs measured from home, and a release that re-arms
+
+One staging point cannot compress a 3.7x speed spread however well it is placed — after a single
+release the army simply re-spreads over whatever leg remains. So
+[`AssaultStagingLogic`](Logic/AssaultStagingLogic.cs) now gathers **repeatedly, on legs measured
+from home**. `StagingAdvanceCells` returns the next boundary in front of a unit —
+`(progress / leg + 1) * leg`, capped at `march = homeToTarget - standoff` — and `StagingCell` walks
+that distance out from our own base rather than back from theirs. `MusterWatchdog.Released` becomes
+`ReleasedThroughUnits`, so a release latches **one boundary instead of the push**: a released unit
+can never turn round, but it does gather again further on. The crowd clocks reset with it, because
+a peak carried over from the last leg can never be beaten by a crowd that has only just started
+arriving, and that would release on arrival — the same bug in a new place.
+
+On badland-ridges the legs land at **(71,25), (61,37), (50,49) and (46,54)**, then commit. The last
+one is the cell the old code sent everybody to directly; the difference is that the force now
+arrives there having re-concentrated three times, and the first gather happens 15 cells from home
+under its own towers.
+
+Why 16 cells: a leg of L is crossed in L/0.952 seconds by `e3` and L/3.54 by `jeep`, so it spreads
+the force by **L × 0.768 seconds**. At 16 that is 12.3s, about 9 evaluations, comfortably inside the
+16 of patience — the ceiling is L ≤ 22.4 / 0.768 = **29 cells**. The floor is the six-cell muster
+radius, below which a unit released at one boundary is already inside the next one; 16 is also
+longer than the longest reach in the ruleset (`msam`, 11), so a unit gathering at one boundary is
+out of reach of anything sitting on the last. `MaxWaitEvaluations` drops from 75 to **32** and now
+bounds **one gather** rather than the whole push: it must exceed the 9 + 16 = 25 evaluations a
+normal gather costs or it would pre-empt the thing it backstops, and four legs × 45s caps the whole
+approach at 180s against the ~100s a working gather actually spends.
+
+Staging reasons are now low-cardinality on purpose. `forming up {N}u short of their base` produced
+**242 distinct strings out of 415 orders** and buried the fact that the branch below it never ran;
+they now read `forming up on leg N`, `mustering on leg N with K allies` and `mustering on leg N,
+engaging {kind}`.
+
+**The next trace answers this in one query.** `mustering on leg 1` must appear at all — it has been
+zero for three matches — and **`mustering on leg 2` appearing proves both halves at once**: that a
+gather completed and that the release re-armed for the next leg. The forming-up spread inside one
+assault window should fall from 46.1 cells to something near one leg, and no single minute should
+lose 42 units to a 400-credit unit again.
+
+If the army arrives together and still loses, the next constraint is composition, and the numbers
+already name it. **`e3` is 27% of the budget — 67 built, 67 lost, 48 kills** — and every mobile type
+the bot fields has built equal to lost (`e1` 70/70, `e2` 16/16, `jeep` 10/10, `msam` 7/7). `msam`
+returns 8.9 kills a unit for 8.5% of the spend. After that, two leads that are still untouched:
+anti-air is **one `atwr`, built at 341s**, after whose death `orca` razed the base unopposed, and
+the enemy economy is still untouched — **0 enemy `harv` and 1 `proc` killed out of 192 kills**.
+
+## The gather worked, and then it ate the match
+
+Last round's fix held, and that is the point of this one. `mustering` went from **zero in three
+matches to 3,014**, spread across every leg — **811 on leg 1, 1,050 on leg 2, 780 on leg 3, 329 on
+leg 4, 44 on leg 5** — so the gather completed and the release re-armed exactly as designed. Legs
+measured from home were right. Every other standing diagnosis held too: lifetime spend reached
+**257,000 credits, 53.3 a second** against 74,160 and 49.1; the 11-cell answer was finally fielded
+(**31 `arty`**); `atwr`/`sam` and `e3` covered Air.
+
+And the bot lost by more than ever, because **the machine that gathers had no timeout on the state
+it actually spent its time in.**
+
+The telemetry is not the telemetry of a bot that was outplayed. At 960s it led **54 units to 8** and
+**17,550 of army to 3,980**. At 2,880s it led **145 to 7** and **49,950 to 2,400**. It finished
+having killed **811 to Cabal's 497** while losing 544 to their 904. It out-produced, out-killed and
+out-expanded the winner for the entire match — and **never razed their base**. Cabal's building
+count never fell below 19 and ended at **43**. Then, between 4,320s and 4,800s, this bot went from
+113 units and 19 buildings to **nothing**.
+
+### Seventy-eight percent of the assault was walking to a field
+
+Of `AttackBaseMode`'s **50,168** decisions, **39,332 — 78% — are `forming up`**. `objective in
+range` is **797, 1.6%**. That is a ratio of **49:1** between getting ready to attack and attacking.
+
+Two separate failures produce it, and both reduce to the same sentence.
+
+**The walk had no clock of any kind.** `Observe` is reached only from the `WaitForTheRest` branch,
+so a unit walking to a staging cell advanced no counter at all, and `MaxWaitEvaluations` could not
+help because it counts waiting. A unit that cannot reach its staging cell therefore walks at it
+forever. One `e1` — actor 355 — issued the identical **`AttackMoveTo(34,39)` 670 times between 460s
+and 877s**. That is **417 game seconds** against the **36 seconds** an `e1` needs to cover the 47.9
+cells from the yard at (13,82), and it reached the leg-3 gather **zero** times. Across the side,
+**19,613 of the 39,332 forming-up orders were that one cell**, issued by **77 distinct units over
+500 game seconds**; leg 3 drew **19,775 walk orders in the first 1,200 seconds against 780 gathers
+in the whole match**.
+
+**The standing still had a clock, but it was per leg and every re-entry reset it.** The doctrine
+left `Attack` **27 times**, so `AttackBaseMode.OnEnter` ran 27 times, and each run cleared
+`ReleasedThroughUnits` — re-imposing gathers the survivors had already been released through.
+
+The arithmetic was never going to work. A gather costs 9 evaluations of arrival spread plus 16 of
+patience, and the per-leg backstop allowed 32 more; four legs of that is **180 seconds**. The
+`Attack` doctrine's **27 episodes averaged 70.2 game seconds** (min 30, max 340; 14 of 27 were 50s
+or shorter). **The gather could not finish inside the episode that authorised it.**
+
+### And the side kept deleting its own target
+
+`Attack → Scout "nothing left to attack, going looking"` fired **24 times**. Every one was followed
+**30 to 50 seconds later** by `Scout → Opening "scout found their base"` — the same base, intact,
+which ended the match with 43 buildings.
+
+Corroborated forgetting was the right idea measured against the wrong clock. `CorroborationTicks`
+was **375 ticks, 15 game seconds**, derived from how often a unit *in contact* re-records. But the
+staging rule deliberately parks the army 14 cells short of their base and up to a leg behind that,
+in fog, for a whole gather. Nobody can see an enemy structure from there, so nobody corroborates,
+so the window expires **during the bot's own approach** — and one fast unit reaching the remembered
+cell then deletes the side's only target while the base is standing.
+
+### The base stopped being rebuilt with 37% of the match left
+
+`BasePlacementLogic.RingAt` grew its far edge as `14 + 6n` with **no ceiling**, while the near edge
+had one from the day it was written. `FindBuildLocation` is backed by a tile search whose
+`MaximumTileSearchRange` is **50 cells**, and it does not clamp — it **throws**, out of a mode's
+tick. At n = 7 the ask is **56**. The trace holds **337 `BuildBaseMode` errors between 3,039s and
+3,375s**, the last structure of the whole match went up at **3,007s**, and **nothing was built in
+the remaining 1,814 seconds — 37.6% of it** — while the base fell from 26 buildings to zero. This is
+the player's "need to restore power when our base is attacked", exactly.
+
+### The fix: a budget the machine cannot outspend
+
+[`AssaultStagingLogic`](Logic/AssaultStagingLogic.cs) gains **one counter and one bound**.
+`MusterWatchdog.StagedEvaluations` counts every evaluation the staging machine holds a unit —
+**walking as well as waiting** — and `MaxStagingEvaluations` caps it at **40**. Nothing resets it:
+not a release, and not a new push. `MusterWatchdog.ForNewPush()` clears the per-leg clocks and the
+release latch, which a unit setting out again genuinely needs, and carries the budget through, which
+is the whole correction. Past the cap the verdict is `Release` for the rest of the unit's life, and
+it is checked **above** the walk order so an out-of-budget unit is never sent back to a cell it has
+already passed. `Charge` is deliberately split out of `Observe`: patience is about standing still,
+a timeout is about being held at all, and conflating them is what left the walk with no clock.
+
+Why 40. One leg done properly costs **37 evaluations** — `e3` at 0.952 cells a game second crosses
+a 16-cell leg in 16.8s, which is 12 evaluations at 1.4s each, plus the 25 a gather costs. Two legs
+is **74**. So `37 ≤ 40 < 74` buys exactly one gather per unit, ever, and 40 evaluations is ~56s,
+inside the **70.2s mean `Attack` episode** that four legs × 45s never was. `MaxWaitEvaluations`
+stays at 32, below the budget, so the per-leg backstop still fires inside a budget that has not run
+out.
+
+[`SightingMemoryLogic`](Logic/SightingMemoryLogic.cs) widens `CorroborationTicks` from 375 to
+**2,250 — 90 game seconds**. The floor is the longest blind spell a committed push legitimately
+has: one gather is ~35s and the final 14-cell run in from the standoff is 15s for `e3`, so 50s. The
+ceiling is `ReferenceBotTuning.LostContactSeconds` (300s), the real backstop for a base that no
+longer exists; at 30% of it a genuinely levelled base is still forgotten inside a minute and a half.
+
+[`BasePlacementLogic`](Logic/BasePlacementLogic.cs) gains `MaxSearchRangeCells = 50` and clamps
+`RingAt`'s far edge to it. [`RefinerySitingLogic`](Logic/RefinerySitingLogic.cs) gets the same
+clamp, where the bug is worse but had not yet fired: `FindResourceFields` is uncapped by design, so
+a field 60 cells out is ordinary and would have thrown identically. A field beyond the engine's
+limit now collapses to one legal band that simply fails to match, and the caller's own ladder
+answers — the neutral fallback it had before the siting rule existed.
+
+**The next trace answers this in one query.** `forming up` must fall from **78% of
+`AttackBaseMode`'s output to well under a quarter**, and `objective in range` must rise from
+**1.6%**; no single actor id may hold more than **40** staging decisions in its whole life, because
+that is now arithmetically impossible. `Attack → Scout "nothing left to attack, going looking"`
+must fall from **24** toward zero, and any occurrence should no longer be followed 30–50s later by
+`scout found their base`. There must be **zero `BuildBaseMode` errors**, and structures must still
+be going up in the final quarter of the match.
+
+## The queue never reached the rung that had the answer
+
+Lost on `badland-ridges` as Nod after 1,528 seconds: **0 units, 1 building**, 72 killed against 78
+lost, while Cabal finished with 225 units and an army worth 99,860. The economic reading of that
+final row is wrong. At **480s the two sides were level** — 41 units, 9,900 army and 15 buildings
+against 42, 10,980 and 16 — and the whole match was decided in the 120 seconds that followed.
+
+Everything the last four rounds fixed held. `forming up` fell from **78% of `AttackBaseMode`'s
+output to 12.4%** and `objective in range` rose from 1.6% to **3.5%**; no actor held more than
+**3** staging decisions against a budget of 40; `mustering` fired for the **first time in four
+recorded matches** (twice); there were **zero** `Attack → Scout "nothing left to attack"` switches
+and **zero** `BuildBaseMode` errors. The one check that failed is the last structure at **771s,
+50.5% of the match** — the base still stops growing halfway through.
+
+### Zero combat vehicles, in 1,134 seconds of being able to build them
+
+`hq` stood at 321s and `afld` at 394s, so Nod `arty` — 600 credits, `rangeCells` **11**,
+5,390/4,312/2,888 damage a second — was buildable for **1,134 of the 1,528 seconds, 74% of the
+match**. The `Vehicle` queue issued **twelve orders** in that time: six `bggy` and six `harv`. Zero
+`arty`. Zero `msam`, `mtnk`, `ltnk`. The largest single killer of this bot was enemy `msam` at 17 of
+97, reaching 11 cells against an army whose longest weapon reached **6**.
+
+### Because the harvester floor is a rung that can never be met
+
+[`ExpansionLogic.Reinforce`](Logic/ExpansionLogic.cs) sizes the harvester floor at
+`HarvestersPerRefinery` (2) × refineries. Five refineries stood — 51s, 117s, 195s, 277s, 585s — so
+the floor read **10**, and a refinery hands out exactly **one** `FreeActor` harvester. Ten
+harvesters were built and ten were lost, nine of them between **660s and 780s**. The floor was
+therefore unmet for essentially the whole match; `UnitProductionLogic.ChooseNext` returns the first
+unmet step; and the floor sits **above** the siege rung that was added last round to buy exactly the
+11 cells of reach this army lacked.
+
+**This is the fourth match the same shape has decided.** Tanks once blocked harvesters, harvesters
+once blocked tanks, siege once blocked harvesters, and now the floor blocks siege. Every previous
+fix moved a rung, and the bug came back one rung higher.
+
+### And the endless rung at the bottom was the dearest unit per kill
+
+Sixty-eight mobile units, 15,400 credits, in three types:
+
+| unit   | built | lost | spend  | share of lifetime spend | kills | credits per kill |
+|--------|-------|------|--------|-------------------------|-------|------------------|
+| `e3`   | 38    | 38   | 11,400 | **29.3%**               | 11    | **1,036**        |
+| `e1`   | 25    | 25   | 2,500  | 6.4%                    | 26    | **96**           |
+| `bggy` | 5     | 5    | 1,500  | 3.9%                    | 14    | **107**          |
+
+Every plan ended `new("Infantry", ["e3"], int.MaxValue)`, so every leftover credit for the whole
+match bought the 1,036 row — and lifetime spend was only 38,850 credits, 25.4 a second.
+
+The ruleset says why. **63% of the mobile army's engagement orders were against Infantry** (563 of
+894, excluding the towers), and `e3` deals **318** damage a second to `None` armour where `e1` deals
+**1,875**. The enemy infantry that did the killing — `e1` 33, `e3` 14, `e2` 9, **56 of 97** — deals
+that 1,875 straight back. A 300-credit unit out-traded 5.9 to 1 by a 100-credit one.
+
+`e3` is also the slowest actor in the game at 0.952 cells a game second. Their yard stood at (50,18)
+and ours at (13,82) — **73.9 cells, 78 game seconds of walking**. The one assault of the match died
+strictly in speed order: `bggy` (4.15 c/s) at 491s, 526s and 527s at (58,35), (49,20) and (49,19),
+inside their base; `e1` (1.318) at 566–574s at (41–44, 25–26), on the wall beside their `gun` at
+(43,21); `e3` at 579–589s at (40–44, 30–33), still eight cells short of where the riflemen had
+already died. **Thirty-nine units in fifty seconds, for nine kills.** `AttackBaseMode` issued its
+last decision at 600s and none in the remaining **928 seconds — 61% of the match**.
+
+### The fix: a floor that stands aside, and riflemen at the bottom of the ladder
+
+[`ArmyBalanceLogic`](Logic/ArmyBalanceLogic.cs) is new, pure, and moves nothing. `Release` marks a
+rung met — by rewriting its target down to what is standing — while the role is inside a slack band
+of its target, and restores the original target the moment it falls below. It is a **preference with
+a fallback**: income keeps absolute priority while the fleet is genuinely in trouble, and a fleet
+that is merely one or two short stops holding the whole queue hostage for the rest of the game. It
+is applied to a **named role** (`HarvesterUnits`) rather than to every rung, so
+`new("Vehicle", ["jeep", "bggy"], 1)` and every other rung keep the previous behaviour exactly.
+
+**Why three quarters.** The band is bounded on both sides. It must be strictly below 1 or nothing
+changes. It must be strictly above **1/2**, because `Reinforce` sizes the floor at two per refinery
+and a refinery hands out one free harvester — so free actors alone are always half the floor, and
+any share at or below a half releases the rung before the bot has bought a single harvester, which
+is the failure that pinned income at ~12 credits a second two rounds ago. `ceil(3n/4) > n/2` for
+every `n > 0`, so 3/4 is strictly inside the band at every refinery count: a floor of 10 releases at
+**8**, so three harvesters must be bought on top of the five free ones; a floor of 8 releases at 6;
+a floor of 4 releases at 3. Targets of 1 and 2 release at their own target, so small rungs never
+release at all.
+
+[`Plans.cs`](Plans.cs) changes one rung in each of the three training plans: the endless
+`new("Infantry", ["e3"], int.MaxValue)` becomes `new("Infantry", ["e1"], int.MaxValue)`. `e3` keeps
+its bounded rung above it in every plan — 12 in `OpeningTrain`, 8 in `DefenceTrain` and
+`AttackTrain` — because it is still the only unit this bot can build that shoots upwards and still
+the best thing it can build per credit against `Heavy` armour (1,592 against `None`'s 318), so it
+must be replaced when it dies. It simply must not be what every leftover credit buys. Capped at
+twelve it costs 3,600 rather than 11,400, and that **7,800-credit difference is 20% of everything
+the bot spent**, moved to the rung that killed 10.8 times more per credit.
+
+**The next trace answers this in one query.** `harvester floor released at N/M` must appear in
+`TrainUnitsMode` reasons — it is a literal that cannot be emitted any other way — and the `Vehicle`
+queue must produce **at least one** `arty`, `msam`, `mtnk` or `ltnk`, against zero in each of the
+last two matches. `e3` must fall from **29.3% of lifetime spend** to under 12%, and `e1` must become
+the most-produced unit. If the floor releases and the queue still buys no combat vehicle, the
+blocker is cash rather than rung order and the next fix belongs in income, not in the plan.
 
 ## Start your own
 

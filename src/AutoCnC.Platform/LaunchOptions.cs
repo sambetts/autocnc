@@ -109,6 +109,25 @@ namespace AutoCnC.Platform
 		public static string BattleLog => Value("Launch.BattleLog");
 
 		/// <summary>
+		/// Where to write the public map facts JSON. Blank leaves the trait's own setting alone;
+		/// <c>none</c> disables it.
+		/// </summary>
+		public static string MapFacts => Value("Launch.MapFacts");
+
+		/// <summary>
+		/// Pins the lobby's random seed, so the same configuration replays the same match.
+		/// </summary>
+		/// <remarks>
+		/// Zero — the default — leaves the engine's own seed alone, which is
+		/// <c>DateTime.Now.ToBinary()</c> and therefore different every launch. Pinning it is what
+		/// turns a single result into a repeatable one: with map, faction, opponent and seed all
+		/// fixed, two runs of the same revision differ only where the bot itself is
+		/// non-deterministic, and a difference between revisions is attributable to the change
+		/// rather than to the draw.
+		/// </remarks>
+		public static int Seed => Integer("Launch.Seed", 0);
+
+		/// <summary>
 		/// Where to write the newline-delimited JSON trace connecting assessments and mode
 		/// decisions to the orders they produced. Blank disables the trace.
 		/// </summary>
@@ -159,6 +178,18 @@ namespace AutoCnC.Platform
 		{
 			var value = Value(key);
 			return value == "1" || value != null && bool.TryParse(value, out var parsed) && parsed;
+		}
+
+		/// <summary>Turns a launch file argument into a log path, or <c>null</c> when it says off.</summary>
+		public static string ResolvePath(string file)
+		{
+			if (string.IsNullOrWhiteSpace(file) ||
+				string.Equals(file, "none", StringComparison.OrdinalIgnoreCase))
+				return null;
+
+			return System.IO.Path.IsPathRooted(file)
+				? file
+				: System.IO.Path.Combine(OpenRA.Platform.SupportDir, "Logs", file);
 		}
 
 		/// <summary>Reads a handicap and snaps it to what the server will actually accept.</summary>

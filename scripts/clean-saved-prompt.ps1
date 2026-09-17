@@ -11,11 +11,25 @@
     This deletes those sections from the saved template and leaves the learned half alone. The
     launcher adds the {gameMechanics} placeholder itself on next use, so this only has to remove.
 
+.PARAMETER Reset
+    Discards the saved template entirely, so the next round renders the repository default in
+    docs/agent-prompt-template.md.
+
+    This is the right switch after the evidence pipeline changes. The saved template is the
+    learned half of the prompt, and a template written before summary.json and units.csv existed
+    spends most of its length on triage recipes that re-derive, by hand and in PowerShell, the
+    aggregates the harness now computes once in tested code. Cleaning cannot fix that; the recipes
+    are not wrong, they are simply obsolete, and the default has been rewritten around the derived
+    artifacts. The agent rewrites this half at the end of every round anyway, so resetting costs
+    one round's accumulated wording and nothing else.
+
 .PARAMETER WhatIf
     Report what would change without writing.
 #>
 [CmdletBinding(SupportsShouldProcess)]
-param()
+param(
+    [switch]$Reset
+)
 
 $ErrorActionPreference = 'Stop'
 
@@ -29,6 +43,22 @@ $settings = Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json
 $template = $settings.AgentPromptTemplate
 if ([string]::IsNullOrWhiteSpace($template)) {
     Write-Host 'No saved prompt template - the repository default will be used.' -ForegroundColor Yellow
+    return
+}
+
+if ($Reset) {
+    $stamp = (Get-Date).ToString('yyyyMMdd-HHmmss')
+    $backup = Join-Path (Join-Path $env:LOCALAPPDATA 'AutoCnC') "launcher.backup-$stamp.json"
+
+    Write-Host ("Discarding the saved {0:N0}-character template; the repository default will be used." -f $template.Length) -ForegroundColor Cyan
+    if ($PSCmdlet.ShouldProcess($settingsPath, 'Discard saved prompt template')) {
+        Copy-Item -LiteralPath $settingsPath -Destination $backup
+        $settings.AgentPromptTemplate = $null
+        $settings | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $settingsPath -Encoding utf8
+        Write-Host "Backed up to $backup" -ForegroundColor DarkGray
+        Write-Host 'Done. The next round renders docs/agent-prompt-template.md.' -ForegroundColor Green
+    }
+
     return
 }
 

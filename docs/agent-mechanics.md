@@ -42,6 +42,99 @@ something a bad round can overwrite.
   explainable — but the reason is legibility, not testability.
 - An invariant worth remembering belongs in prose beside the code it constrains, which is what the
   next round actually reads.
+- A claim about what a change will do belongs in `checks.json`, not in prose. The harness evaluates
+  the previous round's checks against the next fight and reports pass or fail with actual values,
+  so a prediction is settled by the harness rather than by a later round taking your word for it.
+
+## The evidence a fight leaves behind
+
+Two kinds of artifact. The **raw records** are written by the engine during the match. The
+**derived artifacts** are computed from them afterwards by `tools/AutoCnC.Evidence`, once, before
+an improvement round is called — so a round reads the answers rather than recomputing them. Every
+artifact is versioned and append-only: columns are added at the end, JSON fields are added and
+never renamed or removed, and a reader that finds a column missing is reading an older run rather
+than a broken file.
+
+### Derived — read these first
+
+| Artifact | What it answers |
+| --- | --- |
+| `summary.json` | Almost everything. Held under 20 KB so it can be read whole in one go. |
+| `units.csv` | One row per unit, whole lifecycle. |
+| `check-results.json` | The previous round's checks, evaluated against this fight. |
+| `trend.json` | This bot's headline metrics across recent runs, with regressions flagged. |
+| `map.json` | Map dimensions, spawn cells, home-to-enemy distance, resource cells, random seed. |
+
+`summary.json` (`schemaVersion` 1) holds: `provenance` (which inputs existed and at what schema —
+so a missing number reads as unknown rather than as zero), `fight`, `headline`, `fitness`,
+`crossover`, `economy`, `map`, `unitTypes`, `production`, `doctrineEpisodes`, `engagements`,
+`lossClusters`, `notes` and `truncated`.
+
+The tabular sections — `unitTypes`, `production`, `doctrineEpisodes`, `engagements`,
+`lossClusters` and `economy.series` — are `{ "columns": [...], "rows": ["a,b,c", ...] }`: a CSV
+table inside the JSON, one row per line. That is a third of the size of the equivalent indented
+objects, which is what lets the whole ledger fit rather than being trimmed. The first column of
+every table is its natural key. If a very long match does overflow the ceiling, `truncated` names
+each list that was shortened and by how much — a short list is never silently short.
+
+`units.csv` columns: `actorId, type, cost, faction, owner, bornSeconds, diedSeconds,
+lifetimeSeconds, killerActor, killerPlayer, deathX, deathY, kills, creditsKilled, damageDealt,
+damageTaken, cellsTravelled, secondsIdle, modesUsed, decisionCount, free`. `cellsTravelled` is the
+distance between places the unit was *observed*, so it is a lower bound. `secondsIdle` is time
+spent in gaps longer than 15 seconds between that unit's own decisions.
+
+### Raw — for questions the derived artifacts cannot answer
+
+- `battle.csv` — what this side could observe: `spotted`, `attacked`, `dealt`, `built`, `lost`,
+  `killed`, `doctrine`, `player`, `over`.
+- `telemetry.csv` — both sides' curves at one-second resolution.
+- `decisions.jsonl` — assessments and every issued unit decision.
+- `game-rules.json` — the resolved ruleset, including each actor's `freeActors`.
+- `replay.orarep` — the match itself.
+
+### Two traps that have produced wrong analyses
+
+- A `killed` row is written from the **victim's** point of view: `player` owns the victim and
+  `otheractor` is the killer. This side's kills are the rows where `otherplayer` is this side.
+- `cash` is a stock. `cash = 0` cannot distinguish "earning nothing" from "spending it the instant
+  it arrives". The cumulative `earned` and `spent` columns are the flows.
+
+### checks.json
+
+Written by a round into its own bot workspace; evaluated by the harness against the *next* fight.
+
+```json
+{ "schemaVersion": 1, "authoredForRevision": "abc1234",
+  "checks": [ { "id": "escort-runs", "description": "the new branch executes",
+                "query": "reason:escorting harvester", "operator": ">=", "value": "1" } ] }
+```
+
+Queries: `summary.<dotted.path>`, `summary.unitTypes[<type>].<column>`,
+`summary.production[<queue>].<column>`, `units.count(type=x)`, `units.sum(<field>,type=x)`,
+`units.mean(<field>,type=x)`, `units.max(...)`, `units.min(...)`, and `reason:<literal>` for the
+number of decisions whose reason contains that literal. Operators: `>=`, `>`, `<=`, `<`, `==`,
+`!=`, `contains`, `present`, `absent`.
+
+The `reason:` form is the important one. Give any new code path a reason literal nothing else uses
+and assert it: that is what separates "the new branch is wrong" from "the new branch never ran",
+which are the two explanations that get confused when the same bug reappears under a new name.
+
+### Fitness
+
+The score is graded rather than a single bit, with named components reported separately:
+`economicRate`, `valueExchange`, `armyValueIntegral`, `buildingsDestroyed`, `exploration` and
+`survival`. A change that loses the match while doubling income shows up as a component that
+improved, which is the difference between partial progress and noise. Each component's `reference`
+is the value that scores 1.0, and those references are fixed constants — a score normalised
+against its own match would rate every match average and could never show a trend.
+
+### History is for deciding, never for memorising
+
+The cross-run index and `trend.json` exist for the improvement agent between matches. They are
+never readable by a running bot, never compiled into one, and must never justify a constant in
+strategy code. No literal map cells, no branching on which map or opponent was drawn, no constant
+tuned to one seed. Deriving positions at runtime from `BattleState` and `ModeContext` is the only
+permitted way to know where anything is.
 
 ## Economy, and the harvester trap
 

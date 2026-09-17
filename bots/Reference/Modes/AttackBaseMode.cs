@@ -60,10 +60,13 @@ namespace AutoCnC.Reference.Modes
 			// What this unit's warhead is for. See DefensiveMode.OnEnter.
 			role = WeaponMatchLogic.RoleOf(self.Info.Name);
 
-			// Each push forms up once. Resetting here rather than latching for the unit's whole
-			// life is what makes that true: a unit that came home, rebuilt a force and set off
-			// again is starting a new assault, not resuming the old one.
-			musterWatchdog = MusterWatchdog.Start;
+			// Each push forms up once, and each unit forms up a bounded number of times in its
+			// whole life. Clearing the per-leg clocks here is what makes the first true: a unit
+			// that came home, rebuilt a force and set off again is starting a new assault, not
+			// the second true, and it is the correction this round is about — the doctrine left
+			// Attack 27 times on badland-ridges, so this method ran 27 times, and a full reset
+			// each time is what let one staging machine consume 78% of the assault's decisions.
+			musterWatchdog = musterWatchdog.ForNewPush();
 			objectiveId = 0;
 		}
 
@@ -81,9 +84,11 @@ namespace AutoCnC.Reference.Modes
 				objective = ctx.ResolveActor(objectiveId);
 			}
 
-			// Anything we can see is worth remembering for the units that cannot.
+			// Anything we can see is worth remembering for the units that cannot. Recording every
+			// evaluation is also what corroborates the sighting against a unit that cannot see it
+			// — see EnemyBaseSightings.Forget.
 			if (objective != null)
-				EnemyBaseSightings.Record(self.Owner, objective.Location);
+				EnemyBaseSightings.Record(self.Owner, objective.Location, ctx.WorldTick);
 
 			var weaponRange = ctx.WeaponRangeUnits;
 			var state = new AssaultState(
@@ -111,23 +116,35 @@ namespace AutoCnC.Reference.Modes
 		}
 
 		/// <summary>
-		/// What this unit can see about the muster: how far their base is, how far the staging
-		/// cell is, and how much of the army is already standing on it.
+		/// What this unit can see about the muster: how far their base is, which leg it should
+		/// gather on, how far that cell is, and how much of the army is already standing on it.
 		/// </summary>
 		/// <remarks>
 		/// Allies are counted around this unit rather than around the staging cell, because
 		/// sensing is centred on the sensing unit and that is the only count available. It is
 		/// also the more useful one: "am I going in alone" is a question about the company this
 		/// unit will actually keep, not about a map coordinate.
+		/// <para>
+		/// The arithmetic all lives in <see cref="AssaultStagingLogic"/>; this method only turns
+		/// its answer into a cell so the engine can measure the distance to it.
+		/// </para>
 		/// </remarks>
 		MusterState Muster(Actor self, ModeContext ctx, in AssaultState assault)
 		{
 			if (!EnemyBaseSightings.TryGetLastKnown(self.Owner, out var theirBase))
 				return default;
 
-			var standoffCells = musterTuning.StandoffUnits / 1024;
 			var home = ctx.BaseCenter;
-			var (x, y) = AssaultStagingLogic.MusterCell(home.X, home.Y, theirBase.X, theirBase.Y, standoffCells);
+			var homeToTarget = DistanceBetween(home, theirBase);
+			var toTarget = ctx.DistanceTo(theirBase);
+
+			var advanceCells = AssaultStagingLogic.StagingAdvanceCells(
+				homeToTarget / 1024,
+				toTarget / 1024,
+				musterTuning.LegUnits / 1024,
+				musterTuning.StandoffUnits / 1024);
+
+			var (x, y) = AssaultStagingLogic.StagingCell(home.X, home.Y, theirBase.X, theirBase.Y, advanceCells);
 			var musterCell = new CPos(x, y);
 
 			var allies = 0;
@@ -141,12 +158,26 @@ namespace AutoCnC.Reference.Modes
 				HasTarget: true,
 				CanMove: ctx.CanMove,
 				ObjectiveInRange: assault.HasObjective && assault.DistanceToObjectiveUnits <= assault.WeaponRangeUnits,
-				DistanceToTargetUnits: ctx.DistanceTo(theirBase),
+				HomeToTargetUnits: homeToTarget,
+				StagingAdvanceUnits: advanceCells * 1024,
 				MusterX: x,
 				MusterY: y,
 				DistanceToMusterUnits: ctx.DistanceTo(musterCell),
 				AlliesNearbyCount: allies);
 		}
+
+		/// <summary>
+		/// How far apart two cells are, in world units, without reference to where this unit is.
+		/// </summary>
+		/// <remarks>
+		/// <c>ModeContext.DistanceTo</c> always measures from the asking unit, and the length of
+		/// the whole march is a fact about the side rather than about one of its soldiers — a
+		/// unit that has walked most of the way must still know it belongs to a 68-cell push, or
+		/// it will decide the approach is short enough not to need staging at all. Integer-only
+		/// for the same lockstep reason as the rest of the staging arithmetic.
+		/// </remarks>
+		static int DistanceBetween(CPos a, CPos b)
+			=> AssaultStagingLogic.IntSqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y)) * 1024;
 
 		/// <summary>
 		/// Where to march with nothing in sight, and the housekeeping that keeps that honest.
@@ -163,6 +194,17 @@ namespace AutoCnC.Reference.Modes
 		/// window where it has none, and <c>ReferenceBotLogic</c> rule 4 reaches the same
 		/// conclusion from <c>SecondsSinceContact</c> shortly afterwards either way.
 		/// </para>
+		/// <para>
+		/// <b>Arriving and seeing nothing is a statement about this unit, not about their base.</b>
+		/// Sensing is per-unit and shroud-filtered, so one unit inside their base behind a ridge
+		/// reads empty while the rest of the push is shooting the refinery beside it — and this
+		/// method used to believe the blind one and cancel the assault for everybody. It now asks
+		/// <see cref="EnemyBaseSightings.Forget"/>, which only agrees once nobody on this side has
+		/// seen an enemy structure for fifteen seconds; the doctrine is only ended when the
+		/// sighting was genuinely discarded. Either way this unit is standing on the spot and has
+		/// nowhere left to march, so it falls through to the last-stand branch and shoots whatever
+		/// is in reach instead of walking onto its own cell.
+		/// </para>
 		/// </remarks>
 		static ApproachOrders Approach(Actor self, ModeContext ctx)
 		{
@@ -172,13 +214,15 @@ namespace AutoCnC.Reference.Modes
 				return ApproachOrders.None;
 			}
 
-			// Arrived, and there is nothing here after all: the sighting is stale, so drop it
-			// rather than hold the whole push in front of an empty crater.
+			// Arrived, and there is nothing here after all: if nobody else can see their base
+			// either, the sighting is stale, so drop it rather than hold the whole push in front
+			// of an empty crater.
 			var distance = ctx.DistanceTo(cell);
 			if (distance <= ArrivedRadius.Length)
 			{
-				EnemyBaseSightings.Forget(self.Owner);
-				ctx.SwitchDoctrine(ReferenceDoctrines.Scout, "their base is not there any more, going looking");
+				if (EnemyBaseSightings.Forget(self.Owner, ctx.WorldTick, SightingMemoryTuning.Default))
+					ctx.SwitchDoctrine(ReferenceDoctrines.Scout, "their base is not there any more, going looking");
+
 				return ApproachOrders.None;
 			}
 

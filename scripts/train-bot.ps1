@@ -113,6 +113,69 @@ foreach ($required in 'battle.csv', 'telemetry.csv', 'decisions.jsonl') {
 }
 
 $workspace = Split-Path -Parent $project
+
+# ---------------------------------------------------------------------------
+# Derived evidence
+# ---------------------------------------------------------------------------
+
+<#
+    Everything below this line is derived from the raw records above and replaces none of them.
+
+    It is built here, once, because the alternative is what the loop used to do: every round spent
+    the larger part of its budget re-deriving the same aggregates from the raw event stream with
+    bespoke scripts, in a fresh process that paid the decision-trace parse again each time. The
+    same arithmetic, done once by code that is tested, is the single cheapest improvement available
+    to the analysis budget.
+
+    It also evaluates the previous round's checks against this fight and folds the result into the
+    bot's cross-run history, which is what makes a regression something the harness reports rather
+    than something a later round happens to notice.
+#>
+$evidenceDll = Join-Path $repoRoot "tools\AutoCnC.Evidence\bin\$Configuration\net8.0\AutoCnC.Evidence.dll"
+if (-not (Test-Path -LiteralPath $evidenceDll)) {
+    Write-Host '==> Building the evidence tool' -ForegroundColor Cyan
+    dotnet build (Join-Path $repoRoot 'tools\AutoCnC.Evidence\AutoCnC.Evidence.csproj') `
+        -c $Configuration -v quiet --nologo
+    if ($LASTEXITCODE -ne 0) { throw 'Evidence tool build failed.' }
+}
+
+$botName = [IO.Path]::GetFileNameWithoutExtension($project)
+$historyPath = Join-Path (Split-Path -Parent $run) 'history.json'
+
+# The checks a previous round wrote live with the bot, because they are a claim about the bot
+# rather than about any one fight. Carried into the evidence so the fight keeps its own copy.
+$authoredChecks = Join-Path $workspace 'checks.json'
+$fightChecks = Join-Path $evidence 'checks.json'
+if ((Test-Path -LiteralPath $authoredChecks) -and -not (Test-Path -LiteralPath $fightChecks)) {
+    Copy-Item -LiteralPath $authoredChecks -Destination $fightChecks
+}
+
+Write-Host '==> Deriving summary.json, units.csv, checks and the cross-run trend' -ForegroundColor Cyan
+dotnet $evidenceDll summarise $evidence --history $historyPath --bot $botName
+if ($LASTEXITCODE -ne 0) { throw 'Deriving the fight evidence failed.' }
+
+$summaryPath = Join-Path $evidence 'summary.json'
+$unitsPath = Join-Path $evidence 'units.csv'
+$mapFactsPath = Join-Path $evidence 'map.json'
+$checkResultsPath = Join-Path $evidence 'check-results.json'
+$trendPath = Join-Path $evidence 'trend.json'
+
+# The generated halves of the prompt. These replace two sections a round used to hand-maintain:
+# the checks it promised to verify, and the cross-round comparison it carried as prose.
+$checkReport = if (Test-Path -LiteralPath $checkResultsPath) {
+    (Get-Content -LiteralPath $checkResultsPath -Raw | ConvertFrom-Json).rendered
+} else {
+    'No checks were carried into this round. Write some in checks.json before finishing.'
+}
+
+$trendReport = if (Test-Path -LiteralPath $trendPath) {
+    (Get-Content -LiteralPath $trendPath -Raw | ConvertFrom-Json).rendered
+} else {
+    'No cross-run history yet.'
+}
+
+$botAudit = & { dotnet $evidenceDll audit-bot $workspace } | Out-String
+
 $promptFile = Join-Path $evidence 'agent-prompt.txt'
 $transcript = Join-Path $run 'agent-transcript.txt'
 $statusFile = Join-Path $run 'agent-status.json'
@@ -191,10 +254,28 @@ from the fix its harvesters needed.
 
 The template must retain these placeholders exactly:
 {workspace}, {gameMechanics}, {gameGuide}, {gameRules}, {fightManifest}, {battleLog}, {telemetry},
-{decisionTrace}, {battle}, {result}, {sourceRevision}, {nextPromptContract}
+{decisionTrace}, {summary}, {units}, {mapFacts}, {checks}, {checkResults}, {trend}, {checkReport},
+{trendReport}, {botAudit}, {battle}, {result}, {sourceRevision}, {nextPromptContract}
 
 Do not replace any placeholder with a path or value from this fight, even where the rendered prompt
 above shows that value.
+
+Do not write triage recipes. ``{summary}`` and ``{units}`` are computed by the harness from the raw
+records, by tested code, before you are called: the per-unit-type ledger with credits per kill and
+share of spend, the economy series, the production and doctrine tables, the engagement matrix, the
+loss clusters and the telemetry crossover are all already there. A template that tells the next
+round to re-derive those from ``{decisionTrace}`` is spending its budget on arithmetic that has
+already been done, which is the single largest thing that was wrong with this loop. Read
+``{decisionTrace}`` only for a question the summary genuinely cannot answer, and say which.
+
+Put {checkReport} and {trendReport} on lines by themselves where those sections belong. They are
+generated: {checkReport} is the harness evaluating the checks the previous round wrote, and
+{trendReport} is the cross-run comparison. Do not write either by hand, and do not maintain a
+prose list of "already diagnosed, verify this" - that list is exactly what checks.json is for.
+
+Keep a section telling the next round to write ``checks.json`` into {workspace} before it finishes,
+and to give any new code path a reason literal nothing else uses so a ``reason:`` check can prove
+it ran. That is what distinguishes "the new branch is wrong" from "the new branch never ran".
 
 Put {nextPromptContract} on a line by itself where this section belongs. Do not copy this contract
 text or its marker example into the replacement; that placeholder inserts the current contract when
@@ -219,6 +300,22 @@ accept a valid template automatically.
         '{telemetry}' = (Join-Path $evidence 'telemetry.csv')
         '{decisionTrace}' = (Join-Path $evidence 'decisions.jsonl')
         '{replay}' = (Join-Path $evidence 'replay.orarep')
+
+        # Derived artifacts. These are what a round should read; the raw records above are for
+        # the questions these cannot answer.
+        '{summary}' = $summaryPath
+        '{units}' = $unitsPath
+        '{mapFacts}' = $mapFactsPath
+        '{checks}' = $fightChecks
+        '{checkResults}' = $checkResultsPath
+        '{trend}' = $trendPath
+
+        # Generated prose, injected verbatim. These two replace sections a round used to write by
+        # hand and the next round was supposed to verify by eye.
+        '{checkReport}' = $checkReport
+        '{trendReport}' = $trendReport
+        '{botAudit}' = $botAudit.Trim()
+
         '{battle}' = "map=$($battle.Map), difficulty=$($battle.Difficulty), opponents=$($battle.Opponents), faction=$($battle.Faction), opponent faction=$($battle.BotFaction), speed=$($battle.GameSpeed), execution=$($battle.ExecutionMode)"
         '{result}' = "$($result.Outcome) after $($result.DurationSeconds) game seconds; $score`n$playerFeedback"
         '{sourceRevision}' = [string]$manifest.SourceRevision
@@ -237,6 +334,73 @@ accept a valid template automatically.
 }
 
 $prompt = Get-Content -LiteralPath $promptFile -Raw
+
+<#
+    Resolve the derived-evidence placeholders on the prompt as it actually stands.
+
+    This runs unconditionally, and that matters: the block above only renders a prompt when one is
+    not already there, but the launcher writes evidence/agent-prompt.txt itself before invoking
+    this script (TrainingAgent.cs), using a renderer that predates these artifacts. Doing the
+    substitution only inside that block meant the normal improvement flow - the one everybody
+    actually uses - sent the agent the literal text "{summary}" instead of a path, and no generated
+    check or trend report at all.
+
+    Substituting on the rendered text is safe because these placeholders appear nowhere else: a
+    prompt that already has real paths simply has nothing left to replace.
+#>
+$derivedReplacements = [ordered]@{
+    '{summary}' = $summaryPath
+    '{units}' = $unitsPath
+    '{mapFacts}' = $mapFactsPath
+    '{checks}' = $fightChecks
+    '{checkResults}' = $checkResultsPath
+    '{trend}' = $trendPath
+    '{checkReport}' = $checkReport
+    '{trendReport}' = $trendReport
+    '{botAudit}' = $botAudit.Trim()
+}
+
+$before = $prompt
+foreach ($replacement in $derivedReplacements.GetEnumerator()) {
+    $prompt = $prompt.Replace([string]$replacement.Key, [string]$replacement.Value)
+}
+
+if ($prompt -ne $before) {
+    Set-Content -LiteralPath $promptFile -Value $prompt -Encoding utf8
+}
+
+# A learned template written before these artifacts existed has no placeholder to fill, so the
+# agent would never be told they are there. Append them rather than silently sending the old
+# prompt: the artifacts are the point of the round.
+if ($prompt -notlike '*summary.json*') {
+    $appendix = @"
+
+## Derived evidence (appended: this prompt template predates it)
+
+The harness has precomputed these from the raw records. Read them before parsing anything by hand.
+
+- Fight summary, read this first and read it whole: ``$summaryPath``
+- Unit ledger, one row per unit lifecycle: ``$unitsPath``
+- Map facts: ``$mapFactsPath``
+
+Do not re-derive per-unit-type credits-per-kill, share of spend, the economy series, doctrine
+episodes, loss clusters, the engagement matrix or the telemetry crossover from
+``decisions.jsonl`` - they are already in the summary.
+
+### Checks carried in from the previous round
+
+$checkReport
+
+### How this bot is trending
+
+$trendReport
+"@
+
+    $prompt += $appendix
+    Set-Content -LiteralPath $promptFile -Value $prompt -Encoding utf8
+    Write-Host '    Appended the derived-evidence section: the saved prompt template predates it.' -ForegroundColor DarkGray
+}
+
 $configurationPath = if ($AgentConfiguration) {
     (Resolve-Path -LiteralPath $AgentConfiguration).Path
 } else {

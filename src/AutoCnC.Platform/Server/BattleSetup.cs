@@ -85,6 +85,8 @@ namespace AutoCnC.Platform.Server
 			consumed = true;
 			ours = true;
 
+			PinSeed(server);
+
 			speed = ResolveGameSpeed(server, LaunchOptions.GameSpeed);
 			if (speed != null)
 				server.InterpretCommand($"option {GameSpeedOption} {speed}", conn);
@@ -109,6 +111,35 @@ namespace AutoCnC.Platform.Server
 
 			Log.Write("server", $"AutoC&C: seated {seated}x {bot.Type} on handicap {LaunchOptions.BotHandicap}%, " +
 				$"player on handicap {LaunchOptions.PlayerHandicap}%, speed {speed ?? "as the map likes it"}.");
+		}
+
+		/// <summary>
+		/// Replaces the lobby's random seed with the one the command line asked for.
+		/// </summary>
+		/// <remarks>
+		/// <para>
+		/// The engine seeds a server from <c>DateTime.Now.ToBinary()</c> in its constructor, which
+		/// is long before any mod code runs and is why this is done here rather than earlier: by
+		/// the time a client has joined, the seed is still only lobby state, and lobby state is
+		/// exactly what a server trait is allowed to change. The world takes its
+		/// <c>SharedRandom</c> from this value when it is created, so changing it now reaches
+		/// every consumer of match randomness without the pinned engine submodule being touched.
+		/// </para>
+		/// <para>
+		/// Synced explicitly rather than relying on the commands below, because a speed-only
+		/// launch with no opponent issues none of them and would otherwise keep the server's own
+		/// seed while reporting the requested one.
+		/// </para>
+		/// </remarks>
+		static void PinSeed(S server)
+		{
+			var seed = LaunchOptions.Seed;
+			if (seed == 0)
+				return;
+
+			server.LobbyInfo.GlobalSettings.RandomSeed = seed;
+			server.SyncLobbyGlobalSettings();
+			Log.Write("server", $"AutoC&C: pinned the lobby random seed to {seed}.");
 		}
 
 		/// <summary>

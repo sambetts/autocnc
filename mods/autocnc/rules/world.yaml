@@ -34,6 +34,10 @@
 # every player, which a client can do because it simulates the whole world — so it is written for
 # a human to read and is deliberately not reachable from bot or mode code. See docs/determinism.md.
 #
+# MapFacts records the public lobby and map facts behind a run — dimensions, playable bounds,
+# spawn assignments and starting resources — as a one-shot JSON sidecar for tools that need
+# context around the telemetry without reading anything a player had to scout.
+#
 # BattleLog is the opposite, and the pair is the point: it records only what the local player's
 # code was in a position to react to — enemies coming into view, hits taken, units lost and
 # killed, and every doctrine the bot switched to and why — using the same visibility rule
@@ -54,6 +58,7 @@ World:
 	ModeCommands:
 	TurboSpeed:
 	MatchTelemetry:
+	MapFacts:
 	BattleLog:
 	HeadlessSimulation:
 

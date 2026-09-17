@@ -1,0 +1,397 @@
+<#
+.SYNOPSIS
+    Plays a battle bot over a named benchmark set, optionally against a control arm, and reports
+    win rate and medians instead of one match.
+
+.DESCRIPTION
+    One match on a random map against a random faction is not a measurement. It is one sample of a
+    distribution whose spread is wider than most of the changes being tested, which is why a round
+    could lose and call it a regression, or win and call it progress, with equal justification and
+    no evidence for either.
+
+    This runs a fixed set of matches - map, factions and seed all pinned, defined in
+    scripts/benchmarks.json - so two revisions are measured on the same thing. With -Control it
+    also plays the previous revision over the identical set, which is the only way a win rate
+    means anything: without it, the map and the opponent are free to explain the whole result.
+
+    Every match writes a full evidence directory and is folded into the bot's cross-run history,
+    so the trend and the regression alarm work exactly as they do for a single fight.
+
+    Matches run headless at maximum speed. Use -Parallel to run several at once.
+
+.PARAMETER BattleBot
+    The bot to measure: a folder name under bots/, or a path to a project or built .dll.
+
+.PARAMETER Benchmark
+    The named set from scripts/benchmarks.json. Defaults to the set marked default in that file.
+
+.PARAMETER Repeats
+    How many times to play the whole set. Repeats use the set's seeds, so they measure the bot's
+    own non-determinism rather than the draw.
+
+.PARAMETER Control
+    A git revision to play over the identical set as a control arm. The working tree is left
+    alone: the revision is checked out into a temporary worktree and built there.
+
+.PARAMETER Parallel
+    How many matches to run at once. Defaults to 1. Each match is a separate process with its own
+    evidence directory, so they do not interfere; the ceiling is CPU and memory.
+
+.PARAMETER Difficulty
+    Overrides the difficulty named by the benchmark set.
+
+.PARAMETER OutputDirectory
+    Where run directories are written. Defaults to the usual TrainingRuns location for the bot.
+
+.EXAMPLE
+    ./scripts/benchmark-bot.ps1 -BattleBot Reference
+    Play the default set once and report the win rate.
+
+.EXAMPLE
+    ./scripts/benchmark-bot.ps1 -BattleBot Reference -Benchmark standard -Control HEAD~1 -Parallel 4
+    Measure the working tree against the previous commit over twelve pinned matches, four at a
+    time, and report both arms.
+#>
+[CmdletBinding()]
+param(
+    [string]$BattleBot = 'Reference',
+    [string]$Benchmark,
+    [ValidateRange(1, 50)]
+    [int]$Repeats = 1,
+    [string]$Control,
+    [ValidateRange(1, 16)]
+    [int]$Parallel = 1,
+    [string]$Difficulty,
+    [string]$OutputDirectory,
+    [ValidateSet('Debug', 'Release')]
+    [string]$Configuration = 'Release'
+)
+
+$ErrorActionPreference = 'Stop'
+$repoRoot = Split-Path -Parent $PSScriptRoot
+
+$catalogPath = Join-Path $PSScriptRoot 'benchmarks.json'
+if (-not (Test-Path -LiteralPath $catalogPath)) { throw "Benchmark catalogue not found: $catalogPath" }
+$catalog = Get-Content -LiteralPath $catalogPath -Raw | ConvertFrom-Json
+
+$setName = if ($Benchmark) { $Benchmark } else { $catalog.default }
+$set = $catalog.sets | Where-Object { $_.name -eq $setName } | Select-Object -First 1
+if (-not $set) { throw "Unknown benchmark '$setName'. Available: $(($catalog.sets.name) -join ', ')." }
+
+$botName = [IO.Path]::GetFileNameWithoutExtension((Split-Path -Leaf $BattleBot))
+if (-not $OutputDirectory) {
+    $OutputDirectory = Join-Path $env:LOCALAPPDATA "AutoCnC\TrainingRuns\$botName"
+}
+New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
+$historyPath = Join-Path $OutputDirectory 'history.json'
+
+$evidenceTool = Join-Path $repoRoot 'tools\AutoCnC.Evidence\AutoCnC.Evidence.csproj'
+$evidenceDll = Join-Path $repoRoot "tools\AutoCnC.Evidence\bin\$Configuration\net8.0\AutoCnC.Evidence.dll"
+if (-not (Test-Path -LiteralPath $evidenceDll)) {
+    Write-Host '==> Building the evidence tool' -ForegroundColor Cyan
+    dotnet build $evidenceTool -c $Configuration -v quiet --nologo
+    if ($LASTEXITCODE -ne 0) { throw 'Evidence tool build failed.' }
+}
+
+<#
+    One arm is one revision played over the whole set. The candidate arm is the working tree; a
+    control arm is a git revision checked out into its own worktree, so measuring a comparison
+    never disturbs the code being measured. Other agents may be working in this clone.
+#>
+function New-ControlWorktree([string]$revision) {
+    $path = Join-Path ([IO.Path]::GetTempPath()) "autocnc-control-$([guid]::NewGuid().ToString('N').Substring(0,8))"
+    Write-Host "==> Preparing control arm from $revision" -ForegroundColor Cyan
+    git -C $repoRoot worktree add --detach $path $revision 2>&1 | Write-Verbose
+    if ($LASTEXITCODE -ne 0) { throw "Could not create a worktree for '$revision'." }
+    return $path
+}
+
+function Resolve-Revision([string]$root) {
+    $revision = git -C $root rev-parse --short HEAD 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $revision) { return 'unknown' }
+    return $revision.Trim()
+}
+
+function Remove-ControlWorktree([string]$path) {
+    if (-not $path) { return }
+    git -C $repoRoot worktree remove --force $path 2>&1 | Write-Verbose
+}
+
+<#
+    The control arm plays the PREVIOUS REVISION OF THE BOT through the CURRENT harness.
+
+    It deliberately does not invoke the old revision's own scripts/run-bot.ps1. A worktree made by
+    `git worktree add` has no engine submodule checked out, so there is nothing there to play at
+    all; and an older run-bot.ps1 has no -Seed or -MapFacts parameter, so the identical
+    configuration this whole comparison rests on could not even be requested of it. Either failure
+    would show up as matches that silently never happened - which is worse than having no control,
+    because it reads as a control that lost every game.
+
+    So the harness is held constant and the bot source is what varies, which is what a control arm
+    is for.
+#>
+function Resolve-ControlBot([string]$worktree) {
+    $name = [IO.Path]::GetFileNameWithoutExtension((Split-Path -Leaf $BattleBot))
+
+    $folder = Join-Path $worktree "bots\$name"
+    if (Test-Path -LiteralPath $folder) { return $folder }
+
+    $project = Get-ChildItem -LiteralPath (Join-Path $worktree 'bots') -Recurse -Filter '*.csproj' -ErrorAction SilentlyContinue |
+        Where-Object { $_.BaseName -like "*$name*" } | Select-Object -First 1
+    if ($project) { return $project.FullName }
+
+    throw "The control revision has no bot matching '$name' under bots/, so there is nothing to compare against."
+}
+
+<#
+    Builds the list of matches for one arm. Each gets a unique run directory up front so the
+    matches can be started in parallel without racing for a name, and each carries the complete
+    command line it will be played with - which is what lets the parallel path stay a one-liner.
+#>
+function New-MatchPlan($arm, $root, $revision, $bot) {
+    $difficulty = if ($Difficulty) { $Difficulty } else { $set.difficulty }
+    $maxSeconds = if ($set.maxGameSeconds) { $set.maxGameSeconds } else { 5400 }
+
+    $plan = @()
+    for ($repeat = 1; $repeat -le $Repeats; $repeat++) {
+        $index = 0
+        foreach ($match in $set.matches) {
+            $index++
+            $stamp = (Get-Date).ToString('yyyyMMdd-HHmmss-fff')
+            $id = "$stamp-$([guid]::NewGuid().ToString('N').Substring(0,12))"
+            $runDirectory = Join-Path $OutputDirectory $id
+            $evidence = Join-Path $runDirectory 'evidence'
+
+            $plan += [pscustomobject]@{
+                Arm = $arm
+                Root = $root
+                Revision = $revision
+                Repeat = $repeat
+                Index = $index
+                Id = $id
+                RunDirectory = $runDirectory
+                Evidence = $evidence
+                Map = $match.map
+                Faction = $match.faction
+                BotFaction = $match.botFaction
+                Seed = $match.seed
+                Script = (Join-Path $repoRoot 'scripts\run-bot.ps1')
+
+                # A hashtable, not an array. Array splatting binds positionally, so
+                # @('-Map', 'x', '-Seed', 1) reaches run-bot.ps1 as -BattleBot '-Map' and fails on
+                # the first typed parameter it hits.
+                Arguments = @{
+                    BattleBot = $bot
+                    Map = $match.map
+                    Faction = $match.faction
+                    BotFaction = $match.botFaction
+                    Seed = $match.seed
+                    Difficulty = $difficulty
+                    ExecutionMode = 'Headless'
+                    MaxGameSeconds = $maxSeconds
+                    Configuration = $Configuration
+                    Telemetry = (Join-Path $evidence 'telemetry.csv')
+                    BattleLog = (Join-Path $evidence 'battle.csv')
+                    DecisionTrace = (Join-Path $evidence 'decisions.jsonl')
+                    MapFacts = (Join-Path $evidence 'map.json')
+                    PerformanceReport = (Join-Path $evidence 'performance.json')
+                }
+            }
+        }
+    }
+    return $plan
+}
+
+<#
+    Plays every match in the plan.
+
+    The parallel body is written out in full rather than shared with the sequential path through a
+    variable, because PowerShell 7 refuses to marshal a script block into ForEach-Object -Parallel
+    at all: "A ForEach-Object -Parallel using variable cannot be a script block." It throws before
+    a single match starts. Each job therefore carries its own argument list, which reduces both
+    bodies to the same two lines and leaves nothing worth sharing.
+#>
+function Invoke-Arm($plan) {
+    if ($Parallel -le 1) {
+        foreach ($job in $plan) {
+            Write-Host "    [$($job.Arm)] $($job.Map) $($job.Faction) vs $($job.BotFaction) seed $($job.Seed)" -ForegroundColor DarkGray
+            New-Item -ItemType Directory -Path $job.Evidence -Force | Out-Null
+
+            # Splatting needs a variable: `@($job.Arguments)` is array syntax, and an array splat
+            # binds positionally rather than by name.
+            $arguments = $job.Arguments
+            & $job.Script @arguments 2>&1 | Out-String -Width 200 | Write-Verbose
+        }
+        return
+    }
+
+    # One process per match with its own evidence paths, so matches are independent. Throttled
+    # rather than unbounded: each runs the simulation at CPU maximum.
+    $plan | ForEach-Object -ThrottleLimit $Parallel -Parallel {
+        $job = $_
+        Write-Host "    [$($job.Arm)] $($job.Map) $($job.Faction) vs $($job.BotFaction) seed $($job.Seed)"
+        New-Item -ItemType Directory -Path $job.Evidence -Force | Out-Null
+        $arguments = $job.Arguments
+        & $job.Script @arguments 2>&1 | Out-String -Width 200 | Out-Null
+    }
+}
+
+<#
+    Writes the battle configuration the evidence tool reads back out of fight.json, including the
+    benchmark name, the arm and the seed. Without these three the cross-run index cannot tell a
+    candidate from a control, or a pinned match from a lucky one.
+#>
+function Write-FightManifest($job, $outcome, $durationSeconds) {
+    $manifest = [ordered]@{
+        SchemaVersion = 8
+        Id = $job.Id
+        Status = 'completed'
+        CreatedUtc = (Get-Date).ToUniversalTime().ToString('o')
+        SourceRevision = $job.Revision
+        Battle = [ordered]@{
+            Map = $job.Map
+            Difficulty = if ($Difficulty) { $Difficulty } else { $set.difficulty }
+            Opponents = 1
+            Faction = $job.Faction
+            BotFaction = $job.BotFaction
+            GameSpeed = 'maximum'
+            ExecutionMode = 'Headless'
+            Seed = $job.Seed
+            Benchmark = $set.name
+            Arm = $job.Arm
+        }
+        Result = [ordered]@{
+            DurationSeconds = $durationSeconds
+            Outcome = $outcome
+        }
+    }
+
+    $manifest | ConvertTo-Json -Depth 12 |
+        Set-Content -LiteralPath (Join-Path $job.Evidence 'fight.json') -Encoding utf8
+}
+
+function Complete-Match($job) {
+    $battleLog = Join-Path $job.Evidence 'battle.csv'
+    if (-not (Test-Path -LiteralPath $battleLog)) {
+        Write-Warning "[$($job.Arm)] $($job.Map) seed $($job.Seed): no battle log, the match did not record."
+        return $null
+    }
+
+    # The battle log's closing row is the authoritative result: it is written by the engine at
+    # game over, not inferred from an exit code.
+    $rows = Import-Csv -LiteralPath $battleLog
+    $over = $rows | Where-Object { $_.event -eq 'over' } | Select-Object -Last 1
+    $outcome = if ($over -and $over.detail -match 'result=(\w+)') { $Matches[1] } else { 'Unknown' }
+    $duration = if ($rows) { [int]($rows | Select-Object -Last 1).seconds } else { 0 }
+
+    Write-FightManifest $job $outcome $duration
+
+    $rulesPath = Join-Path $job.Evidence 'game-rules.json'
+    if (-not (Test-Path -LiteralPath $rulesPath)) {
+        & (Join-Path $PSScriptRoot 'export-agent-rules.ps1') -Output $rulesPath
+    }
+
+    dotnet $evidenceDll summarise $job.Evidence --history $historyPath --bot $botName | Out-Null
+
+    $summary = Get-Content -LiteralPath (Join-Path $job.Evidence 'summary.json') -Raw | ConvertFrom-Json
+    return [pscustomobject]@{
+        Arm = $job.Arm
+        Map = $job.Map
+        Faction = $job.Faction
+        Seed = $job.Seed
+        Outcome = $summary.fight.outcome
+        Fitness = $summary.fitness.total
+        EarnedPerSecond = $summary.headline.creditsEarnedPerSecond
+        SpentPerSecond = $summary.headline.creditsSpentPerSecond
+        Exchange = $summary.headline.valueExchangeRatio
+        BuildingsKilled = $summary.headline.buildingsKilled
+        DurationSeconds = $summary.fight.durationSeconds
+    }
+}
+
+function Get-Median($values) {
+    $sorted = @($values | Sort-Object)
+    if ($sorted.Count -eq 0) { return 0 }
+    $middle = [int][math]::Floor($sorted.Count / 2)
+    if ($sorted.Count % 2 -eq 1) { return $sorted[$middle] }
+    return ($sorted[$middle - 1] + $sorted[$middle]) / 2
+}
+
+function Show-Arm($name, $results) {
+    $results = @($results)
+    if ($results.Count -eq 0) {
+        Write-Host "  $name : no matches completed." -ForegroundColor Yellow
+        return $null
+    }
+
+    $wins = @($results | Where-Object { $_.Outcome -eq 'Won' }).Count
+    $summary = [pscustomobject]@{
+        Arm = $name
+        Wins = $wins
+        Played = $results.Count
+        MedianFitness = [math]::Round((Get-Median ($results | ForEach-Object { $_.Fitness })), 4)
+        MedianSpentPerSecond = [math]::Round((Get-Median ($results | ForEach-Object { $_.SpentPerSecond })), 2)
+        MedianExchange = [math]::Round((Get-Median ($results | ForEach-Object { $_.Exchange })), 3)
+        MedianBuildingsKilled = Get-Median ($results | ForEach-Object { $_.BuildingsKilled })
+    }
+
+    Write-Host ("  {0,-10} {1} of {2} won; median fitness {3}, spend {4} cr/s, exchange {5}, buildings {6}" -f `
+            $name, $wins, $results.Count, $summary.MedianFitness, $summary.MedianSpentPerSecond,
+        $summary.MedianExchange, $summary.MedianBuildingsKilled) -ForegroundColor Green
+    return $summary
+}
+
+# ---------------------------------------------------------------------------
+# Run the arms
+# ---------------------------------------------------------------------------
+$matchCount = $set.matches.Count * $Repeats
+Write-Host "==> Benchmark '$($set.name)': $($set.matches.Count) match(es) x $Repeats repeat(s) = $matchCount per arm" -ForegroundColor Cyan
+Write-Host "    $($set.summary)" -ForegroundColor DarkGray
+
+$controlWorktree = $null
+try {
+    $plan = New-MatchPlan 'candidate' $repoRoot (Resolve-Revision $repoRoot) $BattleBot
+
+    if ($Control) {
+        $controlWorktree = New-ControlWorktree $Control
+        $plan += New-MatchPlan 'control' $repoRoot (Resolve-Revision $controlWorktree) `
+            (Resolve-ControlBot $controlWorktree)
+    }
+
+    Invoke-Arm $plan
+
+    $results = @()
+    foreach ($job in $plan) {
+        $result = Complete-Match $job
+        if ($result) { $results += $result }
+    }
+
+    Write-Host ''
+    Write-Host "==> Benchmark '$($set.name)' result" -ForegroundColor Cyan
+    $candidate = Show-Arm 'candidate' ($results | Where-Object { $_.Arm -eq 'candidate' })
+    $control = if ($Control) { Show-Arm 'control' ($results | Where-Object { $_.Arm -eq 'control' }) } else { $null }
+
+    if ($control -and $candidate) {
+        $verdict = if ($candidate.Wins -gt $control.Wins) { 'candidate ahead on wins' }
+        elseif ($candidate.Wins -lt $control.Wins) { 'control ahead on wins' }
+        elseif ($candidate.MedianFitness -gt $control.MedianFitness) { 'level on wins, candidate ahead on fitness' }
+        elseif ($candidate.MedianFitness -lt $control.MedianFitness) { 'level on wins, control ahead on fitness' }
+        else { 'indistinguishable' }
+
+        Write-Host ''
+        Write-Host "  Verdict: $verdict." -ForegroundColor Cyan
+        Write-Host ("  This change won {0} of {1} against the control's {2} of {3}." -f `
+                $candidate.Wins, $candidate.Played, $control.Wins, $control.Played) -ForegroundColor Cyan
+    }
+    elseif (-not $Control) {
+        Write-Host '  No control arm was run, so this win rate is not attributable to the change.' -ForegroundColor Yellow
+        Write-Host '  Pass -Control HEAD~1 to compare against the previous revision.' -ForegroundColor DarkGray
+    }
+
+    dotnet $evidenceDll trend $historyPath --out (Join-Path $OutputDirectory 'trend.json')
+
+    $results | Format-Table Arm, Map, Faction, Seed, Outcome, Fitness, SpentPerSecond, Exchange, BuildingsKilled -AutoSize
+}
+finally {
+    Remove-ControlWorktree $controlWorktree
+}

@@ -29,7 +29,8 @@ namespace AutoCnC.Reference.Logic
 		int MaxFieldsConsidered,
 		int DistanceScaleUnits,
 		int SwitchScoreMultiplier,
-		int FieldMatchCells)
+		int FieldMatchCells,
+		int MaxHaulCells)
 	{
 		public static HarvesterTuning Default { get; } = new(
 			PanicRadiusUnits: 7 * 1024,
@@ -95,7 +96,34 @@ namespace AutoCnC.Reference.Logic
 			// How far a flood-filled patch centre may drift between scans and still count as the
 			// same field. A patch's centre moves as it is mined; this keeps that from reading as
 			// a brand new field every review.
-			FieldMatchCells: 6);
+			FieldMatchCells: 6,
+
+			// How far from its refinery a harvester will be *sent*, when anything closer exists.
+			//
+			// The score below is a hyperbola, so it discounts distance and never refuses it. On
+			// badland-ridges that walked the fleet off the map: the field reasons went 12, 17,
+			// 11, 18 cells out for the first four minutes, then 27-35 cells from 447s, and at
+			// 839s the rule crossed to a field 62-71 cells out at (59,35) — nine cells from the
+			// enemy refinery at (62,37). Enemy e3 killed three of the bot's four harvesters at
+			// 888s, 890s and 896s at (45,43), (49,39) and (53,39), 45 to 56 cells from its own
+			// construction yard at (13,82). Income fell from 43.3 credits a second across
+			// 300-840s to 1.56 across 840-1289s, and the bot never built another structure.
+			//
+			// Thirty-six cells, from the throughput the trade is actually made on. A harvester
+			// moves 1.758 cells a game second, so the round trip is 2d/1.758 = 1.14d seconds: 15
+			// seconds at the 13-cell fields this bot worked safely, 41 at 36 cells, 71 at 62. A
+			// load is roughly 700 credits and the measured rate over 300-840s was 10.8 credits a
+			// second per harvester, so a cycle was about 65 seconds of which 15 was travel. At 36
+			// cells the cycle is 91 seconds and the rate 7.7 — 71% of the near-field rate, which
+			// is where a further field stops being an economy and becomes a commute. At 62 cells
+			// it is 121 seconds and 5.8, 54%, before any risk is counted at all.
+			//
+			// The bound it must not cross: it has to admit every field this bot worked without
+			// losing a harvester, which ran out to 35 cells, and exclude the one that killed
+			// three, which began at 61. Thirty-six is the smallest number above the first and the
+			// largest below the second. It is a preference rather than a rule — see
+			// SelectFieldExcept — so a map with nothing inside it behaves exactly as before.
+			MaxHaulCells: 36);
 	}
 
 	/// <summary>One tiberium field, as the harvester rule needs to see it.</summary>
@@ -294,13 +322,22 @@ namespace AutoCnC.Reference.Logic
 
 				// Still there, but no longer worth staying on: something within reach holds enough
 				// more tiberium to pay for the drive twice over.
+				//
+				// ...or we are simply too far out. A harvester already assigned past
+				// MaxHaulCells comes home for any field inside it, whatever the scores say,
+				// because the score that sent it there is the score that would keep it there.
+				// This can only ever fire in the direction of home — it needs the assigned field
+				// outside the ceiling and the candidate inside it — so it cannot dither: once
+				// home, the same pair fails the test forever.
 				var assignedScore = Score(fields[assigned], tuning);
 				var bestScore = Score(fields[best], tuning);
-				if (best != assigned && bestScore >= (long)assignedScore * tuning.SwitchScoreMultiplier)
+				var comingHome = TooFarToHaul(fields[assigned], tuning) && !TooFarToHaul(fields[best], tuning);
+				if (best != assigned && (comingHome || bestScore >= (long)assignedScore * tuning.SwitchScoreMultiplier))
 				{
 					var f = fields[best];
-					return Assign(f, seen,
-						$"field thinning to {fields[assigned].TotalDensity}, crossing to {f.TotalDensity} left {f.DistanceUnits / 1024} cells out");
+					return Assign(f, seen, comingHome
+						? $"field {fields[assigned].DistanceUnits / 1024} cells out is past the {tuning.MaxHaulCells} cell haul limit, coming back to {f.TotalDensity} left {f.DistanceUnits / 1024} cells out"
+						: $"field thinning to {fields[assigned].TotalDensity}, crossing to {f.TotalDensity} left {f.DistanceUnits / 1024} cells out");
 				}
 
 				if (stalled)
@@ -389,6 +426,12 @@ namespace AutoCnC.Reference.Logic
 		/// <see cref="HarvesterTuning.DistanceScaleUnits"/> is worth half its tiberium, one at
 		/// three times that a quarter — so a field three times as far has to hold four times as
 		/// much to win, which is about the trade a unit moving 1.758 cells a second is making.
+		/// <para>
+		/// A hyperbola discounts distance and never refuses it, which is how this rule once sent
+		/// harvesters 62 cells to mine beside the enemy refinery. The refusal lives in
+		/// <see cref="SelectFieldExcept"/> and <see cref="HarvesterTuning.MaxHaulCells"/>, not
+		/// here, so the score stays a pure statement of what a field is worth.
+		/// </para>
 		/// </remarks>
 		public static int Score(in FieldOption field, in HarvesterTuning tuning)
 		{
@@ -412,14 +455,36 @@ namespace AutoCnC.Reference.Logic
 		/// and still has not moved. Somewhere it can see tiberium is always a better answer than
 		/// the shroud probe, and naming a *different* field is the only re-order the host will
 		/// not suppress as a duplicate of the one it is already carrying out.
+		/// <para>
+		/// <b>A preference with a fallback, not a demand.</b> The first pass looks only inside
+		/// <see cref="HarvesterTuning.MaxHaulCells"/>, because a field further out than that is a
+		/// commute the harvester rarely survives — three of this bot's four died 45 to 56 cells
+		/// from home on the way to one 62 cells out. The second pass is the old rule exactly, so
+		/// a map whose tiberium is all distant is unchanged: the ceiling can refuse ground, but
+		/// it can never refuse the last ground there is.
+		/// </para>
 		/// </remarks>
 		public static int SelectFieldExcept(IReadOnlyList<FieldOption> fields, int exclude, in HarvesterTuning tuning)
+		{
+			var near = BestWithin(fields, exclude, tuning, HaulCeilingUnits(tuning));
+			return near >= 0 ? near : BestWithin(fields, exclude, tuning, int.MaxValue);
+		}
+
+		/// <summary>How far out a harvester will be sent while anything closer is on offer.</summary>
+		public static int HaulCeilingUnits(in HarvesterTuning tuning) => tuning.MaxHaulCells * 1024;
+
+		/// <summary>Whether this field is further out than a harvester should be sent.</summary>
+		public static bool TooFarToHaul(in FieldOption field, in HarvesterTuning tuning) =>
+			field.DistanceUnits > HaulCeilingUnits(tuning);
+
+		static int BestWithin(
+			IReadOnlyList<FieldOption> fields, int exclude, in HarvesterTuning tuning, int ceilingUnits)
 		{
 			var best = -1;
 			var bestScore = 0;
 			for (var i = 0; i < fields.Count; i++)
 			{
-				if (i == exclude)
+				if (i == exclude || fields[i].DistanceUnits > ceilingUnits)
 					continue;
 
 				var score = Score(fields[i], tuning);

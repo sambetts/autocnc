@@ -47,6 +47,9 @@ namespace AutoCnC.Reference.Modes
 
 		static readonly string[] PowerCandidates = [.. ReferencePlans.PowerPlants];
 
+		/// <summary>Refinery names for either faction, as an array because a plan step wants one.</summary>
+		static readonly string[] RefineryCandidates = [.. ReferencePlans.Refineries];
+
 		/// <summary>
 		/// Structures that should be pushed outward as they multiply, rather than stacked at home.
 		/// </summary>
@@ -71,6 +74,26 @@ namespace AutoCnC.Reference.Modes
 		/// </remarks>
 		static readonly IReadOnlyList<CoveringRole> CoveringRoles = ReferencePlans.CoveringRoles;
 
+		/// <summary>
+		/// How big an economy the tiberium this side has found is worth, when the plan has run out.
+		/// </summary>
+		/// <remarks>
+		/// Consulted only after <see cref="BaseConstructionLogic.ChooseNext"/> has answered
+		/// "nothing to do" over the doctrine's own plan, so it cannot delay, displace or outbid a
+		/// single rung the doctrine wrote. See <see cref="ExpansionLogic"/> for why a fixed
+		/// ladder is the wrong shape for a map.
+		/// </remarks>
+		readonly ExpansionTuning expansion = ExpansionTuning.Default;
+
+		readonly List<FieldOption> fields = [];
+
+		/// <summary>
+		/// Evaluations since the last map scan, so the scan is paid for on a clock rather than
+		/// every tick. <c>FindResourceFields</c> walks every cell; see
+		/// <see cref="ExpansionTuning.RescanEvaluations"/>.
+		/// </summary>
+		int evaluationsSinceScan = int.MaxValue;
+
 		// Sensing buffers are reused by the host, so what we read from one queue would be
 		// overwritten by reading the next. Copy into buffers we own instead.
 		readonly List<string>[] buildable = NewBuffers();
@@ -88,6 +111,9 @@ namespace AutoCnC.Reference.Modes
 				plannedLocation[i] = null;
 				plannedItem[i] = null;
 			}
+
+			fields.Clear();
+			evaluationsSinceScan = int.MaxValue;
 		}
 
 		public override UnitDecision OnTick(Actor self, ModeContext ctx)
@@ -139,6 +165,19 @@ namespace AutoCnC.Reference.Modes
 			var order = BaseConstructionLogic.ChooseNext(
 				queues, ctx.Cash, ctx.PowerBalance, owned, ctx.BuildPlan, PowerCandidates);
 
+			// The doctrine's own ladder is finite and a map is not. When it has nothing left to
+			// ask for, ask the ground instead: every patch of tiberium this side has explored is
+			// worth a refinery, and a refinery is what makes a field close enough to work safely.
+			//
+			// Reached only on "nothing to do", so the doctrine's plan always wins outright and
+			// the opening is bit-for-bit what it was. On badland-ridges this branch is the whole
+			// difference: the Attack plan was fully satisfied when the fifth proc landed at 744s
+			// and the Building queue issued no planned order in the remaining 842 seconds, while
+			// 32,950 credits — 86% of everything spent after 744s — went on an army that was
+			// worth 0 at the end.
+			if (order.Action == ConstructionAction.None)
+				order = Frontier(ctx, owned);
+
 			// --- Act ---------------------------------------------------------------
 			switch (order.Action)
 			{
@@ -151,6 +190,57 @@ namespace AutoCnC.Reference.Modes
 				default:
 					return UnitDecision.Continue;   // plan complete, or nothing affordable yet
 			}
+		}
+
+		/// <summary>
+		/// What to build once the doctrine's plan is met: the next rung of an economy sized by
+		/// the tiberium this side has actually explored.
+		/// </summary>
+		/// <remarks>
+		/// The scan is a map walk rather than a lookup, so it is paid for on a clock. Nothing
+		/// returned by it is retained — sensing buffers are reused — so the fields are copied
+		/// into <see cref="FieldOption"/>, exactly as <see cref="HarvesterMode"/> does.
+		/// <para>
+		/// Resource reads are shroud-filtered, so this counts only ground the side has been to.
+		/// That is the honest number and it is the useful one: it makes scouting pay for itself
+		/// twice, once in finding the enemy and once in raising the economy's ceiling.
+		/// </para>
+		/// </remarks>
+		ConstructionOrder Frontier(ModeContext ctx, IReadOnlyDictionary<string, int> owned)
+		{
+			if (!ctx.HasResourceLayer)
+				return ConstructionOrder.Nothing;
+
+			if (evaluationsSinceScan < expansion.RescanEvaluations)
+			{
+				evaluationsSinceScan++;
+				return ConstructionOrder.Nothing;
+			}
+
+			evaluationsSinceScan = 0;
+			fields.Clear();
+
+			var found = ctx.FindResourceFields(expansion.MinFieldCells, expansion.MaxFieldsConsidered);
+			for (var i = 0; i < found.Count; i++)
+			{
+				var f = found[i];
+				fields.Add(new FieldOption(f.NearestX, f.NearestY, f.CenterX, f.CenterY, f.CellCount, f.TotalDensity, f.DistanceUnits));
+			}
+
+			var plan = ExpansionLogic.Expand(
+				ctx.BuildPlan, fields, owned, ctx.PowerBalance,
+				RefineryCandidates, PowerCandidates, expansion);
+
+			if (ReferenceEquals(plan, ctx.BuildPlan))
+				return ConstructionOrder.Nothing;
+
+			var order = BaseConstructionLogic.ChooseNext(
+				queues, ctx.Cash, ctx.PowerBalance, owned, plan, PowerCandidates);
+
+			return order.Action == ConstructionAction.Produce
+				? new ConstructionOrder(order.Action, order.Queue, order.Item,
+					$"{order.Item} for {ExpansionLogic.FieldsWorthWorking(fields, expansion)} fields found")
+				: order;
 		}
 
 		UnitDecision Place(ModeContext ctx, in ConstructionOrder order, IReadOnlyDictionary<string, int> owned)

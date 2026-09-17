@@ -56,7 +56,7 @@ namespace AutoCnC.Reference.Modes
 				// nowhere to march.
 				var found = ctx.ResolveActor(structures[0].ActorId);
 				if (found != null)
-					EnemyBaseSightings.Record(self.Owner, found.Location);
+					EnemyBaseSightings.Record(self.Owner, found.Location, ctx.WorldTick);
 
 				ctx.SwitchDoctrine(ReferenceDoctrines.Opening, "scout found their base");
 			}

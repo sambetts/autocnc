@@ -39,7 +39,7 @@ namespace AutoCnC.Platform.Traits
 	}
 
 	/// <summary>
-	/// Writes a running record of how every player's army and economy is doing.
+	/// Writes a running record of how every player's army, economy and production are doing.
 	/// </summary>
 	/// <remarks>
 	/// <para>
@@ -61,6 +61,15 @@ namespace AutoCnC.Platform.Traits
 	/// army value would be a maphack with a graph on it, so only the local player is recorded
 	/// unless every opponent is a bot, or we are watching a replay.
 	/// </para>
+	/// <para>
+	/// The <c>state</c> column remains the engine's own win state for older readers:
+	/// <c>Undefined</c> until the result resolves, then <c>Won</c> or <c>Lost</c>. The appended
+	/// <c>status</c> column adds the live reading: <c>Playing</c> while a player still has units
+	/// or buildings, <c>Eliminated</c> once they have neither, and the resolved result after the
+	/// match is over. The other appended economy columns separate credit flow from the
+	/// <c>cash</c> stock, power balance from its two components, harvester count from broad army
+	/// count, and queued work from finished assets.
+	/// </para>
 	/// </remarks>
 	public class MatchTelemetry : IWorldLoaded, ITickRender, IGameOver
 	{
@@ -68,13 +77,14 @@ namespace AutoCnC.Platform.Traits
 		const int NominalTimestep = TurboSpeed.NominalTimestep;
 
 		const string Header = "seconds,player,faction,bot,colour,units,army,buildings,basevalue," +
-			"assets,cash,killed,lost,buildingskilled,buildingslost,state";
+			"assets,cash,killed,lost,buildingskilled,buildingslost,state,earned,spent,power," +
+			"powerprovided,powerdrained,harvesters,queued,status";
 
 		readonly World world;
 		readonly MatchTelemetryInfo info;
 
-		/// <summary>Buildings owned, tallied once per sample and read back per player.</summary>
-		readonly Dictionary<Player, (int Count, int Value)> bases = [];
+		/// <summary>Buildings and harvesters owned, tallied once per sample and read back per player.</summary>
+		readonly Dictionary<Player, (int Count, int Value, int Harvesters)> bases = [];
 
 		/// <summary>Build cost per actor type, because it never changes and the lookup is not free.</summary>
 		readonly Dictionary<ActorInfo, int> costs = [];
@@ -156,6 +166,7 @@ namespace AutoCnC.Platform.Traits
 			{
 				var stats = player.PlayerActor.TraitOrDefault<PlayerStatistics>();
 				var resources = player.PlayerActor.TraitOrDefault<PlayerResources>();
+				var power = player.PlayerActor.TraitOrDefault<PowerManager>();
 				if (stats == null)
 					continue;
 
@@ -163,6 +174,8 @@ namespace AutoCnC.Platform.Traits
 				// count and the value are always talking about the same set of things.
 				var units = stats.Units.Values.Sum(u => u.Count);
 				bases.TryGetValue(player, out var owned);
+				var queued = player.PlayerActor.TraitsImplementing<ProductionQueue>()
+					.Sum(q => q.AllQueued().Count());
 
 				writer.WriteLine(string.Join(',',
 					seconds.ToString(CultureInfo.InvariantCulture),
@@ -183,7 +196,15 @@ namespace AutoCnC.Platform.Traits
 					stats.UnitsDead.ToString(CultureInfo.InvariantCulture),
 					stats.BuildingsKilled.ToString(CultureInfo.InvariantCulture),
 					stats.BuildingsDead.ToString(CultureInfo.InvariantCulture),
-					player.WinState.ToString()));
+					player.WinState.ToString(),
+					(resources?.Earned ?? 0).ToString(CultureInfo.InvariantCulture),
+					(resources?.Spent ?? 0).ToString(CultureInfo.InvariantCulture),
+					(power?.ExcessPower ?? 0).ToString(CultureInfo.InvariantCulture),
+					(power?.PowerProvided ?? 0).ToString(CultureInfo.InvariantCulture),
+					(power?.PowerDrained ?? 0).ToString(CultureInfo.InvariantCulture),
+					owned.Harvesters.ToString(CultureInfo.InvariantCulture),
+					queued.ToString(CultureInfo.InvariantCulture),
+					Status(player, units, owned.Count)));
 			}
 		}
 
@@ -200,14 +221,30 @@ namespace AutoCnC.Platform.Traits
 		{
 			bases.Clear();
 
-			foreach (var actor in world.ActorsHavingTrait<Building>())
+			foreach (var actor in world.Actors)
 			{
 				if (actor.IsDead || !actor.IsInWorld || actor.Owner == null)
 					continue;
 
 				bases.TryGetValue(actor.Owner, out var tally);
-				bases[actor.Owner] = (tally.Count + 1, tally.Value + Cost(actor.Info));
+				var isBuilding = actor.Info.HasTraitInfo<BuildingInfo>();
+				var isHarvester = actor.Info.HasTraitInfo<HarvesterInfo>();
+				if (!isBuilding && !isHarvester)
+					continue;
+
+				bases[actor.Owner] = (
+					tally.Count + (isBuilding ? 1 : 0),
+					tally.Value + (isBuilding ? Cost(actor.Info) : 0),
+					tally.Harvesters + (isHarvester ? 1 : 0));
 			}
+		}
+
+		static string Status(Player player, int units, int buildings)
+		{
+			if (player.WinState != WinState.Undefined)
+				return player.WinState.ToString();
+
+			return units > 0 || buildings > 0 ? "Playing" : "Eliminated";
 		}
 
 		int Cost(ActorInfo actorInfo)

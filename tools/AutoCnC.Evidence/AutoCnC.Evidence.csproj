@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Turns one fight's raw evidence into the artifacts an improvement round actually reads.
+
+    It deliberately lives outside AutoCnC.sln, and IsPackable is false, because that solution is
+    packed into the NuGet packages a battle bot consumes. Nothing here may ever be reachable from
+    bot code: this assembly reads whole finished matches, including the opponent's, and a bot that
+    could reference it could read the answer sheet for a match it is still playing.
+
+    net8.0 rather than net8.0-windows so CI can build and test it on Linux alongside the launcher.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>12</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>AutoCnC.Evidence</RootNamespace>
+    <AssemblyName>AutoCnC.Evidence</AssemblyName>
+    <Description>Builds summary.json, units.csv, checks.json and the cross-run trend from a fight's raw evidence.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="AutoCnC.Evidence.Tests" />
+  </ItemGroup>
+
+</Project>

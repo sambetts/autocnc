@@ -30,7 +30,7 @@ namespace AutoCnC.Platform.UtilityCommands
 	{
 		sealed class Snapshot
 		{
-			public int SchemaVersion { get; set; } = 1;
+			public int SchemaVersion { get; set; } = 2;
 			public string Source { get; set; }
 			public DateTime GeneratedAtUtc { get; set; }
 			public int NominalTickMilliseconds { get; set; }
@@ -54,6 +54,7 @@ namespace AutoCnC.Platform.UtilityCommands
 			public int? Power { get; set; }
 			public bool IsHarvester { get; set; }
 			public bool IsRefinery { get; set; }
+			public string[] FreeActors { get; set; }
 			public BuildRule Build { get; set; }
 			public string[] Produces { get; set; }
 			public List<ArmamentRule> Armaments { get; set; } = [];
@@ -187,11 +188,16 @@ namespace AutoCnC.Platform.UtilityCommands
 				Power = power != 0 ? power : null,
 				IsHarvester = actor.HasTraitInfo<HarvesterInfo>(),
 				IsRefinery = actor.HasTraitInfo<RefineryInfo>(),
+				FreeActors = actor.TraitInfos<FreeActorInfo>()
+					.Select(f => f.Actor).Where(a => a != null).OrderBy(a => a).ToArray(),
 				Produces = actor.TraitInfos<ProductionInfo>()
 					.SelectMany(p => p.Produces).Distinct().OrderBy(p => p).ToArray(),
 				Traits = actor.TraitsInConstructOrder()
 					.Select(t => TrimInfo(t.GetType().Name)).Distinct().OrderBy(t => t).ToArray()
 			};
+
+			if (result.FreeActors.Length == 0)
+				result.FreeActors = null;
 
 			if (buildable != null)
 				result.Build = new BuildRule

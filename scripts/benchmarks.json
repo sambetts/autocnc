@@ -1,0 +1,49 @@
+{
+  "$comment": [
+    "Named benchmark sets: a fixed list of matches, so two revisions are measured on the same",
+    "thing. A round that says 'this won 4 of 5 on smoke against the control's 1 of 5' has made a",
+    "comparison; a round that says 'we lost again' on a random map, a random faction and a random",
+    "seed has made an anecdote, because faction, map and opponent all moved at once.",
+    "",
+    "Seeds are arbitrary constants. Their only job is to be the same next time, so do not change",
+    "one to chase a nicer number - that silently invalidates every stored result for the set.",
+    "Add a new set instead. Factions are pinned for the same reason: consecutive rounds that",
+    "played GDI then Nod were comparing two different games."
+  ],
+  "default": "smoke",
+  "sets": [
+    {
+      "name": "smoke",
+      "summary": "Five matches, both factions, one map. The quickest thing that is still a measurement.",
+      "difficulty": "Normal",
+      "maxGameSeconds": 5400,
+      "matches": [
+        { "map": "tiberium-rift.oramap", "faction": "gdi", "botFaction": "nod", "seed": 100001 },
+        { "map": "tiberium-rift.oramap", "faction": "nod", "botFaction": "gdi", "seed": 100002 },
+        { "map": "tiberium-rift.oramap", "faction": "gdi", "botFaction": "gdi", "seed": 100003 },
+        { "map": "tiberium-rift.oramap", "faction": "nod", "botFaction": "nod", "seed": 100004 },
+        { "map": "tiberium-rift.oramap", "faction": "gdi", "botFaction": "nod", "seed": 100005 }
+      ]
+    },
+    {
+      "name": "standard",
+      "summary": "Two maps by both factions by three seeds. The set to quote in a round's result.",
+      "difficulty": "Normal",
+      "maxGameSeconds": 5400,
+      "matches": [
+        { "map": "tiberium-rift.oramap", "faction": "gdi", "botFaction": "nod", "seed": 200001 },
+        { "map": "tiberium-rift.oramap", "faction": "gdi", "botFaction": "nod", "seed": 200002 },
+        { "map": "tiberium-rift.oramap", "faction": "gdi", "botFaction": "nod", "seed": 200003 },
+        { "map": "tiberium-rift.oramap", "faction": "nod", "botFaction": "gdi", "seed": 200004 },
+        { "map": "tiberium-rift.oramap", "faction": "nod", "botFaction": "gdi", "seed": 200005 },
+        { "map": "tiberium-rift.oramap", "faction": "nod", "botFaction": "gdi", "seed": 200006 },
+        { "map": "badland-ridges.oramap", "faction": "gdi", "botFaction": "nod", "seed": 200007 },
+        { "map": "badland-ridges.oramap", "faction": "gdi", "botFaction": "nod", "seed": 200008 },
+        { "map": "badland-ridges.oramap", "faction": "gdi", "botFaction": "nod", "seed": 200009 },
+        { "map": "badland-ridges.oramap", "faction": "nod", "botFaction": "gdi", "seed": 200010 },
+        { "map": "badland-ridges.oramap", "faction": "nod", "botFaction": "gdi", "seed": 200011 },
+        { "map": "badland-ridges.oramap", "faction": "nod", "botFaction": "gdi", "seed": 200012 }
+      ]
+    }
+  ]
+}

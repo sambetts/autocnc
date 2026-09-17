@@ -190,6 +190,26 @@ namespace AutoCnC.Reference.Logic
 		/// </remarks>
 		public const int MaxLadderRungs = 12;
 
+		/// <summary>
+		/// How far out a placement search may ever be asked to look, in cells.
+		/// </summary>
+		/// <remarks>
+		/// This is the engine's own limit, not a preference. <c>FindBuildLocation</c> is backed by
+		/// a tile search whose <c>MaximumTileSearchRange</c> is 50 cells, and asking for more does
+		/// not clamp or return nothing — it <b>throws</b>, out of a mode's tick, which is a
+		/// silently dead <c>BuildBaseMode</c> for as long as the request keeps being made.
+		/// <para>
+		/// <see cref="RingAt"/> grew its far edge without a ceiling: <c>DefaultMaxRangeCells + 6n</c>
+		/// reaches 56 at n = 7, one past the first illegal value. On badland-ridges that is exactly
+		/// what happened — 337 "The requested range (56) cannot exceed the value of
+		/// MaximumTileSearchRange (50)" errors between 3,039s and 3,375s, the last structure of the
+		/// whole match went up at 3,007s, and nothing was built in the remaining 1,814 seconds
+		/// (37.6% of it) while the base fell from 26 buildings to none. The near edge had a ceiling
+		/// (<see cref="MaxMinRangeCells"/>) from the day it was written; the far edge never did.
+		/// </para>
+		/// </remarks>
+		public const int MaxSearchRangeCells = 50;
+
 		/// <summary>The ring the default overload of <c>FindBuildLocation</c> would use.</summary>
 		public static PlacementRing Default { get; } = new(DefaultMinRangeCells, DefaultMaxRangeCells);
 
@@ -425,6 +445,13 @@ namespace AutoCnC.Reference.Logic
 		}
 
 		/// <summary>The ring for the n-th structure of an expanding role, counting from zero.</summary>
+		/// <remarks>
+		/// Both edges are clamped, and both clamps are load-bearing. The near edge stops at
+		/// <see cref="MaxMinRangeCells"/> so the request stays answerable; the far edge stops at
+		/// <see cref="MaxSearchRangeCells"/> so the request stays <em>legal</em>. Ordering matters
+		/// on one degenerate input: with the near edge pinned at 16 and the far edge pinned at 50
+		/// the ring is still 34 cells wide, so clamping can never invert it.
+		/// </remarks>
 		public static PlacementRing RingAt(int index)
 		{
 			if (index <= 0)
@@ -434,7 +461,11 @@ namespace AutoCnC.Reference.Logic
 			if (min > MaxMinRangeCells)
 				min = MaxMinRangeCells;
 
-			return new PlacementRing(min, DefaultMaxRangeCells + (RingStepCells * index));
+			var max = DefaultMaxRangeCells + (RingStepCells * index);
+			if (max > MaxSearchRangeCells)
+				max = MaxSearchRangeCells;
+
+			return new PlacementRing(min, max);
 		}
 
 		static int CountOf(IReadOnlyDictionary<string, int> owned, IReadOnlyCollection<string> actors)

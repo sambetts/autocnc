@@ -16,6 +16,7 @@ using System.IO;
 using System.Linq;
 using AutoCnC.Sdk;
 using OpenRA;
+using OpenRA.GameRules;
 using OpenRA.Graphics;
 using OpenRA.Mods.Common.Traits;
 using OpenRA.Traits;
@@ -97,6 +98,18 @@ namespace AutoCnC.Platform.Traits
 		/// <summary>Our actor ID to when it last logged a hit, and the hits suppressed since.</summary>
 		readonly Dictionary<uint, (int Tick, int Hits, int Damage)> hits = [];
 
+		/// <summary>Attacker/victim actor IDs to when they last logged damage, and what was suppressed.</summary>
+		readonly Dictionary<(uint Attacker, uint Victim), (int Tick, int Hits, int Damage)> dealtHits = [];
+
+		/// <summary>Actor ID to its birth second, for writing lifetimes into death rows.</summary>
+		readonly Dictionary<uint, long> born = [];
+
+		/// <summary>Build cost per actor type, because it never changes and the lookup is not free.</summary>
+		readonly Dictionary<ActorInfo, int> costs = [];
+
+		/// <summary>Actor ID to observed damage dealt before death.</summary>
+		readonly Dictionary<uint, int> damageDealt = [];
+
 		StreamWriter writer;
 		Player self;
 		int sightingTicks;
@@ -140,7 +153,11 @@ namespace AutoCnC.Platform.Traits
 
 			// Subscribed after the map's own actors are in place, so the roster is not followed by
 			// a page of 'built' rows for scenery. Starting units arrive later and are worth having.
+			foreach (var actor in w.Actors)
+				RememberBirth(actor);
+
 			w.ActorAdded += Gained;
+			w.ActorRemoved += Removed;
 
 			Log.Write("debug", $"Battle log: recording {self.ResolvedPlayerName?.Trim()}'s battle to {path}.");
 		}
@@ -224,10 +241,15 @@ namespace AutoCnC.Platform.Traits
 					sighted.Remove(id);
 		}
 
-		/// <summary>An actor of ours entered the world: produced, placed, or unloaded.</summary>
+		/// <summary>An actor entered the world: ours may have been produced, placed, or unloaded.</summary>
 		void Gained(Actor actor)
 		{
-			if (writer == null || actor.Owner != self)
+			if (writer == null)
+				return;
+
+			RememberBirth(actor);
+
+			if (actor.Owner != self)
 				return;
 
 			// Only things a plan can ask for. Crates, projectiles-as-actors and the like are not
@@ -237,6 +259,31 @@ namespace AutoCnC.Platform.Traits
 
 			Record("built", self, actor, null, null,
 				actor.Info.HasTraitInfo<BuildingInfo>() ? "kind=Building" : $"kind={ModeContext.Classify(actor)}");
+		}
+
+		void RememberBirth(Actor actor)
+		{
+			if (actor.OccupiesSpace != null)
+				born.TryAdd(actor.ActorID, Seconds());
+		}
+
+		/// <summary>An actor left the world for good, so per-actor ledgers can forget it.</summary>
+		void Removed(Actor actor)
+		{
+			if (!actor.WillDispose)
+				return;
+
+			try
+			{
+				FlushDealtForAttacker(actor);
+				FlushDealtForVictim(actor);
+				Forget(actor.ActorID);
+			}
+			catch (Exception ex)
+			{
+				Log.Write("debug", $"Battle log: stopped recording after {ex.Message}");
+				Close();
+			}
 		}
 
 		/// <summary>
@@ -250,9 +297,22 @@ namespace AutoCnC.Platform.Traits
 		/// </remarks>
 		internal void Damaged(Actor actor, AttackInfo attack)
 		{
-			// Negative damage is a repair. Nothing was done to us, so nothing happened.
-			if (writer == null || actor.Owner != self || attack.Damage == null || attack.Damage.Value <= 0)
+			// Negative damage is a repair. Nothing was done, so nothing happened.
+			if (writer == null || attack.Damage == null || attack.Damage.Value <= 0)
 				return;
+
+			var attacker = attack.Attacker;
+			if (attacker != null && attacker.Owner == self)
+			{
+				damageDealt.TryGetValue(attacker.ActorID, out var total);
+				damageDealt[attacker.ActorID] = total + attack.Damage.Value;
+			}
+
+			if (actor.Owner != self)
+			{
+				Dealt(actor, attack);
+				return;
+			}
 
 			var pending = (Tick: 0, Hits: 0, Damage: 0);
 			if (hits.TryGetValue(actor.ActorID, out var previous))
@@ -268,7 +328,6 @@ namespace AutoCnC.Platform.Traits
 
 			hits[actor.ActorID] = (world.WorldTick, 0, 0);
 
-			var attacker = attack.Attacker;
 			var health = actor.TraitOrDefault<IHealth>();
 
 			Record("attacked", self, actor, attacker?.Owner, attacker,
@@ -282,6 +341,45 @@ namespace AutoCnC.Platform.Traits
 				attacker != null && !ModeContext.IsVisibleEnemy(self, attacker) ? "seen=0" : null);
 		}
 
+		/// <summary>
+		/// One of our actors dealt damage to somebody else's actor we could see.
+		/// </summary>
+		/// <remarks>
+		/// The row is oriented from the dealer's side: <c>player</c>/<c>actor</c> is our attacker,
+		/// and <c>otherplayer</c>/<c>otheractor</c> is the victim. That is the opposite of
+		/// <c>killed</c>, which names the victim first so death rows line up with <c>lost</c>.
+		/// The visibility gate is deliberately the same predicate <see cref="Scan"/> uses:
+		/// splash damage into the fog must not produce a row naming or locating something a mode
+		/// could not have known was there. The throttle key includes both actor IDs, so focus fire
+		/// stays attributed to the unit that actually dealt it.
+		/// </remarks>
+		void Dealt(Actor actor, AttackInfo attack)
+		{
+			var attacker = attack.Attacker;
+			if (attacker == null || attacker.Owner != self || !ModeContext.IsVisibleEnemy(self, actor))
+				return;
+
+			var key = (attacker.ActorID, actor.ActorID);
+			var pending = (Tick: 0, Hits: 0, Damage: 0);
+			if (dealtHits.TryGetValue(key, out var previous))
+			{
+				if (world.WorldTick - previous.Tick < damageTicks)
+				{
+					dealtHits[key] = (previous.Tick, previous.Hits + 1, previous.Damage + attack.Damage.Value);
+					return;
+				}
+
+				pending = previous;
+			}
+
+			dealtHits[key] = (world.WorldTick, 0, 0);
+
+			RecordDealt(attacker, actor,
+				$"damage={pending.Damage + attack.Damage.Value}",
+				pending.Hits > 0 ? $"hits={pending.Hits + 1}" : null,
+				Health(actor));
+		}
+
 		/// <summary>An actor died. Ours is a loss; anything we could see and killed is a kill.</summary>
 		internal void Killed(Actor actor, AttackInfo attack)
 		{
@@ -289,13 +387,21 @@ namespace AutoCnC.Platform.Traits
 				return;
 
 			var killer = attack.Attacker;
+			var details = DeathDetails(actor, attack);
+			born.Remove(actor.ActorID);
+			damageDealt.Remove(actor.ActorID);
 
 			if (actor.Owner == self)
 			{
 				hits.Remove(actor.ActorID);
-				Record("lost", self, actor, killer?.Owner, killer);
+				FlushDealtForAttacker(actor);
+				RemoveDealt(actor.ActorID);
+				Record("lost", self, actor, killer?.Owner, killer, details);
 				return;
 			}
+
+			FlushDealtForVictim(actor);
+			RemoveDealt(actor.ActorID);
 
 			// Somebody else's actor: only interesting if we are the ones who did it.
 			if (killer == null || killer.Owner != self)
@@ -313,7 +419,36 @@ namespace AutoCnC.Platform.Traits
 			if (!sighted.Remove(actor.ActorID))
 				return;
 
-			Record("killed", actor.Owner, actor, self, killer);
+			Record("killed", actor.Owner, actor, self, killer, details);
+		}
+
+		/// <summary>
+		/// Facts written into <c>lost</c> and <c>killed</c> rows, so a death says what was lost.
+		/// </summary>
+		/// <remarks>
+		/// The engine's damage notification carries a <see cref="Damage"/> rather than the weapon
+		/// rule that created it, so the detail names the reachable damage type set as
+		/// <c>damagetypes=a|b</c> instead of inventing a weapon API. Exact lifetimes and damage
+		/// dealt are only written for our own actors, because those are facts this side produced.
+		/// </remarks>
+		string[] DeathDetails(Actor actor, AttackInfo attack)
+		{
+			var ours = actor.Owner == self;
+			damageDealt.TryGetValue(actor.ActorID, out var dealt);
+			born.TryGetValue(actor.ActorID, out var birth);
+
+			var types = attack.Damage?.DamageTypes.IsEmpty == false
+				? string.Join('|', attack.Damage.DamageTypes.OrderBy(t => t))
+				: null;
+
+			return
+			[
+				$"value={Cost(actor.Info)}",
+				ours ? $"life={Math.Max(0, Seconds() - birth)}" : null,
+				ours ? $"dealt={dealt}" : null,
+				types != null ? $"damagetypes={Word(types)}" : null,
+				actor.Info.HasTraitInfo<BuildingInfo>() ? "kind=Building" : $"kind={ModeContext.Classify(actor)}"
+			];
 		}
 
 		/// <summary>
@@ -350,8 +485,76 @@ namespace AutoCnC.Platform.Traits
 			if (writer == null)
 				return;
 
+			FlushDealt();
 			Record("over", self, null, null, null, $"result={self.WinState}");
 			Close();
+		}
+
+		void RecordDealt(Actor attacker, Actor victim, params string[] details)
+		{
+			Record("dealt", self, attacker, victim.Owner, victim, details);
+		}
+
+		void FlushDealt()
+		{
+			foreach (var kv in dealtHits.ToArray())
+				FlushDealt(kv.Key, kv.Value);
+		}
+
+		void FlushDealtForVictim(Actor victim)
+		{
+			foreach (var kv in dealtHits.Where(kv => kv.Key.Victim == victim.ActorID).ToArray())
+				FlushDealt(kv.Key, kv.Value, victim);
+		}
+
+		void FlushDealtForAttacker(Actor attacker)
+		{
+			foreach (var kv in dealtHits.Where(kv => kv.Key.Attacker == attacker.ActorID).ToArray())
+				FlushDealt(kv.Key, kv.Value, attacker: attacker);
+		}
+
+		void FlushDealt((uint Attacker, uint Victim) key, (int Tick, int Hits, int Damage) pending,
+			Actor victim = null, Actor attacker = null)
+		{
+			if (pending.Damage <= 0)
+				return;
+
+			attacker ??= world.GetActorById(key.Attacker);
+			victim ??= world.GetActorById(key.Victim);
+			if (attacker == null || victim == null)
+				return;
+
+			RecordDealt(attacker, victim,
+				$"damage={pending.Damage}",
+				pending.Hits > 1 ? $"hits={pending.Hits}" : null,
+				Health(victim));
+
+			dealtHits[key] = (world.WorldTick, 0, 0);
+		}
+
+		void Forget(uint actorId)
+		{
+			sighted.Remove(actorId);
+			hits.Remove(actorId);
+			born.Remove(actorId);
+			damageDealt.Remove(actorId);
+			RemoveDealt(actorId);
+		}
+
+		void RemoveDealt(uint actorId)
+		{
+			if (dealtHits.Count == 0)
+				return;
+
+			foreach (var key in dealtHits.Keys
+				.Where(k => k.Attacker == actorId || k.Victim == actorId).ToArray())
+				dealtHits.Remove(key);
+		}
+
+		static string Health(Actor actor)
+		{
+			var health = actor.TraitOrDefault<IHealth>();
+			return health != null && health.MaxHP > 0 ? $"health={health.HP * 100 / health.MaxHP}" : null;
 		}
 
 		/// <summary>Our construction yard, for saying how deep into our territory a sighting was.</summary>
@@ -386,7 +589,7 @@ namespace AutoCnC.Platform.Traits
 		{
 			try
 			{
-				var seconds = (long)world.WorldTick * NominalTimestep / 1000;
+				var seconds = Seconds();
 				var cell = actor?.OccupiesSpace != null ? actor.Location : (CPos?)null;
 
 				writer.WriteLine(string.Join(',',
@@ -416,6 +619,7 @@ namespace AutoCnC.Platform.Traits
 		void Close()
 		{
 			world.ActorAdded -= Gained;
+			world.ActorRemoved -= Removed;
 
 			try
 			{
@@ -430,6 +634,18 @@ namespace AutoCnC.Platform.Traits
 
 		static string Id(Actor actor) =>
 			actor == null ? "" : actor.ActorID.ToString(CultureInfo.InvariantCulture);
+
+		long Seconds() => (long)world.WorldTick * NominalTimestep / 1000;
+
+		int Cost(ActorInfo actorInfo)
+		{
+			if (costs.TryGetValue(actorInfo, out var cost))
+				return cost;
+
+			cost = actorInfo.TraitInfoOrDefault<ValuedInfo>()?.Cost ?? 0;
+			costs.Add(actorInfo, cost);
+			return cost;
+		}
 
 		int Ticks(int seconds, int minimum) =>
 			Math.Max(minimum, 1000 * Math.Max(0, seconds) / NominalTimestep);

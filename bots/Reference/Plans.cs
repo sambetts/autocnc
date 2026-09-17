@@ -38,8 +38,38 @@ namespace AutoCnC.Reference
 		/// A floor rather than a ratio, and deliberately small. <c>e1</c> is the cheapest body in
 		/// the game and the best thing a barracks builds against other infantry (M16 does 150%
 		/// against no armour, where the rocket does 28%), so a core of them is worth having
-		/// whatever the enemy turns out to be. Everything above the floor goes on rockets,
-		/// because everything above the floor is what has to kill vehicles and aircraft.
+		/// whatever the enemy turns out to be.
+		/// <para>
+		/// <b>This floor used to be a ceiling as well, and that cost badland-ridges.</b> The rule
+		/// was "everything above the floor goes on rockets", expressed as an endless <c>e3</c>
+		/// rung at the bottom of every plan — so every spare barracks evaluation for the rest of
+		/// the match bought a rocket soldier. It bought 38 of them: <b>11,400 credits, 29.3% of
+		/// the 38,850 this bot spent all match</b>, 38 built and 38 lost, for <b>11 kills</b>.
+		/// That is 1,036 credits a kill, against <b>96</b> for <c>e1</c> (25 built, 26 kills,
+		/// 2,500 credits) and <b>107</b> for <c>bggy</c> (5 built, 14 kills, 1,500 credits) — the
+		/// dearest unit per kill in the bot's reach sat at the bottom of the ladder where every
+		/// leftover credit lands.
+		/// </para>
+		/// <para>
+		/// The ruleset says why. <b>63% of the mobile army's engagement orders were against
+		/// Infantry</b> (563 of 894, excluding the towers), and <c>e3</c> deals <b>318</b> damage
+		/// a second to <c>None</c> armour where <c>e1</c> deals <b>1875</b>. The enemy infantry
+		/// that did the killing — <c>e1</c> 33, <c>e3</c> 14, <c>e2</c> 9, 56 of 97 — deals that
+		/// 1875 straight back, so a 300-credit unit was out-traded 5.9 to 1 by a 100-credit one.
+		/// <c>e3</c> is also the slowest actor in the game at 0.952 cells a second, and the one
+		/// assault of the match died strictly in speed order over 73.9 cells: <c>bggy</c> (4.15)
+		/// at 491-527s inside their base, <c>e1</c> (1.318) at 566-574s on the wall, <c>e3</c> at
+		/// 579-589s still eight cells short. 39 units in 50 seconds, for 9 kills.
+		/// </para>
+		/// <para>
+		/// So the endless rung is now <c>e1</c> and <c>e3</c> keeps only its bounded rung above
+		/// it. That rung is not decoration: <c>e3</c> is the only unit this bot can build that
+		/// shoots upwards (see <see cref="AntiAirUnits"/>) and the best thing it can build per
+		/// credit against <c>Heavy</c> armour (1592 against <c>None</c>'s 318), so it must be
+		/// replaced when it dies — it simply must not be what every leftover credit buys. Capped
+		/// at twelve it costs 3,600 rather than 11,400, and the 7,800-credit difference is 20% of
+		/// everything the bot spent, moved to the rung that killed 10.8 times more per credit.
+		/// </para>
 		/// </remarks>
 		const int RifleCore = 12;
 
@@ -64,6 +94,18 @@ namespace AutoCnC.Reference
 		/// and the one <c>harv</c> it was asked for at 576s was still unpaid at 1,023s. So
 		/// <see cref="RefineryCore"/> now delivers this floor from the construction yard instead,
 		/// and this step is what re-buys a harvester that dies.
+		/// </para>
+		/// <para>
+		/// <b>And a floor equal to <see cref="RefineryCore"/> is a floor that can never fire.</b>
+		/// A refinery hands out a free harvester, so four refineries satisfy a four-harvester
+		/// rung four-out-of-four the moment they stand. On the next badland-ridges the four
+		/// refineries stood at 51s, 117s, 174s and 263s, every <c>harv</c> the bot ever owned
+		/// appeared in one of those same four seconds, and the <c>Vehicle</c> queue bought
+		/// <b>zero</b> harvesters in 1,289 seconds. This number is now only the starting point:
+		/// <see cref="Logic.ExpansionLogic.Reinforce"/> resizes this rung from the refineries
+		/// actually standing, exactly as
+		/// <see cref="Logic.ExpansionLogic.Saturate"/> resizes the saturation rung below, so the
+		/// floor is a demand for docking places filled rather than for refineries counted twice.
 		/// </para>
 		/// </remarks>
 		const int HarvesterCore = 4;
@@ -114,8 +156,109 @@ namespace AutoCnC.Reference
 		/// above the endless combat step, so it is the last thing bought before the plan goes
 		/// back to buying things that shoot.
 		/// </para>
+		/// <para>
+		/// <b>Tied to the refinery <em>constant</em> was still a constant.</b> Every plan reached
+		/// eight harvesters at 634s on badland-ridges and then bought no income for the remaining
+		/// 952 seconds, so a base that grew past four refineries ran one harvester each — the
+		/// free actor a refinery hands out — and never two. <see cref="Modes.TrainUnitsMode"/>
+		/// now resizes this rung, and only this rung, from the refineries actually standing; see
+		/// <see cref="Logic.ExpansionLogic.Saturate"/>. The number here is the floor it starts
+		/// from, and the resize can only ever raise it.
+		/// </para>
+		/// <para>
+		/// <b>And this rung sits below something that dies, so it is not reachable either.</b>
+		/// <see cref="SiegeCore"/> is directly above it and siege vehicles are killed — six
+		/// <c>msam</c> built and six lost on the next badland-ridges — so the siege rung was
+		/// permanently unmet, <c>UnitProductionLogic.ChooseNext</c> returns the first unmet step,
+		/// and the <c>Vehicle</c> queue answered <c>msam</c> at 456s, 515s, 558s, 622s, 724s,
+		/// 791s and 814s while the income underneath was never once reached. That is the third
+		/// time rung order alone has failed to protect income, which is why the *floor* is now
+		/// resized too and this rung is the backstop rather than the mechanism.
+		/// </para>
 		/// </remarks>
 		const int HarvesterSaturation = RefineryCore * 2;
+
+		/// <summary>
+		/// How many long-reach siege vehicles to buy before the last of the income.
+		/// </summary>
+		/// <remarks>
+		/// <b>The vehicle queue used to buy nothing that fights.</b> On badland-ridges this bot
+		/// stood two airfields — 4,000 credits, 11.6% of everything it ever spent — and gave the
+		/// <c>Vehicle</c> queue <b>eleven orders in 1,403 seconds</b>: five <c>bggy</c> and six
+		/// <c>harv</c>. Not one combat vehicle, in a match where <c>hq</c> stood at 318s and the
+		/// first <c>afld</c> at 385s, so <c>arty</c> was buildable for 1,018 seconds — 73% of the
+		/// match.
+		/// <para>
+		/// The cause was rung order, and it is the exact mirror of the bug the tank rung used to
+		/// have. <see cref="HarvesterSaturation"/> sat directly above the armour rung and
+		/// <see cref="Logic.ExpansionLogic.Saturate"/> sizes it at two per standing refinery —
+		/// eight, with four refineries up. Harvesters die: all eight were hunted down between
+		/// 660s and 800s. So the rung was permanently unmet, <c>UnitProductionLogic.ChooseNext</c>
+		/// does not gate on cash, and it returned <c>harv</c> to the vehicle queue for the rest of
+		/// the game while everything below it stayed unreachable. The last vehicle order was at
+		/// 777s; the next was at 1327s.
+		/// </para>
+		/// <para>
+		/// What the army became instead was <b>72% <c>e3</c> by credits</b> — 10,500 of the 14,600
+		/// ever spent on things that shoot — which is the worst anti-infantry warhead in the
+		/// ruleset at 318 damage a second against <c>None</c> armour, while <b>62% of the army's
+		/// engagement orders were against infantry</b> (601 against 366). It walked 62 cells to
+		/// their base and <b>39 of its 90 losses happened in one five-by-four-cell patch at
+		/// (52-56, 38-41) between 480s and 600s</b>, for 23 kills. At 480s this bot led on units
+		/// (38 to 34), army (9,300 to 8,200) and was one building behind; by 600s it had seven
+		/// units left and never recovered.
+		/// </para>
+		/// <para>
+		/// <b>The arithmetic this number must not cross.</b> The rung displaces the same count of
+		/// saturation harvesters at 1,100 each, so it has to cost less than the income it defers.
+		/// Lifetime spend was 34,350 credits over the 782 seconds the economy was alive — 43.9 a
+		/// second across a fleet averaging five live harvesters, so roughly 8.8 a second each and
+		/// about 125 seconds for a harvester to repay itself. Four is the worst case at GDI prices:
+		/// 4 x 900 = 3,600, which is 82 seconds of that income — <b>less than the payback period of
+		/// the single harvester it defers</b>, so the rung can never cost more than it delays. At
+		/// Nod prices it is 4 x 600 = 2,400, 55 seconds.
+		/// </para>
+		/// <para>
+		/// What it buys for that: one <c>arty</c> does <b>5,390</b> damage a second to <c>None</c>
+		/// armour where an <c>e3</c> does <b>318</b>, so a single 600-credit artillery piece is
+		/// worth seventeen 300-credit rocket soldiers — 5,100 credits — against the infantry that
+		/// was most of what this army met. It is also 1.758 cells a second against <c>e3</c>'s
+		/// 0.952, so it arrives in half the time.
+		/// </para>
+		/// </remarks>
+		const int SiegeCore = 4;
+
+		/// <summary>
+		/// The 11-cell answer, per faction.
+		/// </summary>
+		/// <remarks>
+		/// <b>Nothing this bot fielded reached past 6 cells</b>, and the thing that killed most of
+		/// it did: enemy <c>arty</c> was the joint-largest killer of this bot's units on
+		/// badland-ridges at 13 of 90, level with <c>heli</c>. Both factions have the answer behind
+		/// prerequisites this bot routinely meets — <c>anyhq</c> plus its own vehicle factory —
+		/// and <c>game-rules.json</c> prices them: GDI <c>msam</c> at 900 with <c>227mm</c> at
+		/// <c>rangeCells 11</c>, Nod <c>arty</c> at 600 with <c>ArtilleryShell</c> at
+		/// <c>rangeCells 11</c>.
+		/// <para>
+		/// Candidates are alternatives for one role, so exactly one of these is buildable at a
+		/// time and the step works as either faction. Neither short-ranged tank is listed here,
+		/// and that is load-bearing: <c>Until(n)</c> counts <em>every</em> candidate a step lists,
+		/// so a rung written <c>["arty", "ltnk"]</c> is satisfied by light tanks and buys no reach
+		/// at all — the same trap that once made a step written <c>["e3", "e1"]</c> buy 125
+		/// riflemen and zero rockets. The tanks keep their own rungs below.
+		/// </para>
+		/// <para>
+		/// Declared above every plan on purpose. Static property initialisers in this file run in
+		/// <b>textual order</b>, so a list referenced by a plan declared above it captures null.
+		/// </para>
+		/// <para>
+		/// Both are already measured by <see cref="Logic.WeaponMatchLogic.RoleOf"/> — <c>arty</c>
+		/// as AntiInfantry, <c>msam</c> as AntiArmour — so the target scorers divide their work
+		/// correctly the moment they exist, and an actor id that table has never seen still falls
+		/// through to a flat Unknown rather than a guess.
+		/// </para>
+		/// </remarks>
+		public static string[] SiegeVehicles { get; } = ["arty", "msam"];
 
 		/// <summary>
 		/// The economy every doctrine wants, whichever one is running.
@@ -141,6 +284,16 @@ namespace AutoCnC.Reference
 		/// for them. Only the <c>Building</c> queue reads this list, so moving rungs around here
 		/// does not slow infantry production at all — that comes from the production plan and a
 		/// separate queue.
+		/// </para>
+		/// <para>
+		/// <b>Four is a floor, not a ceiling.</b> A plan is a finite ladder and a map is not: on
+		/// badland-ridges every rung of the Attack plan was met when the fifth refinery landed at
+		/// 744s, and the construction yard asked for nothing at all for the remaining 842 seconds
+		/// of a 1,586-second match while the winner grew from 21 buildings to 52.
+		/// <see cref="Logic.ExpansionLogic"/> takes over from there and sizes the refinery count
+		/// from the tiberium the side has actually explored. It is consulted only once this list
+		/// is satisfied, so nothing here is displaced, delayed or outbid, and it can only ever
+		/// raise the number these rungs already asked for.
 		/// </para>
 		/// <para>
 		/// The power rung between the two new refineries is not decoration. Two <c>nuke</c> ran
@@ -234,11 +387,12 @@ namespace AutoCnC.Reference
 			new("Vehicle", ["harv"], HarvesterCore),   // then income, before anything that shoots
 			new("Infantry", ["e1"], RifleCore),
 			new("Infantry", ["e2"], 4),
+			new("Vehicle", SiegeVehicles, SiegeCore),       // reach, ahead of the last of the income
 			new("Vehicle", ["harv"], HarvesterSaturation),  // ...and all of the income, before any of the armour
 			new("Vehicle", ["mtnk", "ltnk"], 4),
 			new("Infantry", ["e3"], 12),
 			new("Vehicle", ["mtnk", "ltnk"], int.MaxValue),
-			new("Infantry", ["e3"], int.MaxValue),
+			new("Infantry", ["e1"], int.MaxValue),   // ...and riflemen, not rockets: see RifleCore
 		];
 
 		/// <summary>
@@ -345,9 +499,10 @@ namespace AutoCnC.Reference
 			new("Infantry", ["e3"], 8),        // rockets, for whatever is chewing the base
 			new("Vehicle", ["harv"], HarvesterCore),   // a siege that kills the economy wins by itself
 			new("Infantry", ["e2"], 4),
+			new("Vehicle", SiegeVehicles, SiegeCore),  // 11 cells of reach, sited at home
 			new("Vehicle", ["harv"], HarvesterSaturation),
 			new("Vehicle", ["mtnk", "ltnk"], int.MaxValue),
-			new("Infantry", ["e3"], int.MaxValue),
+			new("Infantry", ["e1"], int.MaxValue),   // ...and riflemen, not rockets: see RifleCore
 		];
 
 		/// <summary>Pushing: more production, better units, and the tech to make them worth having.</summary>
@@ -391,12 +546,13 @@ namespace AutoCnC.Reference
 		public static IReadOnlyList<ProductionStep> AttackTrain { get; } =
 		[
 			new("Vehicle", ["harv"], HarvesterCore),   // replace what the last push cost us
+			new("Vehicle", SiegeVehicles, SiegeCore),  // then the reach the last push did not have
 			new("Vehicle", ["harv"], HarvesterSaturation),
 			new("Vehicle", ["mtnk", "ltnk"], 8),
 			new("Infantry", ["e3"], 8),
 			new("Infantry", ["e1", "e2"], RifleCore),
 			new("Vehicle", ["mtnk", "ltnk"], int.MaxValue),
-			new("Infantry", ["e3"], int.MaxValue),
+			new("Infantry", ["e1"], int.MaxValue),   // ...and riflemen, not rockets: see RifleCore
 		];
 
 		/// <summary>Actor names treated as power plants, for the low-power override.</summary>

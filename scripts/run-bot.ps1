@@ -85,6 +85,17 @@
     Maximum nominal game seconds before a headless match is treated as a failed stalemate.
     Defaults to 5400 (90 game minutes). Pass 0 for no limit.
 
+.PARAMETER Seed
+    Pins the lobby's random seed, so the same map, factions, opponent and seed replay the same
+    match. 0 (the default) lets the engine pick, as it always has. The seed a match actually ran
+    on is recorded in map.json either way, so an interesting unpinned run can be reproduced by
+    passing its seed back in.
+
+.PARAMETER MapFacts
+    Where the match writes public map facts as JSON: dimensions, spawn cells, the distance from
+    home to the nearest enemy spawn, starting resource cells and the effective random seed.
+    Pass 'none' to record nothing.
+
 .PARAMETER NoLaunch
     Build and install only; don't start the game.
 
@@ -123,6 +134,8 @@ param(
     [string]$Telemetry,
     [string]$BattleLog,
     [string]$DecisionTrace,
+    [string]$MapFacts,
+    [int]$Seed = 0,
     [ValidateSet('Rendered', 'Headless')]
     [string]$ExecutionMode = 'Rendered',
     [string]$CancellationFile,
@@ -291,6 +304,19 @@ if ($BattleLog) {
 if ($DecisionTrace) {
     $battleArgs += "Launch.DecisionTrace=$DecisionTrace"
     Write-Host "==> Decision trace: $DecisionTrace" -ForegroundColor Cyan
+}
+
+if ($MapFacts) {
+    $battleArgs += "Launch.MapFacts=$MapFacts"
+    Write-Host "==> Map facts: $MapFacts" -ForegroundColor Cyan
+}
+
+if ($Seed -ne 0) {
+    # Pinning the seed is what makes a result comparable rather than anecdotal: with map,
+    # faction, opponent and seed fixed, a difference between two revisions is the change rather
+    # than the draw.
+    $battleArgs += "Launch.Seed=$Seed"
+    Write-Host "==> Seed: $Seed (pinned)" -ForegroundColor Cyan
 }
 
 if ($ExecutionMode -eq 'Headless') {

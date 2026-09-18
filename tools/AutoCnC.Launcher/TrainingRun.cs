@@ -170,6 +170,18 @@ namespace AutoCnC.Launcher
 		public TrainingBattleResult Result { get; set; }
 		public TrainingSimulationPerformance Performance { get; set; }
 		public TrainingAgentResult Agent { get; set; }
+
+		/// <summary>
+		/// The launcher that is fighting this battle or running its improvement, while one is.
+		/// </summary>
+		/// <remarks>
+		/// Cleared the moment the work ends, so anything left here alongside unfinished work names
+		/// the process to ask about it. Absent in sessions written before claims were kept, and
+		/// absent is read as "nobody", which is the truth for every one of them: the launcher that
+		/// wrote them exited long ago.
+		/// </remarks>
+		public ProcessOwnership Owner { get; set; }
+
 		public List<string> Warnings { get; set; } = [];
 	}
 
@@ -236,10 +248,31 @@ namespace AutoCnC.Launcher
 			BattleExecutionModes.Headless, StringComparison.OrdinalIgnoreCase);
 		public bool NeedsReplayForFeedback => IsHeadless && Manifest.ReplayWatchedUtc == null;
 		public bool CanProvideFeedback => HasRecordedBattle && !NeedsReplayForFeedback;
-		public bool CanDelete => Manifest.CompletedUtc != null &&
-			Manifest.Agent is not { StartedUtc: not null, CompletedUtc: null } &&
-			!string.Equals(Manifest.Status, "improving", StringComparison.OrdinalIgnoreCase) &&
-			!string.Equals(Manifest.Status, "verifying", StringComparison.OrdinalIgnoreCase);
+
+		/// <summary>True while the manifest still describes a battle or improvement as under way.</summary>
+		public bool HasUnfinishedWork => Manifest.CompletedUtc == null ||
+			Manifest.Agent is { StartedUtc: not null, CompletedUtc: null } ||
+			string.Equals(Manifest.Status, "improving", StringComparison.OrdinalIgnoreCase) ||
+			string.Equals(Manifest.Status, "verifying", StringComparison.OrdinalIgnoreCase);
+
+		/// <summary>True while that work is genuinely still going on somewhere.</summary>
+		public bool IsBusy => HasUnfinishedWork && ProcessOwnership.IsLive(Manifest.Owner);
+
+		/// <summary>
+		/// True when the session was left mid-battle or mid-improvement by a launcher that is gone.
+		/// </summary>
+		public bool WasInterrupted => HasUnfinishedWork && !ProcessOwnership.IsLive(Manifest.Owner);
+
+		/// <summary>
+		/// A session can be deleted unless something is still writing to it.
+		/// </summary>
+		/// <remarks>
+		/// Deliberately says nothing about whether the battle finished, was any good, or produced a
+		/// result at all. A fight abandoned when the launcher was closed is exactly the junk a
+		/// player wants swept up, and refusing to remove it because its manifest still reads
+		/// "improving" strands it in the history for ever with no way to clear it.
+		/// </remarks>
+		public bool CanDelete => !IsBusy;
 		public bool HasImprovementEvidence => IsEditable && Manifest.CompletedUtc != null &&
 			File.Exists(BattleLogPath) && File.Exists(TelemetryPath) && File.Exists(DecisionTracePath);
 		public bool CanImprove => HasImprovementEvidence &&
@@ -285,6 +318,7 @@ namespace AutoCnC.Launcher
 				Id = id,
 				Status = "running",
 				CreatedUtc = DateTime.UtcNow,
+				Owner = ProcessOwnership.Claim(),
 				BotPath = fullBotPath,
 				BotProject = project,
 				BotDirectory = sourceRoot,
@@ -356,6 +390,7 @@ namespace AutoCnC.Launcher
 			Manifest.Status = status;
 			Manifest.CompletedUtc = DateTime.UtcNow;
 			Manifest.Result = result;
+			Manifest.Owner = null;
 			LoadPerformance();
 			if (File.Exists(CancellationPath))
 				File.Delete(CancellationPath);
@@ -609,6 +644,7 @@ namespace AutoCnC.Launcher
 				Repairing = repairing
 			};
 			Manifest.Status = "improving";
+			Manifest.Owner = ProcessOwnership.Claim();
 			Save();
 		}
 
@@ -623,6 +659,7 @@ namespace AutoCnC.Launcher
 			Manifest.Agent.FailurePhase = null;
 			Manifest.Agent.FailureMessage = null;
 			Manifest.Status = "verifying";
+			Manifest.Owner = ProcessOwnership.Claim();
 			Save();
 		}
 
@@ -646,6 +683,7 @@ namespace AutoCnC.Launcher
 			Manifest.Status = exitCode == 0
 				? "improved"
 				: cancelled ? "improvement-cancelled" : "improvement-failed";
+			Manifest.Owner = null;
 			Save();
 		}
 
@@ -664,6 +702,7 @@ namespace AutoCnC.Launcher
 			Manifest.Agent ??= new TrainingAgentResult();
 			Manifest.Agent.RestoredUtc = DateTime.UtcNow;
 			Manifest.Status = "restored";
+			Manifest.Owner = null;
 			Save();
 		}
 

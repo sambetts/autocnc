@@ -20,7 +20,8 @@ namespace AutoCnC.Launcher
 
 		internal static string Status(TrainingRun run) =>
 			run == null ? "No battle selected"
-				: run.Manifest.CompletedUtc == null ? "Battle in progress"
+				: run.Manifest.CompletedUtc == null
+					? run.WasInterrupted ? "Battle interrupted" : "Battle in progress"
 				: !run.HasRecordedBattle ? "No battle recorded"
 				: run.HasPlayerFeedback ? "Feedback provided" : "No feedback yet";
 
@@ -29,7 +30,9 @@ namespace AutoCnC.Launcher
 			if (run == null)
 				return "Fight a battle, then add your observations to help improve your bot.";
 			if (run.Manifest.CompletedUtc == null)
-				return "Feedback will be available when this battle finishes.";
+				return run.WasInterrupted
+					? "This battle never finished - the launcher closed while it was running. Delete the session or fight again."
+					: "Feedback will be available when this battle finishes.";
 			if (!run.HasRecordedBattle)
 				return "No battle telemetry was recorded for this session. Check the build output.";
 			if (busy)

@@ -113,6 +113,50 @@ namespace AutoCnC.Evidence.Tests
 			Assert.That(benchmark.ControlRuns, Is.EqualTo(1));
 		}
 
+		/// <summary>
+		/// A metric that only newer runs record starts trending without deleting the old ones.
+		/// </summary>
+		/// <remarks>
+		/// The economy flows arrived with a telemetry schema change, so a bot's existing history
+		/// has runs that cannot answer them. Requiring every run in the window to carry a metric
+		/// would hide it until the whole window turned over, which would make deleting history the
+		/// only way to see a new number — and history is the thing the trend is made of.
+		/// </remarks>
+		[Test]
+		public void MetricsOnlyNewerRunsRecordStillTrendAlongsideOlderRuns()
+		{
+			var history = new RunHistory { Bot = "TestBot" };
+
+			// Two runs from before telemetry carried earned/spent.
+			RunIndex.Record(history, "TestBot", WithoutEconomy("old-1", 0));
+			RunIndex.Record(history, "TestBot", WithoutEconomy("old-2", 1));
+
+			// Two after, where the economy collapses.
+			RunIndex.Record(history, "TestBot", Entry("new-1", 2, 46.6, 100, "candidate", "Lost"));
+			RunIndex.Record(history, "TestBot", Entry("new-2", 3, 25.4, 100, "candidate", "Lost"));
+
+			var trend = RunIndex.Trend(history);
+			var spend = trend.Metrics.SingleOrDefault(m => m.Name == "creditsSpentPerSecond");
+			var exchange = trend.Metrics.Single(m => m.Name == "valueExchangeRatio");
+
+			Assert.That(spend, Is.Not.Null, "the new metric must trend over the runs that have it");
+			Assert.That(spend.RunsCompared, Is.EqualTo(2), "only the two runs that recorded it");
+			Assert.That(spend.Recent, Is.EqualTo(new[] { 46.6, 25.4 }));
+
+			// The older runs are neither deleted nor counted as zero.
+			Assert.That(exchange.RunsCompared, Is.EqualTo(4));
+			Assert.That(trend.RunsCompared, Is.EqualTo(4));
+			Assert.That(history.Runs.Count, Is.EqualTo(4));
+		}
+
+		static RunHistoryEntry WithoutEconomy(string id, int days)
+		{
+			var entry = Entry(id, days, 40, 100, "candidate", "Lost");
+			entry.Headline.Remove("creditsEarnedPerSecond");
+			entry.Headline.Remove("creditsSpentPerSecond");
+			return entry;
+		}
+
 		static RunHistoryEntry Batched(string id, int days, string arm, string outcome, string batch)
 		{
 			var entry = Entry(id, days, 40, 100, arm, outcome);

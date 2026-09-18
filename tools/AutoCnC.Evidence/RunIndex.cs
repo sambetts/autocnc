@@ -79,6 +79,17 @@ namespace AutoCnC.Evidence
 
 		public string Direction { get; set; }
 
+		/// <summary>
+		/// How many runs this particular metric spans.
+		/// </summary>
+		/// <remarks>
+		/// Per metric rather than per report, because a column added to the evidence part way
+		/// through a bot's life has less history behind it than the ones that were always there.
+		/// A regression measured across three runs deserves less confidence than one across ten,
+		/// and this is what says which you are looking at.
+		/// </remarks>
+		public int RunsCompared { get; set; }
+
 		/// <summary>True when this metric fell far enough to be worth a round's attention.</summary>
 		public bool Regression { get; set; }
 
@@ -262,13 +273,17 @@ namespace AutoCnC.Evidence
 			if (runs.Count >= 2)
 				foreach (var (name, higherIsBetter) in Tracked)
 				{
-					// A metric no longer reaches the trend unless every run in the window recorded
-					// it. Substituting zero for a run that never measured it would manufacture a
-					// cliff, which is precisely the false alarm this report exists to avoid.
-					if (!runs.All(r => r.Headline.ContainsKey(name)))
+					// Only the most recent unbroken stretch of runs that actually recorded this
+					// metric. Substituting zero for a run that never measured it would manufacture
+					// a cliff, but demanding that every run in the window carry it would hide a
+					// newly available metric until the whole window had turned over - which would
+					// make deleting old history the only way to see a new number. The trailing
+					// stretch avoids both.
+					var measured = Trailing(runs, name);
+					if (measured.Count < 2)
 						continue;
 
-					var series = runs.Select(r => r.Headline[name]).ToArray();
+					var series = measured.Select(r => r.Headline[name]).ToArray();
 					var latest = series[^1];
 					var previous = series[^2];
 					var priorMedian = Median(series[..^1]);
@@ -283,6 +298,7 @@ namespace AutoCnC.Evidence
 						ChangePercent = previous != 0 ? Math.Round(100d * change / Math.Abs(previous), 1) : 0,
 						PriorMedian = Math.Round(priorMedian, 3),
 						Direction = change > 0 ? "up" : change < 0 ? "down" : "flat",
+						RunsCompared = measured.Count,
 						Recent = series.Select(v => Math.Round(v, 3)).ToArray()
 					};
 
@@ -307,6 +323,29 @@ namespace AutoCnC.Evidence
 			report.Benchmark = Compare(history);
 			report.Rendered = Render(report);
 			return report;
+		}
+
+		/// <summary>
+		/// The most recent unbroken stretch of runs that recorded <paramref name="name"/>.
+		/// </summary>
+		/// <remarks>
+		/// Walked backwards and stopped at the first run that lacks the metric, so a column added
+		/// to the evidence part way through a bot's life starts trending on its second appearance
+		/// instead of waiting for the whole window to turn over.
+		/// </remarks>
+		static List<RunHistoryEntry> Trailing(List<RunHistoryEntry> runs, string name)
+		{
+			var measured = new List<RunHistoryEntry>();
+			for (var i = runs.Count - 1; i >= 0; i--)
+			{
+				if (!runs[i].Headline.ContainsKey(name))
+					break;
+
+				measured.Add(runs[i]);
+			}
+
+			measured.Reverse();
+			return measured;
 		}
 
 		/// <summary>Candidate against control within the most recent benchmark sitting.</summary>
@@ -380,6 +419,7 @@ namespace AutoCnC.Evidence
 				text.Append(CultureInfo.InvariantCulture,
 					$"- {metric.Name}: {metric.Previous:0.###} -> {metric.Latest:0.###} " +
 					$"({metric.ChangePercent:+0.#;-0.#;0}%), prior median {metric.PriorMedian:0.###}" +
+					$"{(metric.RunsCompared < report.RunsCompared ? $" [only {metric.RunsCompared} runs record this]" : "")}" +
 					$"{(metric.Regression ? "  <== REGRESSION" : "")}\n");
 
 			if (report.Benchmark != null)

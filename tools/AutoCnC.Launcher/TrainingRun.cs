@@ -126,6 +126,17 @@ namespace AutoCnC.Launcher
 		public string Command { get; set; }
 		public string SuggestedNextPrompt { get; set; }
 		public bool SuggestedNextPromptAccepted { get; set; }
+
+		/// <summary>
+		/// True when the player read this round's proposed prompt and declined to adopt it.
+		/// </summary>
+		/// <remarks>
+		/// The proposal itself is kept rather than cleared: a round that argued for a bad prompt
+		/// is evidence about that round, and losing it would leave a session whose agent finished
+		/// successfully looking as though it had proposed nothing at all. What the flag buys is
+		/// that reopening the session stops presenting a settled question as outstanding.
+		/// </remarks>
+		public bool SuggestedNextPromptRejected { get; set; }
 		public string FailurePhase { get; set; }
 		public string FailureMessage { get; set; }
 		public string RecoveryTranscript { get; set; }
@@ -694,6 +705,18 @@ namespace AutoCnC.Launcher
 
 			Manifest.Agent.SuggestedNextPrompt = approvedPrompt;
 			Manifest.Agent.SuggestedNextPromptAccepted = true;
+			Manifest.Agent.SuggestedNextPromptRejected = false;
+			Save();
+		}
+
+		/// <summary>Records that the player turned this round's proposed prompt down.</summary>
+		public void RejectSuggestedNextPrompt()
+		{
+			if (Manifest.Agent == null)
+				throw new InvalidOperationException("This run has no next prompt to reject.");
+
+			Manifest.Agent.SuggestedNextPromptRejected = true;
+			Manifest.Agent.SuggestedNextPromptAccepted = false;
 			Save();
 		}
 

@@ -654,11 +654,13 @@ namespace AutoCnC.Launcher
 				improvementWindow.FormClosing += ImprovementWindowClosing;
 				improvementWindow.FormClosed += (_, _) => improvementWindow = null;
 				improvementWindow.NextPromptAccepted += AcceptNextPrompt;
+				improvementWindow.NextPromptRejected += RejectNextPrompt;
 				improvementWindow.MessageSent += SendAgentMessage;
 				improvementWindow.ShownRunChanged += shown =>
 					improvementWindow?.ShowConversation(ConversationFor(shown));
 			}
 
+			improvementWindow.CurrentPromptTemplate = settings.AgentPromptTemplate;
 			improvementWindow.Show(this, 0.05f, 0.9f);
 			var run = activeTrainingRun ?? trainingRun;
 			if (created && run != null &&
@@ -1810,7 +1812,14 @@ namespace AutoCnC.Launcher
 			// Deliberately outside the block above: this only draws what was just recorded, and a
 			// display fault must not be able to rewrite the durable change count with a zero.
 			if (!closing && improvementWindow != null)
-				improvementWindow.CompleteAgentRun(run);
+			{
+				improvementWindow.CurrentPromptTemplate = settings.AgentPromptTemplate;
+
+				// Continuous improvement adopts the proposal itself a moment from now, so putting
+				// the diff in front of a player who is not there to read it would only steal the
+				// progress view from the round that starts next.
+				improvementWindow.CompleteAgentRun(run, reviewNextPrompt: !continuousLoop.IsRunning);
+			}
 
 			if (exitCode == 0 && continuousLoop.Stage == ContinuousTrainingStage.Improving)
 				AcceptContinuousPrompt(run, suggestedNextPrompt);
@@ -1839,7 +1848,12 @@ namespace AutoCnC.Launcher
 			settings.AgentPromptGuidance = null;
 			run.AcceptSuggestedNextPrompt(approved);
 			PersistSettings();
-			improvementWindow?.MarkNextPromptSaved();
+			if (improvementWindow != null)
+			{
+				improvementWindow.CurrentPromptTemplate = approved;
+				improvementWindow.MarkNextPromptSaved();
+			}
+
 			AppendImprovementOutput("The next-round prompt was accepted automatically for continuous improvement.");
 		}
 
@@ -1988,7 +2002,29 @@ namespace AutoCnC.Launcher
 			if (run.Manifest.Agent != null)
 				run.AcceptSuggestedNextPrompt(approved);
 			PersistSettings();
-			improvementWindow?.MarkNextPromptSaved();
+			if (improvementWindow != null)
+			{
+				improvementWindow.CurrentPromptTemplate = approved;
+				improvementWindow.MarkNextPromptSaved();
+			}
+		}
+
+		/// <summary>
+		/// Turns a proposed prompt down, leaving the one in force exactly as it was.
+		/// </summary>
+		/// <remarks>
+		/// Nothing is written to the prompt archive, because nothing was adopted: a rejected
+		/// proposal is a fact about the round that made it, and the round's own manifest is where
+		/// that belongs. What the player gets back is a prompt lineage in which every revision is
+		/// a prompt that was actually used.
+		/// </remarks>
+		void RejectNextPrompt(TrainingRun run)
+		{
+			if (run?.Manifest.Agent == null)
+				return;
+
+			run.RejectSuggestedNextPrompt();
+			improvementWindow?.MarkNextPromptRejected();
 		}
 
 		/// <summary>

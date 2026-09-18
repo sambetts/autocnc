@@ -284,8 +284,11 @@ improvement/restore safeguards still apply.
 
 The Fight and Units & weapons views are lazy JSON trees: expand only the objects or actors you
 need. Every agent is also asked to draft a complete replacement prompt template for the next
-round—not an extra hint. It appears in **Next prompt***, where the player can edit and approve it.
-The approved template replaces the previous one and is rendered with fresh run values through
+round—not an extra hint. It appears in **Next prompt***, which the window opens by itself when a
+round finishes. That view compares the proposal with the template in force, printing only the
+lines that differ so a paragraph quietly dropped after ten rounds of earning it is visible; the
+player approves it or keeps the current prompt. A rejection changes nothing and is recorded on the
+round. The approved template replaces the previous one and is rendered with fresh run values through
 required placeholders such as `{workspace}`, `{telemetry}`, `{result}`, and
 `{nextPromptContract}`. The initial template lives at `docs/agent-prompt-template.md`; an approved
 replacement is saved in the player's launcher settings.

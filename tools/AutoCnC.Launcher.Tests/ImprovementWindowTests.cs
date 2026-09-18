@@ -70,6 +70,7 @@ namespace AutoCnC.Launcher.Tests
 
 				var nextPrompt = template + Environment.NewLine + "Inspect economy first.";
 				run.AgentFinished(0, 1, nextPrompt);
+				window.CurrentPromptTemplate = template;
 				window.CompleteAgentRun(run);
 				string accepted = null;
 				window.NextPromptAccepted += (_, value) => accepted = value;
@@ -84,6 +85,138 @@ namespace AutoCnC.Launcher.Tests
 				Directory.Delete(root, true);
 			}
 		}
+
+		[Test]
+		public void AFinishedRoundOffersItsProposedPromptAsADifferenceToApproveOrReject()
+		{
+			var root = Path.Combine(Path.GetTempPath(), "AutoCnC Prompt Review",
+				Guid.NewGuid().ToString("N"));
+			var workspace = Path.Combine(root, "Bot");
+			Directory.CreateDirectory(workspace);
+			var project = Path.Combine(workspace, "Bot.csproj");
+			File.WriteAllText(project, "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+
+			try
+			{
+				var run = TrainingRun.Create(project, new TrainingBattleConfiguration(),
+					Path.Combine(root, "runs"));
+				var current = Template("Report what changed.");
+				var proposed = Template("Report what changed, economy first.");
+				run.AgentStarted("fake-agent");
+				run.AgentFinished(0, 1, proposed);
+
+				using var window = new ImprovementWindow();
+				window.ShowInTaskbar = false;
+				window.CurrentPromptTemplate = current;
+				window.CompleteAgentRun(run, reviewNextPrompt: true);
+
+				Assert.That(window.SelectedView, Is.EqualTo("Next prompt *"),
+					"a proposal nobody is shown is a proposal nobody approved");
+				Assert.That(window.NextPromptDiffText,
+					Does.Contain("- Report what changed.").And
+						.Contain("+ Report what changed, economy first."));
+				Assert.That(window.NextPromptDiffText, Does.Not.Contain("- Edit only {workspace}."),
+					"lines the proposal left alone are not changes");
+				Assert.That(window.NextPromptStatusText,
+					Does.Contain("1 line(s) added, 1 line(s) removed."));
+				Assert.That(window.CanAcceptNextPrompt, Is.True);
+				Assert.That(window.CanRejectNextPrompt, Is.True);
+
+				TrainingRun rejected = null;
+				window.NextPromptRejected += value => rejected = value;
+				window.RejectNextPromptDraft();
+
+				Assert.That(rejected, Is.SameAs(run));
+
+				// What the launcher does with it, and what reopening the session then shows.
+				run.RejectSuggestedNextPrompt();
+				window.MarkNextPromptRejected();
+				Assert.That(window.CanAcceptNextPrompt, Is.False);
+				Assert.That(window.CanRejectNextPrompt, Is.False);
+				Assert.That(window.NextPromptStatusText, Does.Contain("Rejected"));
+
+				window.ShowAgentRun(TrainingRun.Load(run.RunDirectory));
+				Assert.That(window.NextPromptStatusText, Does.Contain("Rejected"));
+				Assert.That(window.CanAcceptNextPrompt, Is.False);
+				Assert.That(window.NextPromptText, Is.EqualTo(proposed),
+					"the proposal is evidence about the round that made it");
+
+				// Editing the draft reopens the decision rather than stranding it as rejected.
+				window.NextPromptText = Template("Report what changed, air power first.");
+				Assert.That(window.CanAcceptNextPrompt, Is.True);
+				Assert.That(window.CanRejectNextPrompt, Is.True);
+				Assert.That(window.NextPromptDiffText,
+					Does.Contain("+ Report what changed, air power first."));
+
+				// A tab that lays out to nothing is a decision the player cannot see to take,
+				// and every assertion above would still pass.
+				window.Size = new System.Drawing.Size(900, 600);
+				window.Show();
+				var tabs = Descendants(window).OfType<TabControl>().Single();
+				tabs.SelectedTab = tabs.TabPages.Cast<TabPage>()
+					.Single(page => page.Text.StartsWith("Next prompt", StringComparison.Ordinal));
+				window.PerformLayout();
+
+				var split = Descendants(window).OfType<SplitContainer>().Single();
+				var diffPane = Descendants(split.Panel1).OfType<RichTextBox>().Single();
+				var draft = Descendants(split.Panel2).OfType<TextBox>().Single();
+				Assert.That(diffPane.Height, Is.GreaterThan(diffPane.Font.Height * 3));
+				Assert.That(draft.Height, Is.GreaterThan(draft.Font.Height * 3));
+				Assert.That(diffPane.Height, Is.GreaterThan(draft.Height),
+					"the comparison is the part being judged");
+				foreach (var button in Descendants(window).OfType<ActionButton>()
+					.Where(button => button.Text is "Use this prompt next round"
+						or "Keep the current prompt"))
+					Assert.That(button.Width, Is.GreaterThan(0), button.Text);
+			}
+			finally
+			{
+				Directory.Delete(root, true);
+			}
+		}
+
+		[Test]
+		public void AContinuousRoundDoesNotStealTheProgressViewToShowADiffNobodyIsReading()
+		{
+			var root = Path.Combine(Path.GetTempPath(), "AutoCnC Prompt Review Quiet",
+				Guid.NewGuid().ToString("N"));
+			var workspace = Path.Combine(root, "Bot");
+			Directory.CreateDirectory(workspace);
+			var project = Path.Combine(workspace, "Bot.csproj");
+			File.WriteAllText(project, "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+
+			try
+			{
+				var run = TrainingRun.Create(project, new TrainingBattleConfiguration(),
+					Path.Combine(root, "runs"));
+				run.AgentStarted("fake-agent");
+				run.AgentFinished(0, 1, Template("Report what changed, economy first."));
+
+				using var window = new ImprovementWindow();
+				window.ShowInTaskbar = false;
+				window.CurrentPromptTemplate = Template("Report what changed.");
+				window.StartAgentRun(run);
+				window.CompleteAgentRun(run, reviewNextPrompt: false);
+
+				Assert.That(window.SelectedView, Is.EqualTo("Progress"));
+			}
+			finally
+			{
+				Directory.Delete(root, true);
+			}
+		}
+
+		/// <summary>A prompt that satisfies the template contract, with one line to vary.</summary>
+		static string Template(string tail) => string.Join(Environment.NewLine,
+		[
+			"Improve the bot. Edit only files under {workspace}.",
+			"{gameMechanics}", "{gameGuide}", "{gameRules}", "{fightManifest}", "{battleLog}",
+			"{telemetry}", "{decisionTrace}", "{battle}", "{result}", "{sourceRevision}",
+			"{summary}", "{units}", "{mapFacts}", "{checks}", "{checkResults}", "{trend}",
+			"{checkReport}", "{trendReport}", "{botAudit}",
+			"{nextPromptContract}",
+			tail
+		]);
 
 		[Test]
 		public void TheChatTabShowsWhatWasSaidAndKeepsAcceptingWhileTheAgentWorks()

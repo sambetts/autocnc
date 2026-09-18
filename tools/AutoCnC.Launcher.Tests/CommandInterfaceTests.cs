@@ -749,6 +749,57 @@ namespace AutoCnC.Launcher.Tests
 		}
 
 		[Test]
+		public void RejectingANextRoundPromptLeavesThePromptInForceAndArchivesNothing()
+		{
+			var run = RecordedFeedbackRun(BattleExecutionModes.Rendered);
+			WritePreparedEvidence(run);
+			var previous = string.Join(Environment.NewLine,
+			[
+				"Improve the bot. Edit only files under {workspace}.",
+				"Mechanics: {gameMechanics}",
+				"Read {gameGuide} and {gameRules}.",
+				"Evidence: {fightManifest}, {battleLog}, {telemetry}, {decisionTrace}.",
+				"Derived: {summary}, {units}, {mapFacts}, {checks}, {checkResults}, {trend}.",
+				"{checkReport}",
+				"{trendReport}",
+				"{botAudit}",
+				"Fight: {battle}. Result: {result}. Revision: {sourceRevision}.",
+				"{nextPromptContract}"
+			]);
+			var proposed = previous.Replace("Improve the bot.", "Forget the economy.",
+				StringComparison.Ordinal);
+			settings.AgentPromptTemplate = previous;
+			run.AgentStarted("fake-agent");
+			run.AgentFinished(0, 1, proposed);
+			settings.LastTrainingRunDirectory = run.RunDirectory;
+
+			using var window = Window();
+			window.SelectStation(2);
+			Assert.That(window.SelectTrainingBattle(run), Is.True);
+			Descendants(window).OfType<Button>().Single(button => button.Text == "Agent workspace").PerformClick();
+			var improvement = window.OwnedForms.OfType<ImprovementWindow>().Single();
+
+			// The comparison is the whole basis for the decision, so it has to be on screen
+			// before the decision is taken rather than be a second reading of the same wall.
+			Assert.That(improvement.NextPromptDiffText, Does.Contain(
+				"- Improve the bot. Edit only files under {workspace}."));
+			Assert.That(improvement.NextPromptDiffText, Does.Contain(
+				"+ Forget the economy. Edit only files under {workspace}."));
+			Assert.That(improvement.NextPromptDiffText, Does.Not.Contain("{trendReport}"),
+				"the lines the proposal kept are not part of the decision");
+
+			improvement.RejectNextPromptDraft();
+
+			Assert.That(settings.AgentPromptTemplate, Is.EqualTo(previous));
+			Assert.That(new PromptHistory(PromptHistoryRoot).Read().Revisions, Is.Empty,
+				"a prompt that was never adopted has no place in the lineage of adopted prompts");
+			Assert.That(TrainingRun.Load(run.RunDirectory).Manifest.Agent,
+				Has.Property("SuggestedNextPromptRejected").True
+					.And.Property("SuggestedNextPrompt").EqualTo(proposed));
+			Assert.That(improvement.CanAcceptNextPrompt, Is.False);
+		}
+
+		[Test]
 		public void PrebuiltBotsAndMissingMapsCannotClaimTrainingReadiness()
 		{
 			Write("bots\\Prebuilt.dll", "");

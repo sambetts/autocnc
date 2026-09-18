@@ -50,6 +50,15 @@ namespace AutoCnC.Reference.Modes
 		/// <summary>Refinery names for either faction, as an array because a plan step wants one.</summary>
 		static readonly string[] RefineryCandidates = [.. ReferencePlans.Refineries];
 
+		/// <summary>Anti-air tower names for either faction. See <see cref="ExpansionLogic.Shield"/>.</summary>
+		static readonly string[] AirDefenceCandidates = [.. ReferencePlans.AntiAirStructures];
+
+		/// <summary>
+		/// Every defensive structure, so the anti-air rung sizes itself from the base rather
+		/// than from the towers already covering it.
+		/// </summary>
+		static readonly string[] DefenceStructures = [.. ReferencePlans.SupportQueueStructures];
+
 		/// <summary>
 		/// Structures that should be pushed outward as they multiply, rather than stacked at home.
 		/// </summary>
@@ -178,6 +187,15 @@ namespace AutoCnC.Reference.Modes
 			if (order.Action == ConstructionAction.None)
 				order = Frontier(ctx, owned);
 
+			// The economy frontier is a Building-queue rule, and the Support queue has no
+			// equivalent: every doctrine's defence ladder is finite, so once it is met the yard
+			// has nothing to ask Support for ever again. On badland-ridges that queue issued six
+			// orders and idled 1,017 of 1,581 seconds while enemy orca took 13 of the 21
+			// buildings this side lost. Asked last, so the economy keeps absolute priority and
+			// nothing about the branch above changes. See ExpansionLogic.Shield.
+			if (order.Action == ConstructionAction.None)
+				order = AirDefence(ctx, owned);
+
 			// --- Act ---------------------------------------------------------------
 			switch (order.Action)
 			{
@@ -241,6 +259,50 @@ namespace AutoCnC.Reference.Modes
 				? new ConstructionOrder(order.Action, order.Queue, order.Item,
 					$"{order.Item} for {ExpansionLogic.FieldsWorthWorking(fields, expansion)} fields found")
 				: order;
+		}
+
+		/// <summary>
+		/// The next anti-air tower, once the doctrine's defence ladder has run out.
+		/// </summary>
+		/// <remarks>
+		/// The counterpart of <see cref="Frontier"/> for the <c>Support</c> queue, and cheap for
+		/// the same reason that one is not: this reads counts the yard already has rather than
+		/// walking the map, so it needs no rescan clock.
+		/// <para>
+		/// It can only ever yield the appended rung. Everything above it in the plan has already
+		/// answered "nothing to do" on this evaluation, and a rung whose candidates the queue
+		/// cannot build is skipped silently — so a faction or a tech state with no anti-air
+		/// tower available falls straight through. See <see cref="ExpansionLogic.Shield"/>.
+		/// </para>
+		/// </remarks>
+		ConstructionOrder AirDefence(ModeContext ctx, IReadOnlyDictionary<string, int> owned)
+		{
+			var plan = ExpansionLogic.Shield(
+				ctx.BuildPlan, owned, AirDefenceCandidates, DefenceStructures, expansion);
+
+			if (ReferenceEquals(plan, ctx.BuildPlan))
+				return ConstructionOrder.Nothing;
+
+			var order = BaseConstructionLogic.ChooseNext(
+				queues, ctx.Cash, ctx.PowerBalance, owned, plan, PowerCandidates);
+
+			// Only claim the reason when the order is actually the appended rung. The power
+			// override inside BaseBuildLogic can answer any plan with a power plant, and a
+			// decision trace that labelled one of those "covering the base from the air" would
+			// make the check that proves this branch works unfalsifiable.
+			return order.Action == ConstructionAction.Produce && Named(AirDefenceCandidates, order.Item)
+				? new ConstructionOrder(order.Action, order.Queue, order.Item,
+					$"{order.Item} covering {ExpansionLogic.StructuresWorthCovering(owned, DefenceStructures)} structures from the air")
+				: order;
+		}
+
+		static bool Named(string[] candidates, string item)
+		{
+			for (var i = 0; i < candidates.Length; i++)
+				if (string.Equals(candidates[i], item, System.StringComparison.OrdinalIgnoreCase))
+					return true;
+
+			return false;
 		}
 
 		UnitDecision Place(ModeContext ctx, in ConstructionOrder order, IReadOnlyDictionary<string, int> owned)

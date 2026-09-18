@@ -881,7 +881,7 @@ Reference/
 │   │                                 HarvesterLogic)
 │   ├── RunHomeMode.cs           ←   template: flees to a refinery when threatened
 │   ├── HarvesterEscortMode.cs   ←   guards a harvester
-│   └── ScoutMode.cs             ←   wanders, runs from anything armed
+│   └── ScoutMode.cs             ←   searches a ladder of objectives derived from the map
 ├── Logic/                       ← pure decision functions, no engine
 │                                  (WeaponMatchLogic says what each warhead is good at killing,
 │                                   so a rifleman and a rocket soldier no longer share a
@@ -1738,6 +1738,235 @@ queue must produce **at least one** `arty`, `msam`, `mtnk` or `ltnk`, against ze
 last two matches. `e3` must fall from **29.3% of lifetime spend** to under 12%, and `e1` must become
 the most-produced unit. If the floor releases and the queue still buys no combat vehicle, the
 blocker is cash rather than rung order and the next fix belongs in income, not in the plan.
+
+## A random walk is not a search
+
+Lost on `badland-ridges` as GDI after 1,136 seconds, fitness **0.417** against a prior median of
+0.68. Five of the six fitness components scored between 0.42 and 0.68. One scored **zero**:
+`buildingsDestroyed`, worth 0.15 of the total. The bot destroyed **no enemy building at all**, and
+the reason is not that the push failed. **There was no push.** Across 1,136 seconds and twelve
+doctrine changes the bot ran `Opening`, `Scout` and `Defence` and never once entered `Attack`.
+
+`Attack` is gated on `readyToPush = ArmyValue >= 6000 && EnemyBaseFound`. The army cleared 6,000 at
+420s and peaked at 7,640. The other half never arrived: across **228 assessments**, `enemyBaseFound`
+first read true at **1,045s** — 92% of the way through the match — and it read true then only
+because *their* army had reached *our* base, with `nearestEnemyCells` at 6 and 77 enemies in sight.
+Our own army was worth 0 by that point. **No scout ever saw an enemy structure.**
+
+### The search was a uniform random walk that ran home on contact
+
+`ScoutMode` was still the shipped template. It picked its destination with
+`random.Next(bounds.Width)` — a uniformly random cell from the whole 98×98 map — and on sensing
+anything inside six cells that could shoot it, ordered itself all the way back to `ctx.Anchor`.
+
+Both halves are fatal, and the trace prices them. A uniform random destination has **no expected
+progress**: the mean random cell is the middle of the map, so each new target undoes the last and
+the scout oscillates around the centre. All four jeeps died there — (45,51), (54,61) and (48,72) on
+a map whose centre is (48,48) — at a mean age of 111 seconds, having travelled halfway and turned
+round. And running home discards every cell of progress at the first picket: the decision trace
+holds **17 `spotted, falling back` against 15 `scouting`**, so more than half of every scout's
+output was a retreat. 204 cells were explored, against a prior median of 394 and a fitness
+reference of 300.
+
+Exploration is not only a fitness component. It is the gate on the Attack doctrine, and — because
+resource reads are shroud-filtered — it is the ceiling on income too.
+
+### A ladder derived from the map beats a coin
+
+[`ScoutSearchLogic`](Logic/ScoutSearchLogic.cs) replaces the coin with an ordered ladder of
+objectives, every rung of it computed at runtime from `Map.Bounds` and `ctx.BaseCenter`:
+
+1. our base **reflected through the centre of the map**, because skirmish maps place spawns
+   symmetrically and that is the best single guess there is;
+2. the two single-axis mirrors, for maps mirrored about one axis rather than rotated;
+3. then a walk around the map's rim, striding three-eighths of the perimeter a step and skipping
+   points that land near home, because bases sit near edges and the middle gets crossed anyway.
+
+On this match rung 0 evaluates to **(84,15)**. The enemy spawn was **(83,14)**. Nothing in the code
+knows that — it is arithmetic on the bounds and our own spawn — which is the difference between
+deriving a position and memorising one.
+
+The retreat is gone with it. A threatened scout now takes a six-cell step that is *away from the
+threat and toward the objective at once*; where those disagree the components cancel on that axis
+and the step becomes a genuine sideways go-around. A scout is worth exactly the ground behind it,
+and a 400-credit jeep with no other job is not worth saving by throwing that away. A stall watchdog
+covers the case the old code had no answer for at all: four evaluations at the same cell means the
+rung is unreachable, so take the next one — which also breaks the deadlock where the host suppresses
+a re-issued duplicate order and a scout with a cancelled move stands still for the rest of the match.
+
+A scout that can actually see one of their structures stops searching and keeps watching it.
+`EnemyBaseSightings.Forget` believes a sighting only while somebody has seen a structure in the last
+90 game seconds, and the army's approach march is longer than that; a scout that ticked on to the
+next rung the instant it arrived would let the side's only target go stale during the very march it
+unlocked.
+
+`ScoutMode` is also now **assigned in `OpeningDoctrine`**, not merely registered there. Scouting
+used to happen only while the `Scout` doctrine happened to be running — 320 of 1,136 seconds — and
+for the rest of the match the jeeps stood in the base as defenders. They are not defenders: four of
+them finished with **0 kills**, 11,064 damage dealt and 30,539 taken. Finding the other side is the
+only thing a jeep does that this bot cannot do without.
+
+### What the next trace answers
+
+`searching for their base` and `going around` are literals nothing else emits, and `falling back`
+must not appear at all. The one that matters is `closing on their base`, from `AttackBaseLogic`:
+it is emitted only while marching on a recorded sighting, and it was emitted **zero** times here.
+`buildingsKilled` must leave zero.
+
+**The economy is the standing risk, and it is not what this round changed.** All six harvesters
+died between **635s and 659s** to Nod rocket infantry, 13 to 24 cells out around the forward
+refinery at (7,70), and `earned` never moved again: 25,340 credits at 660s and 25,340 at 1,080s,
+**zero income for the last 477 seconds**, with cash pinned at 1 while a refinery and a war factory
+still stood. `secondsWithNoHarvester` was **530**. If the search works and that still happens, the
+next round's fix belongs in the economy, not in the search — which is why it has a check of its own.
+
+## The whole match ran on one harvester
+
+`badland-ridges`, Hard, lost at 1,187s. Income finished at **17.2 credits a second** against a
+fitness reference of 50, and every other failure in the ledger is downstream of that number: cash
+read 0 or 1 at every one of the twenty economy samples from 180s on, the `Vehicle` queue issued
+**two orders in the entire match**, the army was 100% infantry, and `buildingsDestroyed` was zero
+for the second fight running.
+
+The cause is one line in `units.csv`. Six harvesters ever existed, for **1,260 harvester-seconds
+across a 1,187-second match** — a mean of **1.06 alive** — with four refineries standing from 260s
+and five bought for 7,500 credits, 20.7% of everything ever spent. 550 seconds of the match had no
+harvester at all and `earned` was frozen at 20,475 from 660s to the end.
+
+### It was not the harvesters, and that is the point
+
+Three previous rounds looked at `HarvesterLogic`. Divide the ledger instead: 20,475 credits over
+1,260 harvester-seconds is **16.3 credits per harvester per second**, a full load every forty-odd
+seconds, which is about as well as a harvester can do. The search was fine. There were simply
+almost none of them, and the two reasons are both purchasing, not driving.
+
+### A refinery is a one-shot harvester
+
+`weap`/`afld` was the *last* rung of `Economy`, behind four refineries and the `hq`, on the
+argument that four refineries pay for the factory sooner than two do. That argument only holds for
+the **first** harvester. A refinery hands out one free actor and can never hand out another; the
+factory sells a replacement every time one dies, and this bot's harvesters are hunted — enemy `e3`
+alone killed four of the six, for 153,224 damage.
+
+The ladder reached `afld` at **474s**. Two of the four free harvesters were already dead, at 271s
+and 275s, and until 474s there was no way in the game to replace either. So the factory moves to
+sixth, directly after the second refinery. It costs 2,000 and needs only `proc`, so power,
+refinery, power, barracks, refinery, factory is **6,500 of the 7,500 opening bank** — affordable
+before a single credit of income, with every refinery after it bought out of earnings. `hq` goes
+last, because it is the only rung on the ladder that earns nothing at all.
+
+### Rung order cannot arbitrate a shared bank
+
+The second reason is subtler and had never been addressed, because every previous fix worked
+*inside* one queue. `ExpansionLogic` sizes the harvester rungs, `ArmyBalanceLogic` stops an
+unmeetable one starving what sits below it — and both arbitrate a single plan. Cash is shared by
+every queue on the field, and nothing arbitrated that.
+
+The airfield lived about 540 seconds, issued two orders, and took **143 seconds to deliver one
+1,100-credit harvester**. Over the same match the barracks issued **59 orders worth 8,900 credits**
+— a 100-credit rifleman roughly every twenty seconds. Lifetime spend tracked lifetime earnings to
+the credit. A queue buying 100-credit items always wins that race against one buying an
+1,100-credit item, and what it beat was the entire economy.
+
+[`IncomeFirstLogic`](Logic/IncomeFirstLogic.cs) caps every `Infantry` rung at four bodies, and only
+while all three of these hold at once:
+
+1. a vehicle factory is standing, so a harvester is actually buyable;
+2. the fleet is below the band `ArmyBalanceLogic.ReleaseAt` already defines, rather than below a
+   second threshold invented for the occasion;
+3. cash is below a harvester's price — which is what makes the rule **self-releasing**. The moment
+   the side can afford a harvester *and* a rifleman, the rifleman costs the harvester nothing and
+   the cap lifts on its own. On a healthy economy it never fires.
+
+It caps rather than silences, so the base is never naked: the opening four rifles and four rockets
+are below the cap and untouched, and what stops is the twelve-rifle rung re-firing every time one
+dies. The towers were the better buy anyway — four `gtwr` cost 2,400 credits and killed 47 units
+worth 10,740, at **51 credits a kill against the infantry queue's 171** — and they were starved by
+the same bank.
+
+### One reading lesson, written into `checks.json`
+
+Three of the previous round's ten checks were meaningless and looked decisive. `units.count(type=e1)`
+read **100** and `units.count(type=e3)` read **78** against a side that built 44 and 14:
+`units.csv` holds **both** players, so `units.count`/`units.mean` are never a statement about this
+bot. `summary.unitTypes[<type>].built` is. Every own-side claim this round is phrased that way.
+
+## The Attack doctrine ran for zero seconds
+
+Same `badland-ridges` loss. The economy above explains why the bot was poor; this explains why it
+never once attacked. Across **238 assessments the Attack doctrine was entered zero times** — ten
+doctrine episodes, all of them Opening, Scout or Defence — and `buildingsDestroyed` has now scored
+a structural **0.0 out of 0.15** two fights running.
+
+### A conjunction whose halves were never true at the same instant
+
+The gate was `ArmyValue >= 6000 && EnemyBaseFound`. Grep the assessments for each half:
+
+| condition | true when |
+| --- | --- |
+| `armyValue >= 6000` | 360s – 570s (42 samples) |
+| `enemyBaseFound` | 900s – 1185s (58 samples) |
+| **both** | **never (0 samples)** |
+
+`enemyBaseFound` is only ever set by a unit that can see an enemy structure, and **no scout vehicle
+was built all match** — the `Vehicle` queue issued two orders in 1,187 seconds and both were
+harvesters. The flag first read true at 900s only because *their* army had arrived at *our* base,
+by which point our own army was worth 1,500 and falling.
+
+So the bot was not choosing to attack late. It was structurally incapable of attacking, and had
+been for two fights.
+
+### Waiting for certainty was the mistake
+
+[`AttackBaseMode.Probe`](Modes/AttackBaseMode.cs) is the fix, and it is a deduction rather than a
+sighting. Skirmish maps place their spawns symmetrically, so **our own base reflected through the
+centre of the map** is overwhelmingly the best single guess at where they live — which is exactly
+[`ScoutSearchLogic.Objective`](Logic/ScoutSearchLogic.cs) rung 0, already written, already used by
+the scouts, and already arithmetic on `Map.Bounds` and `ctx.BaseCenter`. Nothing in it knows which
+map is being played.
+
+A push with no sighting now marches at that cell under `AttackMoveTo`, so it fights through what
+it meets rather than being shot for free on the way. Three things follow for one change:
+
+- the attack happens at all;
+- the army *is* the scout — 146 cells were explored last fight against a reference of 300, and
+  because resource reads are shroud-filtered, unexplored tiberium is unusable income as well as
+  lost fitness;
+- staging is skipped while there is no sighting (`MusterState.HasTarget` is false), so the first
+  probe goes out immediately instead of gathering — and once anyone sees a structure, the sighting
+  is recorded and the normal staged assault applies to everything after it.
+
+Standing on the guess and still seeing nothing is the one honest way to learn the map was
+asymmetric, and that hands over to the search ladder, which has more rungs.
+
+### 6,000 credits is a stockpile, not a threshold
+
+The other half. The opponent's first attack was killing harvesters in our base at **271s**; on a
+97-cell diagonal that means they set out at roughly 170s with whatever they had. Our own army
+reached 2,000 at **140s**, 3,000 at 190s and 6,000 only at **360s**. A bot that waits for six
+thousand credits of army concedes the first four minutes to an opponent that does not.
+
+`AttackArmyValue` drops to **2,000** — twenty rifles or six rockets, a raiding party rather than an
+army. That is the point: it buys contact early, and the units the barracks turns out behind it join
+the same push, so the group **expands while it is in the field** instead of being assembled before
+it leaves. `RetreatArmyValue` drops to **600** with it, because two thresholds a handful of
+riflemen apart make the bot commute — push, lose three units, go home, rebuild, push again.
+
+### A veto that fires every minute is not a veto
+
+Rule 1 recalled the army for **any** building lost in the 60-second window. Twenty buildings were
+lost, so against an opponent that raids continuously that rule describes most of the match, and it
+does not postpone a push — it cancels it. That is the same trap rule 2 already documents, and it
+gets the same shape of answer: a side with an army to spend rides out the first building and comes
+home for the **second**, which is a base being dismantled rather than a raid getting lucky. A side
+with no army still turtles on the first, having nothing better to do with the next minute.
+
+### The risk, stated rather than hidden
+
+A raiding party can simply die, and `valueExchangeRatio` was 0.722 with the army safe at home.
+`aggression-does-not-just-feed-the-enemy` in `checks.json` is that risk written as a falsifiable
+floor. If it fails, the answer is to raise `AttackArmyValue` — not to abandon the probe, which is
+the thing that made the Attack doctrine reachable at all.
 
 ## Start your own
 

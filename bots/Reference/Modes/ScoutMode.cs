@@ -1,19 +1,19 @@
 // ============================================================================
-//  ScoutMode — TEMPLATE
+//  ScoutMode — go and find out where the other side lives.
 //
-//  Wanders the map looking for things, and runs from anything that shoots back.
-//  Try it with:  /mode ScoutMode   (applies to your current selection)
+//  Sensing and acting only. Where to look, and what to do about something
+//  shooting at us on the way, is ScoutSearchLogic's judgement — a pure function
+//  of the map's shape and where our own base is.
 //
 //  Shows two things worth copying:
-//    * per-unit state in instance fields (currentTarget)
+//    * per-unit state in instance fields (the watchdog)
 //    * reacting immediately to damage via OnDamaged
 //
 //  Licence: GPL-3.0-or-later, like everything that links against OpenRA. See LICENSE
 //  and NOTICE.md. Modes you write and distribute inherit the same terms.
 // ============================================================================
 
-using System;
-using System.Linq;
+using AutoCnC.Reference.Logic;
 using AutoCnC.Sdk;
 using AutoCnC.Core;
 using OpenRA;
@@ -23,33 +23,34 @@ namespace AutoCnC.Reference.Modes
 {
 	public sealed class ScoutMode : UnitMode
 	{
-		const int FleeRadius = 6 * 1024;
-
 		/// <summary>How far out a structure counts as "found their base".</summary>
 		const int SightRadius = 10 * 1024;
 
+		/// <summary>How close something that can shoot us has to be before we go around it.</summary>
+		const int ThreatRadius = 6 * 1024;
+
+		readonly ScoutTuning tuning = ScoutTuning.Default;
+
 		// One mode instance per unit, so instance fields are safe per-unit memory.
 		// (A static field would be shared by every unit — don't do that.)
-		CPos currentTarget;
-		bool hasTarget;
-
-		// Mode code runs outside the simulation, so ordinary System.Random is fine here.
-		readonly Random random = new();
+		ScoutWatchdog watchdog = ScoutWatchdog.Start;
 
 		public override void OnEnter(Actor self, ModeContext ctx)
 		{
-			hasTarget = false;
+			watchdog = ScoutWatchdog.Start;
 		}
 
 		public override UnitDecision OnTick(Actor self, ModeContext ctx)
 		{
-			// The question this scout was sent to answer. Saying so here rather than leaving it to
-			// the bot is what lets a doctrine end itself: this works even for a bot with no rule
-			// about scouting at all, because the request carries whenever the bot has no opinion.
-			// A bot that does have one — like ReferenceBot — reaches the same conclusion, and its
-			// reason is the one that ends up in the battle log.
+			// --- Sense -------------------------------------------------------------
+			// The question this scout was sent to answer, asked before anything else so a scout
+			// that dies this evaluation has still reported. Saying so here rather than leaving it
+			// to the bot is what lets a doctrine end itself: the request carries whenever the bot
+			// has no opinion, and ReferenceBot reaches the same conclusion, so its reason is the
+			// one that ends up in the battle log.
 			var structures = ctx.SenseStructures(new WDist(SightRadius));
-			if (structures.Count > 0)
+			var inSight = structures.Count > 0;
+			if (inSight)
 			{
 				// Remember where, not just that. The push that this discovery unlocks starts at
 				// home, where nothing enemy is visible, so a bare "found it" leaves the army with
@@ -61,38 +62,63 @@ namespace AutoCnC.Reference.Modes
 				ctx.SwitchDoctrine(ReferenceDoctrines.Opening, "scout found their base");
 			}
 
-			// Scouts are fragile: break off from anything that can shoot us.
-			var threat = ctx.SenseThreats(new WDist(FleeRadius)).FirstOrDefault(t => t.CanHitUs);
-			if (threat.CanHitUs)
+			// Where the threat is, not merely that there is one: going around something needs to
+			// know which side of us it stands on, and ThreatSnapshot carries a range but no cell.
+			var threatened = false;
+			var threatX = 0;
+			var threatY = 0;
+			var threats = ctx.SenseThreats(new WDist(ThreatRadius));
+
+			// A scout's whole job is looking, so what it sees is worth keeping. See
+			// EnemySightings: this is usually the first read of their composition anyone gets.
+			EnemySightings.Record(self.Owner, threats);
+
+			for (var i = 0; i < threats.Count; i++)
 			{
-				hasTarget = false;
-				return UnitDecision.MoveTo(ctx.Anchor.X, ctx.Anchor.Y, "spotted, falling back");
+				if (!threats[i].CanHitUs)
+					continue;
+
+				var actor = ctx.ResolveActor(threats[i].ActorId);
+				if (actor == null)
+					continue;
+
+				threatened = true;
+				threatX = actor.Location.X;
+				threatY = actor.Location.Y;
+				break;
 			}
 
-			// Pick a new destination once we arrive, or if we never had one.
-			if (!hasTarget || ctx.DistanceTo(currentTarget) < 2 * 1024)
-			{
-				currentTarget = RandomCell(ctx);
-				hasTarget = true;
-				return UnitDecision.MoveTo(currentTarget.X, currentTarget.Y, "scouting");
-			}
+			var bounds = ctx.World.Map.Bounds;
+			var here = self.Location;
+			var home = ctx.BaseCenter;
 
-			return UnitDecision.Continue;
+			var state = new ScoutState(
+				CanMove: ctx.CanMove,
+				X: here.X,
+				Y: here.Y,
+				StructureInSight: inSight,
+				ThreatNearby: threatened,
+				ThreatX: threatX,
+				ThreatY: threatY,
+				Field: new ScoutField(
+					MinX: bounds.Left,
+					MinY: bounds.Top,
+					MaxX: bounds.Left + bounds.Width - 1,
+					MaxY: bounds.Top + bounds.Height - 1,
+					BaseX: home.X,
+					BaseY: home.Y));
+
+			// --- Decide ------------------------------------------------------------
+			var outcome = ScoutSearchLogic.Decide(state, watchdog, tuning);
+			watchdog = outcome.Watchdog;
+			return outcome.Decision;
 		}
 
 		public override void OnDamaged(Actor self, ModeContext ctx, AttackInfo e)
 		{
-			// Don't wait for the next scheduled evaluation; react now.
-			hasTarget = false;
+			// Don't wait for the next scheduled evaluation; being shot is the one thing a scout
+			// has to answer sooner than that.
 			ctx.RequestReevaluation();
-		}
-
-		CPos RandomCell(ModeContext ctx)
-		{
-			var bounds = ctx.World.Map.Bounds;
-			return new CPos(
-				bounds.Left + random.Next(bounds.Width),
-				bounds.Top + random.Next(bounds.Height));
 		}
 	}
 }

@@ -37,10 +37,10 @@ namespace AutoCnC.Reference.Logic
 	/// to march it holds, and an attack doctrine whose units all hold is indistinguishable from
 	/// no attack doctrine at all.
 	/// </remarks>
-	public readonly record struct ApproachOrders(bool HasTarget, int X, int Y, int DistanceUnits)
+	public readonly record struct ApproachOrders(bool HasTarget, int X, int Y, int DistanceUnits, string Why)
 	{
 		/// <summary>Nowhere to go: this side has never seen an enemy structure.</summary>
-		public static ApproachOrders None { get; } = new(false, 0, 0, 0);
+		public static ApproachOrders None { get; } = new(false, 0, 0, 0, null);
 	}
 
 	/// <summary>
@@ -117,8 +117,19 @@ namespace AutoCnC.Reference.Logic
 		static UnitDecision Approach(in AssaultState state, in ApproachOrders approach, WeaponRole role)
 		{
 			if (approach.HasTarget && state.CanMove)
+			{
+				// Two different marches share this branch and they are not the same claim. One
+				// walks at a place somebody on this side has actually seen a structure; the
+				// other walks at a cell deduced from the map's own symmetry, with no sighting
+				// behind it at all. Whichever it is says so, so the decision trace can tell a
+				// probe that found nothing from an assault that arrived.
+				var why = string.IsNullOrEmpty(approach.Why)
+					? "nothing in sight, closing on their base"
+					: approach.Why;
+
 				return UnitDecision.AttackMoveTo(approach.X, approach.Y,
-					$"nothing in sight, closing on their base, {approach.DistanceUnits}u out");
+					$"{why}, {approach.DistanceUnits}u out");
+			}
 
 			var target = SelectLastStandTarget(state, role);
 			if (target.HasValue)

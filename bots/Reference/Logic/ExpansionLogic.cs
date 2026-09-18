@@ -26,7 +26,9 @@ namespace AutoCnC.Reference.Logic
 		int HarvestersPerRefinery,
 		int MaxHarvesters,
 		int PowerMargin,
-		int RescanEvaluations)
+		int RescanEvaluations,
+		int StructuresPerAirDefence,
+		int MaxAirDefences)
 	{
 		public static ExpansionTuning Default { get; } = new(
 			// The smallest patch worth 1,500 credits and a building. Twice
@@ -74,7 +76,29 @@ namespace AutoCnC.Reference.Logic
 			// Evaluations of an idle build plan between map scans. The scan is a map walk, not a
 			// lookup, and this one is paid for by a single construction yard rather than by every
 			// harvester, but an unbounded scan in a tick is not a thing to leave lying around.
-			RescanEvaluations: 16);
+			RescanEvaluations: 16,
+
+			// How much base one anti-air tower is expected to cover. See Shield.
+			//
+			// Four, from the geometry rather than from a preference. A sam reaches 10 cells and
+			// an atwr 8 against aircraft, while BasePlacementLogic.RingAt walks the economy out
+			// by RingStepCells (6) a structure and clamps at MaxMinRangeCells (16) — so a base
+			// that has reached its frontier is roughly 16 cells across and no single tower
+			// covers it. The four refineries on badland-ridges stood 7.07, 11.05, 13.42 and
+			// 13.42 cells from the yard; one tower at home covers the yard and the nearest
+			// refinery and nothing else.
+			//
+			// The cost is bounded and small. Nod pays 650 a sam and GDI 1,000 an atwr, so the
+			// ceiling below is 3,900 or 6,000 credits — under a tenth of the 58,950 this bot
+			// spent losing badland-ridges with 1,017 seconds of idle Support queue, and against
+			// enemy orca that destroyed 13 of the 21 buildings it lost.
+			StructuresPerAirDefence: 4,
+
+			// ...and never more than this, however big the base gets. Six is the count at which
+			// the rung stops asking: 24 structures worth covering, which is above the 21 this
+			// bot has ever reached. A ceiling is what stops a rule sized from the base from
+			// turning a good late game into a field of towers.
+			MaxAirDefences: 6);
 	}
 
 	/// <summary>
@@ -222,6 +246,105 @@ namespace AutoCnC.Reference.Logic
 				extended.Add(new BuildStep(powerRole, Standing(owned, powerRole) + 1));
 
 			extended.Add(new BuildStep(refineryRole, desired));
+
+			return extended;
+		}
+
+		/// <summary>How much base there is worth covering, ignoring the defences themselves.</summary>
+		/// <remarks>
+		/// A tower is not an asset a tower is bought to protect, and counting them would make
+		/// the rung below chase its own tail — every tower raising the requirement that bought
+		/// it. Everything else the yard puts down counts: a power plant lost browns out the
+		/// refineries, and a refinery lost ends the match.
+		/// </remarks>
+		public static int StructuresWorthCovering(
+			IReadOnlyDictionary<string, int> owned, IReadOnlyList<string> defences)
+		{
+			var total = 0;
+			if (owned == null)
+				return total;
+
+			foreach (var pair in owned)
+				if (!Contains(defences, pair.Key))
+					total += pair.Value;
+
+			return total;
+		}
+
+		/// <summary>How many anti-air towers a base of this size should stand behind.</summary>
+		/// <remarks>
+		/// Rounded up, and floored at <paramref name="planTarget"/> for the same reason
+		/// <see cref="DesiredRefineries"/> is: the shipped ladder is the floor and this may only
+		/// ever raise it, so an opening with three buildings gets exactly the number the
+		/// doctrine wrote.
+		/// </remarks>
+		public static int DesiredAirDefences(int structures, int planTarget, in ExpansionTuning t)
+		{
+			var per = t.StructuresPerAirDefence;
+			var wanted = per > 0 && structures > 0 ? (structures + per - 1) / per : 0;
+			if (wanted > t.MaxAirDefences)
+				wanted = t.MaxAirDefences;
+
+			return wanted > planTarget ? wanted : planTarget;
+		}
+
+		/// <summary>
+		/// The build plan with an anti-air rung sized from the base standing, or the plan
+		/// unchanged when the doctrine already asks for that many.
+		/// </summary>
+		/// <remarks>
+		/// <b>The <c>Support</c> queue is the only queue in this bot with no endless rung, and
+		/// it cost badland-ridges the base.</b> Every plan includes
+		/// <see cref="ReferencePlans.HomeDefence"/>, which is two guard towers and <em>one</em>
+		/// anti-air tower; <see cref="ReferencePlans.DefenceBuild"/> tops out at six and two.
+		/// Once those are met <c>BaseConstructionLogic.ChooseNext</c> returns nothing for
+		/// <c>Support</c> forever, because <see cref="Expand"/> — the branch that answers "the
+		/// plan has run out" — only ever appends refinery and power rungs, and those are
+		/// <c>Building</c> queue rungs. The queue issued <b>six orders in the whole match and sat
+		/// idle 1,017 of 1,581 seconds</b> while the base grew to 21 buildings behind one tower.
+		/// <para>
+		/// What came through the hole it left: enemy <c>orca</c> destroyed <b>13 of the 21
+		/// buildings this side lost</b> — four <c>proc</c>, four <c>nuke</c>, two <c>afld</c>,
+		/// the <c>fact</c>, the <c>hq</c> and a <c>gtwr</c> — for roughly <b>709,000 damage</b>,
+		/// the largest single source of damage against this side in the match. Every refinery
+		/// the bot owned died to it, which is why <c>earned</c> is flat from 1,380s to the end.
+		/// </para>
+		/// <para>
+		/// And the one tower it did build was the best buy of the match by a distance. The
+		/// single <c>sam</c> cost 650 credits and killed three <c>orca</c> worth 3,600 —
+		/// <b>5.54 credits killed per credit spent</b>, against 3.93 for <c>e3</c>, 1.28 for
+		/// <c>arty</c>, 0.42 for <c>gtwr</c> and 0.23 for <c>e1</c>. It is also the only thing
+		/// in the bot's reach that answers aircraft without walking to them.
+		/// </para>
+		/// <para>
+		/// Appended rather than inserted, and consulted only once the doctrine's own plan has
+		/// answered "nothing to do", so it cannot delay, displace or outbid a rung the doctrine
+		/// wrote — the opening is bit-for-bit what it was. It sizes from the base rather than
+		/// from what the enemy is flying, because the towers have to be standing <em>before</em>
+		/// the first orca arrives: this side saw 31 distinct enemy actors all match and the
+		/// aircraft that killed the economy were not among the early ones.
+		/// </para>
+		/// </remarks>
+		/// <param name="airDefenceRole">Actor names that shoot upwards, for either faction.</param>
+		/// <param name="defenceRole">Every defensive structure, which is what does not get counted.</param>
+		public static IReadOnlyList<BuildStep> Shield(
+			IReadOnlyList<BuildStep> plan,
+			IReadOnlyDictionary<string, int> owned,
+			string[] airDefenceRole,
+			IReadOnlyList<string> defenceRole,
+			in ExpansionTuning t)
+		{
+			if (plan == null || airDefenceRole == null || airDefenceRole.Length == 0)
+				return plan;
+
+			var planTarget = EconomyPlanLogic.TargetFor(EconomyPlanLogic.Rungs(plan), airDefenceRole);
+			var desired = DesiredAirDefences(StructuresWorthCovering(owned, defenceRole), planTarget, t);
+			if (desired <= planTarget)
+				return plan;
+
+			var extended = new List<BuildStep>(plan.Count + 1);
+			extended.AddRange(plan);
+			extended.Add(new BuildStep(airDefenceRole, desired));
 
 			return extended;
 		}

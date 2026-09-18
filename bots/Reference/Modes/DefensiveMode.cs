@@ -68,6 +68,10 @@ namespace AutoCnC.Reference.Modes
 				RepairAvailable: ctx.FindRepairBay() != null,
 				Threats: ctx.SenseThreats(SenseRadius(ctx)));
 
+			// What they are made of, for the barracks that cannot see any of it. See
+			// EnemySightings: whatever raids the base is counted here.
+			EnemySightings.Record(self.Owner, state.Threats);
+
 			// --- Decide ------------------------------------------------------------
 			var decision = DefensiveLogic.Decide(state, tuning, role);
 

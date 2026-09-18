@@ -174,7 +174,9 @@ namespace AutoCnC.Reference.Logic
 		int MovingEvaluations,
 		int EvaluationsSinceScan,
 		int AssignedX,
-		int AssignedY)
+		int AssignedY,
+		int ContestedX,
+		int ContestedY)
 	{
 		/// <summary>
 		/// A harvester we have never seen. The impossible cell counts as "moved", and the scan
@@ -182,10 +184,13 @@ namespace AutoCnC.Reference.Logic
 		/// review window to do it.
 		/// </summary>
 		public static HarvesterWatchdog Start { get; } =
-			new(int.MinValue, int.MinValue, 0, 0, 0, int.MaxValue, int.MinValue, int.MinValue);
+			new(int.MinValue, int.MinValue, 0, 0, 0, int.MaxValue, int.MinValue, int.MinValue, int.MinValue, int.MinValue);
 
 		/// <summary>Whether this harvester has been told which field to work.</summary>
 		public bool HasAssignment => AssignedX != int.MinValue;
+
+		/// <summary>Whether this harvester has been shot off a field and remembers which one.</summary>
+		public bool HasContested => ContestedX != int.MinValue;
 	}
 
 	/// <summary>A decision plus the watchdog state that produced it.</summary>
@@ -297,10 +302,33 @@ namespace AutoCnC.Reference.Logic
 
 			// 1. Run, but only once staying is actually costing us the harvester. Every flee order
 			//    cancels the harvest activity, and cancelling is the expensive half of this rule.
+			//
+			//    Running home was only ever half a rule, and the missing half lost badland-ridges.
+			//    A flee order changes where the harvester *is* and leaves where it has been *sent*
+			//    exactly as it was, so once the shooting stops the field rule looks at a patch
+			//    that is still full of tiberium, still the best thing in reach, and still
+			//    assigned — and drives the harvester straight back into the same rockets. That is
+			//    not a hypothesis: this bot issued 44 "hurt at" orders across six harvesters and
+			//    lost all six to enemy e3, ten of its losses inside one 5-cell circle around a
+			//    single field. Income stopped dead at 660s of a 1,041-second match and the last
+			//    393 seconds were played with no harvester at all, at 21.6 credits a second
+			//    against a prior median of 35.2.
+			//
+			//    So fleeing now also *forgets the ground*: the assigned field is recorded as
+			//    contested, and the scan clock is wound forward so the next evaluation pays for a
+			//    scan instead of waiting out a review window. Rule 2 then reassigns away from it.
+			//    While the harvester is still being shot this branch simply fires again, which is
+			//    correct — escape first, choose new ground once clear.
 			if (state.DangerNearby && state.HealthPercent < tuning.FleeBelowHealthPercent && awayFromRefinery)
+			{
+				var drivenOff = seen.HasAssignment
+					? seen with { ContestedX = seen.AssignedX, ContestedY = seen.AssignedY }
+					: seen;
+
 				return new HarvesterOutcome(
 					UnitDecision.MoveTo(state.RefineryX, state.RefineryY, $"hurt at {state.HealthPercent}%, running to the refinery"),
-					seen with { StillEvaluations = 0 });
+					drivenOff with { StillEvaluations = 0, EvaluationsSinceScan = tuning.ReviewEvaluations });
+			}
 
 			var stalled = seen.StillEvaluations >= tuning.StallEvaluations;
 			var count = fields?.Count ?? 0;
@@ -309,7 +337,8 @@ namespace AutoCnC.Reference.Logic
 			if (scanned && count > 0)
 			{
 				var assigned = FindAssigned(fields, watchdog, tuning);
-				var best = SelectField(fields, tuning);
+				var contested = FindContested(fields, seen, tuning);
+				var best = SelectFieldAvoiding(fields, -1, contested, tuning);
 
 				// Worked out: the patch we were sent to no longer holds MinFieldCells of anything,
 				// so the scan does not return it any more and there is nothing left to go back to.
@@ -329,15 +358,26 @@ namespace AutoCnC.Reference.Logic
 				// This can only ever fire in the direction of home — it needs the assigned field
 				// outside the ceiling and the candidate inside it — so it cannot dither: once
 				// home, the same pair fails the test forever.
+				//
+				// ...or we were shot off it. That one outranks the scores outright: what a field
+				// holds is worth nothing to a harvester that does not survive to carry it, and
+				// the score cannot see the infantry standing on it. It cannot dither either,
+				// because the exclusion travels with the harvester — after the switch the
+				// contested field is still excluded, so the pair can never swap back.
+				var evicted = assigned == contested;
 				var assignedScore = Score(fields[assigned], tuning);
 				var bestScore = Score(fields[best], tuning);
 				var comingHome = TooFarToHaul(fields[assigned], tuning) && !TooFarToHaul(fields[best], tuning);
-				if (best != assigned && (comingHome || bestScore >= (long)assignedScore * tuning.SwitchScoreMultiplier))
+				if (best != assigned && (evicted || comingHome || bestScore >= (long)assignedScore * tuning.SwitchScoreMultiplier))
 				{
 					var f = fields[best];
-					return Assign(f, seen, comingHome
-						? $"field {fields[assigned].DistanceUnits / 1024} cells out is past the {tuning.MaxHaulCells} cell haul limit, coming back to {f.TotalDensity} left {f.DistanceUnits / 1024} cells out"
-						: $"field thinning to {fields[assigned].TotalDensity}, crossing to {f.TotalDensity} left {f.DistanceUnits / 1024} cells out");
+					var why = evicted
+						? $"driven off that field, working {f.TotalDensity} left {f.DistanceUnits / 1024} cells out instead"
+						: comingHome
+							? $"field {fields[assigned].DistanceUnits / 1024} cells out is past the {tuning.MaxHaulCells} cell haul limit, coming back to {f.TotalDensity} left {f.DistanceUnits / 1024} cells out"
+							: $"field thinning to {fields[assigned].TotalDensity}, crossing to {f.TotalDensity} left {f.DistanceUnits / 1024} cells out";
+
+					return Assign(f, seen, why);
 				}
 
 				if (stalled)
@@ -362,7 +402,7 @@ namespace AutoCnC.Reference.Logic
 					//     Assign() moves the remembered assignment with it, so the next stall
 					//     excludes this field in turn and the harvester works outward through
 					//     what is left instead of grinding on one dead patch.
-					var other = SelectFieldExcept(fields, assigned, tuning);
+					var other = SelectFieldAvoiding(fields, assigned, contested, tuning);
 					if (other >= 0)
 					{
 						var f = fields[other];
@@ -465,9 +505,45 @@ namespace AutoCnC.Reference.Logic
 		/// </para>
 		/// </remarks>
 		public static int SelectFieldExcept(IReadOnlyList<FieldOption> fields, int exclude, in HarvesterTuning tuning)
+			=> SelectFieldAvoiding(fields, exclude, -1, tuning);
+
+		/// <summary>
+		/// The best field other than <paramref name="exclude"/>, preferring to leave
+		/// <paramref name="avoid"/> alone as well.
+		/// </summary>
+		/// <remarks>
+		/// <paramref name="exclude"/> is a hard exclusion and <paramref name="avoid"/> is a soft
+		/// one, and the difference is the whole point. <paramref name="exclude"/> is the field we
+		/// have just proved we cannot work; <paramref name="avoid"/> is the field we were shot
+		/// off, which is still perfectly good ground once whatever was standing on it moves on or
+		/// dies. Tiberium is finite and enemies are not stationary, so a hard ban would eventually
+		/// hand the map away one patch at a time, and a harvester that starves because every
+		/// field it knows is dangerous has lost exactly as much as one that is shot.
+		/// <para>
+		/// So the avoidance is tried first and dropped if it leaves nothing. Same shape as the
+		/// haul ceiling above, for the same reason: this rule may refuse ground, but it may never
+		/// refuse the last ground there is.
+		/// </para>
+		/// </remarks>
+		public static int SelectFieldAvoiding(
+			IReadOnlyList<FieldOption> fields, int exclude, int avoid, in HarvesterTuning tuning)
 		{
-			var near = BestWithin(fields, exclude, tuning, HaulCeilingUnits(tuning));
-			return near >= 0 ? near : BestWithin(fields, exclude, tuning, int.MaxValue);
+			if (avoid >= 0)
+			{
+				var elsewhere = SelectWithin(fields, exclude, avoid, tuning);
+				if (elsewhere >= 0)
+					return elsewhere;
+			}
+
+			return SelectWithin(fields, exclude, -1, tuning);
+		}
+
+		/// <summary>The haul-ceiling preference, over whatever exclusions it is given.</summary>
+		static int SelectWithin(
+			IReadOnlyList<FieldOption> fields, int exclude, int avoid, in HarvesterTuning tuning)
+		{
+			var near = BestWithin(fields, exclude, avoid, tuning, HaulCeilingUnits(tuning));
+			return near >= 0 ? near : BestWithin(fields, exclude, avoid, tuning, int.MaxValue);
 		}
 
 		/// <summary>How far out a harvester will be sent while anything closer is on offer.</summary>
@@ -478,13 +554,13 @@ namespace AutoCnC.Reference.Logic
 			field.DistanceUnits > HaulCeilingUnits(tuning);
 
 		static int BestWithin(
-			IReadOnlyList<FieldOption> fields, int exclude, in HarvesterTuning tuning, int ceilingUnits)
+			IReadOnlyList<FieldOption> fields, int exclude, int avoid, in HarvesterTuning tuning, int ceilingUnits)
 		{
 			var best = -1;
 			var bestScore = 0;
 			for (var i = 0; i < fields.Count; i++)
 			{
-				if (i == exclude || fields[i].DistanceUnits > ceilingUnits)
+				if (i == exclude || i == avoid || fields[i].DistanceUnits > ceilingUnits)
 					continue;
 
 				var score = Score(fields[i], tuning);
@@ -504,8 +580,28 @@ namespace AutoCnC.Reference.Logic
 		/// and there is nothing left there to go back to.
 		/// </summary>
 		public static int FindAssigned(IReadOnlyList<FieldOption> fields, in HarvesterWatchdog watchdog, in HarvesterTuning tuning)
+			=> watchdog.HasAssignment
+				? FindByCenter(fields, watchdog.AssignedX, watchdog.AssignedY, tuning)
+				: -1;
+
+		/// <summary>
+		/// Where the field this harvester was shot off has got to, or -1 if it no longer exists
+		/// or the harvester has never been driven off one.
+		/// </summary>
+		/// <remarks>
+		/// Matched by centre exactly as <see cref="FindAssigned"/> is, because the two questions
+		/// are the same question — "which of these patches is the one I remember" — and answering
+		/// them two different ways is how a remembered field turns into a different field.
+		/// </remarks>
+		public static int FindContested(IReadOnlyList<FieldOption> fields, in HarvesterWatchdog watchdog, in HarvesterTuning tuning)
+			=> watchdog.HasContested
+				? FindByCenter(fields, watchdog.ContestedX, watchdog.ContestedY, tuning)
+				: -1;
+
+		/// <summary>The scanned field whose centre is nearest a remembered one, within tolerance.</summary>
+		static int FindByCenter(IReadOnlyList<FieldOption> fields, int x, int y, in HarvesterTuning tuning)
 		{
-			if (!watchdog.HasAssignment)
+			if (fields == null)
 				return -1;
 
 			var tolerance = tuning.FieldMatchCells;
@@ -514,8 +610,8 @@ namespace AutoCnC.Reference.Logic
 
 			for (var i = 0; i < fields.Count; i++)
 			{
-				var dx = fields[i].CenterX - watchdog.AssignedX;
-				var dy = fields[i].CenterY - watchdog.AssignedY;
+				var dx = fields[i].CenterX - x;
+				var dy = fields[i].CenterY - y;
 				if (dx < -tolerance || dx > tolerance || dy < -tolerance || dy > tolerance)
 					continue;
 

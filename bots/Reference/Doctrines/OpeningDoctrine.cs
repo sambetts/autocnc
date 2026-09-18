@@ -29,7 +29,15 @@ namespace AutoCnC.Reference.Doctrines
 			// Hold ground. An opening army that wanders off is an opening army that is not at
 			// home when the first attack lands.
 			b.Assign<DefensiveMode>().ToAll();
-			b.Register<ScoutMode>();
+
+			// ...except the cheap fast things, which keep looking. Scouting used to happen only
+			// while the Scout doctrine happened to be running — 320 seconds of the 1,136 on
+			// badland-ridges — and in the rest of the match the jeeps stood in the base as
+			// defenders. They are not defenders: four of them finished that match with 0 kills,
+			// 11,064 damage dealt and 30,539 taken. Finding the other side is the only thing a
+			// jeep does that this bot cannot do without, because the Attack doctrine is gated on
+			// it, so a jeep should be doing it whenever it is alive.
+			b.Assign<ScoutMode>().ToUnitType("jeep", "bggy");
 		}
 	}
 }

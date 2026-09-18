@@ -70,6 +70,19 @@ namespace AutoCnC.Reference
 		/// at twelve it costs 3,600 rather than 11,400, and the 7,800-credit difference is 20% of
 		/// everything the bot spent, moved to the rung that killed 10.8 times more per credit.
 		/// </para>
+		/// <para>
+		/// <b>And then the endless <c>e1</c> rung lost the next match, for the mirror reason.</b>
+		/// Everything above is an argument about <em>that</em> opponent, who was 63% infantry.
+		/// Against an opponent who fielded none — badland-ridges at Hard, all <c>ltnk</c>,
+		/// <c>bike</c>, <c>ftnk</c>, <c>arty</c>, <c>heli</c> and <c>a10</c> — the same rung
+		/// bought 54 riflemen that absorbed 247,239 damage and killed 1,650 credits' worth, while
+		/// the thirteen <c>e3</c> beside them dealt more damage for less money and took a fifth
+		/// as much. So this constant is no longer the endless rung's answer at all:
+		/// <see cref="Logic.ArmyMixLogic"/> chooses the body from what the side has actually
+		/// watched the enemy field, and both matches come out right. What is left here is what
+		/// the name always meant — the <em>floor</em> of cheap bodies held whatever the enemy
+		/// turns out to be, which is a bounded rung and therefore not this rule's business.
+		/// </para>
 		/// </remarks>
 		const int RifleCore = 12;
 
@@ -261,6 +274,71 @@ namespace AutoCnC.Reference
 		public static string[] SiegeVehicles { get; } = ["arty", "msam"];
 
 		/// <summary>
+		/// Why every plan's last vehicle rung is reach rather than armour.
+		/// </summary>
+		/// <remarks>
+		/// <c>UnitProductionLogic.ChooseNext</c> returns the first unmet step its queue can
+		/// build, and an endless step is never met — so once a ladder is climbed, the endless
+		/// rung is the queue's answer to every remaining evaluation of the match. The endless
+		/// rung is therefore not a fallback, it is <b>what the bot spends its late game on</b>,
+		/// and until now the <c>Vehicle</c> queue's was <c>["mtnk", "ltnk"]</c>.
+		/// <para>
+		/// <b>That rung was the worst buy in the match.</b> From the badland-ridges unit ledger,
+		/// as credits killed per credit spent: <c>e3</c> <b>2.38</b>, <c>msam</c> <b>1.86</b>,
+		/// <c>e1</c> <b>1.06</b>, <c>mtnk</c> <b>0.64</b>. The two endless rungs were the two
+		/// worst units on the field and took 33% of all spend between them, while the two best
+		/// were both capped — <c>e3</c> at twelve and the siege rung at
+		/// <see cref="SiegeCore"/> four. Per credit <c>msam</c> dealt 123 damage and absorbed 7;
+		/// <c>mtnk</c> dealt 40 and absorbed 37.
+		/// </para>
+		/// <para>
+		/// <b>And the ruleset says the same thing about the specific fight this bot keeps
+		/// losing.</b> Enemy <c>arty</c> killed 139 of this side's 264 losses. <c>msam</c> is its
+		/// hard counter on every axis at once: identical reach (11 cells against 11), identical
+		/// speed (1.758 cells a second), 12,000 hit points against 7,500, and 2,405 damage a
+		/// second against <c>Light</c> armour — which is what <c>arty</c> wears — so one
+		/// <c>msam</c> kills one <c>arty</c> in about three seconds. It was the only thing this
+		/// bot fielded that ever hurt one: four of its eight artillery kills came from thirteen
+		/// <c>msam</c>, against 113 <c>e1</c> that died to <c>arty</c> having dealt it nothing.
+		/// <c>mtnk</c> meanwhile reaches 4.75 cells and cannot answer an 11-cell gun at all.
+		/// </para>
+		/// <para>
+		/// The armour rung is kept directly underneath rather than deleted, and that is
+		/// load-bearing. Both need <c>anyhq</c>, so an <c>hq</c> that falls — it was built once
+		/// and lost once on badland-ridges — takes <em>both</em> with it; but a rung whose
+		/// candidates cannot be built is skipped silently, so any future divergence in their
+		/// prerequisites leaves armour as the fallback rather than leaving the queue with
+		/// nothing below it to reach. Same 900-credit price either way, so this reorders spend
+		/// without changing its rate, and every harvester rung still sits above both.
+		/// </para>
+		/// <para>
+		/// Declared here rather than inlined so the three plans that use it cannot drift apart,
+		/// and below <see cref="SiegeVehicles"/> because static initialisers in this file run in
+		/// textual order — a list that referenced it from above would capture null.
+		/// </para>
+		/// </remarks>
+		public static string[] EndlessReach { get; } = SiegeVehicles;
+
+		/// <summary>The name of the queue a barracks owns.</summary>
+		public const string InfantryQueue = "Infantry";
+
+		/// <summary>The cheap body, whose rifle is built for other infantry.</summary>
+		/// <remarks>
+		/// 1,875 damage a second against <c>None</c> armour, 500 against <c>Light</c> and 125
+		/// against <c>Heavy</c>, and it cannot shoot upwards at all. Both factions build it from
+		/// a bare barracks, so it is the only thing a side with nothing else can buy.
+		/// </remarks>
+		public static string[] RifleBodies { get; } = ["e1"];
+
+		/// <summary>The plated-target body, and the only unit this bot fields that shoots upwards.</summary>
+		/// <remarks>
+		/// The mirror image: 319 against <c>None</c>, 1,593 against <c>Light</c> and
+		/// <c>Heavy</c>. Three times the price of <see cref="RifleBodies"/> and worth it against
+		/// exactly the half of the game the rifle cannot touch.
+		/// </remarks>
+		public static string[] RocketBodies { get; } = ["e3"];
+
+		/// <summary>
 		/// The economy every doctrine wants, whichever one is running.
 		/// </summary>
 		/// <remarks>
@@ -278,12 +356,30 @@ namespace AutoCnC.Reference
 		/// <para>
 		/// Nothing was overtaken that pays for itself. <c>hq</c> unlocks <c>mtnk</c>,
 		/// <c>ltnk</c>, <c>e2</c> and <c>atwr</c>, and the bot fielded none of them in that
-		/// match; <c>weap</c>/<c>afld</c> unlocks scouting and harvester production, and took
-		/// 247 seconds to pay for at two-harvester income. Both arrive **sooner** in wall-clock
-		/// behind four refineries than they did in front of two, because the four refineries pay
-		/// for them. Only the <c>Building</c> queue reads this list, so moving rungs around here
-		/// does not slow infantry production at all — that comes from the production plan and a
-		/// separate queue.
+		/// match; it is now last, because it is the only rung here that earns nothing at all.
+		/// Only the <c>Building</c> queue reads this list, so moving rungs around here does not
+		/// slow infantry production — that comes from the production plan and a separate queue.
+		/// </para>
+		/// <para>
+		/// <b>The factory is not tech, and putting it last cost the next match.</b> It used to
+		/// sit behind four refineries and the <c>hq</c> on the argument that four refineries pay
+		/// for it sooner. They do not, because a refinery is a <em>one-shot</em> harvester and
+		/// this bot's harvesters die. On badland-ridges the ladder reached <c>afld</c> at
+		/// <b>474s</b>; two of the four free harvesters were already dead, at 271s and 275s,
+		/// and until 474s there was no way in the game to replace either. The fleet averaged
+		/// <b>1.06 live harvesters across a 1,187-second match</b> with four refineries standing
+		/// from 260s, 550 seconds of the match had none at all, and income finished at 17.2
+		/// credits a second against a reference of 50. Five refineries were bought for 7,500
+		/// credits — 20.7% of everything ever spent — to man them with one harvester.
+		/// </para>
+		/// <para>
+		/// The arithmetic is the opening bank again, and it fits. <c>weap</c>/<c>afld</c> costs
+		/// 2,000 and needs only <c>proc</c>, so power, refinery, power, barracks, refinery,
+		/// factory is 6,500 of the 7,500 a side starts with: the factory is affordable
+		/// <b>before a single credit of income</b>, and every refinery after it is bought with
+		/// earnings rather than with the bank. A bought harvester is 1,100 against a refinery's
+		/// 1,500, it needs no site and no defending, and it can be bought again the next time
+		/// one dies — which is the whole difference between an economy and a countdown.
 		/// </para>
 		/// <para>
 		/// <b>Four is a floor, not a ceiling.</b> A plan is a finite ladder and a map is not: on
@@ -309,11 +405,11 @@ namespace AutoCnC.Reference
 			new(["powr", "nuke"], 2),
 			new(["pyle", "hand"], 1),          // barracks
 			new(["proc"], 2),
+			new(["weap", "afld"], 1),          // ...and the means to replace a harvester that dies
 			new(["proc"], 3),                  // ...and income again, while the opening bank lasts
 			new(["powr", "nuke"], 3),
 			new(["proc"], RefineryCore),       // four refineries is four harvesters, with no factory
-			new(["hq"], 1),                    // unlocks tanks, grenadiers and the AA tower
-			new(["weap", "afld"], 1),          // vehicle production
+			new(["hq"], 1),                    // tech last: it unlocks, it does not earn
 		];
 
 		/// <summary>
@@ -391,8 +487,9 @@ namespace AutoCnC.Reference
 			new("Vehicle", ["harv"], HarvesterSaturation),  // ...and all of the income, before any of the armour
 			new("Vehicle", ["mtnk", "ltnk"], 4),
 			new("Infantry", ["e3"], 12),
-			new("Vehicle", ["mtnk", "ltnk"], int.MaxValue),
-			new("Infantry", ["e1"], int.MaxValue),   // ...and riflemen, not rockets: see RifleCore
+			new("Vehicle", EndlessReach, int.MaxValue),      // reach forever: see EndlessReach
+			new("Vehicle", ["mtnk", "ltnk"], int.MaxValue),  // ...and armour when reach is unbuildable
+			new(InfantryQueue, RifleBodies, int.MaxValue),   // ...and the body that beats what we have seen: see ArmyMixLogic
 		];
 
 		/// <summary>
@@ -460,9 +557,11 @@ namespace AutoCnC.Reference
 		/// <summary>Units whose armament can target aircraft.</summary>
 		/// <remarks>
 		/// One entry, and that is the point: <c>e3</c> is the only anti-air unit this bot can
-		/// reach, it needs nothing but a barracks, and both factions build it.
+		/// reach, it needs nothing but a barracks, and both factions build it. Aliased to
+		/// <see cref="RocketBodies"/> rather than written out again, because the two lists have
+		/// to name the same actor and a duplicate is a drift waiting to happen.
 		/// </remarks>
-		public static IReadOnlyList<string> AntiAirUnits { get; } = ["e3"];
+		public static IReadOnlyList<string> AntiAirUnits { get; } = RocketBodies;
 
 		/// <summary>Units that earn credits rather than spend them.</summary>
 		/// <remarks>
@@ -478,10 +577,15 @@ namespace AutoCnC.Reference
 
 		/// <summary>Structures that own a <c>Vehicle</c> queue, and so gate <c>harv</c>.</summary>
 		/// <remarks>
-		/// Both cost 2,000 and both need <c>proc</c>, which is why a refinery is the cheaper
-		/// harvester until one of these is standing: 1,500 for a refinery and its free actor
-		/// against 2,000 plus 1,100 for the first bought one. The income rungs of every build
-		/// plan belong before the factory rather than behind it.
+		/// Both cost 2,000 and both need only <c>proc</c>. A refinery looks like the cheaper
+		/// harvester — 1,500 with its free actor against 2,000 plus 1,100 for the first bought
+		/// one — and that comparison is what put the factory last in <see cref="Economy"/> and
+		/// lost badland-ridges. It only holds for the <em>first</em> harvester. A refinery buys
+		/// one and can never buy another; a factory buys every replacement for the rest of the
+		/// match, and this bot's harvesters are hunted. See <see cref="Economy"/> for the
+		/// numbers. Standing one of these is also the first of the three conditions
+		/// <see cref="Logic.IncomeFirstLogic"/> requires before it will hold the barracks back:
+		/// with no factory up there is no harvester to protect the credits for.
 		/// </remarks>
 		public static IReadOnlyList<string> VehicleFactories { get; } = ["weap", "afld"];
 
@@ -501,8 +605,9 @@ namespace AutoCnC.Reference
 			new("Infantry", ["e2"], 4),
 			new("Vehicle", SiegeVehicles, SiegeCore),  // 11 cells of reach, sited at home
 			new("Vehicle", ["harv"], HarvesterSaturation),
-			new("Vehicle", ["mtnk", "ltnk"], int.MaxValue),
-			new("Infantry", ["e1"], int.MaxValue),   // ...and riflemen, not rockets: see RifleCore
+			new("Vehicle", EndlessReach, int.MaxValue),      // reach forever: see EndlessReach
+			new("Vehicle", ["mtnk", "ltnk"], int.MaxValue),  // ...and armour when reach is unbuildable
+			new(InfantryQueue, RifleBodies, int.MaxValue),   // ...and the body that beats what we have seen: see ArmyMixLogic
 		];
 
 		/// <summary>Pushing: more production, better units, and the tech to make them worth having.</summary>
@@ -551,8 +656,9 @@ namespace AutoCnC.Reference
 			new("Vehicle", ["mtnk", "ltnk"], 8),
 			new("Infantry", ["e3"], 8),
 			new("Infantry", ["e1", "e2"], RifleCore),
-			new("Vehicle", ["mtnk", "ltnk"], int.MaxValue),
-			new("Infantry", ["e1"], int.MaxValue),   // ...and riflemen, not rockets: see RifleCore
+			new("Vehicle", EndlessReach, int.MaxValue),      // reach forever: see EndlessReach
+			new("Vehicle", ["mtnk", "ltnk"], int.MaxValue),  // ...and armour when reach is unbuildable
+			new(InfantryQueue, RifleBodies, int.MaxValue),   // ...and the body that beats what we have seen: see ArmyMixLogic
 		];
 
 		/// <summary>Actor names treated as power plants, for the low-power override.</summary>

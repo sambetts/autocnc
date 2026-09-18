@@ -29,17 +29,61 @@ namespace AutoCnC.Reference.Logic
 		int RaidEnemies,          // this many at the base is a raid; fewer is a scout
 		int AssaultEnemies,       // floor for "not a raid, their army" — the early-game number
 		int AssaultForceShare,    // ...and past that, a share of our own force: Units / this
+		int RecallBuildings,      // buildings lost in the window that call a push home
 		int DefenceHoldSeconds,   // how long to keep turtling after the shooting stops
 		int ScoutHoldSeconds,     // how long to let a search actually search
 		int LostContactSeconds)   // seeing nothing this long means we have lost them, not that we are marching
 	{
 		public static ReferenceBotTuning Default { get; } = new(
-			AttackArmyValue: 6000,
-			RetreatArmyValue: 1500,
+			// What an opening push costs, not what a decisive one does.
+			//
+			// This was 6,000, and 6,000 is a stockpile. On badland-ridges army value reached
+			// 2,000 at 140s, 3,000 at 190s and 6,000 only at 360s — while the opponent's first
+			// attack was already killing harvesters in our base at 271s, which on a 97-cell
+			// diagonal means they set out at roughly 170s with whatever they had. A bot that
+			// waits for six thousand credits of army is not choosing to attack later, it is
+			// conceding the first four minutes.
+			//
+			// It is also half of what made the Attack doctrine unreachable. The push needed
+			// 6,000 *and* a confirmed enemy base; army value cleared 6,000 only between 360s and
+			// 570s, enemyBaseFound first read true at 900s, so the two were never true at the
+			// same instant and the doctrine ran for zero seconds of a 1,187-second match. See
+			// Modes.AttackBaseMode.Probe for the other half.
+			//
+			// 2,000 is roughly twenty rifles or six rockets: a raiding party rather than an
+			// army, which is the point. It buys contact, it explores the corridor it walks, and
+			// the units that come out of the barracks behind it join the same push — so the
+			// group expands while it is in the field instead of being assembled before it
+			// leaves.
+			AttackArmyValue: 2000,
+
+			// A push is over when it is genuinely spent, not when it has taken casualties.
+			//
+			// This has to sit well below AttackArmyValue or the two thresholds straddle a
+			// handful of riflemen and the bot commutes: push at the bar, lose three units, go
+			// home, rebuild three units, push again. It was 1,500 against a bar of 6,000, a
+			// four-to-one separation; 600 against 2,000 keeps better than three-to-one while
+			// meaning what it says — six rifles or two rockets left is a spent push.
+			RetreatArmyValue: 600,
+
 			ScoutRefineries: 2,
 			RaidEnemies: 3,
 			AssaultEnemies: 6,
 			AssaultForceShare: 4,
+
+			// How many buildings have to fall inside the window before a push already under way
+			// is called home.
+			//
+			// One used to be enough, and against an opponent that raids continuously that is a
+			// permanent veto: twenty buildings were lost on badland-ridges, so a rule that fires
+			// on the first of them in every 60-second window is a rule that fires for most of
+			// the match. It is the same trap rule 2 already documents — a veto evaluated between
+			// the intent to push and the switch being allowed does not delay the push, it
+			// cancels it — and the answer here is the same shape: a bounded exemption rather
+			// than a suspended rule. Two structures inside one window is a base being taken
+			// apart rather than a raid getting lucky, and it still comes home for that.
+			RecallBuildings: 2,
+
 			DefenceHoldSeconds: 45,
 			ScoutHoldSeconds: 90,
 			LostContactSeconds: 300);
@@ -51,14 +95,33 @@ namespace AutoCnC.Reference.Logic
 
 		public static DoctrineDecision Decide(in BattleState s, ReferenceBotTuning t)
 		{
-			// An army worth spending with somewhere to spend it. Computed up front because two
-			// separate rules below need it: one to decide whether a skirmish is worth coming
-			// home for, and one to decide where a finished siege goes next.
-			var readyToPush = s.ArmyValue >= t.AttackArmyValue && s.EnemyBaseFound;
+			// An army worth spending, and — since this round — no longer a requirement that
+			// somebody has already stood in front of one of their buildings. Computed up front
+			// because three separate rules below need it.
+			//
+			// The EnemyBaseFound conjunct that used to be here is what made Attack unreachable.
+			// It is only ever set by a unit that can see an enemy structure, the side built no
+			// scout vehicle at all on badland-ridges, and it first read true at 900s against an
+			// army that cleared the threshold from 360s to 570s — so the conjunction was false
+			// at every one of 238 assessments and the doctrine ran for zero seconds. A push with
+			// no sighting now marches on the map's own symmetry instead; see
+			// Modes.AttackBaseMode.Probe, which is where the deduction lives.
+			var readyToPush = s.ArmyValue >= t.AttackArmyValue;
 
 			// 1. Buildings actually falling over outranks everything else. An army in the field is
 			//    worth nothing if the thing it was protecting is gone when it gets back.
-			if (s.BuildingsLost > 0)
+			//
+			//    Bounded by the same argument rule 2 makes, and for the same reason: against an
+			//    opponent that raids continuously, "any building lost in the last 60 seconds"
+			//    describes most of the match, and a veto that broad cancels every push rather
+			//    than merely postponing it. Twenty buildings were lost on badland-ridges. So a
+			//    side that is pushing, or has the army to push, rides out the first one and
+			//    comes home for the second — which is a base being dismantled rather than a raid
+			//    getting lucky. A side with no army to spend still turtles on the first, because
+			//    it has nothing better to do with the next minute.
+			if (s.BuildingsLost > 0
+				&& (s.BuildingsLost >= t.RecallBuildings
+					|| (!Is(s.Doctrine, ReferenceDoctrines.Attack) && !readyToPush)))
 				return DoctrineDecision.SwitchTo(ReferenceDoctrines.Defence,
 					$"lost {s.BuildingsLost} building(s) in {s.WindowSeconds}s");
 
@@ -175,11 +238,21 @@ namespace AutoCnC.Reference.Logic
 			//    Rules 7 and 8 cannot fire while readyToPush holds — 7 needs an army below the
 			//    retreat floor and 8 needs a base we have never found — so continuing here is
 			//    exactly what falling through to the bottom would do, minus the gag.
+			//
+			//    Rule 8 sitting below this one no longer starves the search, because the two
+			//    thresholds are reached in the right order: two refineries stand at around 117s
+			//    and 2,000 credits of army at around 140s, so the scout doctrine is entered
+			//    first and rule 5 holds it for its full 90 seconds. What has changed is that a
+			//    search which comes back empty no longer parks the army at home for the rest of
+			//    the match — it falls through to here and the push goes out anyway, looking with
+			//    its whole body instead of with one jeep.
 			if (readyToPush)
 				return Is(s.Doctrine, ReferenceDoctrines.Attack)
 					? DoctrineDecision.Continue
 					: DoctrineDecision.SwitchTo(ReferenceDoctrines.Attack,
-						$"army worth {s.ArmyValue} and their base is known");
+						s.EnemyBaseFound
+							? $"army worth {s.ArmyValue} and their base is known"
+							: $"army worth {s.ArmyValue}, probing for their base");
 
 			// 7. A push that has run out of army. Going home and rebuilding beats feeding the
 			//    rest of it in one unit at a time.

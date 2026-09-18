@@ -43,6 +43,10 @@ namespace AutoCnC.Launcher.Tests
 				"Mechanics: {gameMechanics}",
 				"Read {gameGuide} and {gameRules}.",
 				"Evidence: {fightManifest}, {battleLog}, {telemetry}, {decisionTrace}.",
+				"Derived: {summary}, {units}, {mapFacts}, {checks}, {checkResults}, {trend}.",
+				"{checkReport}",
+				"{trendReport}",
+				"{botAudit}",
 				"Fight: {battle}. Result: {result}. Revision: {sourceRevision}.",
 				"{nextPromptContract}"
 			]);

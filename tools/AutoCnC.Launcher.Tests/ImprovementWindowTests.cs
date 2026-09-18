@@ -38,6 +38,8 @@ namespace AutoCnC.Launcher.Tests
 				"Edit only files under {workspace}.", "{gameMechanics}", "{gameGuide}", "{gameRules}",
 				"{fightManifest}", "{battleLog}",
 				"{telemetry}", "{decisionTrace}", "{battle}", "{result}", "{sourceRevision}",
+				"{summary}", "{units}", "{mapFacts}", "{checks}", "{checkResults}", "{trend}",
+				"{checkReport}", "{trendReport}", "{botAudit}",
 				"{nextPromptContract}"
 			]);
 			File.WriteAllText(project, "<Project Sdk=\"Microsoft.NET.Sdk\" />");

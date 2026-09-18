@@ -340,14 +340,19 @@ $prompt = Get-Content -LiteralPath $promptFile -Raw
 
     This runs unconditionally, and that matters: the block above only renders a prompt when one is
     not already there, but the launcher writes evidence/agent-prompt.txt itself before invoking
-    this script (TrainingAgent.cs), using a renderer that predates these artifacts. Doing the
-    substitution only inside that block meant the normal improvement flow - the one everybody
-    actually uses - sent the agent the literal text "{summary}" instead of a path, and no generated
-    check or trend report at all.
+    this script (TrainingAgent.cs). The launcher fills in the paths; the three generated reports
+    below it cannot, because the files they summarise are derived by this script moments ago.
 
-    Substituting on the rendered text is safe because these placeholders appear nowhere else: a
-    prompt that already has real paths simply has nothing left to replace.
+    Substitution stops at the next-prompt contract. The contract names these placeholders as
+    literal text - it is telling the agent which ones to keep - so replacing them inside it would
+    turn an instruction to retain "{summary}" into an instruction to retain a path from this one
+    fight, and the next template would lose the artifact entirely.
 #>
+$contractHeading = '## Create the complete prompt for the next round'
+$contractAt = $prompt.IndexOf($contractHeading)
+$head = if ($contractAt -ge 0) { $prompt.Substring(0, $contractAt) } else { $prompt }
+$tail = if ($contractAt -ge 0) { $prompt.Substring($contractAt) } else { '' }
+
 $derivedReplacements = [ordered]@{
     '{summary}' = $summaryPath
     '{units}' = $unitsPath
@@ -360,12 +365,13 @@ $derivedReplacements = [ordered]@{
     '{botAudit}' = $botAudit.Trim()
 }
 
-$before = $prompt
+$before = $head
 foreach ($replacement in $derivedReplacements.GetEnumerator()) {
-    $prompt = $prompt.Replace([string]$replacement.Key, [string]$replacement.Value)
+    $head = $head.Replace([string]$replacement.Key, [string]$replacement.Value)
 }
 
-if ($prompt -ne $before) {
+if ($head -ne $before) {
+    $prompt = $head + $tail
     Set-Content -LiteralPath $promptFile -Value $prompt -Encoding utf8
 }
 

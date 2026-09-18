@@ -43,6 +43,10 @@ namespace AutoCnC.Launcher.Tests
 				"Mechanics: {gameMechanics}",
 				"Read {gameGuide} and {gameRules}.",
 				"Evidence: {fightManifest}, {battleLog}, {telemetry}, {decisionTrace}.",
+				"Derived: {summary}, {units}, {mapFacts}, {checks}, {checkResults}, {trend}.",
+				"{checkReport}",
+				"{trendReport}",
+				"{botAudit}",
 				"Fight: {battle}. Result: {result}. Revision: {sourceRevision}.",
 				"{nextPromptContract}"
 			]);
@@ -210,6 +214,8 @@ namespace AutoCnC.Launcher.Tests
 				"Improve the bot. Edit only files under {workspace}.",
 				"## Evidence",
 				"{gameGuide} {gameRules} {fightManifest} {battleLog} {telemetry} {decisionTrace}",
+				"{summary} {units} {mapFacts} {checks} {checkResults} {trend}",
+				"{checkReport} {trendReport} {botAudit}",
 				"{battle} {result} {sourceRevision}",
 				"{nextPromptContract}"
 			]);
@@ -226,6 +232,49 @@ namespace AutoCnC.Launcher.Tests
 				"the gospel must be read before any advice that could contradict it");
 			Assert.That(TrainingAgent.EnsureMechanicsPlaceholder(repaired), Is.EqualTo(repaired),
 				"repairing twice must not insert it twice");
+		}
+
+		/// <summary>
+		/// A template that dropped the derived-evidence placeholders is repaired, not rejected.
+		/// </summary>
+		/// <remarks>
+		/// A round is handed its contract at the start and writes its replacement at the end, so
+		/// whenever the required set grows the round already in flight was told an older list. It
+		/// cannot know about the new entries, and discarding a whole round of analysis over a rule
+		/// the agent was never shown would be the worst of both worlds.
+		/// </remarks>
+		[Test]
+		public void ATemplateMissingTheDerivedEvidencePlaceholdersIsRepaired()
+		{
+			var stale = string.Join(Environment.NewLine,
+			[
+				"Improve the bot. Edit only files under {workspace}.",
+				"{gameMechanics}",
+				"## Evidence",
+				"{gameGuide} {gameRules} {fightManifest} {battleLog} {telemetry} {decisionTrace}",
+				"{battle} {result} {sourceRevision}",
+				"{nextPromptContract}"
+			]);
+
+			Assert.That(TrainingAgent.ValidatePromptTemplate(stale, out var before), Is.False);
+			Assert.That(before, Does.Contain("{summary}"));
+
+			var repaired = TrainingAgent.EnsureRequiredPlaceholders(stale);
+
+			Assert.That(TrainingAgent.ValidatePromptTemplate(repaired, out var after), Is.True, after);
+			foreach (var placeholder in new[]
+			{
+				"{summary}", "{units}", "{mapFacts}", "{checks}", "{checkResults}", "{trend}",
+				"{checkReport}", "{trendReport}", "{botAudit}"
+			})
+				Assert.That(repaired, Does.Contain(placeholder));
+
+			// Restored above the contract, so the contract stays last and on its own line.
+			Assert.That(repaired.IndexOf("{summary}", StringComparison.Ordinal),
+				Is.LessThan(repaired.IndexOf("{nextPromptContract}", StringComparison.Ordinal)));
+
+			Assert.That(TrainingAgent.EnsureRequiredPlaceholders(repaired), Is.EqualTo(repaired),
+				"repairing twice must not insert them twice");
 		}
 
 		/// <summary>

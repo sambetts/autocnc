@@ -264,6 +264,7 @@ namespace AutoCnC.Launcher.Tests
 				"Improve the bot. Edit only files under {workspace}. Read {gameGuide} and {gameRules}.\n" +
 				"Mechanics: {gameMechanics}\n" +
 				"Use {fightManifest}, {battleLog}, {telemetry}, {decisionTrace}.\n" +
+				"Derived: {summary}, {units}, {mapFacts}, {checks}, {checkResults}, {trend}.\n{checkReport}\n{trendReport}\n{botAudit}\n" +
 				"Battle: {battle}. Result: {result}. Revision: {sourceRevision}.\n{nextPromptContract}";
 			Assert.That(TrainingAgent.ValidatePromptTemplate(settings.AgentPromptTemplate, out var error), Is.True, error);
 			Write("scripts\\train-bot.ps1",
@@ -323,6 +324,7 @@ namespace AutoCnC.Launcher.Tests
 				"Improve the bot. Edit only files under {workspace}. Read {gameGuide} and {gameRules}.\n" +
 				"Mechanics: {gameMechanics}\n" +
 				"Use {fightManifest}, {battleLog}, {telemetry}, {decisionTrace}.\n" +
+				"Derived: {summary}, {units}, {mapFacts}, {checks}, {checkResults}, {trend}.\n{checkReport}\n{trendReport}\n{botAudit}\n" +
 				"Battle: {battle}. Result: {result}. Revision: {sourceRevision}.\n{nextPromptContract}";
 			Write("scripts\\train-bot.ps1",
 				"param([string]$BattleBot, [string]$RunDirectory, [string]$AgentConfiguration)\n" +
@@ -712,6 +714,10 @@ namespace AutoCnC.Launcher.Tests
 				"Mechanics: {gameMechanics}",
 				"Read {gameGuide} and {gameRules}.",
 				"Evidence: {fightManifest}, {battleLog}, {telemetry}, {decisionTrace}.",
+				"Derived: {summary}, {units}, {mapFacts}, {checks}, {checkResults}, {trend}.",
+				"{checkReport}",
+				"{trendReport}",
+				"{botAudit}",
 				"Fight: {battle}. Result: {result}. Revision: {sourceRevision}.",
 				"{nextPromptContract}"
 			]);

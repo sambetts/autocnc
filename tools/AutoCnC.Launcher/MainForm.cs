@@ -1511,7 +1511,12 @@ namespace AutoCnC.Launcher
 				[
 					"-Telemetry", activeRun.TelemetryPath,
 					"-BattleLog", activeRun.BattleLogPath,
-					"-DecisionTrace", activeRun.DecisionTracePath
+					"-DecisionTrace", activeRun.DecisionTracePath,
+
+					// Map dimensions, spawn cells, resource cells and the effective random seed
+					// are resolved at world load and cannot be recovered from the event stream
+					// afterwards, so the engine has to be asked for them while the match exists.
+					"-MapFacts", activeRun.MapFactsPath
 				]);
 
 				if (IsHeadlessSelected())

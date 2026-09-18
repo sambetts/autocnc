@@ -193,6 +193,21 @@ namespace AutoCnC.Launcher
 		public string TelemetryPath => Path.Combine(EvidenceDirectory, "telemetry.csv");
 		public string BattleLogPath => Path.Combine(EvidenceDirectory, "battle.csv");
 		public string DecisionTracePath => Path.Combine(EvidenceDirectory, "decisions.jsonl");
+
+		/// <summary>Public map facts, written by the engine once the world has loaded.</summary>
+		public string MapFactsPath => Path.Combine(EvidenceDirectory, "map.json");
+
+		/// <summary>Precomputed per-fight aggregates, derived after the match by AutoCnC.Evidence.</summary>
+		public string SummaryPath => Path.Combine(EvidenceDirectory, "summary.json");
+
+		/// <summary>One row per unit, whole lifecycle.</summary>
+		public string UnitsPath => Path.Combine(EvidenceDirectory, "units.csv");
+
+		/// <summary>Falsifiable checks a round writes for the next one to be measured against.</summary>
+		public string ChecksPath => Path.Combine(EvidenceDirectory, "checks.json");
+
+		public string CheckResultsPath => Path.Combine(EvidenceDirectory, "check-results.json");
+		public string TrendPath => Path.Combine(EvidenceDirectory, "trend.json");
 		public string PerformancePath => Path.Combine(EvidenceDirectory, "performance.json");
 		public string ReplayPath => Path.Combine(EvidenceDirectory, "replay.orarep");
 		public string CancellationPath => Path.Combine(RunDirectory, "cancel.request");

@@ -45,6 +45,22 @@ namespace AutoCnC.Launcher
 			"{battleLog}",
 			"{telemetry}",
 			"{decisionTrace}",
+
+			// Derived evidence. These are what a round should read first; the raw records above
+			// are for the questions they cannot answer.
+			"{summary}",
+			"{units}",
+			"{mapFacts}",
+			"{checks}",
+			"{checkResults}",
+			"{trend}",
+
+			// Generated prose, filled in after the evidence has been derived. These replace two
+			// sections rounds used to hand-maintain and the next round verified by eye, if at all.
+			"{checkReport}",
+			"{trendReport}",
+			"{botAudit}",
+
 			"{battle}",
 			"{result}",
 			"{sourceRevision}",
@@ -498,6 +514,19 @@ namespace AutoCnC.Launcher
 				("{battleLog}", run.BattleLogPath),
 				("{telemetry}", run.TelemetryPath),
 				("{decisionTrace}", run.DecisionTracePath),
+
+				// Paths only. These files are derived by scripts/train-bot.ps1 after this prompt
+				// is written and before the agent is called, so naming them here is safe, but
+				// their contents cannot be read yet. The generated reports drawn from them —
+				// {checkReport}, {trendReport}, {botAudit} — are filled in by that script, which
+				// is why they are absent from this list and still literal at this point.
+				("{summary}", run.SummaryPath),
+				("{units}", run.UnitsPath),
+				("{mapFacts}", run.MapFactsPath),
+				("{checks}", run.ChecksPath),
+				("{checkResults}", run.CheckResultsPath),
+				("{trend}", run.TrendPath),
+
 				("{replay}", File.Exists(run.ReplayPath) ? run.ReplayPath : "not captured"),
 				("{battle}", $"map={battle?.Map}, difficulty={battle?.Difficulty}, opponents={battle?.Opponents}, " +
 					$"faction={battle?.Faction}, opponent faction={battle?.BotFaction}, speed={battle?.GameSpeed}, " +
@@ -598,13 +627,95 @@ namespace AutoCnC.Launcher
 			}
 
 			return EnsureMechanicsPlaceholder(
-				string.Join(Environment.NewLine, lines).Trim()).Trim();
+				EnsureRequiredPlaceholders(
+					string.Join(Environment.NewLine, lines).Trim())).Trim();
 		}
+
+		/// <summary>
+		/// Puts back any required placeholder the proposed template dropped.
+		/// </summary>
+		/// <remarks>
+		/// <para>
+		/// Repairing beats rejecting. A round is given its contract at the start and writes its
+		/// replacement at the end, so whenever the required set grows, the round already in flight
+		/// was told an older list and cannot know about the new entries — and refusing its work for
+		/// that reason throws away a whole round of analysis over a formatting rule the agent was
+		/// never shown.
+		/// </para>
+		/// <para>
+		/// The same applies when an agent simply forgets one. The placeholders are how evidence
+		/// reaches the next round at all, so a template missing <c>{summary}</c> silently costs
+		/// every future round its precomputed analysis. That is far too expensive a failure to
+		/// leave to the agent remembering a list.
+		/// </para>
+		/// </remarks>
+		internal static string EnsureRequiredPlaceholders(string template)
+		{
+			var missing = RequiredPromptPlaceholders
+				.Where(placeholder => placeholder != NextPromptContractPlaceholder)
+				.Where(placeholder => placeholder != "{gameMechanics}")
+				.Where(placeholder => !template.Contains(placeholder, StringComparison.Ordinal))
+				.ToArray();
+
+			if (missing.Length == 0)
+				return template;
+
+			var section = new List<string>
+			{
+				"",
+				"## Evidence (restored by the launcher)",
+				"",
+				"The template proposed for this round left these out. They are how the harness",
+				"reaches the next round, so they have been put back rather than the round discarded.",
+				""
+			};
+
+			section.AddRange(missing.Select(placeholder => "- " + PlaceholderDescription(placeholder)));
+
+			var lines = SplitLines(template).ToList();
+			var contract = lines.FindIndex(line =>
+				string.Equals(line.Trim(), NextPromptContractPlaceholder, StringComparison.Ordinal));
+
+			if (contract >= 0)
+				lines.InsertRange(contract, section);
+			else
+				lines.AddRange(section);
+
+			return string.Join(Environment.NewLine, lines);
+		}
+
+		static string PlaceholderDescription(string placeholder) => placeholder switch
+		{
+			"{summary}" => "Fight summary, precomputed and under 20 KB — read this first: {summary}",
+			"{units}" => "Unit ledger, one row per unit lifecycle: {units}",
+			"{mapFacts}" => "Map facts, including the random seed this match ran on: {mapFacts}",
+			"{checks}" => "Checks the previous round wrote: {checks}",
+			"{checkResults}" => "The harness's verdict on those checks: {checkResults}",
+			"{trend}" => "Cross-run trend, including what each prompt revision did: {trend}",
+			"{checkReport}" => "Checks carried in from the previous round:" +
+				Environment.NewLine + Environment.NewLine + "{checkReport}",
+			"{trendReport}" => "How this bot is trending:" +
+				Environment.NewLine + Environment.NewLine + "{trendReport}",
+			"{botAudit}" => "Hardcoded-constant audit of the bot sources:" +
+				Environment.NewLine + Environment.NewLine + "{botAudit}",
+			"{workspace}" => "Edit only the bot workspace: {workspace}",
+			"{gameGuide}" => "Game and bot guide: {gameGuide}",
+			"{gameRules}" => "Resolved actor and weapon stats: {gameRules}",
+			"{fightManifest}" => "Fight manifest: {fightManifest}",
+			"{battleLog}" => "Battle log, what this bot could observe: {battleLog}",
+			"{telemetry}" => "Match telemetry, both sides' curves: {telemetry}",
+			"{decisionTrace}" => "Decision trace: {decisionTrace}",
+			"{battle}" => "Fight configuration: {battle}",
+			"{result}" => "Result and player assessment: {result}",
+			"{sourceRevision}" => "Source revision before the fight: {sourceRevision}",
+			_ => placeholder
+		};
 
 		static bool IsPathPlaceholder(string placeholder) =>
 			placeholder is "{workspace}" or "{gameGuide}" or "{gameRules}" or
 				"{fightManifest}" or "{battleLog}" or "{telemetry}" or "{decisionTrace}" or
-				"{replay}";
+				"{replay}" or "{summary}" or "{units}" or "{mapFacts}" or "{checks}" or
+				"{checkResults}" or "{trend}";
 
 		static string[] SplitLines(string value) =>
 			value.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n').Split('\n');
@@ -649,6 +760,32 @@ namespace AutoCnC.Launcher
 
 			Do not replace any placeholder with a path or value from this fight, even where the
 			rendered prompt above shows that value.
+
+			Do not write triage recipes. {summary} and {units} are computed by the harness from the
+			raw records, by tested code, before you are called: the per-unit-type ledger with
+			credits per kill and share of spend, the economy series, the production and doctrine
+			tables, the engagement matrix, the loss clusters and the telemetry crossover are all
+			already there. A template that tells the next round to re-derive those from
+			{decisionTrace} is spending its budget on arithmetic that has already been done, which
+			is the single largest thing that was wrong with this loop. Read {decisionTrace} only
+			for a question the summary genuinely cannot answer, and say which.
+
+			Put {checkReport} and {trendReport} on lines by themselves where those sections belong.
+			They are generated: {checkReport} is the harness evaluating the checks the previous
+			round wrote, and {trendReport} is the cross-run comparison, including what each prompt
+			revision did to the rounds it steered. Do not write either by hand, and do not maintain
+			a prose list of "already diagnosed, verify this" — that list is what checks.json is for.
+
+			Keep a section telling the next round to write checks.json into {workspace} before it
+			finishes, and to give any new code path a reason literal nothing else uses so a
+			`reason:` check can prove it ran.
+
+			Your template is measured. Each run records which prompt steered it, and the trend
+			reports the mean fitness change from the round a prompt was given to the round after
+			it. Templates here have grown to twenty-seven thousand characters of recipes and lost
+			fitness doing it. Make yours shorter and more specific than this one, not longer; if
+			the report shows the current template losing fitness across several rounds, prefer
+			reverting toward what came before it over adding more advice on top.
 
 			It must explicitly restrict edits to {workspace}.
 

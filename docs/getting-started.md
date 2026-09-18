@@ -591,8 +591,13 @@ because the repeat checkbox is selected. A failed game, agent command, or build 
 with an unverified bot.
 
 Fight and rules JSON are shown as collapsible trees. When the run finishes, the agent drafts an
-entire replacement prompt template in **Next prompt***. Edit and approve it in manual mode, or let
-continuous mode accept a valid template automatically. The launcher inserts that round's paths,
+entire replacement prompt template and the window opens **Next prompt*** on it. The top pane shows
+what accepting would change in the prompt you are using now — added and removed lines only, with
+long unchanged stretches elided — and the bottom pane holds the complete draft, which you can edit
+to see the comparison follow. Choose **Use this prompt next round** to adopt it or **Keep the
+current prompt** to turn it down; rejecting changes nothing and is remembered, so reopening the
+session does not ask again. Continuous mode accepts a valid template automatically and leaves the
+progress view alone. The launcher inserts that round's paths,
 evidence, result, and source revision through required placeholders. This replaces rather than
 appends, so the prompt can get more focused without growing indefinitely. Each adopted template is
 kept in `%LOCALAPPDATA%\AutoCnC\PromptHistory` as a numbered file, so a loop left running overnight

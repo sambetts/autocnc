@@ -400,9 +400,14 @@ termination is used as a fallback. It deliberately has no player-assessment paus
 
 The JSON views parse lazily into collapsible trees, so the resolved rules snapshot is not expanded
 into thousands of controls up front. After coding, the agent returns a complete replacement prompt
-template between machine-readable marker lines. The player can edit and approve it in
-**Next prompt*** in manual mode; continuous mode applies the same validation before accepting it
-automatically. Approval replaces the saved template; required placeholders preserve fresh
+template between machine-readable marker lines. In manual mode the round ends on **Next prompt***,
+which opens by itself and shows the proposal as a line-by-line difference against the template in
+force — unchanged stretches elided — above the editable draft, so the player approves or rejects a
+change rather than comparing two walls of text. Editing the draft updates the difference. Rejecting
+leaves the saved template untouched and records the decision on the round, so reopening the session
+does not present a settled question as outstanding. Continuous mode applies the same validation
+before accepting automatically, and does not steal the progress view to display a difference nobody
+is reading. Approval replaces the saved template; required placeholders preserve fresh
 workspace, evidence, result, and recursive next-template contract values without accumulating
 additive guidance. `docs/agent-prompt-template.md` is the repository default, while an approved
 replacement is user state. Since approval overwrites that state, each adopted template is also

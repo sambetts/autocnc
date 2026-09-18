@@ -12,6 +12,7 @@ using System;
 using System.Drawing;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 namespace AutoCnC.Launcher
@@ -35,9 +36,12 @@ namespace AutoCnC.Launcher
 		readonly JsonTreeView fightManifest;
 		readonly ListView changes;
 		readonly Label summary;
+		readonly SplitContainer nextPromptSplit;
+		readonly RichTextBox nextPromptDiff;
 		readonly TextBox nextPrompt;
 		readonly Label nextPromptStatus;
 		readonly Button applyNextPrompt;
+		readonly Button rejectNextPrompt;
 		readonly Font boldProgressFont;
 		readonly TerminalTextParser transcriptParser = new();
 		readonly TerminalTextParser chatParser = new();
@@ -45,11 +49,16 @@ namespace AutoCnC.Launcher
 
 		bool liveOutputStarted;
 		bool chatStreaming;
+		bool nextPromptSplitPlaced;
+		string currentPromptTemplate;
 		TrainingRun shownRun;
 		AgentConversation chat;
 		internal TrainingRun ShownRun => shownRun;
 
 		public event Action<TrainingRun, string> NextPromptAccepted;
+
+		/// <summary>Raised when the player has read a proposed prompt and declined to adopt it.</summary>
+		public event Action<TrainingRun> NextPromptRejected;
 
 		/// <summary>Raised when the window begins showing a different run.</summary>
 		/// <remarks>
@@ -67,8 +76,11 @@ namespace AutoCnC.Launcher
 		internal string GameGuideText => gameGuide.Text;
 		internal string GameRulesText => gameRules.SourceText;
 		internal string SelectedView => views.SelectedTab?.Text;
-		internal string NextPromptText => nextPrompt.Text;
+		internal string NextPromptText { get => nextPrompt.Text; set => nextPrompt.Text = value; }
+		internal string NextPromptDiffText => nextPromptDiff.Text;
+		internal string NextPromptStatusText => nextPromptStatus.Text;
 		internal bool CanAcceptNextPrompt => applyNextPrompt.Enabled;
+		internal bool CanRejectNextPrompt => rejectNextPrompt.Enabled;
 		internal string ConversationText => conversation.Text;
 		internal string ChatStatusText => chatStatus.Text;
 		internal string ChatInputText { get => chatInput.Text; set => chatInput.Text = value; }
@@ -80,6 +92,30 @@ namespace AutoCnC.Launcher
 			progress.Select(progress.TextLength, 0);
 			return color;
 		}
+
+		/// <summary>
+		/// The template a proposal would replace, so the player can be shown what a round changed
+		/// rather than two indistinguishable walls of text.
+		/// </summary>
+		/// <remarks>
+		/// This is the prompt in force now, not the one the shown round was given — nothing records
+		/// that — and the question the buttons ask is what adopting this would do from here.
+		/// </remarks>
+		public string CurrentPromptTemplate
+		{
+			get => currentPromptTemplate;
+			set
+			{
+				if (string.Equals(currentPromptTemplate, value, StringComparison.Ordinal))
+					return;
+
+				currentPromptTemplate = value;
+				RenderNextPromptDiff();
+			}
+		}
+
+		/// <summary>True while a proposed prompt is neither approved nor turned down.</summary>
+		bool NextPromptAwaitsDecision => rejectNextPrompt.Enabled;
 
 		public ImprovementWindow()
 			: base("AutoC&C — Improvement")
@@ -192,6 +228,19 @@ namespace AutoCnC.Launcher
 				Math.Max(200, changes.ClientSize.Width - changes.Columns[0].Width);
 
 			promptTab = Page("Prompt", prompt);
+			nextPromptDiff = new RichTextBox
+			{
+				Dock = DockStyle.Fill,
+				ReadOnly = true,
+				DetectUrls = false,
+				WordWrap = false,
+				BorderStyle = BorderStyle.None,
+				BackColor = Paper,
+				ForeColor = Ink,
+				Font = new Font(FontFamily.GenericMonospace, 9f),
+				HideSelection = false
+			};
+
 			nextPrompt = new TextBox
 			{
 				Dock = DockStyle.Fill,
@@ -202,7 +251,29 @@ namespace AutoCnC.Launcher
 				ForeColor = Ink,
 				Font = new Font(FontFamily.GenericMonospace, 9f)
 			};
-			nextPrompt.TextChanged += (_, _) => ValidateNextPromptDraft();
+
+			nextPromptSplit = new SplitContainer
+			{
+				Dock = DockStyle.Fill,
+				Orientation = Orientation.Horizontal,
+				BackColor = Paper,
+				Panel1MinSize = 40,
+				Panel2MinSize = 40,
+				SplitterWidth = 6
+			};
+			nextPromptSplit.Panel1.BackColor = Paper;
+			nextPromptSplit.Panel2.BackColor = Paper;
+			nextPromptSplit.Panel1.Controls.Add(nextPromptDiff);
+			nextPromptSplit.Panel1.Controls.Add(Heading(
+				"What accepting this would change in the prompt now in force."));
+			nextPromptSplit.Panel2.Controls.Add(nextPrompt);
+			nextPromptSplit.Panel2.Controls.Add(Heading(
+				"The complete replacement prompt. Edit it and the comparison above follows."));
+
+			// The diff is the part being judged, so it gets the larger share — but only once the
+			// tab has laid out to a real height, because a splitter cannot be placed inside a
+			// panel that has not been given one yet.
+			nextPromptSplit.SizeChanged += (_, _) => PlaceNextPromptSplitter();
 
 			applyNextPrompt = new ActionButton
 			{
@@ -210,6 +281,16 @@ namespace AutoCnC.Launcher
 				Enabled = false
 			};
 			applyNextPrompt.Click += (_, _) => SubmitNextPrompt();
+
+			rejectNextPrompt = new ActionButton
+			{
+				Text = "Keep the current prompt",
+				Enabled = false
+			};
+			rejectNextPrompt.Click += (_, _) => RejectNextPromptDraft();
+
+			// Wired only now that both buttons exist, because validating the draft sets them.
+			nextPrompt.TextChanged += (_, _) => ValidateNextPromptDraft();
 
 			nextPromptStatus = new Label
 			{
@@ -225,13 +306,14 @@ namespace AutoCnC.Launcher
 				BackColor = CommandTheme.Surface
 			};
 			nextPromptFooter.Controls.Add(applyNextPrompt);
+			nextPromptFooter.Controls.Add(rejectNextPrompt);
 			nextPromptFooter.Controls.Add(nextPromptStatus);
 
 			nextPromptTab = new TabPage("Next prompt") { BackColor = Paper, Padding = new Padding(8) };
-			nextPromptTab.Controls.Add(nextPrompt);
+			nextPromptTab.Controls.Add(nextPromptSplit);
 			nextPromptTab.Controls.Add(nextPromptFooter);
 			nextPromptTab.Controls.Add(Heading(
-				"Complete replacement prompt for the next round. Edit it before saving if needed."));
+				"Complete replacement prompt for the next round. Approve it or keep the current one."));
 
 			views = new CommandTabs { Dock = DockStyle.Fill };
 			views.TabPages.Add(progressTab);
@@ -258,6 +340,7 @@ namespace AutoCnC.Launcher
 			nextPromptTab.Text = "Next prompt";
 			nextPromptStatus.Text = "The agent will draft the complete next-round prompt when it finishes.";
 			applyNextPrompt.Enabled = false;
+			rejectNextPrompt.Enabled = false;
 			views.SelectedTab = progressTab;
 			Text = "AutoC&C — Improvement (running)";
 			taskbarProgress.SetBusy(Handle, busy: true);
@@ -289,7 +372,7 @@ namespace AutoCnC.Launcher
 			Append(line, scroll: true);
 		}
 
-		public void CompleteAgentRun(TrainingRun run)
+		public void CompleteAgentRun(TrainingRun run, bool reviewNextPrompt = false)
 		{
 			SetShownRun(run);
 			LoadInputs(run);
@@ -306,6 +389,13 @@ namespace AutoCnC.Launcher
 
 			summary.Text = AgentSummary(run);
 			LoadNextPrompt(run);
+
+			// A prompt the player never looked at is a prompt they cannot have approved, and the
+			// old tab title asterisk was the only thing that ever mentioned the proposal existed.
+			// An invalid draft is shown too: it is the one outcome that needs a human most.
+			if (reviewNextPrompt && NextPromptAwaitsDecision)
+				views.SelectedTab = nextPromptTab;
+
 			Text = "AutoC&C — Improvement (finished)";
 			taskbarProgress.SetBusy(Handle, busy: false);
 			UpdateChatControls();
@@ -359,6 +449,18 @@ namespace AutoCnC.Launcher
 			nextPromptTab.Text = "Next prompt";
 			nextPromptStatus.Text = "Saved. This complete prompt will be rendered with fresh evidence next round.";
 			applyNextPrompt.Enabled = false;
+			rejectNextPrompt.Enabled = false;
+			RenderNextPromptDiff();
+		}
+
+		/// <summary>Reports that the proposal was turned down and the current prompt stands.</summary>
+		public void MarkNextPromptRejected()
+		{
+			nextPromptTab.Text = "Next prompt";
+			nextPromptStatus.Text =
+				"Rejected. The current prompt stands; edit this draft if you want to reconsider.";
+			applyNextPrompt.Enabled = false;
+			rejectNextPrompt.Enabled = false;
 		}
 
 		internal void SubmitNextPrompt()
@@ -366,6 +468,12 @@ namespace AutoCnC.Launcher
 			var suggestion = nextPrompt.Text.Trim();
 			if (shownRun != null && suggestion.Length > 0)
 				NextPromptAccepted?.Invoke(shownRun, suggestion);
+		}
+
+		internal void RejectNextPromptDraft()
+		{
+			if (shownRun != null)
+				NextPromptRejected?.Invoke(shownRun);
 		}
 
 		/// <summary>Shows the conversation belonging to the run on display.</summary>
@@ -534,23 +642,114 @@ namespace AutoCnC.Launcher
 
 		void ValidateNextPromptDraft()
 		{
+			var diff = RenderNextPromptDiff();
+
 			var candidate = nextPrompt.Text.Trim();
 			if (candidate.Length == 0)
 			{
 				applyNextPrompt.Enabled = false;
+				rejectNextPrompt.Enabled = false;
 				return;
 			}
+
+			// A proposal that will not validate can still be turned down. Refusing to let the
+			// player dismiss it would leave the only unusable outcome also being the only one
+			// they cannot close.
+			rejectNextPrompt.Enabled = true;
 
 			if (TrainingAgent.ValidatePromptTemplate(candidate, out var error))
 			{
 				applyNextPrompt.Enabled = true;
-				nextPromptStatus.Text = "Complete replacement prompt is valid and ready to save.";
+				nextPromptStatus.Text = diff.Identical
+					? "No change: this proposal is the prompt already in force."
+					: diff.Summary + " Approve it, or keep the current prompt.";
 			}
 			else
 			{
 				applyNextPrompt.Enabled = false;
 				nextPromptStatus.Text = "Needs editing: " + error;
 			}
+		}
+
+		/// <summary>
+		/// Redraws the comparison between the prompt in force and whatever is in the draft box,
+		/// returning what it found.
+		/// </summary>
+		/// <remarks>
+		/// Redraw is suspended across the rebuild because this runs on every keystroke in the
+		/// draft: a colour is applied per line, and doing that visibly turns editing a prompt into
+		/// watching the pane above it flash.
+		/// </remarks>
+		PromptDiffResult RenderNextPromptDiff()
+		{
+			var diff = PromptDiff.Compare(currentPromptTemplate, nextPrompt.Text);
+			var suspended = nextPromptDiff.IsHandleCreated;
+			if (suspended)
+				SendMessage(nextPromptDiff.Handle, WmSetRedraw, (IntPtr)0, IntPtr.Zero);
+
+			try
+			{
+				nextPromptDiff.Clear();
+				if (string.IsNullOrWhiteSpace(nextPrompt.Text))
+					AppendDiffLine("The agent has not proposed a replacement prompt.", Faded);
+				else if (string.IsNullOrWhiteSpace(currentPromptTemplate))
+					AppendDiffLine("There is no prompt in force to compare this against.", Faded);
+				else if (diff.Identical)
+					AppendDiffLine("Identical to the prompt in force — nothing would change.", Faded);
+				else
+					foreach (var line in diff.Lines)
+						AppendDiffLine(line.Display, DiffColor(line.Kind));
+			}
+			finally
+			{
+				if (suspended)
+				{
+					SendMessage(nextPromptDiff.Handle, WmSetRedraw, (IntPtr)1, IntPtr.Zero);
+					nextPromptDiff.Invalidate();
+				}
+			}
+
+			return diff;
+		}
+
+		/// <summary>
+		/// Turning a control's painting off and on again, so a pane that is rebuilt line by line
+		/// is rebuilt out of sight and shown once.
+		/// </summary>
+		const int WmSetRedraw = 0x000B;
+
+		[DllImport("user32.dll")]
+		static extern IntPtr SendMessage(IntPtr window, int message, IntPtr wParam, IntPtr lParam);
+
+		void AppendDiffLine(string text, Color color)
+		{
+			nextPromptDiff.SelectionStart = nextPromptDiff.TextLength;
+			nextPromptDiff.SelectionLength = 0;
+			nextPromptDiff.SelectionColor = color;
+			nextPromptDiff.AppendText(text + Environment.NewLine);
+		}
+
+		static Color DiffColor(PromptDiffKind kind) => kind switch
+		{
+			PromptDiffKind.Added => CommandTheme.Green,
+			PromptDiffKind.Removed => CommandTheme.Danger,
+			PromptDiffKind.Elision => Rule,
+			_ => Faded
+		};
+
+		void PlaceNextPromptSplitter()
+		{
+			if (nextPromptSplitPlaced)
+				return;
+
+			var available = nextPromptSplit.Height - nextPromptSplit.SplitterWidth;
+			if (available < 200 ||
+				available < nextPromptSplit.Panel1MinSize + nextPromptSplit.Panel2MinSize)
+				return;
+
+			nextPromptSplitPlaced = true;
+			nextPromptSplit.SplitterDistance = Math.Clamp(nextPromptSplit.Height * 3 / 5,
+				nextPromptSplit.Panel1MinSize, available - nextPromptSplit.Panel2MinSize);
 		}
 
 		void LoadInputs(TrainingRun run)
@@ -578,11 +777,21 @@ namespace AutoCnC.Launcher
 		{
 			var agent = run.Manifest.Agent;
 			nextPrompt.Text = agent?.SuggestedNextPrompt ?? "";
+			RenderNextPromptDiff();
 			if (agent?.SuggestedNextPromptAccepted == true)
 			{
 				nextPromptTab.Text = "Next prompt";
 				nextPromptStatus.Text = "Saved. This complete prompt will be rendered with fresh evidence next round.";
 				applyNextPrompt.Enabled = false;
+				rejectNextPrompt.Enabled = false;
+			}
+			else if (agent?.SuggestedNextPromptRejected == true)
+			{
+				nextPromptTab.Text = "Next prompt";
+				nextPromptStatus.Text =
+					"Rejected. The current prompt stands; edit this draft if you want to reconsider.";
+				applyNextPrompt.Enabled = false;
+				rejectNextPrompt.Enabled = false;
 			}
 			else if (!string.IsNullOrEmpty(agent?.SuggestedNextPrompt))
 			{
@@ -594,12 +803,14 @@ namespace AutoCnC.Launcher
 				nextPromptTab.Text = "Next prompt";
 				nextPromptStatus.Text = "No complete prompt was returned. You can paste or write one here.";
 				applyNextPrompt.Enabled = false;
+				rejectNextPrompt.Enabled = false;
 			}
 			else
 			{
 				nextPromptTab.Text = "Next prompt";
 				nextPromptStatus.Text = "The agent will draft the complete next-round prompt when it finishes.";
 				applyNextPrompt.Enabled = false;
+				rejectNextPrompt.Enabled = false;
 			}
 		}
 
@@ -720,8 +931,9 @@ namespace AutoCnC.Launcher
 				? (result.ChangeCount < 0
 						? "The agent's changes could not be inspected. Verification passed."
 						: $"{result.ChangeCount} source file(s) changed. Verification passed.") +
-					(!string.IsNullOrEmpty(result.SuggestedNextPrompt) && !result.SuggestedNextPromptAccepted
-						? " Review Next prompt * to choose the complete prompt for the next round."
+					(!string.IsNullOrEmpty(result.SuggestedNextPrompt) &&
+						!result.SuggestedNextPromptAccepted && !result.SuggestedNextPromptRejected
+						? " Review Next prompt * to approve or reject the prompt for the next round."
 						: "")
 				: "";
 		}

@@ -149,6 +149,82 @@ namespace AutoCnC.Evidence.Tests
 			Assert.That(history.Runs.Count, Is.EqualTo(4));
 		}
 
+		/// <summary>
+		/// A prompt is scored by what happened to the round AFTER the one it steered.
+		/// </summary>
+		/// <remarks>
+		/// The causal chain runs forwards and is one step long: a round reads its prompt, edits
+		/// the bot, and the next fight measures the edit. Scoring a prompt by the fitness of the
+		/// fight it was handed would grade it on its predecessor's work.
+		/// </remarks>
+		[Test]
+		public void PromptEffectIsMeasuredOnTheRoundAfterTheOneItSteered()
+		{
+			var history = new RunHistory { Bot = "TestBot" };
+			RunIndex.Record(history, "TestBot", Prompted("r1", 0, 0.40, "good"));
+			RunIndex.Record(history, "TestBot", Prompted("r2", 1, 0.60, "good"));
+			RunIndex.Record(history, "TestBot", Prompted("r3", 2, 0.80, "bad"));
+			RunIndex.Record(history, "TestBot", Prompted("r4", 3, 0.30, "bad"));
+			RunIndex.Record(history, "TestBot", Prompted("r5", 4, 0.20, "bad"));
+
+			var effects = RunIndex.PromptEffects(history);
+			var good = effects.Single(e => e.PromptId == "good");
+			var bad = effects.Single(e => e.PromptId == "bad");
+
+			// "good" steered r1 (0.40 -> 0.60) and r2 (0.60 -> 0.80): +0.20 each.
+			Assert.That(good.RoundsMeasured, Is.EqualTo(2));
+			Assert.That(good.MeanFitnessDelta, Is.EqualTo(0.2).Within(0.0001));
+			Assert.That(good.Improved, Is.EqualTo(2));
+
+			// "bad" steered r3 (0.80 -> 0.30) and r4 (0.30 -> 0.20); r5 has no successor yet.
+			Assert.That(bad.RoundsMeasured, Is.EqualTo(2));
+			Assert.That(bad.MeanFitnessDelta, Is.EqualTo(-0.3).Within(0.0001));
+			Assert.That(bad.Worsened, Is.EqualTo(2));
+
+			// Worst first, so a round sees the prompt worth reverting at the top.
+			Assert.That(effects[0].PromptId, Is.EqualTo("bad"));
+		}
+
+		[Test]
+		public void APromptSeenOnceIsReportedButNotJudged()
+		{
+			var history = new RunHistory { Bot = "TestBot" };
+			RunIndex.Record(history, "TestBot", Prompted("r1", 0, 0.80, "only"));
+			RunIndex.Record(history, "TestBot", Prompted("r2", 1, 0.10, "next"));
+
+			var effect = RunIndex.PromptEffects(history).Single(e => e.PromptId == "only");
+
+			Assert.That(effect.RoundsMeasured, Is.EqualTo(1));
+			Assert.That(effect.Verdict, Does.Contain("says nothing yet"));
+		}
+
+		[Test]
+		public void RunsWithNoRecordedPromptAreSkippedRatherThanGroupedTogether()
+		{
+			var history = new RunHistory { Bot = "TestBot" };
+			RunIndex.Record(history, "TestBot", Prompted("r1", 0, 0.40, null));
+			RunIndex.Record(history, "TestBot", Prompted("r2", 1, 0.50, null));
+			RunIndex.Record(history, "TestBot", Prompted("r3", 2, 0.60, "p"));
+			RunIndex.Record(history, "TestBot", Prompted("r4", 3, 0.90, "p"));
+
+			var effects = RunIndex.PromptEffects(history);
+
+			Assert.That(effects.Count, Is.EqualTo(1));
+			Assert.That(effects[0].PromptId, Is.EqualTo("p"));
+			Assert.That(effects[0].RoundsMeasured, Is.EqualTo(1), "r4 has no successor");
+		}
+
+		static RunHistoryEntry Prompted(string id, int days, double fitness, string promptId)
+		{
+			var entry = Entry(id, days, 40, 100, "candidate", "Lost");
+			entry.Fitness = fitness;
+			entry.Headline["fitness"] = fitness;
+			entry.PromptId = promptId;
+			entry.PromptCharacters = promptId == null ? 0 : 40000;
+			entry.PromptHeadings = promptId == null ? 0 : 18;
+			return entry;
+		}
+
 		static RunHistoryEntry WithoutEconomy(string id, int days)
 		{
 			var entry = Entry(id, days, 40, 100, "candidate", "Lost");

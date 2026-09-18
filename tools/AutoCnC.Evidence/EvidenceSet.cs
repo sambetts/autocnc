@@ -199,6 +199,8 @@ namespace AutoCnC.Evidence
 		public string ChecksPath => Path.Combine(Directory, "checks.json");
 		public string CheckResultsPath => Path.Combine(Directory, "check-results.json");
 		public string TrendPath => Path.Combine(Directory, "trend.json");
+		public string PromptPath => Path.Combine(Directory, "agent-prompt.txt");
+		public string MechanicsPath => Path.Combine(Directory, "mechanics.md");
 
 		public BattleEvents Battle { get; private set; }
 		public Telemetry Telemetry { get; private set; }

@@ -57,6 +57,19 @@ namespace AutoCnC.Evidence
 		public Dictionary<string, double> Headline { get; set; } = [];
 		public int ChecksPassed { get; set; }
 		public int ChecksFailed { get; set; }
+
+		/// <summary>
+		/// The learned prompt this round's improvement agent was given.
+		/// </summary>
+		/// <remarks>
+		/// Recorded so a prompt revision can be held to account. The prompt a round is given
+		/// produces the edit that the NEXT fight measures, so its effect is the fitness change
+		/// across that boundary — see <see cref="RunIndex.PromptEffects"/>.
+		/// </remarks>
+		public string PromptId { get; set; }
+
+		public int PromptCharacters { get; set; }
+		public int PromptHeadings { get; set; }
 	}
 
 	public sealed class RunHistory
@@ -96,6 +109,27 @@ namespace AutoCnC.Evidence
 		public double[] Recent { get; set; } = [];
 	}
 
+	/// <summary>What one prompt revision actually did to the rounds it steered.</summary>
+	public sealed class PromptEffect
+	{
+		public string PromptId { get; set; }
+		public int Characters { get; set; }
+		public int Headings { get; set; }
+
+		/// <summary>How many rounds were run under this prompt and then measured.</summary>
+		public int RoundsMeasured { get; set; }
+
+		/// <summary>Mean fitness change from the round this prompt steered to the one after it.</summary>
+		public double MeanFitnessDelta { get; set; }
+
+		public double MedianFitnessDelta { get; set; }
+		public int Improved { get; set; }
+		public int Worsened { get; set; }
+		public string FirstSeenRunId { get; set; }
+		public string LastSeenRunId { get; set; }
+		public string Verdict { get; set; }
+	}
+
 	public sealed class TrendReport
 	{
 		public int SchemaVersion { get; set; } = 1;
@@ -107,6 +141,9 @@ namespace AutoCnC.Evidence
 		public List<TrendMetric> Metrics { get; set; } = [];
 		public List<string> Regressions { get; set; } = [];
 		public BenchmarkComparison Benchmark { get; set; }
+
+		/// <summary>What each prompt revision did to the rounds it steered.</summary>
+		public List<PromptEffect> Prompts { get; set; } = [];
 
 		/// <summary>The block the next prompt injects verbatim.</summary>
 		public string Rendered { get; set; }
@@ -195,7 +232,11 @@ namespace AutoCnC.Evidence
 			}
 		}
 
-		public static RunHistoryEntry Entry(FightSummary summary, CheckReport checks)
+		public static RunHistoryEntry Entry(FightSummary summary, CheckReport checks) =>
+			Entry(summary, checks, null);
+
+		public static RunHistoryEntry Entry(FightSummary summary, CheckReport checks,
+			PromptIdentity prompt)
 		{
 			var entry = new RunHistoryEntry
 			{
@@ -214,7 +255,10 @@ namespace AutoCnC.Evidence
 				DurationSeconds = summary.Fight.DurationSeconds,
 				Fitness = summary.Fitness?.Total ?? 0,
 				ChecksPassed = checks?.Passed ?? 0,
-				ChecksFailed = checks?.Failed ?? 0
+				ChecksFailed = checks?.Failed ?? 0,
+				PromptId = prompt?.Id,
+				PromptCharacters = prompt?.Characters ?? 0,
+				PromptHeadings = prompt?.HeadingCount ?? 0
 			};
 
 			foreach (var component in summary.Fitness?.Components ?? [])
@@ -321,8 +365,101 @@ namespace AutoCnC.Evidence
 				}
 
 			report.Benchmark = Compare(history);
+			report.Prompts = PromptEffects(history);
 			report.Rendered = Render(report);
 			return report;
+		}
+
+		/// <summary>
+		/// Scores each prompt revision by what happened to the rounds it steered.
+		/// </summary>
+		/// <remarks>
+		/// <para>
+		/// The causal chain is one step long and runs forwards: a round reads its prompt, edits
+		/// the bot, and the NEXT fight measures the edit. So a prompt's effect is the fitness
+		/// change from the fight it was handed to the fight that followed — not the fitness of the
+		/// fight it read, which its predecessor produced.
+		/// </para>
+		/// <para>
+		/// This is the only feedback the prompt has ever had. It is weak evidence at small counts,
+		/// which is why the verdict says how many rounds it rests on rather than pronouncing on
+		/// one: a prompt seen twice is a hint, and a prompt seen eight times that keeps losing
+		/// fitness is a reason to go back to the revision before it.
+		/// </para>
+		/// </remarks>
+		public static List<PromptEffect> PromptEffects(RunHistory history)
+		{
+			var runs = history.Runs
+				.Where(r => !string.Equals(r.Arm, "control", StringComparison.OrdinalIgnoreCase))
+				.Where(r => !string.IsNullOrEmpty(r.PromptId))
+				.OrderBy(r => r.CompletedUtc)
+				.ToList();
+
+			var all = history.Runs
+				.Where(r => !string.Equals(r.Arm, "control", StringComparison.OrdinalIgnoreCase))
+				.OrderBy(r => r.CompletedUtc)
+				.ToList();
+
+			var deltas = new Dictionary<string, List<double>>(StringComparer.Ordinal);
+			var effects = new Dictionary<string, PromptEffect>(StringComparer.Ordinal);
+
+			foreach (var run in runs)
+			{
+				var index = all.IndexOf(run);
+				if (index < 0 || index + 1 >= all.Count)
+					continue;
+
+				var delta = all[index + 1].Fitness - run.Fitness;
+
+				if (!effects.TryGetValue(run.PromptId, out var effect))
+				{
+					effect = new PromptEffect
+					{
+						PromptId = run.PromptId,
+						Characters = run.PromptCharacters,
+						Headings = run.PromptHeadings,
+						FirstSeenRunId = run.RunId
+					};
+
+					effects[run.PromptId] = effect;
+					deltas[run.PromptId] = [];
+				}
+
+				effect.LastSeenRunId = run.RunId;
+				effect.RoundsMeasured++;
+				if (delta > 0)
+					effect.Improved++;
+				else if (delta < 0)
+					effect.Worsened++;
+
+				deltas[run.PromptId].Add(delta);
+			}
+
+			foreach (var effect in effects.Values)
+			{
+				var series = deltas[effect.PromptId].ToArray();
+				effect.MeanFitnessDelta = Math.Round(series.Average(), 4);
+				effect.MedianFitnessDelta = Math.Round(Median(series), 4);
+				effect.Verdict = Verdict(effect);
+			}
+
+			return effects.Values.OrderBy(e => e.MeanFitnessDelta).ToList();
+		}
+
+		static string Verdict(PromptEffect effect)
+		{
+			if (effect.RoundsMeasured < 2)
+				return "one round only, so this says nothing yet";
+
+			if (effect.MeanFitnessDelta > 0.02)
+				return "rounds under this prompt tended to improve the bot";
+
+			if (effect.MeanFitnessDelta < -0.02)
+				return effect.RoundsMeasured >= 4
+					? "rounds under this prompt consistently made the bot worse; consider reverting to the previous template"
+					: "rounds under this prompt tended to make the bot worse";
+
+			return "no measurable effect either way";
 		}
 
 		/// <summary>
@@ -433,6 +570,21 @@ namespace AutoCnC.Evidence
 			if (report.Regressions.Count > 0)
 				text.Append("Regressions to explain before doing anything else:\n")
 					.Append("- ").Append(string.Join("\n- ", report.Regressions)).Append('\n');
+
+			if (report.Prompts.Count > 0)
+			{
+				// The prompt is the one artifact in this loop that rewrites itself and has never
+				// been graded. Showing a round what its predecessors' templates actually did is
+				// the whole point of recording the id.
+				text.Append("\nWhat each prompt revision did to the rounds it steered " +
+					"(fitness change from the round it was given to the round after):\n");
+
+				foreach (var prompt in report.Prompts)
+					text.Append(CultureInfo.InvariantCulture,
+						$"- {prompt.PromptId} ({prompt.Characters:N0} chars, {prompt.Headings} sections): " +
+						$"{prompt.MeanFitnessDelta:+0.###;-0.###;0} mean over {prompt.RoundsMeasured} round(s), " +
+						$"{prompt.Improved} better / {prompt.Worsened} worse — {prompt.Verdict}\n");
+			}
 
 			return text.ToString().TrimEnd('\n');
 		}

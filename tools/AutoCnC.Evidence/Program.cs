@@ -77,7 +77,12 @@ namespace AutoCnC.Evidence
 			{
 				var history = RunIndex.Read(historyPath);
 				var name = bot ?? summary.Bot ?? history.Bot;
-				RunIndex.Record(history, name, RunIndex.Entry(summary, outcome.Checks));
+
+				// The prompt this round was given. It has produced no edit yet — the NEXT fight
+				// measures what it caused — so it is recorded here and scored later.
+				var prompt = PromptFingerprint.Read(evidence.PromptPath, evidence.MechanicsPath);
+
+				RunIndex.Record(history, name, RunIndex.Entry(summary, outcome.Checks, prompt));
 				RunIndex.WriteHistory(historyPath, history);
 				outcome.Written.Add(historyPath);
 

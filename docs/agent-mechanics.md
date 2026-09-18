@@ -128,8 +128,24 @@ improved, which is the difference between partial progress and noise. Each compo
 is the value that scores 1.0, and those references are fixed constants — a score normalised
 against its own match would rate every match average and could never show a trend.
 
-### History is for deciding, never for memorising
+### Your prompt is measured too
 
+The template you write for the next round is no longer unexamined. Each run records which prompt
+steered it, and `trend.json` reports the mean fitness change from each round a prompt was given to
+the round after it — because that is the causal chain: you read a prompt, you edit the bot, the
+next fight measures the edit.
+
+This exists because the mutable half of the prompt used to accrete without check: one grew to
+27,250 characters of hand-written triage recipes, one claimed an API did not exist for many rounds
+after it shipped, and one silently dropped a rule, after which the following round undid the work
+that rule protected. A template whose rounds keep losing fitness is evidence against that template,
+not against the bot.
+
+So when you rewrite the prompt: make it shorter and more specific, not longer. If the report shows
+your predecessor's template losing fitness across several rounds, prefer reverting toward what came
+before it over adding more advice on top.
+
+### History is for deciding, never for memorising
 The cross-run index and `trend.json` exist for the improvement agent between matches. They are
 never readable by a running bot, never compiled into one, and must never justify a constant in
 strategy code. No literal map cells, no branching on which map or opponent was drawn, no constant

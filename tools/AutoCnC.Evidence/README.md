@@ -134,6 +134,34 @@ code. `BotSourceAudit` is a cheap mechanical smell test for exactly that failure
 by design: failing a build on a regex would be worse than the problem, and the real defence is that
 history never reaches a running bot.
 
+### Measuring the prompt itself
+
+The prompt rewrites itself every round and, until now, was the one artifact in the loop with no
+fitness function at all. Bot code faces a match; the prompt faced nothing. That asymmetry is why a
+saved template grew to 27,250 characters of triage recipes, why one claimed an API did not exist
+for many rounds after it shipped, and why a rule stated only in the mutable half was dropped — and
+the next round promptly undid the work it protected.
+
+Each run therefore records a `promptId`, and `trend.json` reports what each prompt revision did:
+
+```
+- bac2a7fec442 (39,138 chars, 18 sections): +0.085 mean over 4 round(s), 3 better / 1 worse
+- 6f6c15be9675 (42,408 chars, 18 sections): -0.077 mean over 3 round(s), 1 better / 2 worse
+```
+
+The causal chain runs forwards and is one step long: a round reads its prompt, edits the bot, and
+the **next** fight measures that edit. So a prompt's effect is the fitness change across that
+boundary, not the fitness of the fight it was handed — that one its predecessor produced.
+
+Identity comes from the learned half's section headings, not from the file's bytes. A rendered
+prompt embeds paths, scores and the injected gospel, all of which differ between two rounds given
+the same template; hashing the file would make every round unique and measure nothing. The gospel's
+own headings are removed first, so a version-controlled gospel edit does not read as the agent
+having rewritten its template.
+
+It is weak evidence at small counts and says so — a prompt seen once reports "says nothing yet".
+Four rounds of consistently negative effect is a reason to revert to the previous template.
+
 ## Regenerating artifacts for an existing run
 
 ```powershell

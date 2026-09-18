@@ -33,7 +33,23 @@ namespace AutoCnC.Evidence
 			public CheckReport Checks { get; set; }
 			public TrendReport Trend { get; set; }
 			public List<string> Written { get; set; } = [];
+
+			/// <summary>False when the fight was not worth remembering, with <see cref="Skipped"/> saying why.</summary>
+			public bool Indexed { get; set; }
+
+			public string Skipped { get; set; }
 		}
+
+		/// <summary>
+		/// A fight shorter than this is treated as one that never really happened.
+		/// </summary>
+		/// <remarks>
+		/// A cancelled launch, a failed start or a match abandoned in the lobby still leaves a run
+		/// directory behind. Recording those alongside real fights is worse than losing them: a
+		/// one-second entry scoring almost zero drags every median it touches and manufactures
+		/// regressions in metrics nobody changed.
+		/// </remarks>
+		public const int MinimumIndexableSeconds = 30;
 
 		/// <summary>
 		/// Builds every derived artifact for one fight and folds it into the bot's history.
@@ -75,20 +91,29 @@ namespace AutoCnC.Evidence
 
 			if (!string.IsNullOrEmpty(historyPath))
 			{
-				var history = RunIndex.Read(historyPath);
-				var name = bot ?? summary.Bot ?? history.Bot;
+				// A fight that produced no battle log, or lasted a second, is a cancelled launch
+				// rather than evidence. Its artifacts are still written — they document what was
+				// there — but it must not reach the index, where it would drag every median it
+				// touches and invent regressions in metrics nobody changed.
+				outcome.Skipped = Unindexable(summary);
+				if (outcome.Skipped == null)
+				{
+					var history = RunIndex.Read(historyPath);
+					var name = bot ?? summary.Bot ?? history.Bot;
 
-				// The prompt this round was given. It has produced no edit yet — the NEXT fight
-				// measures what it caused — so it is recorded here and scored later.
-				var prompt = PromptFingerprint.Read(evidence.PromptPath, evidence.MechanicsPath);
+					// The prompt this round was given. It has produced no edit yet — the NEXT
+					// fight measures what it caused — so it is recorded here and scored later.
+					var prompt = PromptFingerprint.Read(evidence.PromptPath, evidence.MechanicsPath);
 
-				RunIndex.Record(history, name, RunIndex.Entry(summary, outcome.Checks, prompt));
-				RunIndex.WriteHistory(historyPath, history);
-				outcome.Written.Add(historyPath);
+					RunIndex.Record(history, name, RunIndex.Entry(summary, outcome.Checks, prompt));
+					RunIndex.WriteHistory(historyPath, history);
+					outcome.Written.Add(historyPath);
+					outcome.Indexed = true;
 
-				outcome.Trend = RunIndex.Trend(history);
-				RunIndex.WriteTrend(evidence.TrendPath, outcome.Trend);
-				outcome.Written.Add(evidence.TrendPath);
+					outcome.Trend = RunIndex.Trend(history);
+					RunIndex.WriteTrend(evidence.TrendPath, outcome.Trend);
+					outcome.Written.Add(evidence.TrendPath);
+				}
 			}
 
 			// Written last: the summary is the artifact everything else is judged against, so it
@@ -96,6 +121,19 @@ namespace AutoCnC.Evidence
 			FightSummaryBuilder.Write(evidence.SummaryPath, summary);
 			outcome.Written.Add(evidence.SummaryPath);
 			return outcome;
+		}
+
+		/// <summary>Why this fight must not enter the cross-run index, or null when it may.</summary>
+		static string Unindexable(FightSummary summary)
+		{
+			if (!summary.Provenance.HasBattleLog)
+				return "there is no battle log, so no fight was recorded";
+
+			if (summary.Fight.DurationSeconds < MinimumIndexableSeconds)
+				return $"the fight lasted {summary.Fight.DurationSeconds}s, under the " +
+					$"{MinimumIndexableSeconds}s minimum — treating it as a cancelled launch";
+
+			return null;
 		}
 	}
 
@@ -141,6 +179,9 @@ namespace AutoCnC.Evidence
 
 			Console.WriteLine(FightSummaryBuilder.Describe(outcome.Summary));
 			Console.WriteLine($"{outcome.Units.Count} units in the ledger.");
+
+			if (outcome.Skipped != null)
+				Console.WriteLine($"Not added to the cross-run history: {outcome.Skipped}.");
 
 			if (outcome.Checks != null)
 				Console.WriteLine(outcome.Checks.Rendered);

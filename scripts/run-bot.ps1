@@ -153,6 +153,11 @@ $engineDir = Join-Path $repoRoot 'engine'
 $binDir = Join-Path $engineDir 'bin'
 $botDir = Join-Path $binDir 'bots'
 
+if ($ExecutionMode -eq 'Headless' -and -not $NoLaunch) {
+    . (Join-Path $PSScriptRoot 'game-content.ps1')
+    Assert-CncContent $engineDir
+}
+
 # ---------------------------------------------------------------------------
 # 1. Locate the battle bot
 # ---------------------------------------------------------------------------

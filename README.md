@@ -303,10 +303,30 @@ git clone --recursive https://github.com/sambetts/autocnc.git
 cd autocnc
 ./scripts/setup.ps1      # fetch the engine submodule
 ./scripts/build.ps1      # build engine, mod and the reference bot
+./scripts/install-content.ps1 # install free C&C base assets without a game window
 ./scripts/launcher.ps1   # pick your code, pick an opponent, play
 ```
 
 Cloned without `--recursive`? `git submodule update --init --depth 1`
+
+### Headless setup over Remote Desktop
+
+Headless battles still need C&C's base game assets. Run `./scripts/install-content.ps1`
+once before training. It uses the pinned OpenRA engine's mirror list, checksum and extraction
+list, and installs into the same support directory as the game (normally
+`%APPDATA%\OpenRA\Content\cnc` on Windows; `engine/Support` takes precedence if present).
+It needs neither OpenGL nor a rendered game window, and skips downloading when the required
+files are already installed. For offline setup, use `./scripts/install-content.ps1 -Archive
+C:\path\to\basefiles.zip` with a copy matching the pinned package checksum.
+
+Missing assets cause a headless launch to fail with this setup command instead of waiting
+at an invisible content installer. Installation is explicit; battle launches do not download
+assets automatically.
+
+Rendered battles and replay viewing still require working OpenGL support. A failure such as
+`Failed to initialize low-level OpenGL bindings` can occur with an RDP graphics driver or
+another unsupported graphics configuration. Use headless training after installing content;
+viewing battles requires a session and driver that provide the engine's OpenGL functions.
 
 ### The launcher
 

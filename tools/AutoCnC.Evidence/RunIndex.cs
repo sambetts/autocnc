@@ -138,6 +138,22 @@ namespace AutoCnC.Evidence
 		public int RunsCompared { get; set; }
 		public string LatestRunId { get; set; }
 		public string LatestRevision { get; set; }
+
+		/// <summary>The difficulty every run in this report was played at.</summary>
+		public string Difficulty { get; set; }
+
+		/// <summary>
+		/// Set when the ladder moved, naming what was excluded and why.
+		/// </summary>
+		/// <remarks>
+		/// Raising the difficulty changes the opponent's personality and handicap together — in
+		/// this mod Normal is cabal on a 20% handicap and Hard is hal9001 on none — so a fight
+		/// after the change is not the same experiment as one before it. Comparing across that
+		/// boundary reported nine simultaneous regressions the first time it happened, every one
+		/// of them explained by the opponent rather than the bot.
+		/// </remarks>
+		public string DifficultyChange { get; set; }
+
 		public List<TrendMetric> Metrics { get; set; } = [];
 		public List<string> Regressions { get; set; } = [];
 		public BenchmarkComparison Benchmark { get; set; }
@@ -300,10 +316,26 @@ namespace AutoCnC.Evidence
 
 		public static TrendReport Trend(RunHistory history, int window = TrendWindow)
 		{
-			var runs = history.Runs
+			var candidates = history.Runs
 				.Where(r => !string.Equals(r.Arm, "control", StringComparison.OrdinalIgnoreCase))
-				.TakeLast(Math.Max(2, window))
+				.OrderBy(r => r.CompletedUtc)
 				.ToList();
+
+			// Only runs at the difficulty currently being played.
+			//
+			// Difficulty is not a dial on one opponent: it selects a different bot personality and
+			// a different handicap together, so a fight above the change and a fight below it are
+			// different experiments. Left unsegmented, the first step up this ladder reported nine
+			// simultaneous regressions — economy, exchange, army value, buildings, exploration —
+			// every one of them the new opponent rather than the bot, and the next round would
+			// have been told to explain all nine before doing anything else.
+			var difficulty = candidates.LastOrDefault()?.Difficulty;
+			var comparable = string.IsNullOrEmpty(difficulty)
+				? candidates
+				: TrailingAtDifficulty(candidates, difficulty);
+
+			var excluded = candidates.Count - comparable.Count;
+			var runs = comparable.TakeLast(Math.Max(2, window)).ToList();
 
 			var report = new TrendReport
 			{
@@ -311,9 +343,41 @@ namespace AutoCnC.Evidence
 				GeneratedUtc = DateTime.UtcNow,
 				RunsCompared = runs.Count,
 				LatestRunId = runs.Count > 0 ? runs[^1].RunId : null,
-				LatestRevision = runs.Count > 0 ? runs[^1].SourceRevision : null
+				LatestRevision = runs.Count > 0 ? runs[^1].SourceRevision : null,
+				Difficulty = difficulty
 			};
 
+			if (excluded > 0)
+			{
+				var previous = candidates[^(comparable.Count + 1)].Difficulty;
+				report.DifficultyChange =
+					$"Difficulty changed from {previous} to {difficulty}. " +
+					$"{excluded} earlier run(s) are excluded: a different difficulty is a different " +
+					"opponent personality and handicap, so nothing across that line is comparable. " +
+					"A fitness drop here is the ladder, not the bot.";
+			}
+
+			return Populate(report, runs, history);
+		}
+
+		/// <summary>The most recent unbroken stretch of runs played at one difficulty.</summary>
+		static List<RunHistoryEntry> TrailingAtDifficulty(List<RunHistoryEntry> runs, string difficulty)
+		{
+			var matched = new List<RunHistoryEntry>();
+			for (var i = runs.Count - 1; i >= 0; i--)
+			{
+				if (!string.Equals(runs[i].Difficulty, difficulty, StringComparison.OrdinalIgnoreCase))
+					break;
+
+				matched.Add(runs[i]);
+			}
+
+			matched.Reverse();
+			return matched;
+		}
+
+		static TrendReport Populate(TrendReport report, List<RunHistoryEntry> runs, RunHistory history)
+		{
 			if (runs.Count >= 2)
 				foreach (var (name, higherIsBetter) in Tracked)
 				{
@@ -409,7 +473,16 @@ namespace AutoCnC.Evidence
 				if (index < 0 || index + 1 >= all.Count)
 					continue;
 
-				var delta = all[index + 1].Fitness - run.Fitness;
+				var next = all[index + 1];
+
+				// A delta that straddles a difficulty change measures the ladder, not the prompt.
+				// The round after a step up faces a different opponent personality and handicap,
+				// so its lower fitness says nothing about the template that steered the round
+				// before it.
+				if (!string.Equals(run.Difficulty, next.Difficulty, StringComparison.OrdinalIgnoreCase))
+					continue;
+
+				var delta = next.Fitness - run.Fitness;
 
 				if (!effects.TryGetValue(run.PromptId, out var effect))
 				{
@@ -546,11 +619,18 @@ namespace AutoCnC.Evidence
 		public static string Render(TrendReport report)
 		{
 			if (report.RunsCompared < 2)
-				return "Not enough history yet to show a trend.";
+				return report.DifficultyChange != null
+					? report.DifficultyChange + "\nThere is not yet enough history at this " +
+						"difficulty to show a trend. Treat this fight as the new baseline."
+					: "Not enough history yet to show a trend.";
 
 			var text = new StringBuilder();
 			text.Append(CultureInfo.InvariantCulture,
-				$"Trend across the last {report.RunsCompared} runs of {report.Bot}:\n");
+				$"Trend across the last {report.RunsCompared} runs of {report.Bot}" +
+				$"{(report.Difficulty != null ? " at difficulty " + report.Difficulty : "")}:\n");
+
+			if (report.DifficultyChange != null)
+				text.Append(report.DifficultyChange).Append('\n');
 
 			foreach (var metric in report.Metrics)
 				text.Append(CultureInfo.InvariantCulture,

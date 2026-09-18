@@ -214,6 +214,76 @@ namespace AutoCnC.Evidence.Tests
 			Assert.That(effects[0].RoundsMeasured, Is.EqualTo(1), "r4 has no successor");
 		}
 
+		/// <summary>
+		/// Raising the difficulty must not read as the bot regressing.
+		/// </summary>
+		/// <remarks>
+		/// Difficulty is not a dial on one opponent: it selects a different bot personality and a
+		/// different handicap together. The first time this ladder was climbed for real, an
+		/// unsegmented trend reported nine simultaneous regressions — economy, exchange, army
+		/// value, buildings destroyed, exploration — every one of them the new opponent, and the
+		/// next round would have been told to explain all nine before doing anything else.
+		/// </remarks>
+		[Test]
+		public void RaisingTheDifficultyResetsTheComparisonRatherThanReportingARegression()
+		{
+			var history = new RunHistory { Bot = "TestBot" };
+			foreach (var (id, day, fitness) in new[]
+			{
+				("easy-1", 0, 0.80), ("easy-2", 1, 0.85), ("easy-3", 2, 0.90)
+			})
+				RunIndex.Record(history, "TestBot", AtDifficulty(id, day, fitness, "Normal"));
+
+			// Same bot, harder opponent: fitness halves for reasons the bot did not cause.
+			RunIndex.Record(history, "TestBot", AtDifficulty("hard-1", 3, 0.42, "Hard"));
+			RunIndex.Record(history, "TestBot", AtDifficulty("hard-2", 4, 0.46, "Hard"));
+
+			var trend = RunIndex.Trend(history);
+
+			Assert.That(trend.Difficulty, Is.EqualTo("Hard"));
+			Assert.That(trend.RunsCompared, Is.EqualTo(2), "only the runs at the current difficulty");
+			Assert.That(trend.DifficultyChange, Does.Contain("Normal").And.Contain("Hard"));
+
+			var fitnessMetric = trend.Metrics.Single(m => m.Name == "fitness");
+			Assert.That(fitnessMetric.Recent, Is.EqualTo(new[] { 0.42, 0.46 }));
+			Assert.That(fitnessMetric.Regression, Is.False, "0.42 -> 0.46 is an improvement at this rung");
+			Assert.That(trend.Regressions, Is.Empty);
+		}
+
+		/// <summary>A prompt is not blamed for a fitness drop caused by a harder opponent.</summary>
+		[Test]
+		public void PromptEffectIgnoresDeltasThatStraddleADifficultyChange()
+		{
+			var history = new RunHistory { Bot = "TestBot" };
+
+			var lastEasy = AtDifficulty("easy-last", 0, 0.90, "Normal");
+			lastEasy.PromptId = "steady";
+			RunIndex.Record(history, "TestBot", lastEasy);
+
+			var firstHard = AtDifficulty("hard-1", 1, 0.40, "Hard");
+			firstHard.PromptId = "steady";
+			RunIndex.Record(history, "TestBot", firstHard);
+
+			var secondHard = AtDifficulty("hard-2", 2, 0.50, "Hard");
+			secondHard.PromptId = "steady";
+			RunIndex.Record(history, "TestBot", secondHard);
+
+			var effect = RunIndex.PromptEffects(history).Single(e => e.PromptId == "steady");
+
+			// The -0.50 across the ladder step is discarded; only +0.10 within Hard counts.
+			Assert.That(effect.RoundsMeasured, Is.EqualTo(1));
+			Assert.That(effect.MeanFitnessDelta, Is.EqualTo(0.1).Within(0.0001));
+		}
+
+		static RunHistoryEntry AtDifficulty(string id, int days, double fitness, string difficulty)
+		{
+			var entry = Entry(id, days, 40, 100, "candidate", "Lost");
+			entry.Difficulty = difficulty;
+			entry.Fitness = fitness;
+			entry.Headline["fitness"] = fitness;
+			return entry;
+		}
+
 		static RunHistoryEntry Prompted(string id, int days, double fitness, string promptId)
 		{
 			var entry = Entry(id, days, 40, 100, "candidate", "Lost");

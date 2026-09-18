@@ -128,6 +128,19 @@ so a control loss never reads as the candidate regressing. The comparison is sco
 aggregating every run that ever used the name folds a previous revision's candidates and a stale
 control into the current win count, which is the exact confounding a control arm exists to remove.
 
+The trend is also scoped to one **difficulty**. Difficulty is not a dial on a single opponent: it
+selects a different bot personality and a different handicap together — in this mod Normal is
+`cabal` on a 20% handicap and Hard is `hal9001` on none — so a fight above the change and one below
+it are different experiments. The first time the ladder was climbed for real, an unsegmented trend
+reported nine simultaneous regressions (economy, exchange, army value, buildings destroyed,
+exploration), every one of them the new opponent rather than the bot. Runs before the change are
+excluded and the report says so, and prompt attribution discards any fitness delta that straddles
+the boundary for the same reason.
+
+A fitness score is therefore only comparable within a difficulty. Nothing here rescales it to make
+rungs comparable: a multiplier chosen to equate Normal with Hard would be invented, and an invented
+number that looks like a measurement is worse than an honest gap.
+
 **History is for the improvement agent, between matches.** It is never readable by a running bot,
 never compiled into one, and must never justify a map- or opponent-specific constant in strategy
 code. `BotSourceAudit` is a cheap mechanical smell test for exactly that failure, and is advisory

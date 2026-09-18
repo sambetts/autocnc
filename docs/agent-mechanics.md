@@ -128,6 +128,12 @@ improved, which is the difference between partial progress and noise. Each compo
 is the value that scores 1.0, and those references are fixed constants — a score normalised
 against its own match would rate every match average and could never show a trend.
 
+**A fitness score is only comparable within one difficulty.** Difficulty selects a different
+opponent personality and handicap together, so the same bot scores lower against a harder one
+without having got worse. The trend therefore compares only runs at the current difficulty and
+says so when the ladder moves; nothing rescales a score between rungs, because a multiplier
+invented to equate them would look like a measurement while being a guess.
+
 ### Your prompt is measured too
 
 The template you write for the next round is no longer unexamined. Each run records which prompt

@@ -112,6 +112,7 @@ namespace AutoCnC.Evidence
 				{
 					"summarise" or "summarize" => Summarise(args),
 					"trend" => Trend(args),
+					"prompts" => Prompts(args),
 					"audit-bot" => Audit(args),
 					"--help" or "-h" or "help" => Usage(),
 					_ => Usage($"Unknown command '{args[0]}'.")
@@ -184,6 +185,79 @@ namespace AutoCnC.Evidence
 			return 0;
 		}
 
+		static int Prompts(string[] args)
+		{
+			if (args.Length < 2)
+				return Usage("prompts needs a history file.");
+
+			var options = Options(args);
+			var history = RunIndex.Read(args[1]);
+			var effects = RunIndex.PromptEffects(history);
+
+			if (effects.Count == 0)
+			{
+				Console.WriteLine("No run in this history recorded which prompt steered it.");
+				return 0;
+			}
+
+			// Where the text of each template lives. A prompt is identified by the structure of
+			// its learned half, so the first run that used one is where to read it; the launcher's
+			// archive holds the template on its own, without the fight's values inlined.
+			var firstUse = new Dictionary<string, RunHistoryEntry>(StringComparer.Ordinal);
+			foreach (var run in history.Runs.OrderBy(r => r.CompletedUtc))
+				if (!string.IsNullOrEmpty(run.PromptId))
+					firstUse.TryAdd(run.PromptId, run);
+
+			Console.WriteLine($"{effects.Count} prompt revision(s), worst effect first.");
+			Console.WriteLine("Effect is the mean fitness change from a round this prompt steered " +
+				"to the round after it.");
+			Console.WriteLine();
+
+			foreach (var effect in effects)
+			{
+				var run = firstUse.GetValueOrDefault(effect.PromptId);
+				Console.WriteLine($"{effect.PromptId}  {effect.Characters:N0} chars of learned prompt, " +
+					$"{effect.Headings} sections");
+				Console.WriteLine($"  effect      {effect.MeanFitnessDelta:+0.###;-0.###;0} mean, " +
+					$"{effect.MedianFitnessDelta:+0.###;-0.###;0} median over {effect.RoundsMeasured} round(s) " +
+					$"({effect.Improved} better / {effect.Worsened} worse)");
+				Console.WriteLine($"  verdict     {effect.Verdict}");
+				Console.WriteLine($"  first used  {effect.FirstSeenRunId}");
+				Console.WriteLine($"  last used   {effect.LastSeenRunId}");
+
+				if (run != null)
+					Console.WriteLine($"  rendered    {RunDirectory(args[1], run.RunId)}");
+
+				Console.WriteLine();
+			}
+
+			var archive = options.GetValueOrDefault("archive") ?? DefaultArchive();
+			if (Directory.Exists(archive))
+			{
+				Console.WriteLine($"Templates on their own, without a fight's values inlined, are in:");
+				Console.WriteLine($"  {archive}");
+				foreach (var file in Directory.EnumerateFiles(archive, "*.txt").OrderBy(f => f))
+					Console.WriteLine($"  {Path.GetFileName(file),-28} {new FileInfo(file).Length,7:N0} chars");
+
+				Console.WriteLine();
+				Console.WriteLine("Diff two of them to see what a round actually changed, for example:");
+				Console.WriteLine($"  git diff --no-index \"{archive}\\0006-baseline.txt\" \"{archive}\\0007-manual.txt\"");
+			}
+
+			return 0;
+		}
+
+		/// <summary>The rendered prompt a run was given, beside its evidence.</summary>
+		static string RunDirectory(string historyPath, string runId)
+		{
+			var root = Path.GetDirectoryName(Path.GetFullPath(historyPath));
+			return Path.Combine(root ?? "", runId, "evidence", "agent-prompt.txt");
+		}
+
+		static string DefaultArchive() =>
+			Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+				"AutoCnC", "PromptHistory");
+
 		static Dictionary<string, string> Options(string[] args)
 		{
 			var options = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -207,6 +281,10 @@ namespace AutoCnC.Evidence
 
 				  trend <historyFile> [--out <file>]
 				      Re-renders the cross-run trend from an existing index.
+
+				  prompts <historyFile> [--archive <dir>]
+				      Compares prompt revisions: what each one did to the rounds it steered,
+				      and where to read the text of each.
 
 				  audit-bot <botSourceDir>
 				      Reports map coordinates or opponent names hardcoded into strategy.

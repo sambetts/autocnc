@@ -669,8 +669,30 @@ namespace AutoCnC.Evidence
 			return text.ToString().TrimEnd('\n');
 		}
 
-		public static void WriteHistory(string path, RunHistory history) =>
-			Write(path, history);
+		public static void WriteHistory(string path, RunHistory history)
+		{
+			var full = Path.GetFullPath(path);
+			Directory.CreateDirectory(Path.GetDirectoryName(full));
+
+			// One-deep rotation, as the battle log and telemetry writers do.
+			//
+			// This index is the only durable record of a run once its evidence directory has been
+			// deleted — which the launcher's history view lets a player do at any time — so it
+			// outlives the folders it describes and must never be the single copy. Rebuilding it
+			// by scanning directories silently erases every run whose folder is gone; keeping the
+			// previous version one step behind makes that recoverable.
+			try
+			{
+				if (File.Exists(full))
+					File.Copy(full, full + ".bak", true);
+			}
+			catch (IOException)
+			{
+				// A missing backup must never stop the index itself being written.
+			}
+
+			Write(full, history);
+		}
 
 		public static void WriteTrend(string path, TrendReport report) =>
 			Write(path, report);

@@ -27,7 +27,22 @@ namespace AutoCnC.Evidence
 		/// <summary>The learned half's section headings, in order.</summary>
 		public string[] Headings { get; init; } = [];
 
+		/// <summary>
+		/// Characters of the learned half, with the injected gospel discounted.
+		/// </summary>
+		/// <remarks>
+		/// The rendered prompt is mostly gospel — twenty thousand characters of mechanics and SDK
+		/// reference inlined from version control — and reporting that total would make a lean
+		/// template look bloated and hide the thing worth watching. Since the gospel is inlined
+		/// verbatim from the copy kept beside the fight, subtracting its length leaves very nearly
+		/// the learned half, which is the part an agent actually wrote and the part that has grown
+		/// unchecked before.
+		/// </remarks>
 		public int Characters { get; init; }
+
+		/// <summary>The whole rendered prompt, gospel included.</summary>
+		public int RenderedCharacters { get; init; }
+
 		public int HeadingCount => Headings.Length;
 	}
 
@@ -65,19 +80,29 @@ namespace AutoCnC.Evidence
 				return null;
 
 			var prompt = File.ReadAllText(promptPath);
-			var gospel = File.Exists(mechanicsPath)
-				? new HashSet<string>(Headings(File.ReadAllText(mechanicsPath)), StringComparer.Ordinal)
+			var mechanics = File.Exists(mechanicsPath) ? File.ReadAllText(mechanicsPath) : null;
+
+			var gospel = mechanics != null
+				? new HashSet<string>(Headings(mechanics), StringComparer.Ordinal)
 				: [];
 
 			var headings = Headings(prompt).Where(h => !gospel.Contains(h)).ToArray();
 			if (headings.Length == 0)
 				return null;
 
+			// The gospel is inlined verbatim, so subtracting its length leaves the learned half.
+			// Clamped, because a template that never had the gospel inserted would otherwise
+			// report a negative size.
+			var learned = mechanics != null
+				? Math.Max(0, prompt.Length - mechanics.Trim().Length)
+				: prompt.Length;
+
 			return new PromptIdentity
 			{
 				Id = Hash(string.Join('\n', headings)),
 				Headings = headings,
-				Characters = prompt.Length
+				Characters = learned,
+				RenderedCharacters = prompt.Length
 			};
 		}
 

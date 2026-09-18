@@ -185,3 +185,8 @@ dotnet tools/AutoCnC.Evidence/bin/Release/net8.0/AutoCnC.Evidence.dll summarise 
 
 Safe to re-run: it only writes derived files, and recording a run the index already holds replaces
 that entry rather than duplicating it.
+
+**Do not rebuild `history.json` by scanning run directories.** It is the only durable record of a
+run once its evidence folder has been deleted, which the launcher's history view lets a player do
+at any time, so a rebuild-by-scan silently erases every run whose folder is gone. Normal operation
+only ever appends. `WriteHistory` keeps one previous version alongside as `history.json.bak`.

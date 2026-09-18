@@ -61,12 +61,17 @@ code, before you are called.
   "what did each type kill per credit" in one line each.
 - Map facts: `{mapFacts}` — dimensions, spawn cells, home-to-enemy distance, resource cells, and
   the random seed this match ran on.
+- The checks the previous round wrote, and the harness's verdict on them: `{checks}`,
+  `{checkResults}`. The rendered verdict is in the section below; read the files only if you need
+  a value the rendering does not show.
+- Cross-run trend: `{trend}`.
 
 Do not re-derive anything above from the raw records. That arithmetic is done, and doing it again
 by hand is where this loop used to spend most of its budget.
 
 The raw records remain, for the questions the derived artifacts cannot answer:
 
+- Fight manifest: `{fightManifest}`
 - Battle log (what this bot could observe): `{battleLog}`
 - Match telemetry (both sides' curves, one-second resolution): `{telemetry}`
 - Decision trace (assessments and issued orders): `{decisionTrace}`

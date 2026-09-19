@@ -577,6 +577,72 @@ namespace AutoCnC.Platform.Tests
 		}
 
 		[Test]
+		public void InactiveProductionCommitmentSurvivesHighLatencyPolicyActivation()
+		{
+			const int MaximumOrderLatency = 120;
+			const int NetFrameInterval = 3;
+			const int IssuedTick = 100;
+			var timeout = ProductionCommitmentLedger.SafeTimeoutTicks(
+				MaximumOrderLatency, NetFrameInterval);
+			var first = Candidate(
+				10,
+				100,
+				"Vehicle",
+				"mtnk",
+				600,
+				ownsReservation: false,
+				queueRevision: 7,
+				orderRevision: 20);
+			var second = Candidate(
+				20,
+				200,
+				"Infantry",
+				"e1",
+				600,
+				ownsReservation: false,
+				queueRevision: 11,
+				orderRevision: 4);
+			var ledger = new ProductionCommitmentLedger();
+
+			var issuedWithoutBudget = ProductionBudgetArbitrator.EvaluatePrioritized(
+				ProductionBudget.None,
+				currentCash: 2000,
+				[first],
+				maxOrders: 1).Single();
+			var commitment = ledger.Commit(first, IssuedTick, timeout);
+			ledger.Refresh(
+				worldTick: IssuedTick + MaximumOrderLatency * NetFrameInterval,
+				_ => new ProductionCommitmentObservation(
+					IsValid: true,
+					QueueRevision: 7,
+					HasQueueRevision: true,
+					OrderRevision: 20,
+					HasOrderRevision: true));
+
+			var activatedBudget = ProductionBudget.Reserve(1000, "Building", "save");
+			var committed = ledger.ProjectedSpend(
+				new ProductionBudgetScope(activatedBudget, UsesGroup: true));
+			var evaluatedAfterActivation = ProductionBudgetArbitrator.EvaluatePrioritized(
+				activatedBudget,
+				currentCash: 2000,
+				[second],
+				maxOrders: 1,
+				committed.OwnerCost,
+				committed.NonOwnerCost).Single();
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(issuedWithoutBudget.Outcome, Is.EqualTo(ProductionBudgetOutcome.Allowed));
+				Assert.That(commitment.ExpectedOrderRevision, Is.EqualTo(21));
+				Assert.That(ledger.Current, Has.Count.EqualTo(1));
+				Assert.That(committed.NonOwnerCost, Is.EqualTo(600));
+				Assert.That(evaluatedAfterActivation.Outcome,
+					Is.EqualTo(ProductionBudgetOutcome.BudgetSuppressed));
+				Assert.That(evaluatedAfterActivation.PostOrderCash, Is.EqualTo(800));
+			});
+		}
+
+		[Test]
 		public void InFlightProductionCommitmentExpiresWithoutARevisionSignal()
 		{
 			var budget = ProductionBudget.Reserve(1000, "Building", "save");

@@ -748,27 +748,37 @@ namespace AutoCnC.Platform.Traits
 			Order order = null;
 			ProductionBudgetCandidate? productionCandidate = null;
 
-			if (activeBudget.HasValue && decision.Action == UnitAction.Produce)
+			if (decision.Action == UnitAction.Produce)
 			{
 				var requestedProduction = decision;
-				if (!TryResolveProduction(
+				var resolvedProduction = TryResolveProduction(
 					actor,
 					controller.Context,
 					requestedProduction,
-					activeBudget.Value,
-					out decision,
-					out order,
+					activeBudget,
+					out var productionDecision,
+					out var productionOrder,
 					out var candidate,
-					out var outcome))
+					out var outcome);
+				if (activeBudget.HasValue && !resolvedProduction)
 				{
 					decisionTrace?.UnitDecisionEvaluated(GameSeconds, actor.Info.Name, actor.ActorID,
 						controller.ActiveModeName, decision, outcome);
 					return;
 				}
 
-				productionCandidate = candidate;
+				if (resolvedProduction)
+				{
+					productionCandidate = candidate;
+					if (activeBudget.HasValue)
+					{
+						decision = productionDecision;
+						order = productionOrder;
+					}
+				}
 			}
-			else
+
+			if (!activeBudget.HasValue || decision.Action != UnitAction.Produce)
 			{
 				var resolvedDecision = controller.Context.ResolveAction(decision);
 				if (!resolvedDecision.HasValue)
@@ -833,14 +843,19 @@ namespace AutoCnC.Platform.Traits
 				return;
 			}
 
-			QueueIssuedDecision(actor, controller, decision, order, activeBudget.HasValue);
+			if (QueueIssuedDecision(actor, controller, decision, order, activeBudget.HasValue) &&
+				productionCandidate.HasValue)
+				productionCommitments.Commit(
+					productionCandidate.Value,
+					world.WorldTick,
+					ProductionCommitmentTimeoutTicks);
 		}
 
 		bool TryResolveProduction(
 			Actor actor,
 			ModeContext context,
 			in UnitDecision requestedDecision,
-			in ProductionBudgetScope budgetScope,
+			ProductionBudgetScope? budgetScope,
 			out UnitDecision resolvedDecision,
 			out Order order,
 			out ProductionBudgetCandidate candidate,
@@ -911,7 +926,8 @@ namespace AutoCnC.Platform.Traits
 				canonicalQueue,
 				actorInfo.Name,
 				cost,
-				budgetScope.OwnsQueue(queue.Info.Group, queue.Info.Type),
+				budgetScope.HasValue &&
+					budgetScope.Value.OwnsQueue(queue.Info.Group, queue.Info.Type),
 				queueRevision,
 				hasQueueRevision,
 				orderRevision,

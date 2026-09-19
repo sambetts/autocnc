@@ -306,6 +306,41 @@ namespace AutoCnC.Launcher.Tests
 			}
 		}
 
+		[Test]
+		public void GenericScriptRunnerProcessAlsoUsesKillOnCloseJob()
+		{
+			var directory = TempDirectory();
+			var script = Path.Combine(directory, "generic-worker.ps1");
+			var ready = Path.Combine(directory, "ready");
+			var release = Path.Combine(directory, "release");
+			File.WriteAllText(script,
+				"param([string]$ReadyFile, [string]$ReleaseFile)\n" +
+				"Set-Content -LiteralPath $ReadyFile -Value ready\n" +
+				"while (-not (Test-Path -LiteralPath $ReleaseFile)) { Start-Sleep -Milliseconds 10 }\n");
+
+			try
+			{
+				using var finished = new ManualResetEventSlim();
+				var runner = new ScriptRunner();
+				runner.Finished += _ => finished.Set();
+				runner.Start(new ScriptJob
+				{
+					ScriptPath = script,
+					Arguments = ["-ReadyFile", ready, "-ReleaseFile", release]
+				}, directory);
+
+				Assert.That(SpinWait.SpinUntil(() => File.Exists(ready),
+					TimeSpan.FromSeconds(10)), Is.True);
+				Assert.That(runner.HasProcessJob, Is.True);
+				File.WriteAllText(release, "go");
+				Assert.That(finished.Wait(TimeSpan.FromSeconds(10)), Is.True);
+			}
+			finally
+			{
+				Directory.Delete(directory, true);
+			}
+		}
+
 		internal static (int ExitCode, System.Collections.Generic.IReadOnlyList<string> Output) Run(
 			string script, string directory, string[] arguments)
 		{

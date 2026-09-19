@@ -2995,6 +2995,7 @@ namespace AutoCnC.Launcher
 				// only honest thing to report is that you asked for it to stop.
 				RouteJobOutput(completed, "=== Stopped ===");
 				InvokeJobCompleted(completed, exitCode);
+				queue.Clear();
 				StopWatchingBattle("stopped");
 				AbortUnresolvedContinuousExperiment(
 					"The continuous operation was stopped before a promotion decision.");

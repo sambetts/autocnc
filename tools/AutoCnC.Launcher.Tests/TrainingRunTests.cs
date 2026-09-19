@@ -641,6 +641,27 @@ namespace AutoCnC.Launcher.Tests
 		}
 
 		[Test]
+		public void RestoreRejectsDirectoryWhereSnapshotRequiresAFileBeforeMutation()
+		{
+			var run = NewRun();
+			WorkspaceSnapshot.Capture(run);
+			File.Delete(Path.Combine(workspace, "Strategy.cs"));
+			Directory.CreateDirectory(Path.Combine(workspace, "Strategy.cs"));
+			File.WriteAllText(Path.Combine(workspace, "Strategy.cs", "nested.txt"),
+				"directory conflict");
+			File.WriteAllText(Path.Combine(workspace, "Strategy.custom"), "candidate");
+			var before = BotWorkspace.Fingerprint(workspace);
+
+			Assert.That(() => WorkspaceSnapshot.Restore(run),
+				Throws.TypeOf<InvalidDataException>());
+
+			Assert.That(BotWorkspace.Fingerprint(workspace), Is.EqualTo(before));
+			Assert.That(Directory.Exists(Path.Combine(workspace, "Strategy.cs")), Is.True);
+			Assert.That(File.ReadAllText(Path.Combine(workspace, "Strategy.custom")),
+				Is.EqualTo("candidate"));
+		}
+
+		[Test]
 		public void AgentPacketIsProviderNeutralAndReferencesFightEvidence()
 		{
 			var run = NewRun();

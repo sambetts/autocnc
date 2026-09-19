@@ -10,6 +10,7 @@
 
 using System;
 using System.IO;
+using System.Linq;
 using System.Text.Json;
 using AutoCnC.Evidence;
 using NUnit.Framework;
@@ -45,8 +46,10 @@ namespace AutoCnC.Launcher.Tests
 			File.WriteAllText(Path.Combine(scripts, "benchmark-bot.ps1"), "param()");
 			File.WriteAllText(Path.Combine(scripts, "benchmarks.json"),
 				"{\"default\":\"smoke\",\"sets\":[" +
-				"{\"name\":\"smoke\",\"difficulty\":\"Normal\",\"matches\":[{}]}," +
-				"{\"name\":\"hard-16-9\",\"difficulty\":\"Hard\",\"matches\":[{}]}]}");
+				"{\"name\":\"smoke\",\"difficulty\":\"Normal\",\"matches\":[" +
+					"{\"map\":\"map\",\"faction\":\"gdi\",\"botFaction\":\"nod\",\"seed\":123}]}," +
+				"{\"name\":\"hard-16-9\",\"difficulty\":\"Hard\",\"matches\":[" +
+					"{\"map\":\"map\",\"faction\":\"gdi\",\"botFaction\":\"nod\",\"seed\":123}]}]}");
 			File.WriteAllText(Path.Combine(scripts, "difficulties.json"),
 				"{\"default\":\"Normal\",\"levels\":[" +
 				"{\"name\":\"Normal\"},{\"name\":\"Hard\"}]}");
@@ -321,6 +324,51 @@ namespace AutoCnC.Launcher.Tests
 				Is.EqualTo(PromotionVerdicts.Undefined));
 			Assert.That(completion.Evaluation.CanPromote, Is.False);
 			Assert.That(completion.Evaluation.Reason, Does.Contain("instead of"));
+		}
+
+		[Test]
+		public void SelfDeclaredOneRowCannotSatisfyEightScenarioCatalog()
+		{
+			var matches = string.Join(",", Enumerable.Range(1, 8).Select(index =>
+				$"{{\"map\":\"map-{index}\",\"faction\":\"gdi\"," +
+				$"\"botFaction\":\"nod\",\"seed\":{300000 + index}}}"));
+			File.WriteAllText(Path.Combine(checkout, "scripts", "benchmarks.json"),
+				$"{{\"default\":\"hard-16-9\",\"sets\":[" +
+				$"{{\"name\":\"hard-16-9\",\"difficulty\":\"Hard\"," +
+				$"\"matches\":[{matches}]}}]}}");
+			var run = Candidate();
+			var plan = PreparedArms(run);
+			run = plan.Run;
+			WriteArmResults(run, "Won", "Lost", 0.7, 0.5);
+
+			var completion = promotion.CompleteEvaluation(run, plan, 0);
+
+			Assert.That(plan.Scenarios, Has.Count.EqualTo(8));
+			Assert.That(completion.Evaluation.Verdict,
+				Is.EqualTo(PromotionVerdicts.Undefined));
+			Assert.That(completion.Evaluation.Reason,
+				Does.Contain("requires 8"));
+		}
+
+		[Test]
+		public void ZeroSeedResultCannotMatchCatalogScenario()
+		{
+			var run = Candidate();
+			var plan = PreparedArms(run);
+			run = plan.Run;
+			WriteArmResults(run, "Won", "Lost", 0.7, 0.5);
+			var candidate = PairedBenchmarkEvaluator.ReadResult(
+				run.CandidateBenchmarkResultPath);
+			candidate.Matches[0].Seed = 0;
+			PairedBenchmarkEvaluator.WriteResult(
+				run.CandidateBenchmarkResultPath, candidate);
+
+			var completion = promotion.CompleteEvaluation(run, plan, 0);
+
+			Assert.That(completion.Evaluation.Verdict,
+				Is.EqualTo(PromotionVerdicts.Undefined));
+			Assert.That(completion.Evaluation.Reason,
+				Does.Contain("invalid or duplicate scenario"));
 		}
 
 		[Test]

@@ -217,8 +217,12 @@ namespace AutoCnC.Launcher
 			var files = PreflightRestore(run, snapshot);
 			var changes = Compare(run);
 			foreach (var added in changes.Where(change => change.Kind == "added"))
+			{
 				EnsureNoReparseComponents(snapshot.WorkspaceRoot,
 					Under(snapshot.WorkspaceRoot, added.RelativePath));
+				EnsureDestinationReplaceable(
+					Under(snapshot.WorkspaceRoot, added.RelativePath));
+			}
 
 			foreach (var added in changes.Where(c => c.Kind == "added"))
 			{
@@ -262,6 +266,7 @@ namespace AutoCnC.Launcher
 				var destination = Under(snapshot.WorkspaceRoot, entry.RelativePath);
 				EnsureNoReparseComponents(run.SnapshotDirectory, source);
 				EnsureNoReparseComponents(snapshot.WorkspaceRoot, destination);
+				EnsureDestinationReplaceable(destination);
 				if (!File.Exists(source))
 					throw new InvalidDataException(
 						$"The source snapshot file '{entry.RelativePath}' is missing.");
@@ -340,6 +345,29 @@ namespace AutoCnC.Launcher
 				if ((File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
 					throw new InvalidDataException(
 						$"Restore path '{current}' is a link or junction.");
+			}
+		}
+
+		static void EnsureDestinationReplaceable(string destination)
+		{
+			if (Directory.Exists(destination))
+				throw new InvalidDataException(
+					$"Restore destination '{destination}' is a directory, not a file.");
+			if (!File.Exists(destination))
+				return;
+			if ((File.GetAttributes(destination) & FileAttributes.ReadOnly) != 0)
+				throw new InvalidDataException(
+					$"Restore destination '{destination}' is read-only.");
+
+			try
+			{
+				using var writable = new FileStream(destination, FileMode.Open,
+					FileAccess.Write, FileShare.None);
+			}
+			catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+			{
+				throw new InvalidDataException(
+					$"Restore destination '{destination}' cannot be replaced.", ex);
 			}
 		}
 

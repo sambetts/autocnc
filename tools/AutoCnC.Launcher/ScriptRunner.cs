@@ -121,6 +121,7 @@ namespace AutoCnC.Launcher
 		public event Action<int> Finished;
 
 		public bool IsRunning => process != null;
+		internal bool HasProcessJob => processJob != null;
 		public IReadOnlyList<string> LastOutput { get; private set; } = [];
 
 		public void Start(ScriptJob job, string workingDirectory)
@@ -147,10 +148,9 @@ namespace AutoCnC.Launcher
 			if (preparedCancellationFile != null)
 				startInfo.Environment["AUTOCNC_CANCELLATION_PRECLEARED"] = "1";
 			if (preparedWorker.Ownership != null)
-			{
 				startInfo.Environment["AUTOCNC_WORKER_OWNERSHIP"] = preparedWorker.Ownership;
+			if (preparedWorker.Gate != null)
 				startInfo.Environment["AUTOCNC_WORKER_GATE"] = preparedWorker.Gate;
-			}
 
 			lock (outputLock)
 			{
@@ -197,19 +197,16 @@ namespace AutoCnC.Launcher
 
 			try
 			{
-				jobObject = preparedWorker.Ownership != null
-					? WindowsProcessJob.Create()
-					: null;
+				jobObject = WindowsProcessJob.Create();
 				processJob = jobObject;
 				if (!started.Start())
 					throw new InvalidOperationException(
 						"PowerShell did not start the worker process.");
-				jobObject?.Assign(started);
-				if (preparedWorker.Gate != null)
-				{
+				jobObject.Assign(started);
+				if (preparedWorker.Ownership != null)
 					WriteWorkerOwnership(preparedWorker.Ownership, started);
+				if (preparedWorker.Gate != null)
 					File.WriteAllText(preparedWorker.Gate, "go");
-				}
 				started.BeginOutputReadLine();
 				started.BeginErrorReadLine();
 			}
@@ -329,7 +326,13 @@ namespace AutoCnC.Launcher
 		static (string Ownership, string Gate) PrepareWorkerFiles(string path)
 		{
 			if (string.IsNullOrWhiteSpace(path))
-				return (null, null);
+			{
+				var gateDirectory = Path.Combine(Path.GetTempPath(),
+					"AutoCnC", "WorkerGates");
+				Directory.CreateDirectory(gateDirectory);
+				return (null, Path.Combine(gateDirectory,
+					Guid.NewGuid().ToString("N") + ".gate"));
+			}
 
 			var ownership = Path.GetFullPath(path);
 			var gate = ownership + ".gate";

@@ -46,8 +46,19 @@ namespace AutoCnC.Launcher
 		public string ControlAssemblyPath { get; set; }
 		public string CandidateFingerprint { get; init; }
 		public string ChampionFingerprint { get; init; }
+		public IReadOnlyList<ContinuousBenchmarkScenario> Scenarios { get; init; } = [];
 		public string CandidateAssemblySha256 { get; set; }
 		public string ControlAssemblySha256 { get; set; }
+	}
+
+	public sealed class ContinuousBenchmarkScenario
+	{
+		public int Repeat { get; init; }
+		public int Scenario { get; init; }
+		public string Map { get; init; }
+		public string Faction { get; init; }
+		public string BotFaction { get; init; }
+		public int Seed { get; init; }
 	}
 
 	public sealed class ContinuousEvaluationCompletion
@@ -105,8 +116,9 @@ namespace AutoCnC.Launcher
 			if (!run.IsEditable)
 				throw new InvalidOperationException(
 					"The continuous candidate no longer has an editable bot project.");
-			(benchmark, difficulty) = ValidateBenchmarkSelection(
-				repo, benchmark, difficulty);
+			var selection = ValidateBenchmarkSelection(repo, benchmark, difficulty);
+			benchmark = selection.Benchmark;
+			difficulty = selection.Difficulty;
 
 			var relativeProject = Path.GetRelativePath(run.Manifest.BotDirectory,
 				run.Manifest.BotProject);
@@ -175,6 +187,8 @@ namespace AutoCnC.Launcher
 				ControlBuildResultPath = controlBuildResult,
 				CandidateFingerprint = candidateFingerprint,
 				ChampionFingerprint = championFingerprint
+				,
+				Scenarios = selection.Scenarios
 			};
 		}
 
@@ -486,7 +500,14 @@ namespace AutoCnC.Launcher
 			run.InvalidateContinuousEvaluation(reason);
 		}
 
-		static (string Benchmark, string Difficulty) ValidateBenchmarkSelection(
+		sealed class BenchmarkSelection
+		{
+			public string Benchmark { get; init; }
+			public string Difficulty { get; init; }
+			public IReadOnlyList<ContinuousBenchmarkScenario> Scenarios { get; init; } = [];
+		}
+
+		static BenchmarkSelection ValidateBenchmarkSelection(
 			RepoLayout repo, string benchmark, string difficulty)
 		{
 			benchmark = string.IsNullOrWhiteSpace(benchmark)
@@ -503,18 +524,20 @@ namespace AutoCnC.Launcher
 				sets.ValueKind != JsonValueKind.Array)
 				throw new InvalidDataException("The benchmark catalogue defines no sets.");
 
-			string resolvedBenchmark = null;
+			JsonElement selectedSet = default;
+			var found = false;
 			foreach (var set in sets.EnumerateArray())
 				if (set.TryGetProperty("name", out var name) &&
 					name.ValueKind == JsonValueKind.String &&
 					string.Equals(name.GetString(), benchmark,
 						StringComparison.OrdinalIgnoreCase))
 				{
-					resolvedBenchmark = name.GetString();
+					selectedSet = set;
+					found = true;
 					break;
 				}
 
-			if (resolvedBenchmark == null)
+			if (!found)
 				throw new InvalidOperationException(
 					$"Continuous benchmark '{benchmark}' is not defined.");
 
@@ -526,7 +549,48 @@ namespace AutoCnC.Launcher
 				throw new InvalidOperationException(
 					$"Continuous difficulty '{difficulty}' is not defined.");
 
-			return (resolvedBenchmark, resolvedDifficulty);
+			if (!selectedSet.TryGetProperty("matches", out var matches) ||
+				matches.ValueKind != JsonValueKind.Array ||
+				matches.GetArrayLength() == 0)
+				throw new InvalidDataException(
+					$"Continuous benchmark '{benchmark}' defines no scenarios.");
+
+			var scenarios = new List<ContinuousBenchmarkScenario>();
+			var index = 0;
+			foreach (var match in matches.EnumerateArray())
+			{
+				index++;
+				var map = Text(match, "map");
+				var faction = Text(match, "faction");
+				var botFaction = Text(match, "botFaction");
+				var seed = match.TryGetProperty("seed", out var seedValue) &&
+					seedValue.TryGetInt32(out var parsedSeed)
+					? parsedSeed
+					: 0;
+				if (string.IsNullOrWhiteSpace(map) ||
+					string.IsNullOrWhiteSpace(faction) ||
+					string.IsNullOrWhiteSpace(botFaction) ||
+					seed == 0)
+					throw new InvalidDataException(
+						$"Continuous benchmark '{benchmark}' scenario {index} is incomplete.");
+
+				scenarios.Add(new ContinuousBenchmarkScenario
+				{
+					Repeat = 1,
+					Scenario = index,
+					Map = map,
+					Faction = faction,
+					BotFaction = botFaction,
+					Seed = seed
+				});
+			}
+
+			return new BenchmarkSelection
+			{
+				Benchmark = Text(selectedSet, "name"),
+				Difficulty = resolvedDifficulty,
+				Scenarios = scenarios
+			};
 		}
 
 		static void ValidateBenchmarkResult(ContinuousEvaluationPlan plan,
@@ -545,7 +609,50 @@ namespace AutoCnC.Launcher
 				throw new InvalidDataException(
 					$"The immutable {arm} result reported difficulty '{result.Difficulty}' " +
 					$"instead of '{plan.Difficulty}'.");
+			if (result.ExpectedMatchesPerArm != plan.Scenarios.Count)
+				throw new InvalidDataException(
+					$"The immutable {arm} result declared {result.ExpectedMatchesPerArm} match(es), " +
+					$"but benchmark '{plan.Benchmark}' requires {plan.Scenarios.Count}.");
+
+			var rows = result.Matches ?? [];
+			if (rows.Count != plan.Scenarios.Count)
+				throw new InvalidDataException(
+					$"The immutable {arm} result serialized {rows.Count} match row(s), " +
+					$"but benchmark '{plan.Benchmark}' requires {plan.Scenarios.Count}.");
+			var byScenario = new Dictionary<(int Repeat, int Scenario), BenchmarkMatchResult>();
+			foreach (var row in rows)
+			{
+				if (row == null ||
+					!string.Equals(row.Arm, "candidate",
+						StringComparison.OrdinalIgnoreCase) ||
+					row.Seed is null or 0 ||
+					!byScenario.TryAdd((row.Repeat, row.Scenario), row))
+					throw new InvalidDataException(
+						$"The immutable {arm} result contains an invalid or duplicate scenario row.");
+			}
+
+			foreach (var expected in plan.Scenarios)
+			{
+				if (!byScenario.TryGetValue((expected.Repeat, expected.Scenario),
+					out var actual) ||
+					!string.Equals(actual.Map, expected.Map,
+						StringComparison.OrdinalIgnoreCase) ||
+					!string.Equals(actual.Faction, expected.Faction,
+						StringComparison.OrdinalIgnoreCase) ||
+					!string.Equals(actual.BotFaction, expected.BotFaction,
+						StringComparison.OrdinalIgnoreCase) ||
+					actual.Seed != expected.Seed)
+					throw new InvalidDataException(
+						$"The immutable {arm} result does not match benchmark scenario " +
+						$"{expected.Repeat}:{expected.Scenario}.");
+			}
 		}
+
+		static string Text(JsonElement element, string property) =>
+			element.TryGetProperty(property, out var value) &&
+			value.ValueKind == JsonValueKind.String
+				? value.GetString()
+				: null;
 
 		static string LiveCandidateInvalidation(TrainingRun run, ContinuousEvaluationPlan plan)
 		{

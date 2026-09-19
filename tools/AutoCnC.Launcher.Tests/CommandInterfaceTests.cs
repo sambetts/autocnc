@@ -8,6 +8,7 @@ using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Text.Json;
 using System.Threading;
 using System.Windows.Forms;
@@ -921,6 +922,35 @@ namespace AutoCnC.Launcher.Tests
 			Assert.That(() => button.DrawToBitmap(bitmap, button.ClientRectangle), Throws.Nothing);
 			Assert.That(bitmap.GetPixel(8, 8).ToArgb(),
 				Is.EqualTo((enabled ? CommandTheme.Amber : CommandTheme.Surface).ToArgb()));
+		}
+
+		[Test]
+		public void StopClearsWorkQueuedByARacingSuccessCallback()
+		{
+			using var window = Window();
+			var flags = BindingFlags.Instance | BindingFlags.NonPublic;
+			var queue = (Queue<ScriptJob>)typeof(MainForm)
+				.GetField("queue", flags).GetValue(window);
+			var callbackRan = false;
+			var followup = new ScriptJob { Title = "must not run" };
+			var completed = new ScriptJob
+			{
+				Title = "finishing while stopped",
+				Completed = _ =>
+				{
+					callbackRan = true;
+					queue.Enqueue(followup);
+				}
+			};
+			typeof(MainForm).GetField("activeJob", flags).SetValue(window, completed);
+			typeof(MainForm).GetField("stopRequested", flags).SetValue(window, true);
+
+			typeof(MainForm).GetMethod("JobFinished", flags)
+				.Invoke(window, [0]);
+
+			Assert.That(callbackRan, Is.True);
+			Assert.That(queue, Is.Empty,
+				"a success callback racing Stop must not advance the pipeline");
 		}
 
 		[Test]

@@ -31,8 +31,6 @@ namespace AutoCnC.Platform.Traits
 		{
 			return decision.Action switch
 			{
-				UnitAction.RepairBuilding =>
-					new PlayerScopedActionKey(decision.Action, decision.TargetActorId, null, null),
 				UnitAction.ActivateSupportPower =>
 					new PlayerScopedActionKey(decision.Action, 0, null, decision.Power),
 				_ => null
@@ -66,15 +64,35 @@ namespace AutoCnC.Platform.Traits
 		}
 	}
 
+	internal readonly record struct RepairIntent(
+		uint PlayerActorId,
+		uint BuildingActorId,
+		ulong ExpectedRepairRevision)
+	{
+		public static RepairIntent? From(
+			uint playerActorId, in UnitDecision decision, string repairPayload)
+		{
+			if (!ActionOrderBuilder.TryDecodeRepairPayload(
+				repairPayload, out var revision))
+				return null;
+
+			return new RepairIntent(playerActorId, decision.TargetActorId, revision);
+		}
+	}
+
 	internal sealed class PendingPlayerActions
 	{
 		readonly HashSet<PlayerScopedActionKey> currentTick = [];
 		readonly HashSet<ProductionCancellationIntent> cancellations = [];
+		readonly HashSet<RepairIntent> repairs = [];
 
-		public void BeginTick(Func<ProductionCancellationIntent, bool> cancellationIsCurrent)
+		public void BeginTick(
+			Func<ProductionCancellationIntent, bool> cancellationIsCurrent,
+			Func<RepairIntent, bool> repairIsCurrent)
 		{
 			currentTick.Clear();
 			cancellations.RemoveWhere(intent => !cancellationIsCurrent(intent));
+			repairs.RemoveWhere(intent => !repairIsCurrent(intent));
 		}
 
 		public bool TryReserve(
@@ -85,6 +103,12 @@ namespace AutoCnC.Platform.Traits
 				var intent = ProductionCancellationIntent.From(
 					playerActorId, decision, cancellationPayload);
 				return intent.HasValue && cancellations.Add(intent.Value);
+			}
+
+			if (decision.Action == UnitAction.RepairBuilding)
+			{
+				var intent = RepairIntent.From(playerActorId, decision, cancellationPayload);
+				return intent.HasValue && repairs.Add(intent.Value);
 			}
 
 			var action = PlayerScopedActionKey.From(decision);
@@ -528,7 +552,9 @@ namespace AutoCnC.Platform.Traits
 				return;
 
 			pending.Clear();
-			pendingPlayerActions.BeginTick(intent => CancellationIntentIsCurrent(player, intent));
+			pendingPlayerActions.BeginTick(
+				intent => CancellationIntentIsCurrent(player, intent),
+				intent => RepairIntentIsCurrent(player, intent));
 
 			foreach (var pair in world.ActorsWithTrait<ProgrammableController>())
 			{
@@ -698,6 +724,22 @@ namespace AutoCnC.Platform.Traits
 				intent.Count) != null;
 		}
 
+		bool RepairIntentIsCurrent(Player player, RepairIntent intent)
+		{
+			if (player?.PlayerActor == null || player.PlayerActor.ActorID != intent.PlayerActorId)
+				return false;
+
+			var building = world.GetActorById(intent.BuildingActorId);
+			if (building == null || building.IsDead || !building.IsInWorld ||
+				building.Owner != player)
+				return false;
+
+			var revisions = player.PlayerActor.TraitOrDefault<IRepairStateRevisionProvider>();
+			return revisions != null &&
+				revisions.TryGetRevision(building, out var currentRevision) &&
+				currentRevision == intent.ExpectedRepairRevision;
+		}
+
 		internal static bool ShouldSuppressRepeatedIntent(UnitAction action, bool repeat, bool actorIsIdle)
 		{
 			if (!repeat)
@@ -707,11 +749,10 @@ namespace AutoCnC.Platform.Traits
 		}
 
 		internal static bool IsSingleShotAction(UnitAction action) =>
-			action is UnitAction.RepairBuilding or
-				UnitAction.ActivateSupportPower;
+			action == UnitAction.ActivateSupportPower;
 
 		internal static bool UsesPersistentIntent(UnitAction action) =>
-			action == UnitAction.CancelProduction;
+			action is UnitAction.CancelProduction or UnitAction.RepairBuilding;
 
 		void IGameOver.GameOver(World w)
 		{

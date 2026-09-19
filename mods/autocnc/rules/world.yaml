@@ -54,8 +54,8 @@
 # exposed back to bot code.
 #
 # SdkActionResolver handles synchronized player-actor requests and owns monotonic production-queue
-# revisions. SdkQueueOrderObserver advances those revisions before native production mutation
-# orders, while synced ticks detect automatic queue changes.
+# and repair-state revisions. SdkQueueOrderObserver advances queue revisions before native
+# production mutation orders, while synced ticks detect automatic queue and repair-state changes.
 #
 # HeadlessSimulation takes over the normal client world loop only when Launch.Headless is present.
 # It keeps the order/world/TickRender sequence intact, but removes wall-clock pacing and drawing.

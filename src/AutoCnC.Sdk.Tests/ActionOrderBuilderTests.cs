@@ -23,8 +23,9 @@ namespace AutoCnC.Sdk.Tests
 		[Test]
 		public void RepairRequestUsesAPlayerScopedSynchronizedOrder()
 		{
+			const ulong Revision = 0xFEDCBA9876543210;
 			var target = Target.FromPos(new WPos(1024, 2048, 0));
-			var order = ActionOrderBuilder.RequestRepairBuilding(null, target);
+			var order = ActionOrderBuilder.RequestRepairBuilding(null, target, Revision);
 
 			Assert.Multiple(() =>
 			{
@@ -34,6 +35,11 @@ namespace AutoCnC.Sdk.Tests
 				Assert.That(order.Target.Type, Is.EqualTo(TargetType.Terrain));
 				Assert.That(order.Target.CenterPosition, Is.EqualTo(target.CenterPosition));
 				Assert.That(order.SuppressVisualFeedback, Is.True);
+				Assert.That(
+					ActionOrderBuilder.TryDecodeRepairPayload(
+						order.TargetString, out var decodedRevision),
+					Is.True);
+				Assert.That(decodedRevision, Is.EqualTo(Revision));
 			});
 		}
 

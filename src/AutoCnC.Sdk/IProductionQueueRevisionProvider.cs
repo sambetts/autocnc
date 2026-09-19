@@ -9,6 +9,7 @@
  */
 #endregion
 
+using OpenRA;
 using OpenRA.Mods.Common.Traits;
 
 namespace AutoCnC.Sdk
@@ -16,5 +17,10 @@ namespace AutoCnC.Sdk
 	internal interface IProductionQueueRevisionProvider
 	{
 		bool TryGetRevision(ProductionQueue queue, out ulong revision);
+	}
+
+	internal interface IRepairStateRevisionProvider
+	{
+		bool TryGetRevision(Actor building, out ulong revision);
 	}
 }

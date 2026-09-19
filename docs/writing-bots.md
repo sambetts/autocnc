@@ -431,8 +431,10 @@ stopping it harvesting. Only return an action when you want to override what the
 `RepairBuilding` is an ensure-start action, not a repair toggle: it only emits the engine's
 player-scoped repair order for a live owned `RepairableBuilding` that is damaged and does not
 already have this player's repair request or an active repair. The synchronized resolver repeats
-that validation immediately before applying the engine order. Read `OwnedBuildingStates()` for
-health, `IsRepairable`, `RepairRequested`, and `RepairActive`.
+that validation immediately before applying the engine order. The host keeps only an in-flight
+repair intent and retires it when the synchronized repair revision changes, so a building that
+finishes repairing and is damaged again can issue the identical ensure-repair decision. Read
+`OwnedBuildingStates()` for health, `IsRepairable`, `RepairRequested`, and `RepairActive`.
 
 `CancelProduction` names one queue, one item, and an exact positive count. It emits no order when
 the queue does not contain that many matching entries, and the synchronized platform resolver
@@ -451,10 +453,10 @@ order as the engine UI; it does not pick targets or reveal anything about the ta
 order name is resolved to a concrete ready key before duplicate comparison, so multiple charged
 instances can fire on successive evaluations.
 
-Repair and support-power requests are coalesced across every controller before orders are issued.
-Cancellation coalescing additionally spans in-flight order latency. Two modes cannot toggle the
-same repair off, multiply a cancellation count, or activate the same concrete power twice in one
-tick.
+Repair and cancellation requests are coalesced across every controller for their full in-flight
+order lifetime; support-power requests are coalesced within the issuing tick. Two modes cannot
+toggle the same repair off, multiply a cancellation count, or activate the same concrete power
+twice in one tick.
 
 ### Sense → decide → act
 

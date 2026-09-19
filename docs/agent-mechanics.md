@@ -237,14 +237,16 @@ permitted way to know where anything is.
   controllers and A→B→A queue transitions from duplicating an in-flight request.
 - `RepairBuilding` starts repair only for a live owned damaged `RepairableBuilding` without an
   existing repair request or active repair. The synchronized resolver repeats that check before
-  applying OpenRA's player-scoped repair order.
+  applying OpenRA's player-scoped repair order. Its in-flight intent retires on synchronized
+  health/request/active-state revision changes, so full repair followed by new damage can issue
+  the same intent again.
 - Resolve support powers from `SupportPowerStates()` rather than faction names. Activation accepts
   either the manager key or configured order name, requires an active ready power, and targets the
   supplied cell without revealing anything about it. Order names resolve to concrete ready keys
   before duplicate comparison, allowing multiple charged instances to fire successively.
-- The host coalesces repair and support-power requests globally for the local player before
-  issuing orders, and keeps cancellation intents globally pending across order latency, rather
-  than relying on each controller's duplicate history.
+- The host keeps repair and cancellation intents globally pending across order latency, while
+  support-power requests are coalesced for the issuing tick, rather than relying on each
+  controller's duplicate history.
 - For deployment, check both `ctx.CanDeploy` and `ctx.DeploysIntoBuilding`; otherwise a
   construction yard can repeatedly pack and unpack.
 - Do not retain lists returned by sensing methods; their buffers are reused.

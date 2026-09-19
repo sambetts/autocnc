@@ -9,17 +9,18 @@
  */
 #endregion
 
+using System.Runtime.CompilerServices;
 using AutoCnC.Core;
 using AutoCnC.Platform.Traits;
 using AutoCnC.Sdk;
 using NUnit.Framework;
+using OpenRA;
 
 namespace AutoCnC.Platform.Tests
 {
 	[TestFixture]
 	public sealed class ModeExecutorActionTests
 	{
-		[TestCase(UnitAction.RepairBuilding)]
 		[TestCase(UnitAction.ActivateSupportPower)]
 		public void PlayerScopedActionsAreNotRepeatedWhenTheControllerActorIsIdle(UnitAction action)
 		{
@@ -39,6 +40,8 @@ namespace AutoCnC.Platform.Tests
 			{
 				Assert.That(ModeExecutor.IsSingleShotAction(UnitAction.CancelProduction), Is.False);
 				Assert.That(ModeExecutor.UsesPersistentIntent(UnitAction.CancelProduction), Is.True);
+				Assert.That(ModeExecutor.IsSingleShotAction(UnitAction.RepairBuilding), Is.False);
+				Assert.That(ModeExecutor.UsesPersistentIntent(UnitAction.RepairBuilding), Is.True);
 			});
 		}
 
@@ -65,10 +68,6 @@ namespace AutoCnC.Platform.Tests
 		[Test]
 		public void PlayerScopedActionsCoalesceAcrossControllers()
 		{
-			var repair = PlayerScopedActionKey.From(
-				UnitDecision.RepairBuilding(12, "repair")).Value;
-			var sameRepair = PlayerScopedActionKey.From(
-				UnitDecision.RepairBuilding(12, "other reason")).Value;
 			var firstPower = PlayerScopedActionKey.From(
 				UnitDecision.ActivateSupportPower("AirstrikeOrder_3", 4, 5, "fire")).Value;
 			var samePowerElsewhere = PlayerScopedActionKey.From(
@@ -78,7 +77,6 @@ namespace AutoCnC.Platform.Tests
 
 			Assert.Multiple(() =>
 			{
-				Assert.That(repair, Is.EqualTo(sameRepair));
 				Assert.That(firstPower, Is.EqualTo(samePowerElsewhere),
 					"one concrete power key can only be activated once per tick");
 				Assert.That(firstPower, Is.Not.EqualTo(otherPower),
@@ -99,10 +97,14 @@ namespace AutoCnC.Platform.Tests
 			var firstPayload = ActionOrderBuilder.EncodeCancellationPayload(
 				"mtnk", revision.Revision);
 
-			pending.BeginTick(intent => intent.ExpectedQueueRevision == revision.Revision);
+			pending.BeginTick(
+				intent => intent.ExpectedQueueRevision == revision.Revision,
+				_ => true);
 			var firstControllerReserved = pending.TryReserve(7, first, firstPayload);
 
-			pending.BeginTick(intent => intent.ExpectedQueueRevision == revision.Revision);
+			pending.BeginTick(
+				intent => intent.ExpectedQueueRevision == revision.Revision,
+				_ => true);
 			var staggeredControllerReserved = pending.TryReserve(7, first, firstPayload);
 
 			revision.Advance(
@@ -110,7 +112,9 @@ namespace AutoCnC.Platform.Tests
 				[queueItem]);
 			var secondPayload = ActionOrderBuilder.EncodeCancellationPayload(
 				"mtnk", revision.Revision);
-			pending.BeginTick(intent => intent.ExpectedQueueRevision == revision.Revision);
+			pending.BeginTick(
+				intent => intent.ExpectedQueueRevision == revision.Revision,
+				_ => true);
 			var changedQueueReserved = pending.TryReserve(7, first, secondPayload);
 
 			Assert.Multiple(() =>
@@ -132,7 +136,7 @@ namespace AutoCnC.Platform.Tests
 			var revisionTwo = ActionOrderBuilder.EncodeCancellationPayload("mtnk", 2);
 			var otherItem = ActionOrderBuilder.EncodeCancellationPayload("e1", 1);
 
-			pending.BeginTick(_ => true);
+			pending.BeginTick(_ => true, _ => true);
 
 			Assert.Multiple(() =>
 			{
@@ -147,6 +151,44 @@ namespace AutoCnC.Platform.Tests
 					7, Cancellation(20, "mtnk", 1), revisionOne), Is.True);
 				Assert.That(pending.TryReserve(
 					7, Cancellation(20, "mtnk", 2), revisionTwo), Is.True);
+			});
+		}
+
+		[Test]
+		public void RepairIntentClearsAfterFastCompletionAndRedamage()
+		{
+			var revision = new RepairStateRevision(new RepairStateSnapshot(
+				HitPoints: 50,
+				MaxHitPoints: 100,
+				IsRepairable: true,
+				RepairRequested: false,
+				RepairActive: false));
+			var pending = new PendingPlayerActions();
+			var decision = UnitDecision.RepairBuilding(20, "repair");
+			var firstPayload = ActionOrderBuilder.EncodeRepairPayload(revision.Revision);
+
+			pending.BeginTick(
+				_ => true,
+				intent => intent.ExpectedRepairRevision == revision.Revision);
+			var firstReserved = pending.TryReserve(7, decision, firstPayload);
+			var duplicateReserved = pending.TryReserve(7, decision, firstPayload);
+
+			revision.Advance(new RepairStateSnapshot(60, 100, true, true, false));
+			revision.Observe(new RepairStateSnapshot(100, 100, true, false, false));
+			revision.Observe(new RepairStateSnapshot(50, 100, true, false, false));
+
+			var redamagedPayload = ActionOrderBuilder.EncodeRepairPayload(revision.Revision);
+			pending.BeginTick(
+				_ => true,
+				intent => intent.ExpectedRepairRevision == revision.Revision);
+			var redamagedReserved = pending.TryReserve(7, decision, redamagedPayload);
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(firstReserved, Is.True);
+				Assert.That(duplicateReserved, Is.False);
+				Assert.That(revision.Revision, Is.EqualTo(4));
+				Assert.That(redamagedReserved, Is.True);
 			});
 		}
 
@@ -201,6 +243,43 @@ namespace AutoCnC.Platform.Tests
 				Assert.That(LegacyQueueFingerprint(collision), Is.EqualTo(0x8D6B64F6u));
 				Assert.That(revision, Is.EqualTo(2));
 			});
+		}
+
+		[Test]
+		public void QueueMutationObserverRejectsMalformedActorsBeforePlayerAccess()
+		{
+			var ownerless = (Actor)RuntimeHelpers.GetUninitializedObject(typeof(Actor));
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(SdkQueueOrderObserver.Observe(null), Is.False);
+				Assert.That(SdkQueueOrderObserver.Observe(ownerless), Is.False);
+				Assert.That(
+					SdkQueueOrderObserver.IsEligibleMutationTarget(
+						hasOwner: false, hasPlayerActor: false, hasProductionQueue: false),
+					Is.False);
+				Assert.That(
+					SdkQueueOrderObserver.IsEligibleMutationTarget(
+						hasOwner: true, hasPlayerActor: false, hasProductionQueue: true),
+					Is.False);
+				Assert.That(
+					SdkQueueOrderObserver.IsEligibleMutationTarget(
+						hasOwner: true, hasPlayerActor: true, hasProductionQueue: false),
+					Is.False);
+			});
+		}
+
+		[TestCase("PlaceBuilding")]
+		[TestCase("LineBuild")]
+		[TestCase("PlacePlug")]
+		public void DeferredPlacementMutationOrdersTolerateMalformedTargets(string orderString)
+		{
+			var observer = new SdkQueueOrderObserver();
+			var order = new Order(orderString, null, false) { ExtraData = uint.MaxValue };
+
+			Assert.That(
+				observer.OrderValidation(null, null, 0, order),
+				Is.True);
 		}
 
 		[Test]

@@ -809,6 +809,9 @@ namespace AutoCnC.Sdk
 		IProductionQueueRevisionProvider GetProductionQueueRevisionProvider() =>
 			self.Owner.PlayerActor.TraitOrDefault<IProductionQueueRevisionProvider>();
 
+		IRepairStateRevisionProvider GetRepairStateRevisionProvider() =>
+			self.Owner.PlayerActor.TraitOrDefault<IRepairStateRevisionProvider>();
+
 		/// <summary>How many of each owned building type this player has, including queued.</summary>
 		public IReadOnlyDictionary<string, int> OwnedBuildingCounts() => CountOwned<Building>("Building");
 
@@ -997,8 +1000,12 @@ namespace AutoCnC.Sdk
 						!ActionOrderBuilder.CanStartRepair(building))
 						return null;
 
+					var revisions = GetRepairStateRevisionProvider();
+					if (revisions == null || !revisions.TryGetRevision(target, out var repairRevision))
+						return null;
+
 					return ActionOrderBuilder.RequestRepairBuilding(
-						self.Owner.PlayerActor, Target.FromActor(target));
+						self.Owner.PlayerActor, Target.FromActor(target), repairRevision);
 				}
 
 				case UnitAction.Deploy:

@@ -24,13 +24,19 @@ namespace AutoCnC.Sdk
 	internal static class ActionOrderBuilder
 	{
 		const byte CancellationPayloadVersion = 1;
+		const byte RepairPayloadVersion = 1;
 		const int MaximumCancellationPayloadLength = 1024 * 1024;
 
 		public const string EnsureRepairOrder = "AutoCnCEnsureRepair";
 		public const string ExactCancelProductionOrder = "AutoCnCExactCancelProduction";
 
-		public static Order RequestRepairBuilding(Actor playerActor, in Target target) =>
-			new(EnsureRepairOrder, playerActor, target, false) { SuppressVisualFeedback = true };
+		public static Order RequestRepairBuilding(
+			Actor playerActor, in Target target, ulong expectedRepairRevision) =>
+			new(EnsureRepairOrder, playerActor, target, false)
+			{
+				TargetString = EncodeRepairPayload(expectedRepairRevision),
+				SuppressVisualFeedback = true
+			};
 
 		public static Order RepairBuilding(Actor playerActor, in Target target) =>
 			new("RepairBuilding", playerActor, target, false);
@@ -52,6 +58,49 @@ namespace AutoCnC.Sdk
 
 		public static Order CancelProduction(Actor queueActor, string item, int count) =>
 			Order.CancelProduction(queueActor, item, count);
+
+		public static string EncodeRepairPayload(ulong expectedRepairRevision)
+		{
+			using var stream = new MemoryStream();
+			using (var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true))
+			{
+				writer.Write(RepairPayloadVersion);
+				writer.Write(expectedRepairRevision);
+			}
+
+			return Convert.ToBase64String(stream.ToArray());
+		}
+
+		public static bool TryDecodeRepairPayload(
+			string payload, out ulong expectedRepairRevision)
+		{
+			expectedRepairRevision = 0;
+			if (string.IsNullOrEmpty(payload) || payload.Length > MaximumCancellationPayloadLength)
+				return false;
+
+			try
+			{
+				using var stream = new MemoryStream(Convert.FromBase64String(payload), writable: false);
+				using var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: true);
+				if (reader.ReadByte() != RepairPayloadVersion)
+					return false;
+
+				expectedRepairRevision = reader.ReadUInt64();
+				return expectedRepairRevision != 0 && stream.Position == stream.Length;
+			}
+			catch (FormatException)
+			{
+				return false;
+			}
+			catch (EndOfStreamException)
+			{
+				return false;
+			}
+			catch (IOException)
+			{
+				return false;
+			}
+		}
 
 		public static string EncodeCancellationPayload(
 			string item, ulong expectedQueueRevision)

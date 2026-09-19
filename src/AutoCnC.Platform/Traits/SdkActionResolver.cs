@@ -67,6 +67,42 @@ namespace AutoCnC.Platform.Traits
 		}
 	}
 
+	internal readonly record struct RepairStateSnapshot(
+		int HitPoints,
+		int MaxHitPoints,
+		bool IsRepairable,
+		bool RepairRequested,
+		bool RepairActive);
+
+	internal sealed class RepairStateRevision
+	{
+		RepairStateSnapshot snapshot;
+
+		public ulong Revision { get; private set; } = 1;
+
+		public RepairStateRevision(in RepairStateSnapshot snapshot)
+		{
+			this.snapshot = snapshot;
+		}
+
+		public ulong Observe(in RepairStateSnapshot current)
+		{
+			if (current != snapshot)
+				Advance(current);
+
+			return Revision;
+		}
+
+		public void Advance(in RepairStateSnapshot current)
+		{
+			Revision++;
+			if (Revision == 0)
+				Revision = 1;
+
+			snapshot = current;
+		}
+	}
+
 	[TraitLocation(SystemActors.Player)]
 	[Desc("Resolves synchronized player-scoped orders emitted by the AutoC&C SDK.")]
 	public sealed class SdkActionResolverInfo : TraitInfo
@@ -75,11 +111,12 @@ namespace AutoCnC.Platform.Traits
 	}
 
 	sealed class SdkActionResolver : IResolveOrder, ITick, INotifyCreated, ISync,
-		IProductionQueueRevisionProvider
+		IProductionQueueRevisionProvider, IRepairStateRevisionProvider
 	{
 		readonly Actor self;
 		readonly World world;
 		readonly Dictionary<ProductionQueue, ProductionQueueRevisionState<ProductionItem>> queues = [];
+		readonly Dictionary<Actor, RepairStateRevision> repairs = [];
 
 		[VerifySync]
 		public int RevisionsHash
@@ -101,6 +138,13 @@ namespace AutoCnC.Platform.Traits
 								hash = hash * 31 + (int)state.Revision;
 								hash = hash * 31 + (int)(state.Revision >> 32);
 							}
+					}
+
+					foreach (var pair in repairs.OrderBy(pair => pair.Key.ActorID))
+					{
+						hash = hash * 31 + (int)pair.Key.ActorID;
+						hash = hash * 31 + (int)pair.Value.Revision;
+						hash = hash * 31 + (int)(pair.Value.Revision >> 32);
 					}
 
 					return hash;
@@ -127,12 +171,17 @@ namespace AutoCnC.Platform.Traits
 
 			foreach (var queue in actor.TraitsImplementing<ProductionQueue>())
 				EnsureQueue(queue);
+
+			if (actor.TraitOrDefault<RepairableBuilding>() != null)
+				EnsureRepair(actor);
 		}
 
 		void ActorRemoved(Actor actor)
 		{
 			foreach (var queue in actor.TraitsImplementing<ProductionQueue>())
 				queues.Remove(queue);
+
+			repairs.Remove(actor);
 		}
 
 		internal void RefreshQueues()
@@ -146,6 +195,15 @@ namespace AutoCnC.Platform.Traits
 			foreach (var pair in world.ActorsWithTrait<ProductionQueue>())
 				if (pair.Actor.Owner == self.Owner && !pair.Actor.IsDead && pair.Actor.IsInWorld)
 					RefreshQueue(pair.Trait);
+
+			foreach (var actor in repairs.Keys
+				.Where(actor => actor.Owner != self.Owner || actor.IsDead || !actor.IsInWorld)
+				.ToArray())
+				repairs.Remove(actor);
+
+			foreach (var pair in world.ActorsWithTrait<RepairableBuilding>())
+				if (pair.Actor.Owner == self.Owner && !pair.Actor.IsDead && pair.Actor.IsInWorld)
+					RefreshRepair(pair.Actor);
 		}
 
 		ProductionQueueRevisionState<ProductionItem> EnsureQueue(ProductionQueue queue)
@@ -184,10 +242,58 @@ namespace AutoCnC.Platform.Traits
 			return (entries, items);
 		}
 
+		RepairStateRevision EnsureRepair(Actor building)
+		{
+			if (repairs.TryGetValue(building, out var state))
+				return state;
+
+			state = new RepairStateRevision(RepairSnapshot(building));
+			repairs.Add(building, state);
+			return state;
+		}
+
+		ulong RefreshRepair(Actor building)
+		{
+			var state = EnsureRepair(building);
+			return state.Observe(RepairSnapshot(building));
+		}
+
+		void AdvanceRepair(Actor building)
+		{
+			var state = EnsureRepair(building);
+			state.Advance(RepairSnapshot(building));
+		}
+
+		RepairStateSnapshot RepairSnapshot(Actor building)
+		{
+			var health = building.TraitOrDefault<IHealth>();
+			var repairable = building.TraitOrDefault<RepairableBuilding>();
+			var isRepairable = repairable != null && !repairable.IsTraitDisabled;
+			return new RepairStateSnapshot(
+				HitPoints: health?.HP ?? 0,
+				MaxHitPoints: health?.MaxHP ?? 0,
+				IsRepairable: isRepairable,
+				RepairRequested: isRepairable && repairable.Repairers.Contains(self.Owner),
+				RepairActive: isRepairable && repairable.RepairActive);
+		}
+
 		bool IProductionQueueRevisionProvider.TryGetRevision(
 			ProductionQueue queue, out ulong revision)
 		{
 			if (queue != null && queues.TryGetValue(queue, out var state))
+			{
+				revision = state.Revision;
+				return true;
+			}
+
+			revision = 0;
+			return false;
+		}
+
+		bool IRepairStateRevisionProvider.TryGetRevision(
+			Actor building, out ulong revision)
+		{
+			if (building != null && repairs.TryGetValue(building, out var state))
 			{
 				revision = state.Revision;
 				return true;
@@ -225,7 +331,9 @@ namespace AutoCnC.Platform.Traits
 
 		static void ResolveRepairBuilding(Actor playerActor, Order order)
 		{
-			if (order.Target.Type != TargetType.Actor)
+			if (order.Target.Type != TargetType.Actor ||
+				!ActionOrderBuilder.TryDecodeRepairPayload(
+					order.TargetString, out var expectedRevision))
 				return;
 
 			var building = order.Target.Actor;
@@ -233,15 +341,19 @@ namespace AutoCnC.Platform.Traits
 				!building.Info.HasTraitInfo<BuildingInfo>())
 				return;
 
-			var health = building.TraitOrDefault<IHealth>();
-			var repairable = building.TraitOrDefault<RepairableBuilding>();
-			if (health == null || health.MaxHP <= 0 || health.HP >= health.MaxHP ||
-				repairable == null || repairable.IsTraitDisabled ||
-				repairable.RepairActive || repairable.Repairers.Contains(playerActor.Owner))
+			var resolver = playerActor.Trait<SdkActionResolver>();
+			if (resolver.RefreshRepair(building) != expectedRevision)
 				return;
 
-			playerActor.ResolveOrder(ActionOrderBuilder.RepairBuilding(
-				playerActor, Target.FromActor(building)));
+			var health = building.TraitOrDefault<IHealth>();
+			var repairable = building.TraitOrDefault<RepairableBuilding>();
+			if (health != null && health.MaxHP > 0 && health.HP < health.MaxHP &&
+				repairable != null && !repairable.IsTraitDisabled &&
+				!repairable.RepairActive && !repairable.Repairers.Contains(playerActor.Owner))
+				playerActor.ResolveOrder(ActionOrderBuilder.RepairBuilding(
+					playerActor, Target.FromActor(building)));
+
+			resolver.AdvanceRepair(building);
 		}
 
 		static void ResolveCancelProduction(Actor playerActor, Order order)
@@ -325,18 +437,43 @@ namespace AutoCnC.Platform.Traits
 					break;
 
 				case "PlaceBuilding":
-					Observe(world.GetActorById(order.ExtraData));
+				case "LineBuild":
+				case "PlacePlug":
+					Observe(world?.GetActorById(order.ExtraData));
 					break;
 			}
 
 			return true;
 		}
 
-		static void Observe(Actor queueActor)
+		internal static bool Observe(Actor queueActor)
 		{
-			queueActor?.Owner.PlayerActor
-				.TraitOrDefault<SdkActionResolver>()
-				?.ObservePotentialMutation(queueActor);
+			if (queueActor == null)
+				return false;
+
+			var owner = queueActor.Owner;
+			if (owner == null)
+				return false;
+
+			var playerActor = owner.PlayerActor;
+			if (playerActor == null)
+				return false;
+
+			var hasProductionQueue = queueActor.TraitsImplementing<ProductionQueue>().Any();
+			if (!IsEligibleMutationTarget(
+				hasOwner: true, hasPlayerActor: true, hasProductionQueue))
+				return false;
+
+			var resolver = playerActor.TraitOrDefault<SdkActionResolver>();
+			if (resolver == null)
+				return false;
+
+			resolver.ObservePotentialMutation(queueActor);
+			return true;
 		}
+
+		internal static bool IsEligibleMutationTarget(
+			bool hasOwner, bool hasPlayerActor, bool hasProductionQueue) =>
+			hasOwner && hasPlayerActor && hasProductionQueue;
 	}
 }

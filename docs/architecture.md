@@ -152,6 +152,12 @@ advances revisions before production mutation orders, so A→B→A transitions c
 The full 64-bit revision and item use a base64-encoded length-prefixed payload, while the count
 travels in `Order.ExtraData`; no packed-cell field participates in the identity.
 
+Repair uses the same pattern with a per-building synchronized revision over hit points,
+repair-requested, repair-active, and repairability state. The resolver advances it when an
+ensure-repair request resolves, so a fast complete-and-redamage cycle cannot be hidden by the
+controller's previous `LastIssued` value. Deferred `PlaceBuilding`, `LineBuild`, and `PlacePlug`
+orders all invalidate their concrete production queue revision before resolution.
+
 ### Assignment precedence
 
 ```

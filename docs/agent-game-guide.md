@@ -79,7 +79,8 @@ it as authoritative context alongside the source and the evidence from one compl
 - Building repair is player-scoped: choose a damaged entry from `ctx.OwnedBuildingStates()` and
   return `UnitDecision.RepairBuilding(id, reason)`. The SDK rejects enemy, dead, non-repairable,
   full-health, already-active, and already-requested targets, including a synchronized recheck
-  before applying the engine repair order.
+  before applying the engine repair order. The in-flight intent clears on synchronized repair
+  state changes, allowing the identical decision after completion and later damage.
 - Production cancellation is exact: queue, item, and positive count must still match the live
   queue when the synchronized order resolves, or nothing is cancelled. `ctx.QueueStates()` exposes
   current item/progress/cost and counts. The request remains globally pending across local ticks
@@ -88,9 +89,8 @@ it as authoritative context alongside the source and the evidence from one compl
 - Support powers come from `ctx.SupportPowerStates()`, not faction-specific constants. Activate a
   ready active key or configured order name at a cell with `UnitDecision.ActivateSupportPower`;
   configured names resolve to concrete ready keys before duplicate suppression.
-- Player-scoped repair and support-power requests are coalesced across all controllers before the
-  tick's orders are issued; cancellation coalescing additionally persists while the order is in
-  flight.
+- Player-scoped repair and cancellation requests remain coalesced while their orders are in
+  flight; support-power requests are coalesced within the issuing tick.
 - Returning the same intent repeatedly is cheap because the host suppresses duplicate orders.
 - Target selection should be stable. Re-picking equivalent targets every evaluation makes units
   dither.

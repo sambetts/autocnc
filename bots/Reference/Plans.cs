@@ -32,7 +32,7 @@ namespace AutoCnC.Reference
 	public static class ReferencePlans
 	{
 		/// <summary>
-		/// How many riflemen to keep standing before most plans spend further on rockets.
+		/// How many riflemen to keep standing before anything is spent on rockets.
 		/// </summary>
 		/// <remarks>
 		/// A floor rather than a ratio, and deliberately small. <c>e1</c> is the cheapest body in
@@ -85,28 +85,6 @@ namespace AutoCnC.Reference
 		/// </para>
 		/// </remarks>
 		const int RifleCore = 12;
-
-		/// <summary>
-		/// The anti-air pair Defence targets while allowing rifle rebuilding behind one survivor.
-		/// An empty floor temporarily yields to a large local infantry screen until that pressure
-		/// clears or aircraft appear; see <see cref="Modes.TrainUnitsMode"/>.
-		/// </summary>
-		public const int DefenceAntiAirCore = 2;
-
-		/// <summary>
-		/// The defensive armour pair keeps one durable line unit standing without pinning the
-		/// Vehicle queue ahead of recovery and long-range fire.
-		/// </summary>
-		/// <remarks>
-		/// <see cref="Modes.TrainUnitsMode"/> releases this two-unit rung after one survivor, just
-		/// as it does for the light screen. Zero armour therefore rebuilds one faction-equivalent
-		/// tank, while one standing tank lets the queue continue to siege and income rungs.
-		/// </remarks>
-		public const int DefenceArmourCore = 2;
-
-		// Scout targets the pair. Defence keeps one strict and lets that survivor release the
-		// second slot so repeated screen losses cannot pin the Vehicle queue.
-		const int ScreenVehicleCore = 2;
 
 		/// <summary>
 		/// How many harvesters to keep working before anything is spent on the next tank.
@@ -360,15 +338,6 @@ namespace AutoCnC.Reference
 		/// </remarks>
 		public static string[] RocketBodies { get; } = ["e3"];
 
-		/// <summary>The cheap faction-portable vehicles that scout and screen the economy.</summary>
-		public static string[] ScreenVehicles { get; } = ["jeep", "bggy"];
-
-		/// <summary>The faction-portable tanks that anchor a defensive line.</summary>
-		public static string[] DefenceArmourVehicles { get; } = ["mtnk", "ltnk"];
-
-		/// <summary>Faction alternatives for the tech infantry that clears infantry off harvesters.</summary>
-		public static string[] HarvesterGuardInfantry { get; } = ["e2", "e4"];
-
 		/// <summary>
 		/// The economy every doctrine wants, whichever one is running.
 		/// </summary>
@@ -404,20 +373,13 @@ namespace AutoCnC.Reference
 		/// credits — 20.7% of everything ever spent — to man them with one harvester.
 		/// </para>
 		/// <para>
-		/// <b>The queue must also open before the second refinery spends the remaining bank.</b>
-		/// The latest fight built that refinery first, then opened the Vehicle queue after cash
-		/// was exhausted. Its replacement harvester competed with the next refinery order and
-		/// neither delivered before both free harvesters died. Reordering the harvester inside
-		/// the Vehicle plan could not help a queue that opened too late to fund it.
-		/// </para>
-		/// <para>
 		/// The arithmetic is the opening bank again, and it fits. <c>weap</c>/<c>afld</c> costs
-		/// 2,000 and needs only <c>proc</c>, so power, refinery, power, barracks, factory is
-		/// 5,000 of the 7,500 a side starts with. The replacement queue now opens while the bank
-		/// can still fund it, then the plan returns immediately to the second refinery. A bought
-		/// harvester is 1,100 against a refinery's 1,500, needs no site or additional defence,
-		/// and can be bought again the next time one dies — which is the whole difference
-		/// between an economy and a countdown.
+		/// 2,000 and needs only <c>proc</c>, so power, refinery, power, barracks, refinery,
+		/// factory is 6,500 of the 7,500 a side starts with: the factory is affordable
+		/// <b>before a single credit of income</b>, and every refinery after it is bought with
+		/// earnings rather than with the bank. A bought harvester is 1,100 against a refinery's
+		/// 1,500, it needs no site and no defending, and it can be bought again the next time
+		/// one dies — which is the whole difference between an economy and a countdown.
 		/// </para>
 		/// <para>
 		/// <b>Four is a floor, not a ceiling.</b> A plan is a finite ladder and a map is not: on
@@ -442,8 +404,8 @@ namespace AutoCnC.Reference
 			new(["proc"], 1),                  // income before anything else
 			new(["powr", "nuke"], 2),
 			new(["pyle", "hand"], 1),          // barracks
+			new(["proc"], 2),
 			new(["weap", "afld"], 1),          // ...and the means to replace a harvester that dies
-			new(["proc"], 2),                  // then the second free harvester
 			new(["proc"], 3),                  // ...and income again, while the opening bank lasts
 			new(["powr", "nuke"], 3),
 			new(["proc"], RefineryCore),       // four refineries is four harvesters, with no factory
@@ -516,11 +478,11 @@ namespace AutoCnC.Reference
 		public static IReadOnlyList<ProductionStep> OpeningTrain { get; } =
 		[
 			new("Infantry", ["e1"], 4),        // bodies now; a first barracks has nothing else
-			new("Vehicle", ScreenVehicles, 1),
+			new("Vehicle", ["jeep", "bggy"], 1),
 			new("Infantry", ["e3"], 4),        // ...and rockets, which that same barracks can build
 			new("Vehicle", ["harv"], HarvesterCore),   // then income, before anything that shoots
 			new("Infantry", ["e1"], RifleCore),
-			new(InfantryQueue, HarvesterGuardInfantry, 4),
+			new("Infantry", ["e2"], 4),
 			new("Vehicle", SiegeVehicles, SiegeCore),       // reach, ahead of the last of the income
 			new("Vehicle", ["harv"], HarvesterSaturation),  // ...and all of the income, before any of the armour
 			new("Vehicle", ["mtnk", "ltnk"], 4),
@@ -542,14 +504,13 @@ namespace AutoCnC.Reference
 
 		public static IReadOnlyList<ProductionStep> ScoutTrain { get; } =
 		[
-			new("Vehicle", ScreenVehicles, ScreenVehicleCore),
+			new("Vehicle", ["jeep", "bggy"], 2),
 			.. OpeningTrain,
 		];
 
 		/// <summary>
-		/// Turtling: alternate the first ground and air emplacements, then add depth and bodies.
-		/// Cheap infantry rather than tanks, because what is needed is guns in the base now
-		/// rather than better guns in a minute.
+		/// Turtling: static defence first, then bodies. Cheap infantry rather than tanks, because
+		/// what is needed is guns in the base now rather than better guns in a minute.
 		/// </summary>
 		/// <remarks>
 		/// Anti-air is not optional for this bot, and it is no longer only this doctrine's
@@ -567,8 +528,6 @@ namespace AutoCnC.Reference
 		public static IReadOnlyList<BuildStep> DefenceBuild { get; } =
 		[
 			.. Economy,
-			new(["gtwr", "gun"], 1),           // answer the ground rush immediately
-			new(["atwr", "sam"], 1),           // do not pin AA behind a two-tower standing floor
 			.. HomeDefence,
 			new(["gtwr", "gun"], 4),
 			new(["atwr", "sam"], 2),           // depth on the only thing that can hit aircraft
@@ -640,13 +599,10 @@ namespace AutoCnC.Reference
 
 		public static IReadOnlyList<ProductionStep> DefenceTrain { get; } =
 		[
-			new(InfantryQueue, RocketBodies, DefenceAntiAirCore), // restore AA; current infantry pressure may redirect an empty floor
-			new(InfantryQueue, RifleBodies, RifleCore),
-			new(InfantryQueue, RocketBodies, 8), // then anti-armour and anti-air depth
-			new("Vehicle", ScreenVehicles, ScreenVehicleCore), // keep one escort strict; TrainUnitsMode releases the second
+			new("Infantry", ["e1"], RifleCore),
+			new("Infantry", ["e3"], 8),        // rockets, for whatever is chewing the base
 			new("Vehicle", ["harv"], HarvesterCore),   // a siege that kills the economy wins by itself
 			new("Infantry", ["e2"], 4),
-			new("Vehicle", DefenceArmourVehicles, DefenceArmourCore), // one tank holds the line; TrainUnitsMode releases the second
 			new("Vehicle", SiegeVehicles, SiegeCore),  // 11 cells of reach, sited at home
 			new("Vehicle", ["harv"], HarvesterSaturation),
 			new("Vehicle", EndlessReach, int.MaxValue),      // reach forever: see EndlessReach

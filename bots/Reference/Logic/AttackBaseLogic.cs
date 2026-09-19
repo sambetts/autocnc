@@ -74,24 +74,9 @@ namespace AutoCnC.Reference.Logic
 			if (!state.HasObjective)
 				return Approach(state, approach, role);
 
-			// 2. In range of the objective: clear only enemies already able to fight us, then
-			//    resume the sticky objective. This is not a chase: every candidate is already
-			//    inside weapon range, and the existing role scorer gives each weapon its job.
+			// 2. In range of the objective: hit it. The objective always wins over distractions.
 			if (state.DistanceToObjectiveUnits <= state.WeaponRangeUnits)
-			{
-				var screen = SelectObjectiveScreen(state, tuning, role);
-				if (screen.HasValue)
-				{
-					if (ObjectiveIsDamaged(state))
-						return UnitDecision.Attack(
-							state.ObjectiveActorId,
-							"finishing damaged objective despite immediate screen");
-
-					return UnitDecision.Attack(screen.Value.ActorId, "screening immediate threat before objective");
-				}
-
 				return UnitDecision.Attack(state.ObjectiveActorId, "objective in range");
-			}
 
 			// 3. Opportunistic fire only — strictly targets already inside weapon range, so
 			//    taking the shot costs us no forward progress.
@@ -204,65 +189,6 @@ namespace AutoCnC.Reference.Logic
 		/// </summary>
 		public static ThreatSnapshot? SelectBlocker(in AssaultState state, in AssaultTuning tuning)
 			=> SelectBlocker(state, tuning, WeaponRole.Unknown);
-
-		/// <summary>
-		/// An attackable local defender that must be removed before structure fire can continue.
-		/// The objective itself is excluded so this branch proves a real tactical preemption.
-		/// </summary>
-		static ThreatSnapshot? SelectObjectiveScreen(
-			in AssaultState state,
-			in AssaultTuning tuning,
-			WeaponRole role)
-		{
-			var threats = state.Threats;
-			if (threats == null || threats.Count == 0)
-				return null;
-
-			ThreatSnapshot? best = null;
-			var bestScore = int.MinValue;
-
-			for (var i = 0; i < threats.Count; i++)
-			{
-				var t = threats[i];
-				if (t.ActorId == state.ObjectiveActorId || !t.IsAttackable)
-					continue;
-
-				if (t.DistanceUnits > state.WeaponRangeUnits)
-					continue;
-
-				var isDefence = t.Kind == ThreatKind.Defence;
-				if (isDefence && !tuning.ClearDefencesEnRoute)
-					continue;
-
-				if (!isDefence && !t.CanHitUs)
-					continue;
-
-				var score = ScoreBlocker(t, role);
-				if (score > bestScore || (score == bestScore && best.HasValue && t.ActorId < best.Value.ActorId))
-				{
-					bestScore = score;
-					best = t;
-				}
-			}
-
-			return best;
-		}
-
-		static bool ObjectiveIsDamaged(in AssaultState state)
-		{
-			var threats = state.Threats;
-			if (threats == null)
-				return false;
-
-			for (var i = 0; i < threats.Count; i++)
-			{
-				var threat = threats[i];
-				if (threat.ActorId == state.ObjectiveActorId)
-					return threat.HealthPercent < 100;
-			}
-
-			return false;
-		}
 
 		/// <inheritdoc cref="SelectBlocker(in AssaultState, in AssaultTuning)"/>
 		public static ThreatSnapshot? SelectBlocker(in AssaultState state, in AssaultTuning tuning, WeaponRole role)

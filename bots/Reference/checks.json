@@ -1,181 +1,97 @@
 {
   "schemaVersion": 1,
-  "authoredForRevision": "7fdbc489c04f16b7289acb4d493d2af4d119efaa",
+  "authoredForRevision": "b9559a7a38dc737db6bccea4619ebaa190f6a694-dirty:3be83c1387f781598f6742cc590eec1b88cc9b5a397c1ef8a3a279e469ee62e7",
   "checks": [
     {
-      "id": "cleared-base-assault-launch-runs",
-      "description": "The changed Defence exit launches a formed assault only after immediate base pressure has cleared.",
-      "query": "reason:launching cleared-base assault",
+      "id": "probe-march-runs",
+      "description": "AGGRESSION CHANGE, new code path 1 of 2. AttackBaseMode.Probe marches the push at our own base reflected through the centre of the map when nobody has ever seen an enemy structure, instead of giving up and asking for the Scout doctrine. Nothing else emits this literal, and it is a unit decision rather than a doctrine reason so it is definitely counted. If it reads 0 the branch never executed and every aggression check below says nothing about it.",
+      "query": "reason:probing their likely base, mirrored from ours",
       "operator": ">=",
       "value": "1"
     },
     {
-      "id": "unsafe-siege-lift-launch-retired",
-      "description": "The former Defence exit no longer launches merely because its dwell timer elapsed while the base may still be under attack.",
-      "query": "reason:siege lifted with army worth",
-      "operator": "absent",
-      "value": ""
-    },
-    {
-      "id": "first-screened-withdrawal-still-runs",
-      "description": "The first damage-confirmed harvester withdrawal still uses the threat-opposite side of the refinery.",
-      "query": "reason:harvester threat-vector withdrawal preserving refinery access, damage-confirmed harvester withdrawal",
+      "id": "attack-doctrine-finally-runs",
+      "description": "AGGRESSION CHANGE, the roll-up of the doctrine gate. The Attack doctrine ran for ZERO seconds of the last 1187-second match across 238 assessments, because readyToPush needed armyValue>=6000 AND enemyBaseFound: army cleared 6000 only from 360s to 570s and enemyBaseFound first read true at 900s, so the conjunction was never true. AttackBaseMode is the only thing that emits any 'closing on their base' literal and it only runs under Attack, so any count above 0 proves the doctrine executed. The threshold is now 2000, reached at 140s last fight.",
+      "query": "reason:closing on their base",
       "operator": ">=",
       "value": "1"
     },
     {
-      "id": "undamaged-withdrawal-stays-gated",
-      "description": "Nearby contacts alone still do not trigger a damage-confirmed withdrawal at full health.",
-      "query": "reason:damage-confirmed harvester withdrawal at 100%",
-      "operator": "absent",
-      "value": ""
-    },
-    {
-      "id": "bounded-escape-still-runs",
-      "description": "A threatened harvester retains its stable escape destination while travelling.",
-      "query": "reason:harvester bounded threat escape en route",
+      "id": "buildings-finally-destroyed",
+      "description": "AGGRESSION CHANGE, the point of attacking at all, and the only fitness component scoring a structural zero for two fights running at weight 0.15. The army never left home, so it finished no structure; this is what a push that actually arrives is for. One is a deliberately low bar because it distinguishes 'arrived and did damage' from 'never arrived', which is the question this round is asking.",
+      "query": "summary.headline.buildingsKilled",
       "operator": ">=",
       "value": "1"
     },
     {
-      "id": "active-threat-extension-still-runs",
-      "description": "A harvester reaching an escape point still extends away from a live immediate threat.",
-      "query": "reason:harvester extending escape while immediate threat remains",
+      "id": "the-army-becomes-the-scout",
+      "description": "AGGRESSION CHANGE, the side effect that pays for itself. 146 cells were explored against a fitness reference of 300, and no scout vehicle was built all match. An army that marches the full diagonal explores the corridor it walks, exploration is permanent, and resource reads are shroud-filtered so unexplored tiberium is unusable income. 220 is a bar the last fight missed by 50 percent.",
+      "query": "summary.headline.cellsExplored",
+      "operator": ">=",
+      "value": "220"
+    },
+    {
+      "id": "income-gate-runs",
+      "description": "ECONOMY CHANGE, new code path 2 of 2. IncomeFirstLogic caps every Infantry rung at 4 bodies while a vehicle factory is standing, the harvester fleet is below the ReleaseAt band of 2-per-refinery, and cash is under a harvester's 1100. Nothing else emits this literal. The factory now stands inside the opening bank at roughly 200s with 0-1 harvesters and near-zero cash, so the gate must fire almost immediately. If this reads 0 the branch never executed and the economy checks below say nothing about it.",
+      "query": "reason:income first",
       "operator": ">=",
       "value": "1"
     },
     {
-      "id": "first-screen-precedes-recovery",
-      "description": "One faction-portable light screen retains priority while a surviving harvester can fund recovery.",
-      "query": "reason:first light screen before harvester recovery",
+      "id": "harvesters-get-bought",
+      "description": "ECONOMY CHANGE, the mechanism from the other side. Last fight 6 harv existed and 4 were refinery free actors, so the Vehicle queue bought 2 in 1187 seconds and the airfield took 143 seconds to deliver one 1100-credit item. With the factory affordable from the opening bank and the barracks no longer taking those credits, bought harvesters should stop being a rounding error. NOTE FOR THE NEXT ROUND: this is summary.unitTypes, which is this side only. units.count(type=harv) counts BOTH sides and is what made three of last round's checks meaningless.",
+      "query": "summary.unitTypes[harv].built",
       "operator": ">=",
-      "value": "1"
+      "value": "10"
     },
     {
-      "id": "prequeue-harvester-reservation-still-runs",
-      "description": "An understrength Vehicle request still reserves shared cash before queue visibility updates.",
-      "query": "reason:reserving construction cash before harvester queue visibility",
-      "operator": ">=",
-      "value": "1"
-    },
-    {
-      "id": "early-replacement-factory-still-runs",
-      "description": "The faction-portable Vehicle factory still opens before refinery two.",
-      "query": "reason:opening replacement factory before second refinery",
-      "operator": ">=",
-      "value": "1"
-    },
-    {
-      "id": "defensive-consolidation-still-runs",
-      "description": "Defenders facing a massed distant screen still enter the existing consolidation posture.",
-      "query": "reason:consolidating defensive line against",
-      "operator": ">=",
-      "value": "1"
-    },
-    {
-      "id": "distributed-line-engages",
-      "description": "An in-tether defender under mass pressure engages instead of canceling its attack with Stop.",
-      "query": "reason:engaging from distributed defensive line under mass pressure",
-      "operator": ">=",
-      "value": "1"
-    },
-    {
-      "id": "distributed-line-no-longer-stops",
-      "description": "The superseded mass-pressure branch no longer cancels an attack with Hold.",
-      "query": "reason:holding distributed defensive line under mass pressure",
-      "operator": "absent",
-      "value": ""
-    },
-    {
-      "id": "harvester-outage-improves",
-      "description": "Keeping the formed army on active defence shortens the latest fight's 499-second no-harvester interval.",
+      "id": "economy-stops-flatlining",
+      "description": "ECONOMY CHANGE. 550 of 1187 seconds had no live harvester at all and earned was frozen at 20475 from 660s to the end, with a fleet averaging 1.06 alive against four standing refineries. Replaceability is exactly what that measures, so this is the cleanest single test of moving the vehicle factory up the build ladder.",
       "query": "summary.economy.secondsWithNoHarvester",
-      "operator": "<",
-      "value": "499"
+      "operator": "<=",
+      "value": "200"
     },
     {
-      "id": "harvester-lifetime-gain-holds",
-      "description": "Preserve the latest fight's longest harvester lifetime while protecting the economy.",
-      "query": "units.max(lifetimeSeconds,type=harv)",
-      "operator": ">=",
-      "value": "994"
-    },
-    {
-      "id": "income-rate-improves",
-      "description": "Longer harvester survival raises income above the latest fight.",
+      "id": "income-rate-recovers",
+      "description": "ECONOMY CHANGE, roll-up. 17.249 credits a second last fight against a reference of 50, and harvesting itself was already near-optimal at 16.3 credits per harvester-second - so income is a pure function of fleet size, not of harvester behaviour. Doubling the fleet should roughly double this. 28 clears both this fight and the 25.639 the bot managed at the easier difficulty.",
       "query": "summary.headline.creditsEarnedPerSecond",
-      "operator": ">",
-      "value": "21.687"
+      "operator": ">=",
+      "value": "28"
     },
     {
-      "id": "spending-rate-improves",
-      "description": "Sustained income raises spending above the latest fight.",
-      "query": "summary.headline.creditsSpentPerSecond",
-      "operator": ">",
-      "value": "26.717"
+      "id": "barracks-stops-soaking-the-credits",
+      "description": "ECONOMY CHANGE, the absence of what was displaced. 44 e1 were built for 4400 credits across 59 Infantry orders, roughly one rifleman every twenty seconds, while the queue that buys income managed two orders in the whole match. The cap leaves rungs of 4 or fewer alone, so the opening four rifles still build; what stops is the twelve-rifle rung re-firing every time one dies. READ THIS WITH income-gate-runs, and read it with the aggression change too: an army that now leaves home dies faster, so replacement pressure is higher than last fight.",
+      "query": "summary.unitTypes[e1].built",
+      "operator": "<=",
+      "value": "34"
     },
     {
-      "id": "defender-lifetime-improves",
-      "description": "Avoiding a launch under fire raises core-infantry lifetime above the latest fight.",
-      "query": "summary.unitTypes[e1].meanLifetimeSeconds",
-      "operator": ">",
-      "value": "66.9"
+      "id": "fitness-improves",
+      "description": "Both changes together. 0.3675 this fight at Hard, up from 0.3065. economicRate scored 0.345 and buildingsDestroyed 0.0, and this round attacks one of those directly and the other through the army it pays for. 0.45 is a real bar rather than a certainty.",
+      "query": "summary.fitness.total",
+      "operator": ">=",
+      "value": "0.45"
     },
     {
-      "id": "credits-lost-improves",
-      "description": "Defending through the live raid loses less value than the latest fight.",
-      "query": "summary.headline.creditsLost",
-      "operator": "<",
-      "value": "46240"
-    },
-    {
-      "id": "value-exchange-gain-holds",
-      "description": "The delayed launch preserves the latest fight's improved value exchange.",
+      "id": "aggression-does-not-just-feed-the-enemy",
+      "description": "THE RISK THIS ROUND TAKES, stated so it can be refuted. Pushing at 2000 credits instead of 6000 sends a raiding party rather than an army, and against a Hard opponent a raiding party can simply die. valueExchangeRatio was 0.722 this fight with the army sitting at home. If the probe is feeding units in one at a time this drops sharply, and the answer would be to raise AttackArmyValue rather than to abandon the probe - the probe is what made Attack reachable at all. 0.5 is below where the bot already is, on purpose: this is a floor, not a target.",
       "query": "summary.headline.valueExchangeRatio",
       "operator": ">=",
-      "value": "0.699"
+      "value": "0.5"
     },
     {
-      "id": "credits-killed-gain-holds",
-      "description": "Waiting for a clear base does not sacrifice the latest fight's enemy value destroyed.",
-      "query": "summary.headline.creditsKilled",
-      "operator": ">=",
-      "value": "32300"
-    },
-    {
-      "id": "mean-army-value-improves",
-      "description": "Avoiding the rate-limited recall trap raises mean army value above the latest fight.",
-      "query": "summary.headline.meanArmyValue",
-      "operator": ">",
-      "value": "850.2"
-    },
-    {
-      "id": "buildings-killed-gain-holds",
-      "description": "The safer launch still destroys at least as many enemy buildings as the latest fight.",
-      "query": "summary.headline.buildingsKilled",
+      "id": "standing-vehicle-queue-never-leaves-the-harvester-rung",
+      "description": "STANDING DIAGNOSIS, addressed only indirectly. The Vehicle queue issued 2 orders all match and its one distinct item was harv: no arty, no ltnk, not even a scout buggy. That is correct prioritisation on a dead economy - the floor is 2 per refinery and the fleet averaged 1.06 - so the release band can only be reached by an economy that works. If income recovers and this is still 1, the harvester floor is sized wrong rather than starved, and the arithmetic in ExpansionLogic.Reinforce is the next lever.",
+      "query": "summary.production[Vehicle].distinctItems",
       "operator": ">=",
       "value": "2"
     },
     {
-      "id": "exploration-remains-saturated",
-      "description": "The delayed launch preserves the fully saturated exploration component.",
-      "query": "summary.headline.cellsExplored",
+      "id": "standing-mix-swap-still-never-runs",
+      "description": "STANDING DIAGNOSIS, inherited unfixed for a second round. The rifle-to-rocket retarget read 0 again because it only rewrites the ENDLESS Infantry rung, and ChooseNext never reached it: the bounded twelve-rifle rung above it was unmet at almost every evaluation, since 44 e1 were built and 44 died. Capping bounded rungs at 4 makes them meetable and should expose the endless rung for the first time. If it still reads 0 the retarget is unreachable by construction and belongs on the bounded rungs instead.",
+      "query": "reason:rifles swapped for rockets",
       "operator": ">=",
-      "value": "300"
-    },
-    {
-      "id": "idle-time-improves",
-      "description": "A healthier army and economy reduce accumulated idle unit time from the latest fight.",
-      "query": "summary.headline.idleUnitSeconds",
-      "operator": "<",
-      "value": "8813"
-    },
-    {
-      "id": "fitness-improves",
-      "description": "Improved army retention and economy raise Hard fitness above the latest fight.",
-      "query": "summary.fitness.total",
-      "operator": ">",
-      "value": "0.423"
+      "value": "1"
     }
   ]
 }

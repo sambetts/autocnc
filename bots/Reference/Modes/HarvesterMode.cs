@@ -19,8 +19,8 @@ using OpenRA.Traits;
 namespace AutoCnC.Reference.Modes
 {
 	/// <summary>
-	/// Keeps one harvester earning: leaves immediate threats before they can pin it down, and keeps
-	/// it on ground that still has tiberium in it.
+	/// Keeps one harvester earning: runs from a fight that is actually killing it, and keeps it on
+	/// ground that still has tiberium in it.
 	/// </summary>
 	/// <remarks>
 	/// Sensing and acting only — the judgement is in <see cref="HarvesterLogic"/>, which has no
@@ -42,23 +42,15 @@ namespace AutoCnC.Reference.Modes
 		public override UnitDecision OnTick(Actor self, ModeContext ctx)
 		{
 			// --- Sense -------------------------------------------------------------
-			var nearbyThreatCount = 0;
-			long threatXTotal = 0;
-			long threatYTotal = 0;
+			var danger = false;
 			var threats = ctx.SenseThreats(new WDist(tuning.PanicRadiusUnits));
 			for (var i = 0; i < threats.Count; i++)
 			{
-				var threat = threats[i];
-				if (!threat.CanHitUs)
-					continue;
-
-				var actor = ctx.ResolveActor(threat.ActorId);
-				if (actor == null || !actor.IsInWorld || actor.IsDead)
-					continue;
-
-				nearbyThreatCount++;
-				threatXTotal += actor.Location.X;
-				threatYTotal += actor.Location.Y;
+				if (threats[i].CanHitUs)
+				{
+					danger = true;
+					break;
+				}
 			}
 
 			var refinery = ctx.FindRefinery();
@@ -70,12 +62,7 @@ namespace AutoCnC.Reference.Modes
 				HealthPercent: ctx.HealthPercent,
 				CanMove: ctx.CanMove,
 				IsIdle: ctx.IsIdle,
-				DangerNearby: nearbyThreatCount > 0,
-				NearbyThreatCount: nearbyThreatCount,
-				WorldTick: ctx.WorldTick,
-				HasThreatCenter: nearbyThreatCount > 0,
-				ThreatCenterX: nearbyThreatCount > 0 ? (int)(threatXTotal / nearbyThreatCount) : 0,
-				ThreatCenterY: nearbyThreatCount > 0 ? (int)(threatYTotal / nearbyThreatCount) : 0,
+				DangerNearby: danger,
 				HasRefinery: refinery != null,
 				RefineryX: home.X,
 				RefineryY: home.Y,
@@ -118,22 +105,8 @@ namespace AutoCnC.Reference.Modes
 
 		public override void OnDamaged(Actor self, ModeContext ctx, AttackInfo e)
 		{
-			var attacker = e.Attacker;
-			if (attacker != null
-				&& attacker.IsInWorld
-				&& !attacker.IsDead
-				&& self.Owner.RelationshipWith(attacker.Owner) == PlayerRelationship.Enemy)
-				HarvesterThreats.Record(
-					self.Owner,
-					self.ActorID,
-					attacker.ActorID,
-					attacker.Location.X,
-					attacker.Location.Y,
-					ModeContext.Classify(attacker),
-					ctx.WorldTick);
-
 			// Being shot is the one thing worth reacting to sooner than the next scheduled
-			// evaluation, both for this harvester's flee rule and for its escorts.
+			// evaluation, because the flee rule is the only decision here that is time-critical.
 			ctx.RequestReevaluation();
 		}
 	}

@@ -31,7 +31,6 @@ namespace AutoCnC.Reference.Modes
 		DefensiveTuning tuning = DefensiveTuning.Default;
 		WeaponRole role = WeaponRole.Unknown;
 		bool recovering;
-		bool consolidating;
 
 		public override void OnEnter(Actor self, ModeContext ctx)
 		{
@@ -51,12 +50,9 @@ namespace AutoCnC.Reference.Modes
 			role = WeaponMatchLogic.RoleOf(self.Info.Name);
 
 			recovering = false;
-			consolidating = false;
 
-			// A doctrine switch can assign this mode while a unit is far from home. Anchor the
-			// whole screen to the current base instead of turning that forward position into a
-			// permanent guard post.
-			ctx.Anchor = ctx.BaseCenter;
+			// Guard wherever we were standing when the mode was assigned.
+			ctx.Anchor = self.Location;
 		}
 
 		public override UnitDecision OnTick(Actor self, ModeContext ctx)
@@ -77,35 +73,16 @@ namespace AutoCnC.Reference.Modes
 			EnemySightings.Record(self.Owner, state.Threats);
 
 			// --- Decide ------------------------------------------------------------
-			var decision = DefensiveLogic.Decide(
-				state,
-				tuning,
-				role,
-				consolidating,
-				out var keepConsolidating);
+			var decision = DefensiveLogic.Decide(state, tuning, role);
 
 			// Hysteresis, so a unit that limps to the repair bay stays long enough to actually be
 			// repaired instead of oscillating in and out of combat at the retreat threshold.
 			if (decision.Action == UnitAction.Retreat)
-			{
 				recovering = true;
-				consolidating = false;
-			}
 			else if (recovering && state.HealthPercent < tuning.ResumeAboveHealthPercent)
-			{
 				decision = UnitDecision.Retreat("still recovering");
-				consolidating = false;
-			}
 			else
-			{
 				recovering = false;
-				consolidating = keepConsolidating;
-				if (consolidating && decision.Action == UnitAction.ReturnToAnchor)
-					decision = UnitDecision.AttackMoveTo(
-						ctx.Anchor.X,
-						ctx.Anchor.Y,
-						$"{decision.Reason}, fighting regroup to defensive anchor");
-			}
 
 			return decision;
 		}

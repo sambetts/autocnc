@@ -3,7 +3,7 @@
 //
 //  Static defence goes up, production switches to cheap bodies, and everything
 //  that was off doing something else comes home. DefensiveMode falls back to
-//  the runtime base centre, so a doctrine switch cannot strand defenders forward.
+//  each unit's anchor, which is where it was built, which is the base.
 //
 //  Licence: GPL-3.0-or-later. See LICENSE and NOTICE.md.
 // ============================================================================
@@ -29,10 +29,9 @@ namespace AutoCnC.Reference.Doctrines
 		{
 			b.Assign<DefensiveMode>().ToAll();
 
-			// Scouts and faction-equivalent anti-infantry specialists stay with the economy,
-			// rockets answer vehicles, and siege units can return fire beyond a harvester's
-			// sight. Claims bound the response to each reported attacker.
-			b.Assign<HarvesterEscortMode>().ToUnitType("jeep", "bggy", "e2", "e4", "e3", "arty", "msam");
+			// The scouts stop scouting and come back to guard the harvesters, which is where a
+			// fast unarmoured thing is worth something during a siege.
+			b.Assign<HarvesterEscortMode>().ToUnitType("jeep", "bggy");
 		}
 	}
 }

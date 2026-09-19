@@ -127,12 +127,36 @@ namespace AutoCnC.Reference.Logic
 	public static class IncomeFirstLogic
 	{
 		/// <summary>
-		/// Moves the first harvester rung to the front while the side has no live income.
+		/// Whether discretionary queues should yield to a refinery already being built.
+		/// </summary>
+		/// <remarks>
+		/// A queued structure does not reserve shared cash. Finish the refinery while the base
+		/// has no redundancy; callers may still allow the existing harvester recovery priority.
+		/// </remarks>
+		public static bool ShouldFundCriticalRefinery(
+			int ownedRefineries,
+			bool refineryInProduction)
+		{
+			if (ownedRefineries < 0)
+				return false;
+
+			// Owned counts include the active production item once its order is visible.
+			var completedRefineries = refineryInProduction && ownedRefineries > 0
+				? ownedRefineries - 1
+				: ownedRefineries;
+			return refineryInProduction
+				&& completedRefineries <= 1;
+		}
+
+		/// <summary>
+		/// Moves the first harvester rung to the front while the fleet is below its release floor.
 		/// </summary>
 		/// <remarks>
 		/// Cross-queue cash holds cannot help when a cheaper combat rung leads the harvester in
-		/// the Vehicle queue itself. This override is limited to zero harvesters, and returns the
-		/// original plan by reference as soon as one harvester is standing.
+		/// the Vehicle queue itself. The same release floor that normally lets the queue move
+		/// beyond harvesters defines when recovery is complete, so one remaining earner cannot
+		/// be spent down behind a screen rung. The original plan returns by reference as soon as
+		/// the floor is restored.
 		/// </remarks>
 		public static IReadOnlyList<ProductionStep> PrioritizeRecovery(
 			IReadOnlyList<ProductionStep> plan,
@@ -144,7 +168,7 @@ namespace AutoCnC.Reference.Logic
 			if (plan == null || harvesterRole == null || harvesterRole.Count == 0)
 				return plan;
 
-			if (!harvestersBuildable || standingHarvesters != 0 || shortBelow <= 0)
+			if (!harvestersBuildable || shortBelow <= 0 || standingHarvesters >= shortBelow)
 				return plan;
 
 			var firstHarvester = ExpansionLogic.FirstRungNaming(plan, harvesterRole);

@@ -88,10 +88,13 @@ namespace AutoCnC.Reference
 
 		/// <summary>
 		/// The anti-air pair Defence targets while allowing rifle rebuilding behind one survivor.
+		/// An empty floor temporarily yields to a large local infantry screen until that pressure
+		/// clears or aircraft appear; see <see cref="Modes.TrainUnitsMode"/>.
 		/// </summary>
 		public const int DefenceAntiAirCore = 2;
 
-		// The Scout doctrine already establishes this pair; Defence now keeps it standing.
+		// Scout targets the pair. Defence keeps one strict and lets that survivor release the
+		// second slot so repeated screen losses cannot pin the Vehicle queue.
 		const int ScreenVehicleCore = 2;
 
 		/// <summary>
@@ -384,13 +387,20 @@ namespace AutoCnC.Reference
 		/// credits — 20.7% of everything ever spent — to man them with one harvester.
 		/// </para>
 		/// <para>
+		/// <b>The queue must also open before the second refinery spends the remaining bank.</b>
+		/// The latest fight built that refinery first, then opened the Vehicle queue after cash
+		/// was exhausted. Its replacement harvester competed with the next refinery order and
+		/// neither delivered before both free harvesters died. Reordering the harvester inside
+		/// the Vehicle plan could not help a queue that opened too late to fund it.
+		/// </para>
+		/// <para>
 		/// The arithmetic is the opening bank again, and it fits. <c>weap</c>/<c>afld</c> costs
-		/// 2,000 and needs only <c>proc</c>, so power, refinery, power, barracks, refinery,
-		/// factory is 6,500 of the 7,500 a side starts with: the factory is affordable
-		/// <b>before a single credit of income</b>, and every refinery after it is bought with
-		/// earnings rather than with the bank. A bought harvester is 1,100 against a refinery's
-		/// 1,500, it needs no site and no defending, and it can be bought again the next time
-		/// one dies — which is the whole difference between an economy and a countdown.
+		/// 2,000 and needs only <c>proc</c>, so power, refinery, power, barracks, factory is
+		/// 5,000 of the 7,500 a side starts with. The replacement queue now opens while the bank
+		/// can still fund it, then the plan returns immediately to the second refinery. A bought
+		/// harvester is 1,100 against a refinery's 1,500, needs no site or additional defence,
+		/// and can be bought again the next time one dies — which is the whole difference
+		/// between an economy and a countdown.
 		/// </para>
 		/// <para>
 		/// <b>Four is a floor, not a ceiling.</b> A plan is a finite ladder and a map is not: on
@@ -415,8 +425,8 @@ namespace AutoCnC.Reference
 			new(["proc"], 1),                  // income before anything else
 			new(["powr", "nuke"], 2),
 			new(["pyle", "hand"], 1),          // barracks
-			new(["proc"], 2),
 			new(["weap", "afld"], 1),          // ...and the means to replace a harvester that dies
+			new(["proc"], 2),                  // then the second free harvester
 			new(["proc"], 3),                  // ...and income again, while the opening bank lasts
 			new(["powr", "nuke"], 3),
 			new(["proc"], RefineryCore),       // four refineries is four harvesters, with no factory
@@ -520,8 +530,9 @@ namespace AutoCnC.Reference
 		];
 
 		/// <summary>
-		/// Turtling: static defence first, then bodies. Cheap infantry rather than tanks, because
-		/// what is needed is guns in the base now rather than better guns in a minute.
+		/// Turtling: alternate the first ground and air emplacements, then add depth and bodies.
+		/// Cheap infantry rather than tanks, because what is needed is guns in the base now
+		/// rather than better guns in a minute.
 		/// </summary>
 		/// <remarks>
 		/// Anti-air is not optional for this bot, and it is no longer only this doctrine's
@@ -539,6 +550,8 @@ namespace AutoCnC.Reference
 		public static IReadOnlyList<BuildStep> DefenceBuild { get; } =
 		[
 			.. Economy,
+			new(["gtwr", "gun"], 1),           // answer the ground rush immediately
+			new(["atwr", "sam"], 1),           // do not pin AA behind a two-tower standing floor
 			.. HomeDefence,
 			new(["gtwr", "gun"], 4),
 			new(["atwr", "sam"], 2),           // depth on the only thing that can hit aircraft
@@ -610,10 +623,10 @@ namespace AutoCnC.Reference
 
 		public static IReadOnlyList<ProductionStep> DefenceTrain { get; } =
 		[
-			new(InfantryQueue, RocketBodies, DefenceAntiAirCore), // restore AA from zero; one survivor releases rifles
+			new(InfantryQueue, RocketBodies, DefenceAntiAirCore), // restore AA; current infantry pressure may redirect an empty floor
 			new(InfantryQueue, RifleBodies, RifleCore),
 			new(InfantryQueue, RocketBodies, 8), // then anti-armour and anti-air depth
-			new("Vehicle", ScreenVehicles, ScreenVehicleCore), // keep buildable escorts ahead of replacements
+			new("Vehicle", ScreenVehicles, ScreenVehicleCore), // keep one escort strict; TrainUnitsMode releases the second
 			new("Vehicle", ["harv"], HarvesterCore),   // a siege that kills the economy wins by itself
 			new("Infantry", ["e2"], 4),
 			new("Vehicle", SiegeVehicles, SiegeCore),  // 11 cells of reach, sited at home

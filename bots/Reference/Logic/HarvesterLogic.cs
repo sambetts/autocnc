@@ -19,6 +19,8 @@ namespace AutoCnC.Reference.Logic
 		int PanicRadiusUnits,
 		int SafeDistanceUnits,
 		int FleeBelowHealthPercent,
+		int PreemptiveThreatCount,
+		int ThreatClearTicks,
 		int StallEvaluations,
 		int FirstProbeCells,
 		int ProbeStepCells,
@@ -41,6 +43,14 @@ namespace AutoCnC.Reference.Logic
 			// its hit points — fled, and never harvested again. Below 70% it is genuinely being
 			// taken apart and the load is not worth the harvester.
 			FleeBelowHealthPercent: 70,
+
+			// Proximity is not proof that a harvester is the target. Once it has taken damage,
+			// two attack-capable contacts justify leaving before they remove the rest.
+			PreemptiveThreatCount: 2,
+
+			// A threat can briefly leave the panic radius while a harvester is still reaching
+			// cover. Keep the retreat active long enough for that gap not to restart harvesting.
+			ThreatClearTicks: 300,
 
 			// Consecutive evaluations of "idle AND has not changed cell" before we intervene. A
 			// harvester that is driving, cutting tiberium or unloading has a live activity and is
@@ -148,6 +158,11 @@ namespace AutoCnC.Reference.Logic
 		bool CanMove,
 		bool IsIdle,
 		bool DangerNearby,
+		int NearbyThreatCount,
+		int WorldTick,
+		bool HasThreatCenter,
+		int ThreatCenterX,
+		int ThreatCenterY,
 		bool HasRefinery,
 		int RefineryX,
 		int RefineryY,
@@ -177,7 +192,11 @@ namespace AutoCnC.Reference.Logic
 		int AssignedY,
 		int ContestedX,
 		int ContestedY,
-		bool RetreatingToRefinery)
+		bool Retreating,
+		bool PreemptiveWithdrawalSpent,
+		int LastDangerTick,
+		int RetreatX,
+		int RetreatY)
 	{
 		/// <summary>
 		/// A harvester we have never seen. The impossible cell counts as "moved", and the scan
@@ -185,13 +204,19 @@ namespace AutoCnC.Reference.Logic
 		/// review window to do it.
 		/// </summary>
 		public static HarvesterWatchdog Start { get; } =
-			new(int.MinValue, int.MinValue, 0, 0, 0, int.MaxValue, int.MinValue, int.MinValue, int.MinValue, int.MinValue, false);
+			new(
+				int.MinValue, int.MinValue, 0, 0, 0, int.MaxValue,
+				int.MinValue, int.MinValue, int.MinValue, int.MinValue,
+				false, false, 0, int.MinValue, int.MinValue);
 
 		/// <summary>Whether this harvester has been told which field to work.</summary>
 		public bool HasAssignment => AssignedX != int.MinValue;
 
 		/// <summary>Whether this harvester has been shot off a field and remembers which one.</summary>
 		public bool HasContested => ContestedX != int.MinValue;
+
+		/// <summary>Whether this harvester has a stable tactical escape destination.</summary>
+		public bool HasRetreatTarget => RetreatX != int.MinValue;
 	}
 
 	/// <summary>A decision plus the watchdog state that produced it.</summary>
@@ -295,14 +320,21 @@ namespace AutoCnC.Reference.Logic
 					: (seen.EvaluationsSinceScan >= tuning.ReviewEvaluations ? tuning.ReviewEvaluations : seen.EvaluationsSinceScan + 1)
 			};
 
+			if (state.DangerNearby)
+				seen = seen with { LastDangerTick = state.WorldTick };
+
 			// Nothing we order can help a harvester that cannot move.
 			if (!state.CanMove)
 				return new HarvesterOutcome(UnitDecision.Continue, seen);
 
 			var awayFromRefinery = state.HasRefinery && state.DistanceToRefineryUnits > tuning.SafeDistanceUnits;
+			var lowHealthDanger = state.HealthPercent < tuning.FleeBelowHealthPercent;
+			var completedBoundedWithdrawal = false;
 
-			// 1. Run, but only once staying is actually costing us the harvester. Every flee order
-			//    cancels the harvest activity, and cancelling is the expensive half of this rule.
+			// 1. Leave concentrated immediate threats before sustained fire makes escape
+			//    impossible. The short panic radius limits this to enemies that can hit the
+			//    harvester, while the health threshold keeps the existing response to one
+			//    attacker that is already doing serious damage.
 			//
 			//    Running home was only ever half a rule, and the missing half lost badland-ridges.
 			//    A flee order changes where the harvester *is* and leaves where it has been *sent*
@@ -318,23 +350,118 @@ namespace AutoCnC.Reference.Logic
 			//    So fleeing now also *forgets the ground*: the assigned field is recorded as
 			//    contested, and the scan clock is wound forward so the next evaluation pays for a
 			//    scan instead of waiting out a review window. Rule 2 then reassigns away from it.
-			//    While the harvester is still being shot this branch simply fires again, which is
-			//    correct — escape first, choose new ground once clear.
-			if (state.DangerNearby && state.HealthPercent < tuning.FleeBelowHealthPercent && state.HasRefinery)
+			//
+			//    A harvester that has actually taken damage gets one refinery-screened escape
+			//    before the low-health rule takes over. Nearby contacts alone do not prove they
+			//    are attacking it: repeatedly fleeing from an undamaged screen cancels every
+			//    harvest attempt and can suppress income without costing the harvester a hit.
+			//    It shelters only after no attacker remains inside the panic radius. If an
+			//    attacker can still hit it at the endpoint, the next leg starts from the
+			//    harvester instead of the refinery; re-anchoring each leg to the refinery can
+			//    reverse the escape as the threat centre moves.
+			if (seen.Retreating)
+			{
+				var reachedTarget = seen.HasRetreatTarget
+					&& IsNear(state.X, state.Y, seen.RetreatX, seen.RetreatY);
+				var retreatStillActive = state.DangerNearby
+					|| state.WorldTick - seen.LastDangerTick <= tuning.ThreatClearTicks;
+				if (seen.HasRetreatTarget && !reachedTarget && retreatStillActive)
+					return new HarvesterOutcome(
+						UnitDecision.MoveTo(seen.RetreatX, seen.RetreatY, "harvester bounded threat escape en route"),
+						seen with { StillEvaluations = 0, EvaluationsSinceScan = tuning.ReviewEvaluations });
+
+				if (reachedTarget && state.DangerNearby)
+				{
+					var escape = ThreatEscapeCell(state, tuning, preserveRefineryAccess: false);
+					return new HarvesterOutcome(
+						UnitDecision.MoveTo(escape.X, escape.Y, "harvester extending escape while immediate threat remains"),
+						seen with
+						{
+							StillEvaluations = 0,
+							EvaluationsSinceScan = tuning.ReviewEvaluations,
+							RetreatX = escape.X,
+							RetreatY = escape.Y
+						});
+				}
+
+				if (reachedTarget && retreatStillActive)
+					return new HarvesterOutcome(
+						UnitDecision.Hold("harvester sheltering after immediate threat clears"),
+						seen with { StillEvaluations = 0, EvaluationsSinceScan = tuning.ReviewEvaluations });
+
+				completedBoundedWithdrawal =
+					reachedTarget && seen.PreemptiveWithdrawalSpent;
+				seen = seen with { Retreating = false, RetreatX = int.MinValue, RetreatY = int.MinValue };
+			}
+
+			// The escape re-arms only after repair; the clear radius created by the retreat
+			// itself is not evidence that the next nearby contacts are a new attack.
+			if (!seen.Retreating
+				&& !state.DangerNearby
+				&& state.WorldTick - seen.LastDangerTick > tuning.ThreatClearTicks
+				&& state.HealthPercent >= 100
+				&& !completedBoundedWithdrawal)
+				seen = seen with { PreemptiveWithdrawalSpent = false };
+
+			var damageConfirmedDanger =
+				state.HealthPercent < 100
+				&& !lowHealthDanger
+				&& state.NearbyThreatCount >= tuning.PreemptiveThreatCount
+				&& !seen.PreemptiveWithdrawalSpent;
+			if (state.DangerNearby
+				&& (lowHealthDanger || damageConfirmedDanger))
 			{
 				var drivenOff = seen.HasAssignment
 					? seen with { ContestedX = seen.AssignedX, ContestedY = seen.AssignedY }
 					: seen;
+				drivenOff = drivenOff with
+				{
+					PreemptiveWithdrawalSpent =
+						drivenOff.PreemptiveWithdrawalSpent || damageConfirmedDanger
+				};
+
+				if (state.HasThreatCenter)
+				{
+					var escape = ThreatEscapeCell(state, tuning);
+					return new HarvesterOutcome(
+						UnitDecision.MoveTo(
+							escape.X,
+							escape.Y,
+							damageConfirmedDanger
+								? escape.PreservesRefineryAccess
+									? $"harvester threat-vector withdrawal preserving refinery access, damage-confirmed harvester withdrawal at {state.HealthPercent}%"
+									: $"harvester threat-vector withdrawal, damage-confirmed harvester withdrawal at {state.HealthPercent}%"
+								: escape.PreservesRefineryAccess
+									? $"harvester threat-vector withdrawal preserving refinery access at {state.HealthPercent}%"
+									: $"harvester threat-vector withdrawal at {state.HealthPercent}%"),
+						drivenOff with
+						{
+							StillEvaluations = 0,
+							EvaluationsSinceScan = tuning.ReviewEvaluations,
+							Retreating = true,
+							RetreatX = escape.X,
+							RetreatY = escape.Y
+						});
+				}
+
+				if (!state.HasRefinery)
+					return new HarvesterOutcome(UnitDecision.Continue, drivenOff);
+
 				var retreating = drivenOff with
 				{
 					StillEvaluations = 0,
 					EvaluationsSinceScan = tuning.ReviewEvaluations,
-					RetreatingToRefinery = true
+					Retreating = true,
+					RetreatX = state.RefineryX,
+					RetreatY = state.RefineryY
 				};
 
 				if (awayFromRefinery)
 					return new HarvesterOutcome(
-						UnitDecision.MoveTo(state.RefineryX, state.RefineryY, $"hurt at {state.HealthPercent}%, running to the refinery"),
+						UnitDecision.MoveTo(state.RefineryX, state.RefineryY,
+							damageConfirmedDanger
+								? $"damage-confirmed harvester withdrawal to refinery at {state.HealthPercent}%"
+								: $"hurt at {state.HealthPercent}%, running to the refinery"),
 						retreating);
 
 				// Do not fall through to the due field scan while the same raid is still in
@@ -345,20 +472,19 @@ namespace AutoCnC.Reference.Logic
 					retreating);
 			}
 
-			// A momentary gap in fire does not make the route safe. Once a damaged harvester
-			// starts retreating, finish that retreat before field selection can replace it.
-			if (seen.RetreatingToRefinery)
-			{
-				if (state.HasRefinery && awayFromRefinery)
-					return new HarvesterOutcome(
-						UnitDecision.MoveTo(state.RefineryX, state.RefineryY, "damaged harvester retreat persisted to refinery"),
-						seen with { StillEvaluations = 0, EvaluationsSinceScan = tuning.ReviewEvaluations });
-
-				seen = seen with { RetreatingToRefinery = false };
-			}
-
 			var stalled = seen.StillEvaluations >= tuning.StallEvaluations;
 			var count = fields?.Count ?? 0;
+
+			if (completedBoundedWithdrawal && scanned && count > 0)
+			{
+				var contested = FindContested(fields, seen, tuning);
+				var best = SelectFieldAvoiding(fields, -1, contested, tuning);
+				var f = fields[best];
+				return Assign(
+					f,
+					seen,
+					$"harvester resumed economy after bounded threat withdrawal, harvesting {f.CellCount} cells ({f.TotalDensity} left) {f.DistanceUnits / 1024} cells out");
+			}
 
 			// 2. Choosing the ground. Only on a review, because this is the half that costs a scan.
 			if (scanned && count > 0)
@@ -466,6 +592,10 @@ namespace AutoCnC.Reference.Logic
 				seen with { StillEvaluations = 0, ProbeIndex = probe + 1 });
 		}
 
+		static bool IsNear(int x, int y, int targetX, int targetY) =>
+			x >= targetX - 1 && x <= targetX + 1
+			&& y >= targetY - 1 && y <= targetY + 1;
+
 		/// <summary>
 		/// Sends the harvester to a field and remembers which one, so the next review can tell
 		/// "still on it" from "it is gone".
@@ -481,6 +611,47 @@ namespace AutoCnC.Reference.Logic
 		static HarvesterOutcome Assign(in FieldOption field, in HarvesterWatchdog seen, string reason, int probeIndex = 0) =>
 			new(UnitDecision.Harvest(field.NearestX, field.NearestY, reason),
 				seen with { StillEvaluations = 0, ProbeIndex = probeIndex, AssignedX = field.CenterX, AssignedY = field.CenterY });
+
+		/// <summary>Picks a threat-opposite escape cell without abandoning a live refinery.</summary>
+		static (int X, int Y, bool PreservesRefineryAccess) ThreatEscapeCell(
+			in HarvesterState state, in HarvesterTuning tuning, bool preserveRefineryAccess = true)
+		{
+			// Repeated local vectors can ratchet a damaged harvester farther from the only place
+			// that can unload it. A live refinery instead anchors a dispersed screen: the visible
+			// threat still selects the far side, but every completed leg can resume deliveries.
+			var preservesRefineryAccess = preserveRefineryAccess && state.HasRefinery;
+			var originX = preservesRefineryAccess ? state.RefineryX : state.X;
+			var originY = preservesRefineryAccess ? state.RefineryY : state.Y;
+			var cells = preservesRefineryAccess
+				? (tuning.SafeDistanceUnits + 1023) / 1024
+				: (tuning.PanicRadiusUnits + 1023) / 1024 + 1;
+			if (cells < 1)
+				cells = 1;
+
+			var bestX = state.X;
+			var bestY = state.Y;
+			long bestDistance = -1;
+
+			for (var i = 0; i < DirX.Length; i++)
+			{
+				var x = Clamp(originX + cells * DirX[i] / 10, state.MapMinX, state.MapMaxX);
+				var y = Clamp(originY + cells * DirY[i] / 10, state.MapMinY, state.MapMaxY);
+				if (x == state.X && y == state.Y)
+					continue;
+
+				var dx = x - state.ThreatCenterX;
+				var dy = y - state.ThreatCenterY;
+				var distance = (long)dx * dx + (long)dy * dy;
+				if (distance <= bestDistance)
+					continue;
+
+				bestDistance = distance;
+				bestX = x;
+				bestY = y;
+			}
+
+			return (bestX, bestY, preservesRefineryAccess);
+		}
 
 		/// <summary>
 		/// What a field is worth to a harvester: what is left in it, discounted by how far the

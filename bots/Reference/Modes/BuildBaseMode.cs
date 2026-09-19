@@ -50,8 +50,17 @@ namespace AutoCnC.Reference.Modes
 		/// <summary>Refinery names for either faction, as an array because a plan step wants one.</summary>
 		static readonly string[] RefineryCandidates = [.. ReferencePlans.Refineries];
 
+		/// <summary>Harvester names for either faction.</summary>
+		static readonly string[] HarvesterCandidates = [.. ReferencePlans.HarvesterUnits];
+
+		/// <summary>Vehicle factory names for either faction.</summary>
+		static readonly string[] VehicleFactoryCandidates = [.. ReferencePlans.VehicleFactories];
+
 		/// <summary>Anti-air tower names for either faction. See <see cref="ExpansionLogic.Shield"/>.</summary>
 		static readonly string[] AirDefenceCandidates = [.. ReferencePlans.AntiAirStructures];
+
+		/// <summary>Ground-defence tower names for either faction.</summary>
+		static readonly string[] GroundDefenceCandidates = [.. ReferencePlans.GuardTowers];
 
 		/// <summary>
 		/// Every defensive structure, so the anti-air rung sizes itself from the base rather
@@ -94,6 +103,9 @@ namespace AutoCnC.Reference.Modes
 		/// </remarks>
 		readonly ExpansionTuning expansion = ExpansionTuning.Default;
 
+		/// <summary>The production plan's existing release band for an understrength role.</summary>
+		readonly BalanceTuning balance = BalanceTuning.Default;
+
 		readonly List<FieldOption> fields = [];
 
 		/// <summary>
@@ -113,6 +125,8 @@ namespace AutoCnC.Reference.Modes
 		readonly CPos?[] plannedLocation = new CPos?[ConstructionQueues.Length];
 		readonly string[] plannedItem = new string[ConstructionQueues.Length];
 
+		bool deferredConstructionForHarvester;
+
 		public override void OnEnter(Actor self, ModeContext ctx)
 		{
 			for (var i = 0; i < ConstructionQueues.Length; i++)
@@ -123,6 +137,7 @@ namespace AutoCnC.Reference.Modes
 
 			fields.Clear();
 			evaluationsSinceScan = int.MaxValue;
+			deferredConstructionForHarvester = false;
 		}
 
 		public override UnitDecision OnTick(Actor self, ModeContext ctx)
@@ -174,6 +189,34 @@ namespace AutoCnC.Reference.Modes
 			var order = BaseConstructionLogic.ChooseNext(
 				queues, ctx.Cash, ctx.PowerBalance, owned, ctx.BuildPlan, PowerCandidates);
 
+			if (ctx.Doctrine == ReferenceDoctrines.Defence
+				&& order.Action == ConstructionAction.Produce
+				&& Named(AirDefenceCandidates, order.Item)
+				&& ExpansionLogic.Standing(owned, AirDefenceCandidates) == 0
+				&& ExpansionLogic.Standing(owned, GroundDefenceCandidates) <= 1)
+			{
+				order = new ConstructionOrder(order.Action, order.Queue, order.Item,
+					$"{order.Reason}, defensive anti-air released after first ground emplacement");
+			}
+
+			if (ctx.Doctrine == ReferenceDoctrines.Defence
+				&& order.Action == ConstructionAction.Place
+				&& Named(AirDefenceCandidates, order.Item)
+				&& ExpansionLogic.Standing(owned, AirDefenceCandidates) == 0)
+			{
+				order = new ConstructionOrder(order.Action, order.Queue, order.Item,
+					$"{order.Reason}, placing first defensive anti-air from early release");
+			}
+
+			if (order.Action == ConstructionAction.Produce
+				&& Named(VehicleFactoryCandidates, order.Item)
+				&& ExpansionLogic.Standing(owned, VehicleFactoryCandidates) == 0
+				&& ExpansionLogic.Standing(owned, RefineryCandidates) == 1)
+			{
+				order = new ConstructionOrder(order.Action, order.Queue, order.Item,
+					$"{order.Reason}, opening replacement factory before second refinery");
+			}
+
 			// The doctrine's own ladder is finite and a map is not. When it has nothing left to
 			// ask for, ask the ground instead: every patch of tiberium this side has explored is
 			// worth a refinery, and a refinery is what makes a field close enough to work safely.
@@ -195,6 +238,55 @@ namespace AutoCnC.Reference.Modes
 			// nothing about the branch above changes. See ExpansionLogic.Shield.
 			if (order.Action == ConstructionAction.None)
 				order = AirDefence(ctx, owned);
+
+			// Starting a construction item is not a cash reservation: it draws from the same
+			// income as every production queue. Do not let a new refinery or tower strand an
+			// active recovery harvester when the live fleet is still below its established
+			// release band. The yard cannot reliably observe a sibling Vehicle queue's new
+			// order, so the stable reservation signal is the combination that makes recovery
+			// actionable: a standing factory and an understrength fleet. TrainUnitsMode keeps
+			// the harvester rung first until that floor is restored. Finished structures still
+			// place, and emergency power remains available because a brownout would slow the
+			// harvester too.
+			var standingHarvesters = ExpansionLogic.Standing(
+				ctx.OwnedUnitCounts(), HarvesterCandidates);
+			var refineryCount = ExpansionLogic.Standing(owned, RefineryCandidates);
+			var harvesterRelease = ArmyBalanceLogic.ReleaseAt(
+				ExpansionLogic.DesiredHarvesters(refineryCount, 0, expansion), balance);
+			var factoryBackedHarvesterRecovery =
+				standingHarvesters < harvesterRelease
+				&& ExpansionLogic.Standing(owned, VehicleFactoryCandidates) > 0;
+			var fundingCriticalRefinery = IncomeFirstLogic.ShouldFundCriticalRefinery(
+				refineryCount,
+				Named(RefineryCandidates, ctx.ProducingItem("Building")));
+
+			if (fundingCriticalRefinery
+				&& order.Action == ConstructionAction.Produce
+				&& !string.Equals(order.Queue, "Building", System.StringComparison.OrdinalIgnoreCase))
+			{
+				if (factoryBackedHarvesterRecovery)
+					deferredConstructionForHarvester = true;
+
+				return UnitDecision.Hold("support queue yielding shared cash to active critical refinery");
+			}
+
+			if (factoryBackedHarvesterRecovery
+				&& order.Action == ConstructionAction.Produce
+				&& !Named(PowerCandidates, order.Item))
+			{
+				deferredConstructionForHarvester = true;
+				return UnitDecision.Hold(
+					"construction yielding shared cash to factory-backed harvester recovery");
+			}
+
+			if (deferredConstructionForHarvester
+				&& !factoryBackedHarvesterRecovery
+				&& order.Action == ConstructionAction.Produce)
+			{
+				order = new ConstructionOrder(order.Action, order.Queue, order.Item,
+					$"{order.Reason}, construction resumed after harvester funding hold");
+				deferredConstructionForHarvester = false;
+			}
 
 			// --- Act ---------------------------------------------------------------
 			switch (order.Action)

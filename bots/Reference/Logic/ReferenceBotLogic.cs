@@ -121,14 +121,27 @@ namespace AutoCnC.Reference.Logic
 			//    The exemption still has a ceiling, and the ceiling has to scale. Six units in the
 			//    base is a siege at four minutes and a nuisance at fifteen, so past the early-game
 			//    floor it is a share of our own standing force instead.
+			//
+			//    The exemption also ends when the push is no longer formed. Once an active assault
+			//    falls below the same value required to start it, preserving the march while a real
+			//    raid is already damaging the base only feeds the survivors away from the fight
+			//    that now matters.
+			if (Is(s.Doctrine, ReferenceDoctrines.Attack)
+				&& !readyToPush
+				&& s.BaseUnderAttack
+				&& s.EnemiesNearBase >= t.RaidEnemies)
+				return DoctrineDecision.SwitchTo(ReferenceDoctrines.Defence,
+					$"spent assault recalled to threatened base: army worth {s.ArmyValue}, {s.EnemiesNearBase} enemy nearby");
+
 			if (s.EnemiesNearBase >= t.RaidEnemies
 				&& ((!Is(s.Doctrine, ReferenceDoctrines.Attack) && !readyToPush)
 					|| s.EnemiesNearBase >= AssaultSize(s, t)))
 				return DoctrineDecision.SwitchTo(ReferenceDoctrines.Defence,
 					$"{s.EnemiesNearBase} enemy at the base");
 
-			// 3. Turtling with the pressure gone. Held for a while first, because an attack that
-			//    has paused to regroup is not an attack that has finished.
+			// 3. Turtling with the pressure gone. The minimum doctrine dwell filters the first
+			//    wave; leaving also needs a full quiet interval and enough rebuilt army not to
+			//    send an empty base straight into Opening or Scout.
 			//
 			//    A siege that lifts with the army intact goes straight back out rather than
 			//    routing through Opening. Opening is where the bot waits, and waiting costs a
@@ -139,10 +152,22 @@ namespace AutoCnC.Reference.Logic
 				if (s.DoctrineSeconds < t.DefenceHoldSeconds)
 					return DoctrineDecision.Continue;
 
-				return readyToPush
-					? DoctrineDecision.SwitchTo(ReferenceDoctrines.Attack,
-						$"siege lifted with army worth {s.ArmyValue}")
-					: DoctrineDecision.SwitchTo(ReferenceDoctrines.Opening, "the attack is over");
+				if (readyToPush)
+					return DoctrineDecision.SwitchTo(ReferenceDoctrines.Attack,
+						$"siege lifted with army worth {s.ArmyValue}");
+
+				var calmSeconds = s.SecondsSinceContact < 0
+					? s.DoctrineSeconds
+					: s.SecondsSinceContact;
+				if (s.BaseUnderAttack
+					|| s.EnemiesNearBase > 0
+					|| calmSeconds < t.DefenceHoldSeconds
+					|| s.ArmyValue < t.RetreatArmyValue)
+					return DoctrineDecision.Continue;
+
+				return DoctrineDecision.SwitchTo(
+					ReferenceDoctrines.Opening,
+					$"defence recovery completed after {calmSeconds}s calm with army worth {s.ArmyValue}");
 			}
 
 			// 4. Contact lost. We found their base, we went there, and now there is nothing of

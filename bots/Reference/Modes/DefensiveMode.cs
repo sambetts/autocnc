@@ -86,9 +86,6 @@ namespace AutoCnC.Reference.Modes
 			else
 				recovering = false;
 
-			if (decision.Action == UnitAction.ReturnToAnchor)
-				return UnitDecision.ReturnToAnchor("defensive base-center regroup");
-
 			return decision;
 		}
 

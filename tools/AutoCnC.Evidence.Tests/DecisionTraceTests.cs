@@ -136,5 +136,39 @@ namespace AutoCnC.Evidence.Tests
 				Assert.That(trace.ActionCounts["Attack"], Is.EqualTo(1));
 			});
 		}
+
+		[Test]
+		public void ReadsBudgetSuppressionDetailsAndRegistersItsReasonId()
+		{
+			var path = WriteFile("budget-suppression.jsonl",
+				"{\"event\":\"started\",\"schemaVersion\":3}\n" +
+				"{\"event\":\"unit-decision-evaluated\",\"seconds\":17,\"actor\":\"weap\"," +
+				"\"actorId\":42,\"mode\":\"TrainUnitsMode\",\"action\":\"Produce\"," +
+				"\"itemName\":\"mtnk\",\"queue\":\"Vehicle\",\"reason\":\"replace armour\"," +
+				"\"reasonId\":\"production.armour\",\"outcome\":\"production-budget-suppressed\"," +
+				"\"productionBudget\":{\"reservedCash\":1200,\"ownerQueue\":\"Building\"," +
+				"\"reason\":\"save for tech\",\"reasonId\":\"production.reserve.tech\"}," +
+				"\"production\":{\"itemCost\":800,\"currentCash\":1700,\"postOrderCash\":900," +
+				"\"reservedCashRemaining\":1200}}\n");
+
+			var trace = DecisionTrace.Read(path);
+			var evaluation = trace.UnitDecisionEvaluations.Single();
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(evaluation.Outcome, Is.EqualTo("production-budget-suppressed"));
+				Assert.That(evaluation.ProductionBudget.ReservedCash, Is.EqualTo(1200));
+				Assert.That(evaluation.ProductionBudget.OwnerQueue, Is.EqualTo("Building"));
+				Assert.That(evaluation.ProductionBudget.Reason, Is.EqualTo("save for tech"));
+				Assert.That(evaluation.ProductionBudget.ReasonId,
+					Is.EqualTo("production.reserve.tech"));
+				Assert.That(evaluation.Production.ItemCost, Is.EqualTo(800));
+				Assert.That(evaluation.Production.CurrentCash, Is.EqualTo(1700));
+				Assert.That(evaluation.Production.PostOrderCash, Is.EqualTo(900));
+				Assert.That(evaluation.Production.ReservedCashRemaining, Is.EqualTo(1200));
+				Assert.That(trace.ReasonIdMentions("production.armour"), Is.EqualTo(1));
+				Assert.That(trace.ReasonIdMentions("production.reserve.tech"), Is.EqualTo(1));
+			});
+		}
 	}
 }

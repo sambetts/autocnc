@@ -116,6 +116,41 @@ namespace AutoCnC.Evidence.Tests
 		}
 
 		[Test]
+		public void ReasonIdQueryCountsProductionBudgetSuppressions()
+		{
+			var tracePath = WriteFile("budget-reason-id.jsonl",
+				"{\"event\":\"started\",\"schemaVersion\":3}\n" +
+				"{\"event\":\"unit-decision-evaluated\",\"action\":\"Produce\"," +
+				"\"outcome\":\"production-budget-suppressed\"," +
+				"\"productionBudget\":{\"reservedCash\":1200,\"ownerQueue\":\"Building\"," +
+				"\"reason\":\"save for tech\",\"reasonId\":\"production.reserve.tech\"}," +
+				"\"production\":{\"itemCost\":800,\"currentCash\":1700,\"postOrderCash\":900," +
+				"\"reservedCashRemaining\":1200}}\n");
+			var trace = DecisionTrace.Read(tracePath);
+			var document = new CheckDocument
+			{
+				Checks =
+				[
+					new Check
+					{
+						Id = "budget-reason",
+						Query = "reason-id:production.reserve.tech",
+						Operator = "==",
+						Value = "1"
+					}
+				]
+			};
+
+			var report = Checks.Evaluate(document, Summary(), Units(), trace);
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(Result(report, "budget-reason").Passed, Is.True);
+				Assert.That(Result(report, "budget-reason").Actual, Is.EqualTo("1"));
+			});
+		}
+
+		[Test]
 		public void SummaryHeadlinePathResolvesAndComparesNumerically()
 		{
 			var report = Evaluate(new Check

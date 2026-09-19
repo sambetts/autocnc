@@ -114,6 +114,26 @@ namespace AutoCnC.Platform.Traits
 			var action = PlayerScopedActionKey.From(decision);
 			return !action.HasValue || currentTick.Add(action.Value);
 		}
+
+		public bool CanReserve(
+			uint playerActorId, in UnitDecision decision, string cancellationPayload)
+		{
+			if (decision.Action == UnitAction.CancelProduction)
+			{
+				var intent = ProductionCancellationIntent.From(
+					playerActorId, decision, cancellationPayload);
+				return intent.HasValue && !cancellations.Contains(intent.Value);
+			}
+
+			if (decision.Action == UnitAction.RepairBuilding)
+			{
+				var intent = RepairIntent.From(playerActorId, decision, cancellationPayload);
+				return intent.HasValue && !repairs.Contains(intent.Value);
+			}
+
+			var action = PlayerScopedActionKey.From(decision);
+			return !action.HasValue || !currentTick.Contains(action.Value);
+		}
 	}
 
 	internal sealed class PendingProductionOrder
@@ -618,8 +638,8 @@ namespace AutoCnC.Platform.Traits
 				intent => CancellationIntentIsCurrent(player, intent),
 				intent => RepairIntentIsCurrent(player, intent));
 
-			ProductionBudget? activeBudget = TryGetApplicableProductionBudget(player, out var budget)
-				? budget
+			ProductionBudgetScope? activeBudget = TryGetApplicableProductionBudget(player, out var budgetScope)
+				? budgetScope
 				: null;
 			var controllers = world.ActorsWithTrait<ProgrammableController>().AsEnumerable();
 			if (activeBudget.HasValue)
@@ -661,7 +681,7 @@ namespace AutoCnC.Platform.Traits
 		void Evaluate(
 			Actor actor,
 			ProgrammableController controller,
-			ProductionBudget? activeBudget)
+			ProductionBudgetScope? activeBudget)
 		{
 			UnitDecision decision;
 
@@ -771,15 +791,6 @@ namespace AutoCnC.Platform.Traits
 				return;
 			}
 
-			if (!pendingPlayerActions.TryReserve(
-				actor.Owner.PlayerActor.ActorID, decision, order.TargetString))
-			{
-				controller.LastIssued = decision;
-				decisionTrace?.UnitDecisionEvaluated(GameSeconds, actor.Info.Name, actor.ActorID,
-					controller.ActiveModeName, decision, "coalesced-pending-action");
-				return;
-			}
-
 			if (productionCandidate.HasValue)
 			{
 				pendingProduction.Add(new PendingProductionOrder(
@@ -794,7 +805,7 @@ namespace AutoCnC.Platform.Traits
 			Actor actor,
 			ModeContext context,
 			in UnitDecision requestedDecision,
-			in ProductionBudget budget,
+			in ProductionBudgetScope budgetScope,
 			out UnitDecision resolvedDecision,
 			out Order order,
 			out ProductionBudgetCandidate candidate,
@@ -833,7 +844,7 @@ namespace AutoCnC.Platform.Traits
 			}
 
 			var canonicalQueue = queue.Info.Group ?? queue.Info.Type ?? requestedDecision.Queue;
-			var cost = Math.Max(0, actorInfo.TraitInfoOrDefault<ValuedInfo>()?.Cost ?? 0);
+			var cost = Math.Max(0, queue.GetProductionCost(buildable));
 			resolvedDecision = requestedDecision with
 			{
 				TargetActorId = queue.Actor.ActorID,
@@ -847,32 +858,34 @@ namespace AutoCnC.Platform.Traits
 				canonicalQueue,
 				actorInfo.Name,
 				cost,
-				ProductionBudgetArbitrator.QueueMatches(
-					budget.Queue, queue.Info.Group, queue.Info.Type));
+				budgetScope.OwnsQueue(queue.Info.Group, queue.Info.Type));
 			outcome = null;
 			return true;
 		}
 
-		bool TryGetApplicableProductionBudget(Player player, out ProductionBudget budget)
+		bool TryGetApplicableProductionBudget(Player player, out ProductionBudgetScope scope)
 		{
-			budget = CurrentProductionBudget;
+			var budget = CurrentProductionBudget;
 			if (!budget.IsActive)
+			{
+				scope = default;
 				return false;
+			}
 
 			var queues = world.ActorsWithTrait<ProductionQueue>()
 				.Where(pair => pair.Actor.Owner == player && pair.Trait.Enabled)
 				.Select(pair => new ProductionQueueIdentity(
 					pair.Trait.Info.Group,
 					pair.Trait.Info.Type));
-			if (ProductionBudgetArbitrator.HasOwnerQueue(budget, queues))
+			if (ProductionBudgetArbitrator.TryResolveScope(budget, queues, out scope))
 				return true;
 
 			productionBudget.Clear();
-			budget = ProductionBudget.None;
+			scope = default;
 			return false;
 		}
 
-		void FlushProductionOrders(Player player, in ProductionBudget budget)
+		void FlushProductionOrders(Player player, in ProductionBudgetScope budgetScope)
 		{
 			if (pendingProduction.Count == 0)
 				return;
@@ -885,7 +898,7 @@ namespace AutoCnC.Platform.Traits
 			var byActor = pendingProduction.ToDictionary(
 				item => item.Candidate.ControllerActorId);
 			var evaluations = ProductionBudgetArbitrator.Evaluate(
-				budget,
+				budgetScope.Budget,
 				currentCash,
 				pendingProduction.Select(item => item.Candidate),
 				availableSlots);
@@ -909,7 +922,7 @@ namespace AutoCnC.Platform.Traits
 							item.Actor.ActorID,
 							item.Controller.ActiveModeName,
 							item.Decision,
-							budget,
+							budgetScope.Budget,
 							evaluation.Candidate.Cost,
 							evaluation.CurrentCash,
 							evaluation.PostOrderCash,
@@ -936,10 +949,30 @@ namespace AutoCnC.Platform.Traits
 			Order order,
 			bool enforceOrderLimit)
 		{
+			// Persistent intents are committed only after the order has secured a pending slot.
 			if (enforceOrderLimit && pending.Count >= Math.Max(0, info.MaxOrdersPerTick))
 			{
 				decisionTrace?.UnitDecisionEvaluated(GameSeconds, actor.Info.Name, actor.ActorID,
 					controller.ActiveModeName, decision, "order-limit");
+				return;
+			}
+
+			var playerActorId = actor.Owner.PlayerActor.ActorID;
+			if (!pendingPlayerActions.CanReserve(playerActorId, decision, order.TargetString))
+			{
+				controller.LastIssued = decision;
+				decisionTrace?.UnitDecisionEvaluated(GameSeconds, actor.Info.Name, actor.ActorID,
+					controller.ActiveModeName, decision, "coalesced-pending-action");
+				return;
+			}
+
+			pending.Add(order);
+			if (!pendingPlayerActions.TryReserve(playerActorId, decision, order.TargetString))
+			{
+				pending.RemoveAt(pending.Count - 1);
+				controller.LastIssued = decision;
+				decisionTrace?.UnitDecisionEvaluated(GameSeconds, actor.Info.Name, actor.ActorID,
+					controller.ActiveModeName, decision, "coalesced-pending-action");
 				return;
 			}
 
@@ -953,7 +986,6 @@ namespace AutoCnC.Platform.Traits
 			decisionTrace?.UnitDecisionIssued(GameSeconds, actor.Info.Name, actor.ActorID,
 				controller.ActiveModeName, decision, order.OrderString);
 			controller.LastIssued = decision;
-			pending.Add(order);
 		}
 
 		bool CancellationIntentIsCurrent(Player player, ProductionCancellationIntent intent)

@@ -47,6 +47,17 @@ namespace AutoCnC.Platform.Traits
 
 	internal readonly record struct ProductionQueueIdentity(string Group, string Type);
 
+	internal readonly record struct ProductionBudgetScope(
+		ProductionBudget Budget,
+		bool UsesGroup)
+	{
+		public bool OwnsQueue(string group, string type) =>
+			string.Equals(
+				Budget.Queue,
+				UsesGroup ? group : type,
+				StringComparison.OrdinalIgnoreCase);
+	}
+
 	internal readonly record struct ProductionBudgetCandidate(
 		uint ControllerActorId,
 		uint QueueActorId,
@@ -71,20 +82,32 @@ namespace AutoCnC.Platform.Traits
 
 	internal static class ProductionBudgetArbitrator
 	{
-		public static bool QueueMatches(string reservationQueue, string group, string type) =>
-			!string.IsNullOrWhiteSpace(reservationQueue) &&
-			(string.Equals(reservationQueue, group, StringComparison.OrdinalIgnoreCase) ||
-				string.Equals(reservationQueue, type, StringComparison.OrdinalIgnoreCase));
-
-		public static bool HasOwnerQueue(
-			in ProductionBudget budget, IEnumerable<ProductionQueueIdentity> queues)
+		public static bool TryResolveScope(
+			in ProductionBudget proposed,
+			IEnumerable<ProductionQueueIdentity> queues,
+			out ProductionBudgetScope scope)
 		{
+			scope = default;
+			var budget = ProductionBudgetLease.Normalize(proposed);
 			if (!budget.IsActive)
 				return false;
 
-			var reservationQueue = budget.Queue;
-			return queues.Any(queue =>
-				QueueMatches(reservationQueue, queue.Group, queue.Type));
+			var available = queues?.ToArray() ?? [];
+			if (available.Any(queue =>
+				string.Equals(budget.Queue, queue.Group, StringComparison.OrdinalIgnoreCase)))
+			{
+				scope = new ProductionBudgetScope(budget, UsesGroup: true);
+				return true;
+			}
+
+			if (available.Any(queue =>
+				string.Equals(budget.Queue, queue.Type, StringComparison.OrdinalIgnoreCase)))
+			{
+				scope = new ProductionBudgetScope(budget, UsesGroup: false);
+				return true;
+			}
+
+			return false;
 		}
 
 		public static IReadOnlyList<ProductionBudgetEvaluation> Evaluate(

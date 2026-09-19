@@ -132,6 +132,37 @@ namespace AutoCnC.Platform.Tests
 		}
 
 		[Test]
+		public void PersistentIntentAvailabilityDoesNotReserveBeforeOrderCommit()
+		{
+			var pending = new PendingPlayerActions();
+			var cancellation = Cancellation(queueActorId: 20, item: "mtnk", count: 2);
+			var cancellationPayload = ActionOrderBuilder.EncodeCancellationPayload("mtnk", 1);
+			var repair = UnitDecision.RepairBuilding(30, "repair");
+			var repairPayload = ActionOrderBuilder.EncodeRepairPayload(1);
+
+			pending.BeginTick(_ => true, _ => true);
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(pending.CanReserve(7, cancellation, cancellationPayload), Is.True);
+				Assert.That(pending.CanReserve(7, cancellation, cancellationPayload), Is.True,
+					"a capacity check must not leave a persistent cancellation reservation");
+				Assert.That(pending.CanReserve(7, repair, repairPayload), Is.True);
+				Assert.That(pending.CanReserve(7, repair, repairPayload), Is.True,
+					"a capacity check must not leave a persistent repair reservation");
+			});
+
+			Assert.That(pending.TryReserve(7, cancellation, cancellationPayload), Is.True);
+			Assert.That(pending.TryReserve(7, repair, repairPayload), Is.True);
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(pending.CanReserve(7, cancellation, cancellationPayload), Is.False);
+				Assert.That(pending.CanReserve(7, repair, repairPayload), Is.False);
+			});
+		}
+
+		[Test]
 		public void CancellationIntentKeyIncludesPlayerQueueItemCountAndRevision()
 		{
 			var pending = new PendingPlayerActions();
@@ -468,11 +499,47 @@ namespace AutoCnC.Platform.Tests
 
 			Assert.Multiple(() =>
 			{
-				Assert.That(ProductionBudgetArbitrator.HasOwnerQueue(budget, queues), Is.False);
-				Assert.That(ProductionBudgetArbitrator.HasOwnerQueue(
+				Assert.That(ProductionBudgetArbitrator.TryResolveScope(
+					budget, queues, out _), Is.False);
+				Assert.That(ProductionBudgetArbitrator.TryResolveScope(
 					budget,
-					queues.Append(new ProductionQueueIdentity("building", "Building.GDI"))),
+					queues.Append(new ProductionQueueIdentity("building", "Building.GDI")),
+					out _),
 					Is.True);
+			});
+		}
+
+		[Test]
+		public void ProductionBudgetOwnershipUsesGroupBeforeType()
+		{
+			var budget = ProductionBudget.Reserve(1000, "Vehicle", "save");
+			var queues = new[]
+			{
+				new ProductionQueueIdentity("Factory", "Vehicle"),
+				new ProductionQueueIdentity("Vehicle", "Aircraft")
+			};
+
+			Assert.That(
+				ProductionBudgetArbitrator.TryResolveScope(budget, queues, out var groupScope),
+				Is.True);
+			Assert.Multiple(() =>
+			{
+				Assert.That(groupScope.UsesGroup, Is.True);
+				Assert.That(groupScope.OwnsQueue("Factory", "Vehicle"), Is.False,
+					"a Type match must not own the reservation when any Group matches");
+				Assert.That(groupScope.OwnsQueue("Vehicle", "Aircraft"), Is.True);
+			});
+
+			Assert.That(
+				ProductionBudgetArbitrator.TryResolveScope(
+					budget,
+					[new ProductionQueueIdentity("Factory", "Vehicle")],
+					out var typeScope),
+				Is.True);
+			Assert.Multiple(() =>
+			{
+				Assert.That(typeScope.UsesGroup, Is.False);
+				Assert.That(typeScope.OwnsQueue("Factory", "Vehicle"), Is.True);
 			});
 		}
 

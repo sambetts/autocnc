@@ -44,6 +44,26 @@ namespace AutoCnC.Evidence
 		public string Reason { get; init; }
 		public string ReasonId { get; init; }
 		public string Outcome { get; init; }
+		public ProductionBudgetTraceRecord ProductionBudget { get; init; }
+		public ProductionTraceRecord Production { get; init; }
+	}
+
+	/// <summary>Production reservation attached to a budget-suppressed evaluation.</summary>
+	public sealed class ProductionBudgetTraceRecord
+	{
+		public int ReservedCash { get; init; }
+		public string OwnerQueue { get; init; }
+		public string Reason { get; init; }
+		public string ReasonId { get; init; }
+	}
+
+	/// <summary>Cash calculation attached to a budget-suppressed evaluation.</summary>
+	public sealed class ProductionTraceRecord
+	{
+		public int ItemCost { get; init; }
+		public long CurrentCash { get; init; }
+		public long PostOrderCash { get; init; }
+		public long ReservedCashRemaining { get; init; }
 	}
 
 	/// <summary>Visible enemy count and value for one threat kind in an assessment.</summary>
@@ -156,7 +176,8 @@ namespace AutoCnC.Evidence
 
 		/// <summary>
 		/// Every exact machine-readable reason identifier in evaluations, assessments, and
-		/// doctrine changes, with occurrence count. Old traces fall back to issued decisions.
+		/// doctrine changes, including nested production-budget reasons, with occurrence count.
+		/// Old traces fall back to issued decisions.
 		/// </summary>
 		public Dictionary<string, int> ReasonIdCounts { get; } = new(StringComparer.Ordinal);
 
@@ -377,11 +398,14 @@ namespace AutoCnC.Evidence
 				Queue = Text(root, "queue"),
 				Reason = Text(root, "reason"),
 				ReasonId = Text(root, "reasonId"),
-				Outcome = Text(root, "outcome")
+				Outcome = Text(root, "outcome"),
+				ProductionBudget = ProductionBudget(root),
+				Production = Production(root)
 			};
 
 			UnitDecisionEvaluations.Add(record);
 			RegisterReasonId(record.ReasonId);
+			RegisterReasonId(record.ProductionBudget?.ReasonId);
 		}
 
 		void IncludeLegacyIssuedReasonIds()
@@ -407,6 +431,36 @@ namespace AutoCnC.Evidence
 		static bool DecisionFlag(JsonElement root, string decision, string name) =>
 			root.TryGetProperty(decision, out var value) && value.ValueKind == JsonValueKind.Object &&
 			Flag(value, name);
+
+		static ProductionBudgetTraceRecord ProductionBudget(JsonElement root)
+		{
+			if (!root.TryGetProperty("productionBudget", out var budget) ||
+				budget.ValueKind != JsonValueKind.Object)
+				return null;
+
+			return new ProductionBudgetTraceRecord
+			{
+				ReservedCash = Integer(budget, "reservedCash"),
+				OwnerQueue = Text(budget, "ownerQueue"),
+				Reason = Text(budget, "reason"),
+				ReasonId = Text(budget, "reasonId")
+			};
+		}
+
+		static ProductionTraceRecord Production(JsonElement root)
+		{
+			if (!root.TryGetProperty("production", out var production) ||
+				production.ValueKind != JsonValueKind.Object)
+				return null;
+
+			return new ProductionTraceRecord
+			{
+				ItemCost = Integer(production, "itemCost"),
+				CurrentCash = Long(production, "currentCash"),
+				PostOrderCash = Long(production, "postOrderCash"),
+				ReservedCashRemaining = Long(production, "reservedCashRemaining")
+			};
+		}
 
 		static List<ThreatValueRecord> ThreatValues(JsonElement root, string name)
 		{
@@ -440,6 +494,13 @@ namespace AutoCnC.Evidence
 			value.ValueKind == JsonValueKind.Number &&
 			value.TryGetInt64(out var parsed)
 				? (int)Math.Clamp(parsed, int.MinValue, int.MaxValue)
+				: 0;
+
+		static long Long(JsonElement element, string name) =>
+			element.TryGetProperty(name, out var value) &&
+			value.ValueKind == JsonValueKind.Number &&
+			value.TryGetInt64(out var parsed)
+				? parsed
 				: 0;
 
 		static bool Flag(JsonElement element, string name) =>

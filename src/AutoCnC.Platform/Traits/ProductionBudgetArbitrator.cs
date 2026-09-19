@@ -16,6 +16,23 @@ using AutoCnC.Core;
 
 namespace AutoCnC.Platform.Traits
 {
+	internal sealed class ProductionAdmissionCursor
+	{
+		ulong nextRound;
+
+		public ulong NextRound => nextRound;
+
+		public bool TryBeginBatch(int pendingOrderCount, out ulong round)
+		{
+			round = nextRound;
+			if (pendingOrderCount <= 0)
+				return false;
+
+			nextRound++;
+			return true;
+		}
+	}
+
 	internal sealed class ProductionBudgetLease
 	{
 		ProductionBudget current;

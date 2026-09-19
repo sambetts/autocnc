@@ -225,6 +225,7 @@ namespace AutoCnC.Platform.Traits
 		readonly PendingPlayerActions pendingPlayerActions = new();
 		readonly ProductionBudgetLease productionBudget = new();
 		readonly ProductionCommitmentLedger productionCommitments = new();
+		readonly ProductionAdmissionCursor productionAdmission = new();
 
 		BattleAssessor assessor;
 		BattleLog battleLog;
@@ -235,8 +236,6 @@ namespace AutoCnC.Platform.Traits
 
 		int nextAssessTick;
 		int doctrineStartedSeconds;
-		ulong productionAdmissionRound;
-
 		/// <summary>The loaded battle bot, or null if none.</summary>
 		public BattleBotDefinition Bot { get; private set; }
 
@@ -673,12 +672,8 @@ namespace AutoCnC.Platform.Traits
 				? budgetScope
 				: null;
 			var controllers = world.ActorsWithTrait<ProgrammableController>().AsEnumerable();
-			var admissionRound = 0UL;
 			if (activeBudget.HasValue)
-			{
-				admissionRound = productionAdmissionRound++;
 				controllers = controllers.OrderBy(pair => pair.Actor.ActorID);
-			}
 
 			foreach (var pair in controllers)
 			{
@@ -707,7 +702,7 @@ namespace AutoCnC.Platform.Traits
 			}
 
 			if (activeBudget.HasValue)
-				FlushBudgetedOrders(player, activeBudget.Value, admissionRound);
+				FlushBudgetedOrders(player, activeBudget.Value);
 
 			foreach (var order in pending)
 				world.IssueOrder(order);
@@ -978,10 +973,10 @@ namespace AutoCnC.Platform.Traits
 
 		void FlushBudgetedOrders(
 			Player player,
-			in ProductionBudgetScope budgetScope,
-			ulong admissionRound)
+			in ProductionBudgetScope budgetScope)
 		{
-			if (pendingBudgetedOrders.Count == 0)
+			if (!productionAdmission.TryBeginBatch(
+				pendingBudgetedOrders.Count, out var admissionRound))
 				return;
 
 			var resources = player.PlayerActor.TraitOrDefault<PlayerResources>();

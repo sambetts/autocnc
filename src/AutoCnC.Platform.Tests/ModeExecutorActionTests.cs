@@ -443,6 +443,29 @@ namespace AutoCnC.Platform.Tests
 		}
 
 		[Test]
+		public void AdmissionRoundAdvancesOnlyWhenEightTickControllersProduceABatch()
+		{
+			var cursor = new ProductionAdmissionCursor();
+			var controllers = new[] { 10u, 20u };
+			var admitted = new List<uint>();
+
+			for (var worldTick = 0; worldTick <= 24; worldTick++)
+			{
+				var pendingCount = worldTick % 8 == 0 ? controllers.Length : 0;
+				if (!cursor.TryBeginBatch(pendingCount, out var round))
+					continue;
+
+				admitted.Add(ModeExecutor.RotateAdmission(controllers, round).First());
+			}
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(admitted, Is.EqualTo(new[] { 10u, 20u, 10u, 20u }));
+				Assert.That(cursor.NextRound, Is.EqualTo(4));
+			});
+		}
+
+		[Test]
 		public void OwningQueueCanSpendReservedCashBeforeOtherQueues()
 		{
 			var budget = ProductionBudget.Reserve(1000, "Building", "save for construction");

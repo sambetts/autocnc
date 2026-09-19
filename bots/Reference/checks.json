@@ -1,14 +1,7 @@
 {
   "schemaVersion": 1,
-  "authoredForRevision": "1bba1476bad2651f8bc782fd574e18959934fd5e",
+  "authoredForRevision": "7fdbc489c04f16b7289acb4d493d2af4d119efaa",
   "checks": [
-    {
-      "id": "critical-building-repair-runs",
-      "description": "A badly damaged critical economy or production building starts one bounded repair cycle.",
-      "query": "reason-id:reference.building.repair-critical",
-      "operator": ">=",
-      "value": "1"
-    },
     {
       "id": "cleared-base-assault-launch-runs",
       "description": "The changed Defence exit launches a formed assault only after immediate base pressure has cleared.",

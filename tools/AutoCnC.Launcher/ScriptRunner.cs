@@ -60,7 +60,7 @@ namespace AutoCnC.Launcher
 	{
 		/// <summary>How long a closing game gets to write its replay out before it is killed.</summary>
 		const int CloseTimeout = 8000;
-		static readonly string EncodedRunner = Convert.ToBase64String(Encoding.Unicode.GetBytes(
+		const string Runner =
 			"$utf8 = New-Object System.Text.UTF8Encoding $false\n" +
 			"$OutputEncoding = [Console]::OutputEncoding = $utf8\n" +
 			"if (Get-Variable PSStyle -ErrorAction SilentlyContinue) {\n" +
@@ -94,7 +94,7 @@ namespace AutoCnC.Launcher
 			"        $parameters[$metadata.Name] = [string]$job[$i]\n" +
 			"    }\n" +
 			"}\n" +
-			"& $command @parameters\n"));
+			"& $command @parameters\n";
 
 		readonly object outputLock = new();
 		readonly List<string> currentOutput = [];
@@ -205,8 +205,10 @@ namespace AutoCnC.Launcher
 			startInfo.ArgumentList.Add("Bypass");
 			startInfo.ArgumentList.Add("-OutputFormat");
 			startInfo.ArgumentList.Add("Text");
-			startInfo.ArgumentList.Add("-EncodedCommand");
-			startInfo.ArgumentList.Add(EncodedRunner);
+			// Windows PowerShell serializes stderr as CLIXML with -EncodedCommand even when
+			// text output is requested. Only this fixed bootstrap is code; job values stay in JSON.
+			startInfo.ArgumentList.Add("-Command");
+			startInfo.ArgumentList.Add(Runner);
 
 			var invocation = new List<string> { job.ScriptPath };
 			invocation.AddRange(job.Arguments);

@@ -129,6 +129,18 @@ namespace AutoCnC.Reference.Logic
 		}
 
 		/// <summary>
+		/// Whether a sufficiently large observed force falls below the anti-armour threshold.
+		/// </summary>
+		public static bool PreferAntiInfantry(in EnemyMix mix, in MixTuning t)
+		{
+			var total = mix.Total;
+			if (total <= 0 || total < t.MinimumSeen)
+				return false;
+
+			return mix.Armour * 100 < total * t.ArmourSharePercent;
+		}
+
+		/// <summary>
 		/// The plan with every endless rung of <paramref name="queue"/> that names only
 		/// <paramref name="from"/> rewritten to buy <paramref name="to"/> instead.
 		/// </summary>
@@ -171,6 +183,47 @@ namespace AutoCnC.Reference.Logic
 			}
 
 			return rewritten ?? plan;
+		}
+
+		/// <summary>
+		/// Replaces the first bounded role rung of an exact size without changing its target.
+		/// </summary>
+		/// <remarks>
+		/// This is for a temporary tactical substitution, not a permanent composition change.
+		/// Returning the original plan by reference lets the caller prove whether the rung
+		/// existed and was rewritten.
+		/// </remarks>
+		public static IReadOnlyList<ProductionStep> RetargetFirstBounded(
+			IReadOnlyList<ProductionStep> plan,
+			string queue,
+			IReadOnlyList<string> from,
+			string[] to,
+			int desiredCount)
+		{
+			if (plan == null
+				|| string.IsNullOrEmpty(queue)
+				|| from == null
+				|| from.Count == 0
+				|| to == null
+				|| to.Length == 0
+				|| desiredCount <= 0
+				|| desiredCount == int.MaxValue)
+				return plan;
+
+			for (var i = 0; i < plan.Count; i++)
+			{
+				var step = plan[i];
+				if (step.DesiredCount != desiredCount
+					|| !string.Equals(step.Queue, queue, StringComparison.OrdinalIgnoreCase)
+					|| !AllNamed(from, step.Candidates))
+					continue;
+
+				var rewritten = new List<ProductionStep>(plan);
+				rewritten[i] = new ProductionStep(step.Queue, to, step.DesiredCount);
+				return rewritten;
+			}
+
+			return plan;
 		}
 
 		/// <summary>Whether an actor type belongs to a named role.</summary>

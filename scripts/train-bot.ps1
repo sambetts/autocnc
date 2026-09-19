@@ -479,7 +479,7 @@ if ($commandLineLength -ge 32767) {
         '({promptFile}) instead of putting {prompt} in the arguments.')
 }
 
-Set-Content -LiteralPath $transcript -Value "=== Agent: $($agent.command) ==="
+"=== Agent: $($agent.command) ===" | Tee-Object -FilePath $transcript | Out-Null
 Write-Host "==> Improving $([IO.Path]::GetFileNameWithoutExtension($project)) with $($agent.command)" -ForegroundColor Cyan
 Write-Host "    Evidence: $run" -ForegroundColor DarkGray
 Write-AgentStatus -State 'running' -Phase 'agent'
@@ -490,16 +490,33 @@ try {
     # every non-ASCII character in the prompt.
     $OutputEncoding = [Text.UTF8Encoding]::new($false)
     $agentFailure = $null
+    $agentResult = @{ ExitCode = $null }
     try {
-        if ($null -ne $agentInput) {
-            $agentInput | & $agent.command @agentArguments 2>&1 | Tee-Object -FilePath $transcript -Append
-        } else {
-            & $agent.command @agentArguments 2>&1 | Tee-Object -FilePath $transcript -Append
-        }
+        & {
+            # Windows PowerShell turns native stderr into ErrorRecords. Only the process exit
+            # code signals agent failure; keep strict error handling outside this child scope.
+            $ErrorActionPreference = 'Continue'
+            $PSNativeCommandUseErrorActionPreference = $false
+            $global:LASTEXITCODE = $null
+            if ($null -ne $agentInput) {
+                $agentInput | & $agent.command @agentArguments 2>&1
+            } else {
+                & $agent.command @agentArguments 2>&1
+            }
 
-        $agentExitCode = $LASTEXITCODE
+            $agentResult.ExitCode = $global:LASTEXITCODE
+        } | ForEach-Object {
+            if ($_ -is [System.Management.Automation.ErrorRecord] -and
+                $_.FullyQualifiedErrorId -notin @('NativeCommandError', 'NativeCommandErrorMessage')) {
+                throw $_
+            }
+
+            $_.ToString()
+        } | Tee-Object -FilePath $transcript -Append
+
+        $agentExitCode = $agentResult.ExitCode
     } catch {
-        $agentExitCode = if ($LASTEXITCODE) { $LASTEXITCODE } else { 1 }
+        $agentExitCode = if ($agentResult.ExitCode) { $agentResult.ExitCode } else { 1 }
         $agentFailure = $_
         $_ | Out-String | Tee-Object -FilePath $transcript -Append | Write-Host
     }

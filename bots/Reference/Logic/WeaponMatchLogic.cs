@@ -111,6 +111,7 @@ namespace AutoCnC.Reference.Logic
 				// Strong against None, collapsing against plate.
 				case "e1":    return WeaponRole.AntiInfantry;  // M16          1875 /  500 /  125
 				case "e2":    return WeaponRole.AntiInfantry;  // Grenade      2500 / 2000 /  850
+				case "e4":    return WeaponRole.AntiInfantry;  // Flamethrower
 				case "jeep":  return WeaponRole.AntiInfantry;  // MachineGunH  5391 / 2516 /  359
 				case "bggy":  return WeaponRole.AntiInfantry;  // MachineGun   4688 / 2188 /  312
 				case "ftnk":  return WeaponRole.AntiInfantry;  // BigFlamer    5469 / 5002 / 1201

@@ -170,7 +170,7 @@ $agentArguments = foreach ($argument in $arguments) {
 $agentInput = if ($agentStdin) { Expand-AgentPlaceholders $agentStdin } else { $null }
 
 $transcript = Join-Path $run 'agent-chat-turn.txt'
-Set-Content -LiteralPath $transcript -Value "=== You ==="
+"=== You ===" | Tee-Object -FilePath $transcript | Out-Null
 Add-Content -LiteralPath $transcript -Value $Message
 
 Write-Host "==> Asking $($agent.command) about $([IO.Path]::GetFileNameWithoutExtension($project))" -ForegroundColor Cyan
@@ -185,13 +185,30 @@ try {
     # Windows PowerShell pipes to native commands as ASCII by default, which would quietly mangle
     # every non-ASCII character in the message.
     $OutputEncoding = [Text.UTF8Encoding]::new($false)
-    if ($null -ne $agentInput) {
-        $agentInput | & $agent.command @agentArguments 2>&1 | Tee-Object -FilePath $transcript -Append
-    } else {
-        & $agent.command @agentArguments 2>&1 | Tee-Object -FilePath $transcript -Append
-    }
+    $agentResult = @{ ExitCode = $null }
+    & {
+        # Windows PowerShell turns native stderr into ErrorRecords. Only the process exit
+        # code signals agent failure; keep strict error handling outside this child scope.
+        $ErrorActionPreference = 'Continue'
+        $PSNativeCommandUseErrorActionPreference = $false
+        $global:LASTEXITCODE = $null
+        if ($null -ne $agentInput) {
+            $agentInput | & $agent.command @agentArguments 2>&1
+        } else {
+            & $agent.command @agentArguments 2>&1
+        }
 
-    $exitCode = $LASTEXITCODE
+        $agentResult.ExitCode = $global:LASTEXITCODE
+    } | ForEach-Object {
+        if ($_ -is [System.Management.Automation.ErrorRecord] -and
+            $_.FullyQualifiedErrorId -notin @('NativeCommandError', 'NativeCommandErrorMessage')) {
+            throw $_
+        }
+
+        $_.ToString()
+    } | Tee-Object -FilePath $transcript -Append
+
+    $exitCode = $agentResult.ExitCode
 } finally {
     Pop-Location
 }

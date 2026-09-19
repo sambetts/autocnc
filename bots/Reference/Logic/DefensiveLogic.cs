@@ -19,13 +19,17 @@ namespace AutoCnC.Reference.Logic
 		int RetreatBelowHealthPercent,
 		int ResumeAboveHealthPercent,
 		int TetherRadiusUnits,
-		int LeashRadiusUnits)
+		int LeashRadiusUnits,
+		int ConsolidateAtThreatCount,
+		int MaintainConsolidationAtThreatCount)
 	{
 		public static DefensiveTuning Default { get; } = new(
 			RetreatBelowHealthPercent: 30,
 			ResumeAboveHealthPercent: 80,
 			TetherRadiusUnits: 5 * 1024,
-			LeashRadiusUnits: 8 * 1024);
+			LeashRadiusUnits: 8 * 1024,
+			ConsolidateAtThreatCount: 3,
+			MaintainConsolidationAtThreatCount: 2);
 	}
 
 	/// <summary>
@@ -42,7 +46,17 @@ namespace AutoCnC.Reference.Logic
 			=> Decide(state, tuning, WeaponRole.Unknown);
 
 		public static UnitDecision Decide(in DefensiveState state, in DefensiveTuning tuning, WeaponRole role)
+			=> Decide(state, tuning, role, false, out _);
+
+		public static UnitDecision Decide(
+			in DefensiveState state,
+			in DefensiveTuning tuning,
+			WeaponRole role,
+			bool wasConsolidating,
+			out bool isConsolidating)
 		{
+			isConsolidating = false;
+
 			// 0. A unit with no weapon cannot defend anything, so this mode has nothing useful to
 			//    say about it. Bail out rather than interfering: without this, step 3 below drags
 			//    harvesters off tiberium and back to their anchor, killing the economy the moment
@@ -60,12 +74,35 @@ namespace AutoCnC.Reference.Logic
 			{
 				var target = SelectTarget(state, tuning, role);
 				if (target.HasValue)
+				{
+					var engageableThreats = CountEngageableThreats(state, tuning);
+					isConsolidating = wasConsolidating
+						&& engageableThreats >= tuning.MaintainConsolidationAtThreatCount;
+					if (state.CanMove
+						&& target.Value.DistanceUnits > state.WeaponRangeUnits
+						&& (engageableThreats >= tuning.ConsolidateAtThreatCount
+							|| isConsolidating))
+					{
+						isConsolidating = true;
+						var reason = engageableThreats >= tuning.ConsolidateAtThreatCount
+							? $"consolidating defensive line against {engageableThreats} distant threats"
+							: $"defensive consolidation held through threat-count flicker: {engageableThreats} distant threats remain";
+						if (state.DistanceFromAnchorUnits <= tuning.TetherRadiusUnits)
+							return UnitDecision.Attack(
+								target.Value.ActorId,
+								$"{reason}, engaging from distributed defensive line under mass pressure");
+
+						return UnitDecision.ReturnToAnchor(reason);
+					}
+
 					return UnitDecision.Attack(target.Value.ActorId, $"engaging {target.Value.Kind} at {target.Value.DistanceUnits}u");
+				}
 			}
 
 			// 3. Nothing to shoot: get back on post if we have drifted.
 			if (state.CanMove && state.DistanceFromAnchorUnits > tuning.TetherRadiusUnits)
-				return UnitDecision.ReturnToAnchor($"drifted {state.DistanceFromAnchorUnits}u > tether {tuning.TetherRadiusUnits}u");
+				return UnitDecision.ReturnToAnchor(
+					$"defensive base-center regroup: drifted {state.DistanceFromAnchorUnits}u > tether {tuning.TetherRadiusUnits}u");
 
 			// 4. On post, no threats. Only assert Hold when genuinely idle, so we don't
 			//    stomp an activity that is still legitimately running.
@@ -101,22 +138,7 @@ namespace AutoCnC.Reference.Logic
 			for (var i = 0; i < threats.Count; i++)
 			{
 				var t = threats[i];
-				if (!t.IsAttackable)
-					continue;
-
-				var withinWeaponRange = t.DistanceUnits <= state.WeaponRangeUnits;
-
-				// Movement only pays if the target can be caught, and an aircraft cannot.
-				// Every aircraft in the ruleset outruns every ground unit this side fields,
-				// so a step taken toward one ends with the aircraft somewhere else and us
-				// standing on whatever ground it happened to be over. Shoot the ones that
-				// come to us — our reach is the longer of the two — and ignore the rest.
-				if (!withinWeaponRange && t.Kind == ThreatKind.Aircraft)
-					continue;
-
-				// Would engaging this drag us off our post? If so, ignore it entirely.
-				var reachDistance = state.DistanceFromAnchorUnits + t.DistanceUnits;
-				if (!withinWeaponRange && reachDistance > tuning.LeashRadiusUnits)
+				if (!CanEngage(state, tuning, t))
 					continue;
 
 				var score = ScoreThreat(t, state.WeaponRangeUnits, role);
@@ -128,6 +150,43 @@ namespace AutoCnC.Reference.Logic
 			}
 
 			return best;
+		}
+
+		static int CountEngageableThreats(in DefensiveState state, in DefensiveTuning tuning)
+		{
+			var threats = state.Threats;
+			if (threats == null)
+				return 0;
+
+			var count = 0;
+			for (var i = 0; i < threats.Count; i++)
+				if (CanEngage(state, tuning, threats[i]))
+					count++;
+
+			return count;
+		}
+
+		static bool CanEngage(
+			in DefensiveState state,
+			in DefensiveTuning tuning,
+			in ThreatSnapshot threat)
+		{
+			if (!threat.IsAttackable)
+				return false;
+
+			var withinWeaponRange = threat.DistanceUnits <= state.WeaponRangeUnits;
+
+			// Movement only pays if the target can be caught, and an aircraft cannot.
+			// Every aircraft in the ruleset outruns every ground unit this side fields,
+			// so a step taken toward one ends with the aircraft somewhere else and us
+			// standing on whatever ground it happened to be over. Shoot the ones that
+			// come to us — our reach is the longer of the two — and ignore the rest.
+			if (!withinWeaponRange && threat.Kind == ThreatKind.Aircraft)
+				return false;
+
+			// Would engaging this drag us off our post? If so, ignore it entirely.
+			var reachDistance = state.DistanceFromAnchorUnits + threat.DistanceUnits;
+			return withinWeaponRange || reachDistance <= tuning.LeashRadiusUnits;
 		}
 
 		/// <summary>

@@ -20,6 +20,9 @@ namespace AutoCnC.Reference.Logic
 	/// <paramref name="HarvesterPrice"/> is a ruleset price, not a tuned number: <c>harv</c>
 	/// costs 1,100 for both factions and needs only <c>proc</c>. It is the bar because it is
 	/// exactly the sum the barracks has to stop taking for the vehicle queue to finish one.
+	/// <paramref name="ScreenVehiclePrice"/> is the larger price in the faction-portable
+	/// <see cref="ReferencePlans.ScreenVehicles"/> pair: 400 for <c>jeep</c>, while <c>bggy</c>
+	/// costs 300. Reserving the larger amount makes the same gate sufficient for either faction.
 	/// <para>
 	/// <paramref name="GarrisonBodies"/> is the plan's own idea of "enough not to die to a
 	/// rush": <see cref="ReferencePlans.OpeningTrain"/> opens on four rifles and four rockets
@@ -28,10 +31,14 @@ namespace AutoCnC.Reference.Logic
 	/// for four or fewer is left exactly as its doctrine wrote it.
 	/// </para>
 	/// </remarks>
-	public readonly record struct IncomeFirstTuning(int HarvesterPrice, int GarrisonBodies)
+	public readonly record struct IncomeFirstTuning(
+		int HarvesterPrice,
+		int ScreenVehiclePrice,
+		int GarrisonBodies)
 	{
 		public static IncomeFirstTuning Default { get; } = new(
 			HarvesterPrice: 1100,
+			ScreenVehiclePrice: 400,
 			GarrisonBodies: 4);
 	}
 
@@ -111,9 +118,73 @@ namespace AutoCnC.Reference.Logic
 	/// answer whenever everything above it is met, so a rule that skipped it would hold the
 	/// bounded rungs and leak the whole surplus through the last one.
 	/// </para>
+	/// <para>
+	/// <see cref="HoldForPriority"/> applies the same arbitration to the light-vehicle screen.
+	/// The harvester-specific entry point remains separate so economy rescue keeps its own
+	/// threshold and reason.
+	/// </para>
 	/// </remarks>
 	public static class IncomeFirstLogic
 	{
+		/// <summary>
+		/// Whether discretionary queues should yield to a refinery already being built.
+		/// </summary>
+		/// <remarks>
+		/// A queued structure does not reserve shared cash. Finish the refinery while the base
+		/// has no redundancy; callers may still allow the existing harvester recovery priority.
+		/// </remarks>
+		public static bool ShouldFundCriticalRefinery(
+			int ownedRefineries,
+			bool refineryInProduction)
+		{
+			if (ownedRefineries < 0)
+				return false;
+
+			// Owned counts include the active production item once its order is visible.
+			var completedRefineries = refineryInProduction && ownedRefineries > 0
+				? ownedRefineries - 1
+				: ownedRefineries;
+			return refineryInProduction
+				&& completedRefineries <= 1;
+		}
+
+		/// <summary>
+		/// Moves the first harvester rung to the front while the fleet is below its release floor.
+		/// </summary>
+		/// <remarks>
+		/// Cross-queue cash holds cannot help when a cheaper combat rung leads the harvester in
+		/// the Vehicle queue itself. The same release floor that normally lets the queue move
+		/// beyond harvesters defines when recovery is complete. Callers may preserve one leading
+		/// screen while an earner survives; once recovery is selected, this method moves it
+		/// ahead of every cheaper rung. The original plan returns by reference as soon as the
+		/// floor is restored.
+		/// </remarks>
+		public static IReadOnlyList<ProductionStep> PrioritizeRecovery(
+			IReadOnlyList<ProductionStep> plan,
+			IReadOnlyList<string> harvesterRole,
+			int standingHarvesters,
+			int shortBelow,
+			bool harvestersBuildable)
+		{
+			if (plan == null || harvesterRole == null || harvesterRole.Count == 0)
+				return plan;
+
+			if (!harvestersBuildable || shortBelow <= 0 || standingHarvesters >= shortBelow)
+				return plan;
+
+			var firstHarvester = ExpansionLogic.FirstRungNaming(plan, harvesterRole);
+			if (firstHarvester <= 0)
+				return plan;
+
+			var prioritized = new List<ProductionStep>(plan.Count);
+			prioritized.Add(plan[firstHarvester]);
+			for (var i = 0; i < plan.Count; i++)
+				if (i != firstHarvester)
+					prioritized.Add(plan[i]);
+
+			return prioritized;
+		}
+
 		/// <summary>
 		/// The plan with every rung of <paramref name="queue"/> capped at the garrison, while the
 		/// side cannot afford the harvester it is short of.
@@ -132,22 +203,37 @@ namespace AutoCnC.Reference.Logic
 			bool harvestersBuildable,
 			in IncomeFirstTuning t)
 		{
-			var idle = new IncomeHold(plan, standingHarvesters, shortBelow, cash, 0);
+			return HoldForPriority(
+				plan, queue, cash, standingHarvesters, shortBelow,
+				harvestersBuildable, t.HarvesterPrice, t);
+		}
+
+		/// <summary>
+		/// Caps a cheap queue while a buildable priority role is below its release band and
+		/// cannot yet be funded.
+		/// </summary>
+		public static IncomeHold HoldForPriority(
+			IReadOnlyList<ProductionStep> plan,
+			string queue,
+			int cash,
+			int standingPriority,
+			int shortBelow,
+			bool priorityBuildable,
+			int reservePrice,
+			in IncomeFirstTuning t)
+		{
+			var idle = new IncomeHold(plan, standingPriority, shortBelow, cash, 0);
 
 			if (plan == null || string.IsNullOrEmpty(queue) || t.GarrisonBodies < 0)
 				return idle;
 
-			// Nothing can buy a harvester, so holding the barracks buys nothing either.
-			if (!harvestersBuildable || shortBelow <= 0)
+			if (!priorityBuildable || shortBelow <= 0 || reservePrice <= 0)
 				return idle;
 
-			// The fleet is inside the band the vehicle queue is allowed to stop asking about.
-			if (standingHarvesters >= shortBelow)
+			if (standingPriority >= shortBelow)
 				return idle;
 
-			// Both are affordable this tick, so the rifleman is not costing the harvester
-			// anything. This is the clause that lifts the cap the moment income recovers.
-			if (cash >= t.HarvesterPrice)
+			if (cash >= reservePrice)
 				return idle;
 
 			List<ProductionStep> capped = null;
@@ -175,7 +261,7 @@ namespace AutoCnC.Reference.Logic
 
 			return capped == null
 				? idle
-				: new IncomeHold(capped, standingHarvesters, shortBelow, cash, rungs);
+				: new IncomeHold(capped, standingPriority, shortBelow, cash, rungs);
 		}
 	}
 }

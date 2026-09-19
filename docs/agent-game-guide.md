@@ -91,6 +91,12 @@ it as authoritative context alongside the source and the evidence from one compl
   configured names resolve to concrete ready keys before duplicate suppression.
 - Player-scoped repair and cancellation requests remain coalesced while their orders are in
   flight; support-power requests are coalesced within the issuing tick.
+- `IBattleBot.ReserveProductionBudget` may reserve cash for one production queue Group/Type until
+  the next assessment. The owner may spend it; other new `Produce` decisions are centrally
+  suppressed when their full rules cost would take live cash below the remaining reservation.
+  Arbitration is deterministic across controller order. Existing queued items, cancellation and
+  completed-building placement are not gated. Modes may inspect `ctx.CurrentProductionBudget`
+  but must not coordinate reservations with `Hold` or evaluation sequence.
 - Returning the same intent repeatedly is cheap because the host suppresses duplicate orders.
 - Target selection should be stable. Re-picking equivalent targets every evaluation makes units
   dither.

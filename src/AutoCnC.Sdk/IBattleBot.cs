@@ -90,6 +90,17 @@ namespace AutoCnC.Sdk
 		/// dwell only for a switch to <c>Defence</c> while visible enemies are near the base.
 		/// </remarks>
 		DoctrineDecision Reassess(in BattleState state);
+
+		/// <summary>
+		/// Called after doctrine selection at every strategic assessment. Return cash to reserve
+		/// for one production queue category, or <see cref="ProductionBudget.None"/>.
+		/// </summary>
+		/// <remarks>
+		/// This default keeps bots written before production arbitration source-compatible. The
+		/// platform refreshes the reservation on every assessment; modes do not need to coordinate
+		/// with each other or issue <see cref="UnitDecision.Hold"/>.
+		/// </remarks>
+		ProductionBudget ReserveProductionBudget(in BattleState state) => ProductionBudget.None;
 	}
 
 	/// <summary>Fluent surface a bot uses to declare which doctrines it owns.</summary>
@@ -121,6 +132,9 @@ namespace AutoCnC.Sdk
 		public abstract void Configure(IBattleBotBuilder builder);
 
 		public virtual DoctrineDecision Reassess(in BattleState state) => DoctrineDecision.Continue;
+
+		public virtual ProductionBudget ReserveProductionBudget(in BattleState state) =>
+			ProductionBudget.None;
 	}
 
 	/// <summary>

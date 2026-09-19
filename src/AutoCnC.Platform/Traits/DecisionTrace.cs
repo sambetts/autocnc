@@ -149,6 +149,49 @@ namespace AutoCnC.Platform.Traits
 				Outcome = outcome
 			});
 
+		public void ProductionBudgetSuppressed(
+			int seconds,
+			string actor,
+			uint actorId,
+			string mode,
+			in UnitDecision decision,
+			in ProductionBudget budget,
+			int itemCost,
+			long currentCash,
+			long postOrderCash,
+			long reservedCashRemaining) =>
+			Write(new
+			{
+				Event = "unit-decision-evaluated",
+				Seconds = seconds,
+				Actor = actor,
+				ActorId = actorId,
+				Mode = mode,
+				Action = decision.Action.ToString(),
+				decision.TargetActorId,
+				decision.TargetX,
+				decision.TargetY,
+				decision.ItemName,
+				decision.Queue,
+				decision.Reason,
+				decision.ReasonId,
+				Outcome = "production-budget-suppressed",
+				ProductionBudget = new
+				{
+					budget.ReservedCash,
+					OwnerQueue = budget.Queue,
+					budget.Reason,
+					budget.ReasonId
+				},
+				Production = new
+				{
+					ItemCost = itemCost,
+					CurrentCash = currentCash,
+					PostOrderCash = postOrderCash,
+					ReservedCashRemaining = reservedCashRemaining
+				}
+			});
+
 		public void Error(int seconds, string scope, string subject, Exception exception) =>
 			Write(new
 			{

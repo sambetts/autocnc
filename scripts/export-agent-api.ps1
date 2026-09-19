@@ -155,6 +155,15 @@ try {
     Add-Section 'ModeContext — everything a mode can see and do' $sdk.GetType('AutoCnC.Sdk.ModeContext') `
         'One instance per unit. This is the complete public surface; nothing else is reachable from a mode.'
 
+    Add-Section 'IBattleBot — strategic assessment policy' $sdk.GetType('AutoCnC.Sdk.IBattleBot') `
+        'Existing direct implementations may omit `ReserveProductionBudget`; its default returns no reservation.'
+
+    Add-Section 'BattleBot — convenience base class' $sdk.GetType('AutoCnC.Sdk.BattleBot') `
+        'Override only the strategic policies the bot needs.'
+
+    Add-Section 'IModeHost — read-only strategic state behind ModeContext' $sdk.GetType('AutoCnC.Sdk.IModeHost') `
+        'Modes normally consume this through `ModeContext`; historical hosts may omit the defaulted budget property.'
+
     Add-Section 'UnitAction' $core.GetType('AutoCnC.Core.UnitAction') `
         'The complete set of actions a decision can carry.'
 
@@ -166,6 +175,9 @@ try {
 
     Add-Section 'DoctrineDecision' $core.GetType('AutoCnC.Core.DoctrineDecision') `
         'Returned from `IBattleBot.Reassess` to continue or request a doctrine transition.'
+
+    Add-Section 'ProductionBudget' $core.GetType('AutoCnC.Core.ProductionBudget') `
+        'Returned from `IBattleBot.ReserveProductionBudget`; the queue is the reservation owner.'
 
     foreach ($typeName in 'ThreatValueSummary', 'ResourceCell', 'ResourceField', 'ThreatSnapshot',
         'OwnedBuildingState', 'ProductionQueueState', 'SupportPowerState', 'ThreatKind') {

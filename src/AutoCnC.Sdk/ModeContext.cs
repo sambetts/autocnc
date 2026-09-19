@@ -79,6 +79,12 @@ namespace AutoCnC.Sdk
 		public string Doctrine => host.ActiveDoctrine;
 
 		/// <summary>
+		/// The bot's current production cash reservation, or
+		/// <see cref="ProductionBudget.None"/>.
+		/// </summary>
+		public ProductionBudget CurrentProductionBudget => host.CurrentProductionBudget;
+
+		/// <summary>
 		/// The other doctrines the bot could be running instead, this one included.
 		/// </summary>
 		/// <remarks>

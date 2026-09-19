@@ -9,7 +9,11 @@
  */
 #endregion
 
+using System;
+using System.IO;
+using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 using AutoCnC.Core;
 using AutoCnC.Platform.Traits;
 using AutoCnC.Sdk;
@@ -342,11 +346,202 @@ namespace AutoCnC.Platform.Tests
 			});
 		}
 
+		[Test]
+		public void ProductionBudgetArbitrationIsIndependentOfCandidateEnumerationOrder()
+		{
+			var budget = ProductionBudget.Reserve(1000, "Building", "save for construction");
+			var candidates = new[]
+			{
+				Candidate(30, 3, "Vehicle", "mtnk", 700, ownsReservation: false),
+				Candidate(10, 2, "Infantry", "e1", 400, ownsReservation: false)
+			};
+
+			var forward = ProductionBudgetArbitrator.Evaluate(
+					budget, currentCash: 1800, candidates, maxOrders: 20)
+				.ToDictionary(result => result.Candidate.ControllerActorId, result => result.Outcome);
+			var reverse = ProductionBudgetArbitrator.Evaluate(
+					budget, currentCash: 1800, candidates.Reverse(), maxOrders: 20)
+				.ToDictionary(result => result.Candidate.ControllerActorId, result => result.Outcome);
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(reverse, Is.EqualTo(forward));
+				Assert.That(forward[10], Is.EqualTo(ProductionBudgetOutcome.Allowed));
+				Assert.That(forward[30], Is.EqualTo(ProductionBudgetOutcome.BudgetSuppressed));
+			});
+		}
+
+		[Test]
+		public void OwningQueueCanSpendReservedCashBeforeOtherQueues()
+		{
+			var budget = ProductionBudget.Reserve(1000, "Building", "save for construction");
+			var owner = Candidate(1, 11, "Building", "weap", 1000, ownsReservation: true);
+			var exactRemainder = Candidate(2, 12, "Vehicle", "mtnk", 800, ownsReservation: false);
+			var results = ProductionBudgetArbitrator.Evaluate(
+					budget, currentCash: 1800, [exactRemainder, owner], maxOrders: 20)
+				.ToDictionary(result => result.Candidate.ControllerActorId);
+			var cashPoorOwner = ProductionBudgetArbitrator.Evaluate(
+				budget,
+				currentCash: 100,
+				[Candidate(3, 11, "Building", "weap", 2000, ownsReservation: true)],
+				maxOrders: 20).Single();
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(results[1].Outcome, Is.EqualTo(ProductionBudgetOutcome.Allowed));
+				Assert.That(results[2].Outcome, Is.EqualTo(ProductionBudgetOutcome.Allowed));
+				Assert.That(results[2].PostOrderCash, Is.Zero);
+				Assert.That(cashPoorOwner.Outcome, Is.EqualTo(ProductionBudgetOutcome.Allowed),
+					"the owner is not blocked by the cash it reserved for itself");
+			});
+		}
+
+		[Test]
+		public void ArbitrationUsesLiveCashAndHandlesOversizedReservations()
+		{
+			var budget = ProductionBudget.Reserve(
+				int.MaxValue, "Building", "reserve everything");
+			var candidate = Candidate(
+				7, 12, "Vehicle", "mtnk", 1, ownsReservation: false);
+
+			var enoughAtAssessment = ProductionBudgetArbitrator.Evaluate(
+				ProductionBudget.Reserve(1000, "Building", "reserve"),
+				currentCash: 1500,
+				[candidate with { Cost = 500 }],
+				maxOrders: 20).Single();
+			var staleCashDropped = ProductionBudgetArbitrator.Evaluate(
+				ProductionBudget.Reserve(1000, "Building", "reserve"),
+				currentCash: 1499,
+				[candidate with { Cost = 500 }],
+				maxOrders: 20).Single();
+			var oversized = ProductionBudgetArbitrator.Evaluate(
+				budget, int.MaxValue, [candidate], maxOrders: 20).Single();
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(enoughAtAssessment.Outcome, Is.EqualTo(ProductionBudgetOutcome.Allowed));
+				Assert.That(staleCashDropped.Outcome,
+					Is.EqualTo(ProductionBudgetOutcome.BudgetSuppressed));
+				Assert.That(oversized.Outcome,
+					Is.EqualTo(ProductionBudgetOutcome.BudgetSuppressed));
+				Assert.That(oversized.PostOrderCash, Is.EqualTo((long)int.MaxValue - 1));
+			});
+		}
+
+		[Test]
+		public void ReservationLeaseRefreshesExpiresAndClearsInvalidValues()
+		{
+			var lease = new ProductionBudgetLease();
+			var first = ProductionBudget.Reserve(800, " Building ", "first");
+			var second = ProductionBudget.Reserve(1200, "Vehicle", "second");
+
+			lease.Refresh(first, nextAssessmentTick: 10);
+			var normalized = lease.Current(worldTick: 9);
+			lease.Refresh(second, nextAssessmentTick: 20);
+			var refreshed = lease.Current(worldTick: 10);
+			var expired = lease.Current(worldTick: 20);
+			lease.Refresh(ProductionBudget.Reserve(-1, "Vehicle", "invalid"), 30);
+			var negative = lease.Current(worldTick: 21);
+			lease.Refresh(first, 40);
+			lease.Clear();
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(normalized.Queue, Is.EqualTo("Building"));
+				Assert.That(refreshed, Is.EqualTo(second));
+				Assert.That(expired, Is.EqualTo(ProductionBudget.None));
+				Assert.That(negative, Is.EqualTo(ProductionBudget.None));
+				Assert.That(lease.Current(22), Is.EqualTo(ProductionBudget.None),
+					"a doctrine change clears the previous reservation immediately");
+			});
+		}
+
+		[Test]
+		public void MissingOwnerQueueDisablesReservationEnforcement()
+		{
+			var budget = ProductionBudget.Reserve(1000, "Building", "save");
+			var queues = new[]
+			{
+				new ProductionQueueIdentity("Vehicle", "Vehicle.GDI"),
+				new ProductionQueueIdentity(null, "Infantry.GDI")
+			};
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(ProductionBudgetArbitrator.HasOwnerQueue(budget, queues), Is.False);
+				Assert.That(ProductionBudgetArbitrator.HasOwnerQueue(
+					budget,
+					queues.Append(new ProductionQueueIdentity("building", "Building.GDI"))),
+					Is.True);
+			});
+		}
+
+		[Test]
+		public void BudgetSuppressionTraceIncludesStructuredReservationData()
+		{
+			var path = Path.Combine(
+				Path.GetTempPath(), $"autocnc-budget-trace-{Guid.NewGuid():N}.jsonl");
+
+			try
+			{
+				using (var trace = DecisionTrace.Open(path))
+				{
+					trace.ProductionBudgetSuppressed(
+						seconds: 17,
+						actor: "weap",
+						actorId: 42,
+						mode: "TrainUnitsMode",
+						UnitDecision.Produce("Vehicle", "mtnk", "replace armour", "production.armour"),
+						ProductionBudget.Reserve(
+							1200,
+							"Building",
+							"save for tech",
+							"production.reserve.tech"),
+						itemCost: 800,
+						currentCash: 1700,
+						postOrderCash: 900,
+						reservedCashRemaining: 1200);
+				}
+
+				using var document = JsonDocument.Parse(File.ReadLines(path).Skip(1).Single());
+				var root = document.RootElement;
+				var reservation = root.GetProperty("productionBudget");
+				var production = root.GetProperty("production");
+
+				Assert.Multiple(() =>
+				{
+					Assert.That(root.GetProperty("outcome").GetString(),
+						Is.EqualTo("production-budget-suppressed"));
+					Assert.That(reservation.GetProperty("reservedCash").GetInt32(), Is.EqualTo(1200));
+					Assert.That(reservation.GetProperty("ownerQueue").GetString(), Is.EqualTo("Building"));
+					Assert.That(reservation.GetProperty("reasonId").GetString(),
+						Is.EqualTo("production.reserve.tech"));
+					Assert.That(production.GetProperty("itemCost").GetInt32(), Is.EqualTo(800));
+					Assert.That(production.GetProperty("currentCash").GetInt64(), Is.EqualTo(1700));
+					Assert.That(production.GetProperty("postOrderCash").GetInt64(), Is.EqualTo(900));
+				});
+			}
+			finally
+			{
+				File.Delete(path);
+				File.Delete(path + ".1");
+			}
+		}
+
 		static UnitDecision Cancellation(uint queueActorId, string item, int count) =>
 			UnitDecision.CancelProduction("Vehicle", item, count, "cancel") with
 			{
 				TargetActorId = queueActorId
 			};
+
+		static ProductionBudgetCandidate Candidate(
+			uint controllerActorId,
+			uint queueActorId,
+			string queue,
+			string item,
+			int cost,
+			bool ownsReservation) =>
+			new(controllerActorId, queueActorId, queue, item, cost, ownsReservation);
 
 		static uint LegacyQueueFingerprint(ProductionQueueEntry[] entries)
 		{

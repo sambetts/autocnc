@@ -174,6 +174,29 @@ namespace AutoCnC.Core.Tests
 		}
 
 		[Test]
+		public void ProductionBudgetCarriesQueueCashAndStableReason()
+		{
+			var budget = ProductionBudget.Reserve(
+				2400,
+				"Building",
+				"save for the advanced power plant",
+				"production.reserve.advanced-power");
+			var (reservedCash, queue, reason) = budget;
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(reservedCash, Is.EqualTo(2400));
+				Assert.That(queue, Is.EqualTo("Building"));
+				Assert.That(reason, Is.EqualTo("save for the advanced power plant"));
+				Assert.That(budget.ReasonId, Is.EqualTo("production.reserve.advanced-power"));
+				Assert.That(budget.IsActive, Is.True);
+				Assert.That(ProductionBudget.None.IsActive, Is.False);
+				Assert.That(ProductionBudget.Reserve(-1, "Building", "invalid").IsActive, Is.False);
+				Assert.That(ProductionBudget.Reserve(100, " ", "invalid").IsActive, Is.False);
+			});
+		}
+
+		[Test]
 		public void UrgentDoctrineDecisionOnlyBypassesDwellForImmediateDefencePressure()
 		{
 			var ordinaryDefence = DoctrineDecision.SwitchTo(

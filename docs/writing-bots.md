@@ -113,6 +113,37 @@ be stricter still. The sole early-switch path is an explicit
 doctrine “Defence” does not make an ordinary decision urgent, a rolling `BuildingsLost` value is
 not immediate pressure, and an urgent decision for any other destination remains rate-limited.
 
+### Reserve production cash centrally
+
+A bot can reserve cash for one production queue category at each strategic assessment:
+
+```csharp
+public override ProductionBudget ReserveProductionBudget(in BattleState s)
+{
+    if (s.Doctrine == "Opening" && s.Cash < 5000)
+        return ProductionBudget.Reserve(
+            2000,
+            "Building",
+            "save for the next base structure",
+            "production.reserve.next-structure");
+
+    return ProductionBudget.None;
+}
+```
+
+The returned value replaces the previous reservation and expires at the next assessment. Queue
+names match `ProductionQueue` Group first and Type second, like `ctx.QueueFor`. The owning queue
+may spend the reserved cash; every other queue's new `Produce` decision is suppressed when the
+full rules cost would take live cash below the remaining reservation. Arbitration is central and
+stable across controller evaluation order, so modes do not call `Hold` or register claims in a
+particular sequence.
+
+Only new production starts are gated. Existing queue entries keep running, cancellation still
+works, and a completed building can still be placed. A reservation with a non-positive amount,
+an empty category, no matching enabled queue, or an expired assessment is not enforced. Modes can
+read the effective assessment value through `ctx.CurrentProductionBudget`, but they do not need
+to enforce it themselves.
+
 ### A lone doctrine is still a bot
 
 An assembly with `IDoctrine` types and no `IBattleBot` is played as one bot per doctrine, each
@@ -589,6 +620,7 @@ genuine reason to scout.
 | `OwnedBuildingCounts()`, `OwnedUnitCounts()` | Counts, including queued |
 | `FindBuildLocation(actorType)` | A valid placement cell near the base |
 | `BuildPlan`, `ProductionPlan` | **The running doctrine's plans** — read these rather than hardcoding |
+| `CurrentProductionBudget` | The latest unexpired bot reservation; enforcement is automatic |
 | `Doctrine`, `Doctrines`, `SwitchDoctrine(name, why)` | The doctrine you are part of, its siblings, and asking for one |
 
 `BuildBaseMode` and `TrainUnitsMode` read `ctx.BuildPlan` / `ctx.ProductionPlan`, which is why
@@ -622,8 +654,11 @@ they work unchanged for any doctrine: change the plan in your `IDoctrine`, not t
 ```
 
 The JSON decision trace records every evaluation with an outcome (`continue`, `already-idle`,
-`duplicate-intent`, `no-order`, or `issued`), plus the historical issued-order event when an
-order was actually sent. Both carry the prose `Reason` and stable `ReasonId`.
+`duplicate-intent`, `no-order`, `production-budget-suppressed`, or `issued`), plus the historical
+issued-order event when an order was actually sent. Both carry the decision's prose `Reason` and
+stable `ReasonId`. A budget-suppressed evaluation also carries structured `productionBudget`
+(reserved cash, owner queue, reason and reason ID) and `production` (item cost, live cash,
+post-order cash and remaining reservation) objects.
 
 `/modelog` says what your code *did*. The **battle log** says what it had to go on: the launcher's
 output window records every event your side could react to — an enemy coming into view, a hit

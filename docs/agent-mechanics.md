@@ -224,6 +224,12 @@ permitted way to know where anything is.
   activation, and placement decisions become normal player orders a few ticks later. Do not
   assume an order applies immediately.
 - Returning the same intent repeatedly is cheap because the host suppresses duplicate orders.
+- `IBattleBot.ReserveProductionBudget` may reserve cash for one production queue Group/Type until
+  the next assessment. The owner may spend it; other new `Produce` decisions are centrally
+  suppressed when their full rules cost would take live cash below the remaining reservation.
+  Arbitration is deterministic across controller order. Existing queued items, cancellation and
+  completed-building placement are not gated. Modes may inspect `ctx.CurrentProductionBudget`
+  but must not coordinate reservations with `Hold` or evaluation sequence.
 - Give decisions a stable `ReasonId` through the final factory argument. Human `Reason` prose and
   `ReasonId` are both ignored by duplicate-intent suppression.
 - Target selection should be stable. Re-picking equivalent targets every evaluation makes units
@@ -291,6 +297,7 @@ IReadOnlyList<BuildStep> BuildPlan { get }
 bool CanDeploy { get }
 bool CanMove { get }
 int Cash { get }
+ProductionBudget CurrentProductionBudget { get }
 bool DeploysIntoBuilding { get }
 int DistanceFromAnchorUnits { get }
 string Doctrine { get }
@@ -346,6 +353,44 @@ ThreatSnapshot Snapshot(Actor actor)
 IReadOnlyCollection<SupportPowerState> SupportPowerStates()
 void SwitchDoctrine(string doctrine, string reason)
 void SwitchDoctrine(string doctrine, string reason, string reasonId)
+```
+
+### IBattleBot — strategic assessment policy
+
+Existing direct implementations may omit `ReserveProductionBudget`; its default returns no reservation.
+
+```
+string Description { get }
+string Name { get }
+void Configure(IBattleBotBuilder builder)
+DoctrineDecision Reassess(BattleState state)
+ProductionBudget ReserveProductionBudget(BattleState state)
+```
+
+### BattleBot — convenience base class
+
+Override only the strategic policies the bot needs.
+
+```
+string Description { get }
+string Name { get }
+void Configure(IBattleBotBuilder builder)
+DoctrineDecision Reassess(BattleState state)
+ProductionBudget ReserveProductionBudget(BattleState state)
+```
+
+### IModeHost — read-only strategic state behind ModeContext
+
+Modes normally consume this through `ModeContext`; historical hosts may omit the defaulted budget property.
+
+```
+string ActiveDoctrine { get }
+IReadOnlyList<BuildStep> BuildPlan { get }
+ProductionBudget CurrentProductionBudget { get }
+IReadOnlyList<string> DoctrineNames { get }
+IReadOnlyList<ProductionStep> ProductionPlan { get }
+void RequestDoctrine(string doctrine, string reason)
+void RequestDoctrine(string doctrine, string reason, string reasonId)
 ```
 
 ### UnitAction
@@ -459,6 +504,21 @@ static DoctrineDecision SwitchUrgentlyTo(string doctrine, string reason)
 static DoctrineDecision SwitchUrgentlyTo(string doctrine, string reason, string reasonId)
 ```
 
+### ProductionBudget
+
+Returned from `IBattleBot.ReserveProductionBudget`; the queue is the reservation owner.
+
+```
+bool IsActive { get }
+static ProductionBudget None { get }
+string Queue { get; init }
+string Reason { get; init }
+string ReasonId { get; init }
+int ReservedCash { get; init }
+static ProductionBudget Reserve(int reservedCash, string queue, string reason)
+static ProductionBudget Reserve(int reservedCash, string queue, string reason, string reasonId)
+```
+
 ### ThreatValueSummary
 
 ```
@@ -555,7 +615,7 @@ enum ThreatKind: Unknown, Infantry, Vehicle, Aircraft, Structure, Defence, Econo
 ### Every public AutoCnC.Core type
 
 ```
-ArmyPlanState, AssaultState, AssignmentScope, BaseBuildLogic, BasePlanState, BattleState, BuildStep, DefensiveState, DoctrineDecision, ModeAssignments, OwnedBuildingState, ProductionChoice, ProductionQueueState, ProductionStep, ResourceCell, ResourceField, SupportPowerState, ThreatKind, ThreatSnapshot, ThreatValueSummary, UnitAction, UnitDecision, UnitProductionLogic
+ArmyPlanState, AssaultState, AssignmentScope, BaseBuildLogic, BasePlanState, BattleState, BuildStep, DefensiveState, DoctrineDecision, ModeAssignments, OwnedBuildingState, ProductionBudget, ProductionChoice, ProductionQueueState, ProductionStep, ResourceCell, ResourceField, SupportPowerState, ThreatKind, ThreatSnapshot, ThreatValueSummary, UnitAction, UnitDecision, UnitProductionLogic
 ```
 
 <!-- END GENERATED SDK SURFACE -->

@@ -59,6 +59,12 @@ namespace AutoCnC.Sdk
 		/// <summary>Every doctrine the loaded bot owns, in the order it declared them.</summary>
 		IReadOnlyList<string> DoctrineNames { get; }
 
+		/// <summary>The production reservation from the latest unexpired assessment.</summary>
+		/// <remarks>
+		/// The default preserves compatibility with hosts written before production arbitration.
+		/// </remarks>
+		ProductionBudget CurrentProductionBudget => ProductionBudget.None;
+
 		/// <summary>
 		/// Ask for a different doctrine. Honoured at the next assessment, or refused.
 		/// </summary>

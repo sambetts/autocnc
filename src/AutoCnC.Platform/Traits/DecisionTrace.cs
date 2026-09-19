@@ -22,9 +22,10 @@ namespace AutoCnC.Platform.Traits
 	/// </summary>
 	/// <remarks>
 	/// The battle log says what the side observed and telemetry says how the match went. This trace
-	/// records the missing middle: what the bot decided about each assessment and which unit
-	/// decisions actually became orders. It is deliberately write-only from the game's point of
-	/// view, so bot code cannot inspect or learn from information it did not have during the fight.
+	/// records the missing middle: what the bot decided about each assessment, every unit decision
+	/// evaluation and its outcome, and which evaluations actually became orders. It is deliberately
+	/// write-only from the game's point of view, so bot code cannot inspect or learn from
+	/// information it did not have during the fight.
 	/// </remarks>
 	sealed class DecisionTrace : IDisposable
 	{
@@ -42,7 +43,7 @@ namespace AutoCnC.Platform.Traits
 			Write(new
 			{
 				Event = "started",
-				SchemaVersion = 2,
+				SchemaVersion = 3,
 				RecordedAtUtc = DateTime.UtcNow
 			});
 		}
@@ -126,6 +127,26 @@ namespace AutoCnC.Platform.Traits
 				decision.Reason,
 				decision.ReasonId,
 				Order = order
+			});
+
+		public void UnitDecisionEvaluated(int seconds, string actor, uint actorId, string mode,
+			in UnitDecision decision, string outcome) =>
+			Write(new
+			{
+				Event = "unit-decision-evaluated",
+				Seconds = seconds,
+				Actor = actor,
+				ActorId = actorId,
+				Mode = mode,
+				Action = decision.Action.ToString(),
+				decision.TargetActorId,
+				decision.TargetX,
+				decision.TargetY,
+				decision.ItemName,
+				decision.Queue,
+				decision.Reason,
+				decision.ReasonId,
+				Outcome = outcome
 			});
 
 		public void Error(int seconds, string scope, string subject, Exception exception) =>

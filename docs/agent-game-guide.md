@@ -48,8 +48,8 @@ it as authoritative context alongside the source and the evidence from one compl
   about and make strategy changes explainable.
 - A doctrine switch changes plans and assignments for the whole side. Switches are rate-limited;
   do not create rules that oscillate between doctrines. An explicit
-  `DoctrineDecision.SwitchUrgentlyTo(...)` bypasses the dwell only while `BaseUnderAttack`; a
-  doctrine name never implies urgency.
+  `DoctrineDecision.SwitchUrgentlyTo("Defence", ...)` bypasses the dwell only while
+  `EnemiesNearBase > 0`; neither a doctrine name nor a rolling building loss implies urgency.
 
 ## Information and fairness rules
 
@@ -58,9 +58,9 @@ it as authoritative context alongside the source and the evidence from one compl
   encode facts that the side could not know during the match.
 - Own economy, forces, queues, and buildings are known exactly. Enemy actors are known only when
   visible, except for facts the bot legitimately remembers such as having found an enemy base.
-- `BattleState` exposes rolling income and killed/lost value, visible enemy value and mix, and own
-  versus enemy value near the base. All enemy values retain the same visibility filter as
-  `SenseThreats`.
+- `BattleState` exposes rolling income, exact own value lost, observed enemy value killed, visible
+  enemy value and mix, and own versus enemy value near the base. Enemy value is conservative and
+  retains the same visibility sampling as `SenseThreats`.
 - A damage callback can identify an unseen attacker because the attacked unit receives that same
   notification. Do not generalize that exception into map-wide enemy knowledge.
 - Improvement happens between matches. Edited assemblies require a rebuild and a fresh game; do
@@ -112,8 +112,9 @@ it as authoritative context alongside the source and the evidence from one compl
   to locate turning points, never as information the runtime bot could have read.
 - `battle.csv` records what the local side could observe: sightings, damage, losses, kills,
   production, doctrine changes, and the final result.
-- `decisions.jsonl` records each bot assessment and every mode decision that actually became an
-  order. Correlate it with nearby battle events and telemetry changes.
+- `decisions.jsonl` records each bot assessment, every mode evaluation and its outcome, and the
+  legacy issued-decision event for evaluations that actually became orders. Correlate it with
+  nearby battle events and telemetry changes.
 - `replay.orarep` is optional visual evidence. Do not require it when the structured records are
   sufficient.
 

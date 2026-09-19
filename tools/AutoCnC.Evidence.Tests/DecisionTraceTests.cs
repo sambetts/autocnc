@@ -24,8 +24,10 @@ namespace AutoCnC.Evidence.Tests
 				"{\"event\":\"started\",\"schemaVersion\":2}\n" +
 				"{\"event\":\"assessment\",\"seconds\":12," +
 				"\"state\":{\"doctrine\":\"Opening\",\"cash\":100,\"powerBalance\":5," +
-				"\"harvesters\":1,\"refineries\":1,\"armyValue\":900,\"buildings\":3," +
-				"\"creditsKilled\":500,\"creditsLost\":200,\"incomeEarned\":750," +
+				"\"harvesters\":1,\"refineries\":1,\"units\":4,\"armyValue\":900,\"buildings\":3," +
+				"\"baseValue\":1500,\"windowSeconds\":60,\"unitsLost\":1,\"buildingsLost\":0," +
+				"\"unitsKilled\":2,\"enemiesInSight\":3,\"enemiesNearBase\":1," +
+				"\"creditsKilled\":500,\"creditsLost\":200,\"hasValueTradeData\":true,\"incomeEarned\":750," +
 				"\"visibleEnemyValue\":600,\"enemyValueNearBase\":400,\"ownArmyValueNearBase\":800," +
 				"\"visibleEnemyMix\":[{\"kind\":\"Infantry\",\"count\":2,\"value\":200}," +
 				"{\"kind\":\"Vehicle\",\"count\":1,\"value\":400}]," +
@@ -52,6 +54,9 @@ namespace AutoCnC.Evidence.Tests
 				Assert.That(trace.SchemaVersion, Is.EqualTo(2));
 				Assert.That(assessment.CreditsKilled, Is.EqualTo(500));
 				Assert.That(assessment.CreditsLost, Is.EqualTo(200));
+				Assert.That(assessment.HasValueTradeData, Is.True);
+				Assert.That(assessment.EnemiesNearBase, Is.EqualTo(1));
+				Assert.That(assessment.BuildingsLost, Is.Zero);
 				Assert.That(assessment.IncomeEarned, Is.EqualTo(750));
 				Assert.That(assessment.VisibleEnemyValue, Is.EqualTo(600));
 				Assert.That(assessment.EnemyValueNearBase, Is.EqualTo(400));
@@ -92,6 +97,43 @@ namespace AutoCnC.Evidence.Tests
 				Assert.That(trace.DoctrineChanges.Single().ReasonId, Is.Null);
 				Assert.That(trace.ReasonMentions("retreat"), Is.EqualTo(1));
 				Assert.That(trace.ReasonIdCounts, Is.Empty);
+			});
+		}
+
+		[Test]
+		public void EvaluationReasonIdsCountEveryOutcomeWithoutChangingIssuedDecisionIndexes()
+		{
+			var path = WriteFile("evaluations.jsonl",
+				"{\"event\":\"started\",\"schemaVersion\":3}\n" +
+				"{\"event\":\"unit-decision-evaluated\",\"mode\":\"Defence\",\"action\":\"Continue\"," +
+				"\"reason\":\"suppressed prose\",\"reasonId\":\"unit.evaluate\",\"outcome\":\"continue\"}\n" +
+				"{\"event\":\"unit-decision-evaluated\",\"mode\":\"Defence\",\"action\":\"Hold\"," +
+				"\"reason\":\"suppressed prose\",\"reasonId\":\"unit.evaluate\",\"outcome\":\"already-idle\"}\n" +
+				"{\"event\":\"unit-decision-evaluated\",\"mode\":\"Defence\",\"action\":\"Attack\"," +
+				"\"reason\":\"suppressed prose\",\"reasonId\":\"unit.evaluate\",\"outcome\":\"duplicate-intent\"}\n" +
+				"{\"event\":\"unit-decision-evaluated\",\"mode\":\"Defence\",\"action\":\"Produce\"," +
+				"\"reason\":\"suppressed prose\",\"reasonId\":\"unit.evaluate\",\"outcome\":\"no-order\"}\n" +
+				"{\"event\":\"unit-decision-evaluated\",\"mode\":\"Defence\",\"action\":\"Attack\"," +
+				"\"reasonId\":\"unit.evaluate\",\"outcome\":\"issued\"}\n" +
+				"{\"event\":\"unit-decision\",\"mode\":\"Defence\",\"action\":\"Attack\"," +
+				"\"reason\":\"issued prose\",\"reasonId\":\"unit.evaluate\",\"order\":\"Attack\"}\n");
+
+			var trace = DecisionTrace.Read(path);
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(trace.UnitDecisionEvaluations.Select(e => e.Outcome), Is.EqualTo(new[]
+				{
+					"continue", "already-idle", "duplicate-intent", "no-order", "issued"
+				}));
+				Assert.That(trace.ReasonIdMentions("unit.evaluate"), Is.EqualTo(5),
+					"the issued event must not double-count its evaluation");
+				Assert.That(trace.UnitDecisions, Has.Count.EqualTo(1),
+					"legacy issued-decision records remain issued-only");
+				Assert.That(trace.ReasonCounts["issued prose"], Is.EqualTo(1));
+				Assert.That(trace.ReasonCounts.ContainsKey("suppressed prose"), Is.False);
+				Assert.That(trace.ModeDecisionCounts["Defence"], Is.EqualTo(1));
+				Assert.That(trace.ActionCounts["Attack"], Is.EqualTo(1));
 			});
 		}
 	}

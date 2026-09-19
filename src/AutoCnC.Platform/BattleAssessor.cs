@@ -12,6 +12,7 @@
 using System;
 using System.Collections.Generic;
 using AutoCnC.Core;
+using AutoCnC.Platform.Traits;
 using AutoCnC.Sdk;
 using OpenRA;
 using OpenRA.Mods.Common.Traits;
@@ -31,10 +32,10 @@ namespace AutoCnC.Platform
 	/// why the filtering has to be deliberate.
 	/// </para>
 	/// <para>
-	/// Losses, kills, their build values, and earned income are differences in the engine's
-	/// running totals across a rolling window rather than counted from notifications. A
-	/// difference of two totals cannot drift the way a parallel tally can — the question a bot
-	/// asks is "how much have I lost or earned lately", and lately is exactly what a window is.
+	/// Loss counts, exact own value lost, and earned income are differences in the engine's
+	/// running totals across a rolling window. Enemy value killed comes from the battle log's
+	/// visibility-sampled kill ledger, so artillery or splash kills in unexplored fog cannot leak
+	/// enemy composition or value into the bot's assessment.
 	/// </para>
 	/// </remarks>
 	public sealed class BattleAssessor
@@ -44,6 +45,7 @@ namespace AutoCnC.Platform
 
 		readonly World world;
 		readonly Player self;
+		readonly BattleLog battleLog;
 		readonly int windowSeconds;
 		readonly int baseRadiusCells;
 
@@ -57,6 +59,7 @@ namespace AutoCnC.Platform
 		{
 			this.world = world;
 			this.self = self;
+			battleLog = world.WorldActor.TraitOrDefault<BattleLog>();
 			this.windowSeconds = Math.Max(1, windowSeconds);
 			this.baseRadiusCells = Math.Max(1, baseRadiusCells);
 		}
@@ -106,6 +109,7 @@ namespace AutoCnC.Platform
 			{
 				CreditsKilled = lately.CreditsKilled,
 				CreditsLost = lately.CreditsLost,
+				HasValueTradeData = true,
 				IncomeEarned = lately.IncomeEarned,
 				VisibleEnemyValue = seen.VisibleValue,
 				EnemyValueNearBase = seen.NearBaseValue,
@@ -243,7 +247,7 @@ namespace AutoCnC.Platform
 				stats?.BuildingsDead ?? 0,
 				(stats?.UnitsKilled ?? 0) + (stats?.BuildingsKilled ?? 0),
 				stats?.DeathsCost ?? 0,
-				stats?.KillsCost ?? 0,
+				battleLog?.ObservedKillsValue ?? 0,
 				resources?.Earned ?? 0);
 
 			history.Enqueue(now);

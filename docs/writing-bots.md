@@ -44,7 +44,7 @@ public sealed class MyBot : BattleBot
 
     public override DoctrineDecision Reassess(in BattleState s)
     {
-        if (s.BaseUnderAttack)
+        if (s.EnemiesNearBase > 0)
             return DoctrineDecision.SwitchUrgentlyTo(
                 "Defence", "base is under attack", "doctrine.defence.base-under-attack");
 
@@ -74,7 +74,8 @@ eyes on.
 | `Cash`, `PowerBalance`, `Harvesters`, `Refineries` | Your economy |
 | `Units`, `ArmyValue`, `Buildings`, `BaseValue` | Your forces |
 | `UnitsLost`, `BuildingsLost`, `UnitsKilled` | What the last `WindowSeconds` cost you |
-| `CreditsLost`, `CreditsKilled`, `IncomeEarned` | Value exchange and income over that same rolling window |
+| `CreditsLost`, `CreditsKilled`, `IncomeEarned` | Exact own value lost, observed enemy value killed, and income over that rolling window |
+| `HasValueTradeData` | True for platform assessments, including windows where both values are zero |
 | `EnemiesInSight`, `EnemiesNearBase`, `NearestEnemyCells` | What you can see, right now |
 | `VisibleEnemyValue`, `EnemyValueNearBase`, `OwnArmyValueNearBase` | Visible pressure and local defensive value |
 | `VisibleEnemyMix` | Visible enemy count and value grouped by `ThreatKind` |
@@ -82,8 +83,9 @@ eyes on.
 
 There are a few conveniences on top — `BaseUnderAttack`, `BlindToEnemy`, `Winning` — and no
 engine types anywhere, which is the point: the deciding half of a bot is a pure function you can
-read on its own. `Winning` requires the base to be safe and, when value data is present, a
-favourable value trade; legacy hand-built states without value data still fall back to unit counts.
+read on its own. `CreditsKilled` is deliberately conservative: enemy kills outside the current
+visibility sample are omitted. `Winning` requires the base to be safe and a favourable observed
+value trade; legacy hand-built states without value data still fall back to unit counts.
 
 ```csharp
 public static Assessment Decide(BattleState s) =>
@@ -100,9 +102,9 @@ what the whole side is trying to do — and two rules that disagree would otherw
 back and forth every few seconds. The platform will not act on a switch until the current
 doctrine has had `MinimumDoctrineSeconds` (30 by default). Read `DoctrineSeconds` if you want to
 be stricter still. The sole early-switch path is an explicit
-`DoctrineDecision.SwitchUrgentlyTo(...)` while `BaseUnderAttack` is true. Naming a doctrine
-“Defence” does not make an ordinary decision urgent, and an urgent decision made away from the
-base remains rate-limited.
+`DoctrineDecision.SwitchUrgentlyTo("Defence", ...)` while `EnemiesNearBase > 0`. Naming a
+doctrine “Defence” does not make an ordinary decision urgent, a rolling `BuildingsLost` value is
+not immediate pressure, and an urgent decision for any other destination remains rate-limited.
 
 ### A lone doctrine is still a bot
 
@@ -532,7 +534,9 @@ they work unchanged for any doctrine: change the plan in your `IDoctrine`, not t
 [mode] pyle#30 TrainUnitsMode: Produce e1 -> StartProduction (training e1)
 ```
 
-You get the decision, the order it became, and both the prose `Reason` and stable `ReasonId`.
+The JSON decision trace records every evaluation with an outcome (`continue`, `already-idle`,
+`duplicate-intent`, `no-order`, or `issued`), plus the historical issued-order event when an
+order was actually sent. Both carry the prose `Reason` and stable `ReasonId`.
 
 `/modelog` says what your code *did*. The **battle log** says what it had to go on: the launcher's
 output window records every event your side could react to — an enemy coming into view, a hit

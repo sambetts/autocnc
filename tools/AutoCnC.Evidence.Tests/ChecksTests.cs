@@ -85,6 +85,11 @@ namespace AutoCnC.Evidence.Tests
 		public void ReasonIdQueryIsExactAndReasonQueryPrefersAnExactId()
 		{
 			var tracePath = WriteFile("reason-ids.jsonl",
+				"{\"event\":\"started\",\"schemaVersion\":3}\n" +
+				"{\"event\":\"unit-decision-evaluated\",\"reason\":\"combat.engage primary\"," +
+				"\"reasonId\":\"combat.engage\",\"outcome\":\"duplicate-intent\"}\n" +
+				"{\"event\":\"unit-decision-evaluated\",\"reason\":\"combat.engage nearby\"," +
+				"\"reasonId\":\"combat.engage.nearby\",\"outcome\":\"issued\"}\n" +
 				"{\"event\":\"unit-decision\",\"reason\":\"combat.engage primary\",\"reasonId\":\"combat.engage\"}\n" +
 				"{\"event\":\"unit-decision\",\"reason\":\"combat.engage nearby\",\"reasonId\":\"combat.engage.nearby\"}\n");
 			var trace = DecisionTrace.Read(tracePath);

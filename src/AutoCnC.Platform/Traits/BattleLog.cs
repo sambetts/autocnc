@@ -14,6 +14,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using AutoCnC.Core;
 using AutoCnC.Sdk;
 using OpenRA;
 using OpenRA.GameRules;
@@ -70,6 +71,10 @@ namespace AutoCnC.Platform.Traits
 	/// if a mode could have responded to it, it is in this file.
 	/// </para>
 	/// <para>
+	/// The same one-second visibility sample also feeds BattleState's observed enemy kill value,
+	/// even when CSV output is disabled. A kill outside that sample contributes no value.
+	/// </para>
+	/// <para>
 	/// The file opens with a <c>player</c> row per side — name, faction, colour, whether it is a
 	/// bot and which one is you — so a log read a week later still says who was fighting whom.
 	/// Every event row then names the player it happened to and the player on the other end of
@@ -110,6 +115,8 @@ namespace AutoCnC.Platform.Traits
 		/// <summary>Actor ID to observed damage dealt before death.</summary>
 		readonly Dictionary<uint, int> damageDealt = [];
 
+		readonly ObservedKillValueLedger observedKillValues = new();
+
 		StreamWriter writer;
 		Player self;
 		int sightingTicks;
@@ -123,8 +130,11 @@ namespace AutoCnC.Platform.Traits
 			this.info = info;
 		}
 
-		/// <summary>True while there is somewhere to write to. Checked before doing any work.</summary>
+		/// <summary>True while CSV output is active.</summary>
 		public bool IsRecording => writer != null;
+
+		/// <summary>Cumulative value of enemy kills visible to this side at the last sighting scan.</summary>
+		internal int ObservedKillsValue => observedKillValues.TotalValue;
 
 		void IWorldLoaded.WorldLoaded(World w, WorldRenderer wr)
 		{
@@ -137,6 +147,11 @@ namespace AutoCnC.Platform.Traits
 			if (self == null || self.NonCombatant)
 				return;
 
+			sightingTicks = Ticks(info.SightingInterval, 1);
+			cooldownTicks = Ticks(info.SightingCooldown, 0);
+			damageTicks = Ticks(info.DamageCooldown, 0);
+			nextScanTick = world.WorldTick;
+
 			var path = ResolvePath(LaunchOptions.BattleLog ?? info.File);
 			if (path == null)
 				return;
@@ -144,10 +159,6 @@ namespace AutoCnC.Platform.Traits
 			writer = Open(path);
 			if (writer == null)
 				return;
-
-			sightingTicks = Ticks(info.SightingInterval, 1);
-			cooldownTicks = Ticks(info.SightingCooldown, 0);
-			damageTicks = Ticks(info.DamageCooldown, 0);
 
 			RecordRoster();
 
@@ -192,7 +203,7 @@ namespace AutoCnC.Platform.Traits
 
 		void ITick.Tick(Actor actor)
 		{
-			if (writer == null || world.WorldTick < nextScanTick)
+			if (self == null || world.WorldTick < nextScanTick)
 				return;
 
 			Scan();
@@ -209,14 +220,20 @@ namespace AutoCnC.Platform.Traits
 		void Scan()
 		{
 			nextScanTick = world.WorldTick + sightingTicks;
+			observedKillValues.BeginVisibilitySample();
 
-			var home = BaseCentre();
+			var home = writer != null ? BaseCentre() : null;
 
 			foreach (var actor in world.Actors)
 			{
 				// Position first: an actor with no place on the map is not something a unit could
 				// have seen, and asking it where it is throws.
 				if (actor.OccupiesSpace == null || !ModeContext.IsVisibleEnemy(self, actor))
+					continue;
+
+				observedKillValues.ObserveVisibleEnemy(actor.ActorID);
+
+				if (writer == null)
 					continue;
 
 				// Still in view since last time: keep the timestamp fresh, say nothing.
@@ -233,6 +250,9 @@ namespace AutoCnC.Platform.Traits
 					home.HasValue ? $"frombase={(actor.Location - home.Value).Length}" : null,
 					last != 0 ? "again=1" : null);
 			}
+
+			if (writer == null)
+				return;
 
 			// Anything not seen within the cooldown would be logged again on sight anyway, so the
 			// entry has no further use. Dropping it here is what stops this growing all match.
@@ -298,10 +318,17 @@ namespace AutoCnC.Platform.Traits
 		internal void Damaged(Actor actor, AttackInfo attack)
 		{
 			// Negative damage is a repair. Nothing was done, so nothing happened.
-			if (writer == null || attack.Damage == null || attack.Damage.Value <= 0)
+			if (self == null || attack.Damage == null || attack.Damage.Value <= 0)
 				return;
 
 			var attacker = attack.Attacker;
+			if (actor.Owner != self && attacker != null && attacker.Owner == self &&
+				ModeContext.IsVisibleEnemy(self, actor))
+				observedKillValues.ObserveVisibleEnemy(actor.ActorID);
+
+			if (writer == null)
+				return;
+
 			if (attacker != null && attacker.Owner == self)
 			{
 				damageDealt.TryGetValue(attacker.ActorID, out var total);
@@ -383,10 +410,19 @@ namespace AutoCnC.Platform.Traits
 		/// <summary>An actor died. Ours is a loss; anything we could see and killed is a kill.</summary>
 		internal void Killed(Actor actor, AttackInfo attack)
 		{
-			if (writer == null)
+			if (self == null)
 				return;
 
 			var killer = attack.Attacker;
+			if (actor.Owner != self)
+				observedKillValues.ObserveKill(
+					actor.ActorID,
+					killer != null && killer.Owner == self,
+					() => Cost(actor.Info));
+
+			if (writer == null)
+				return;
+
 			var details = DeathDetails(actor, attack);
 			born.Remove(actor.ActorID);
 			damageDealt.Remove(actor.ActorID);
@@ -534,6 +570,7 @@ namespace AutoCnC.Platform.Traits
 
 		void Forget(uint actorId)
 		{
+			observedKillValues.Forget(actorId);
 			sighted.Remove(actorId);
 			hits.Remove(actorId);
 			born.Remove(actorId);
@@ -703,7 +740,7 @@ namespace AutoCnC.Platform.Traits
 
 	[TraitLocation(SystemActors.Player)]
 	[Desc("Forwards this player's damage and death notifications to BattleLog on the world actor.",
-		"Attach this to the player actor; it does nothing without BattleLog.")]
+		"Attach this to the player actor; it also feeds visibility-safe battle assessment values.")]
 	public class ReportsToBattleLogInfo : TraitInfo
 	{
 		public override object Create(ActorInitializer init) { return new ReportsToBattleLog(init.World); }
@@ -731,21 +768,21 @@ namespace AutoCnC.Platform.Traits
 
 		/// <summary>
 		/// Resolved on first use rather than on creation: player actors are constructed before the
-		/// world actor's traits have finished loading, and a match with no log at all is the norm.
+		/// world actor's traits have finished loading.
 		/// </summary>
 		BattleLog Log => log ??= world.WorldActor.TraitOrDefault<BattleLog>();
 
 		void INotifyDamage.Damaged(Actor self, AttackInfo e)
 		{
 			var battleLog = Log;
-			if (battleLog != null && battleLog.IsRecording)
+			if (battleLog != null)
 				battleLog.Damaged(self, e);
 		}
 
 		void INotifyKilled.Killed(Actor self, AttackInfo e)
 		{
 			var battleLog = Log;
-			if (battleLog != null && battleLog.IsRecording)
+			if (battleLog != null)
 				battleLog.Killed(self, e);
 		}
 	}

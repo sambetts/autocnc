@@ -155,9 +155,10 @@ Query forms: `summary.<dotted.path>`, `summary.unitTypes[<type>].<column>`,
 `summary.production[<queue>].<column>`, `units.count(type=x)`, `units.sum(<field>,type=x)`,
 `units.mean(<field>,type=x)`, `reason-id:<id>` for an exact stable identifier, and
 `reason:<literal>` for the backward-compatible prose substring query. `reason:` first uses an
-exact `ReasonId` when one exists. Exact-ID counts include matching unit decisions, assessment
-decisions, and doctrine changes. Operators: `>=`, `>`, `<=`, `<`, `==`, `!=`, `contains`,
-`present`, `absent`.
+exact `ReasonId` when one exists. Exact-ID counts include matching unit evaluations, assessment
+decisions, and doctrine changes. Unit IDs count evaluations rather than only issued orders;
+legacy issued-decision indexes remain unchanged. Operators: `>=`, `>`, `<=`, `<`, `==`, `!=`,
+`contains`, `present`, `absent`.
 
 If you added or changed a code path, give it a stable `ReasonId` and assert it with a
 `reason-id:` check. That is the only thing that distinguishes "the new branch is wrong" from

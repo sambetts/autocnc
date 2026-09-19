@@ -66,13 +66,16 @@ namespace AutoCnC.Core.Tests
 		}
 
 		[Test]
-		public void UrgentDoctrineDecisionOnlyBypassesDwellDuringBaseAttack()
+		public void UrgentDoctrineDecisionOnlyBypassesDwellForImmediateDefencePressure()
 		{
 			var ordinaryDefence = DoctrineDecision.SwitchTo(
 				"Defence", "visible pressure", "doctrine.defence");
 			var urgentDefence = DoctrineDecision.SwitchUrgentlyTo(
 				"Defence", "base breached", "doctrine.defence.base-breached");
+			var urgentAttack = DoctrineDecision.SwitchUrgentlyTo(
+				"Attack", "counter-attack now", "doctrine.attack.urgent");
 			var safe = State();
+			var recentBuildingLoss = State(buildingsLost: 1);
 			var attacked = State(enemiesNearBase: 1);
 
 			Assert.Multiple(() =>
@@ -80,13 +83,21 @@ namespace AutoCnC.Core.Tests
 				Assert.That(ordinaryDefence.CanBypassMinimumDwell(attacked), Is.False,
 					"a doctrine name alone must not imply urgency");
 				Assert.That(urgentDefence.CanBypassMinimumDwell(safe), Is.False,
-					"an urgent decision does not bypass dwell without a base attack");
+					"an urgent decision does not bypass dwell without immediate pressure");
+				Assert.That(urgentDefence.CanBypassMinimumDwell(recentBuildingLoss), Is.False,
+					"a rolling building loss is not immediate pressure");
+				Assert.That(urgentAttack.CanBypassMinimumDwell(attacked), Is.False,
+					"the urgent bypass is restricted to Defence");
 				Assert.That(urgentDefence.CanBypassMinimumDwell(attacked), Is.True);
 				Assert.That(urgentDefence.ReasonId, Is.EqualTo("doctrine.defence.base-breached"));
 				Assert.That(DoctrineTransitionPolicy.CheckDwell(ordinaryDefence, attacked, 30),
 					Is.EqualTo(DoctrineDwellResult.MinimumDwell));
 				Assert.That(DoctrineTransitionPolicy.CheckDwell(urgentDefence, safe, 30),
-					Is.EqualTo(DoctrineDwellResult.UrgentWithoutBaseAttack));
+					Is.EqualTo(DoctrineDwellResult.UrgentWithoutImmediateDefencePressure));
+				Assert.That(DoctrineTransitionPolicy.CheckDwell(urgentDefence, recentBuildingLoss, 30),
+					Is.EqualTo(DoctrineDwellResult.UrgentWithoutImmediateDefencePressure));
+				Assert.That(DoctrineTransitionPolicy.CheckDwell(urgentAttack, attacked, 30),
+					Is.EqualTo(DoctrineDwellResult.UrgentWithoutImmediateDefencePressure));
 				Assert.That(DoctrineTransitionPolicy.CheckDwell(urgentDefence, attacked, 30),
 					Is.EqualTo(DoctrineDwellResult.UrgentDwellBypass));
 				Assert.That(DoctrineTransitionPolicy.CheckDwell(ordinaryDefence,
@@ -101,6 +112,7 @@ namespace AutoCnC.Core.Tests
 			{
 				CreditsKilled = 900,
 				CreditsLost = 400,
+				HasValueTradeData = true,
 				IncomeEarned = 1200,
 				VisibleEnemyValue = 700,
 				EnemyValueNearBase = 500,
@@ -116,6 +128,7 @@ namespace AutoCnC.Core.Tests
 			{
 				Assert.That(state.CreditsKilled, Is.EqualTo(900));
 				Assert.That(state.CreditsLost, Is.EqualTo(400));
+				Assert.That(state.HasValueTradeData, Is.True);
 				Assert.That(state.IncomeEarned, Is.EqualTo(1200));
 				Assert.That(state.VisibleEnemyValue, Is.EqualTo(700));
 				Assert.That(state.EnemyValueNearBase, Is.EqualTo(500));
@@ -123,6 +136,7 @@ namespace AutoCnC.Core.Tests
 				Assert.That(state.VisibleEnemyMix.Sum(v => v.Count), Is.EqualTo(3));
 				Assert.That(State().VisibleEnemyMix, Is.Empty,
 					"the legacy positional constructor initializes the additive collection");
+				Assert.That(State().HasValueTradeData, Is.False);
 			});
 		}
 
@@ -130,13 +144,20 @@ namespace AutoCnC.Core.Tests
 		public void WinningRequiresSafetyAndAFavourableValueTrade()
 		{
 			var legacyWinning = State(unitsLost: 1, unitsKilled: 2);
-			var losingValueTrade = legacyWinning with { CreditsKilled = 100, CreditsLost = 500 };
+			var noObservedValueLead = legacyWinning with { HasValueTradeData = true };
+			var losingValueTrade = legacyWinning with
+			{
+				CreditsKilled = 100,
+				CreditsLost = 500
+			};
 			var baseUnderAttack = legacyWinning with { EnemiesNearBase = 1 };
 
 			Assert.Multiple(() =>
 			{
 				Assert.That(legacyWinning.Winning, Is.True,
 					"legacy states without value data retain the unit-count fallback");
+				Assert.That(noObservedValueLead.Winning, Is.False,
+					"runtime states do not fall back to omniscient kill counts");
 				Assert.That(losingValueTrade.Winning, Is.False);
 				Assert.That(baseUnderAttack.Winning, Is.False);
 			});
@@ -228,6 +249,39 @@ namespace AutoCnC.Core.Tests
 				Assert.That(delta.CreditsKilled, Is.EqualTo(700));
 				Assert.That(delta.IncomeEarned, Is.EqualTo(900));
 			});
+		}
+
+		[Test]
+		public void KillValueCountsOnlyEnemiesVisibleInTheLatestSampleAndKilledByUs()
+		{
+			var ledger = new ObservedKillValueLedger();
+			ledger.BeginVisibilitySample();
+			ledger.ObserveVisibleEnemy(1);
+			ledger.ObserveVisibleEnemy(2);
+			var unseenValueRead = false;
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(ledger.ObserveKill(3, killedBySelf: true, valueFactory: () =>
+				{
+					unseenValueRead = true;
+					return 900;
+				}), Is.False,
+					"an unseen kill must not leak value");
+				Assert.That(unseenValueRead, Is.False,
+					"the hidden actor's value must not even be read");
+				Assert.That(ledger.ObserveKill(1, killedBySelf: false, valueFactory: () => 500), Is.False,
+					"somebody else's kill is not ours");
+				Assert.That(ledger.ObserveKill(2, killedBySelf: true, valueFactory: () => 700), Is.True);
+				Assert.That(ledger.ObserveKill(2, killedBySelf: true, valueFactory: () => 700), Is.False,
+					"one observed death is counted once");
+				Assert.That(ledger.TotalValue, Is.EqualTo(700));
+			});
+
+			ledger.ObserveVisibleEnemy(4);
+			ledger.BeginVisibilitySample();
+			Assert.That(ledger.ObserveKill(4, killedBySelf: true, valueFactory: () => 1000), Is.False,
+				"visibility does not carry across samples");
 		}
 	}
 }

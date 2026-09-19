@@ -16,7 +16,7 @@ namespace AutoCnC.Core
 		Allowed = 0,
 		MinimumDwell = 1,
 		UrgentDwellBypass = 2,
-		UrgentWithoutBaseAttack = 3
+		UrgentWithoutImmediateDefencePressure = 3
 	}
 
 	internal static class DoctrineTransitionPolicy
@@ -31,7 +31,7 @@ namespace AutoCnC.Core
 				return DoctrineDwellResult.UrgentDwellBypass;
 
 			return decision.IsUrgent
-				? DoctrineDwellResult.UrgentWithoutBaseAttack
+				? DoctrineDwellResult.UrgentWithoutImmediateDefencePressure
 				: DoctrineDwellResult.MinimumDwell;
 		}
 	}

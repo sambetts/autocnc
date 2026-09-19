@@ -16,7 +16,7 @@ using System.Text.Json;
 
 namespace AutoCnC.Evidence
 {
-	/// <summary>One <c>unit-decision</c> record, flattened.</summary>
+	/// <summary>One issued <c>unit-decision</c> record, flattened.</summary>
 	public sealed class UnitDecisionRecord
 	{
 		public int Seconds { get; init; }
@@ -29,6 +29,21 @@ namespace AutoCnC.Evidence
 		public string Reason { get; init; }
 		public string ReasonId { get; init; }
 		public string Order { get; init; }
+	}
+
+	/// <summary>One evaluated unit decision, whether or not it became an order.</summary>
+	public sealed class UnitDecisionEvaluationRecord
+	{
+		public int Seconds { get; init; }
+		public string Actor { get; init; }
+		public uint ActorId { get; init; }
+		public string Mode { get; init; }
+		public string Action { get; init; }
+		public string ItemName { get; init; }
+		public string Queue { get; init; }
+		public string Reason { get; init; }
+		public string ReasonId { get; init; }
+		public string Outcome { get; init; }
 	}
 
 	/// <summary>Visible enemy count and value for one threat kind in an assessment.</summary>
@@ -48,15 +63,24 @@ namespace AutoCnC.Evidence
 		public int PowerBalance { get; init; }
 		public int Harvesters { get; init; }
 		public int Refineries { get; init; }
+		public int Units { get; init; }
 		public int ArmyValue { get; init; }
 		public int Buildings { get; init; }
+		public int BaseValue { get; init; }
+		public int WindowSeconds { get; init; }
+		public int UnitsLost { get; init; }
+		public int BuildingsLost { get; init; }
+		public int UnitsKilled { get; init; }
 		public int CreditsKilled { get; init; }
 		public int CreditsLost { get; init; }
+		public bool HasValueTradeData { get; init; }
 		public int IncomeEarned { get; init; }
 		public int VisibleEnemyValue { get; init; }
 		public int EnemyValueNearBase { get; init; }
 		public int OwnArmyValueNearBase { get; init; }
 		public List<ThreatValueRecord> VisibleEnemyMix { get; init; } = [];
+		public int EnemiesInSight { get; init; }
+		public int EnemiesNearBase { get; init; }
 		public int NearestEnemyCells { get; init; }
 		public int SecondsSinceContact { get; init; }
 		public bool EnemyBaseFound { get; init; }
@@ -98,9 +122,16 @@ namespace AutoCnC.Evidence
 	/// append-only across schema versions, so a reader that insisted on knowing every field would
 	/// refuse the next version of a file it can otherwise read perfectly well.
 	/// </para>
+	/// <para>
+	/// Issued-decision indexes retain their historical meaning. Schema 3 adds a separate
+	/// evaluation stream, and machine-readable reason counts use that stream so suppressed and
+	/// unbuildable decisions remain observable without double-counting issued orders.
+	/// </para>
 	/// </remarks>
 	public sealed class DecisionTrace
 	{
+		readonly Dictionary<string, int> issuedReasonIdCounts = new(StringComparer.Ordinal);
+
 		public int SchemaVersion { get; private set; }
 		public string Bot { get; private set; }
 		public string Source { get; private set; }
@@ -108,6 +139,7 @@ namespace AutoCnC.Evidence
 		public int CompletedSeconds { get; private set; }
 
 		public List<UnitDecisionRecord> UnitDecisions { get; } = [];
+		public List<UnitDecisionEvaluationRecord> UnitDecisionEvaluations { get; } = [];
 		public List<AssessmentRecord> Assessments { get; } = [];
 		public List<DoctrineChangeRecord> DoctrineChanges { get; } = [];
 		public List<string> Errors { get; } = [];
@@ -123,7 +155,8 @@ namespace AutoCnC.Evidence
 		public Dictionary<string, int> ReasonCounts { get; } = new(StringComparer.Ordinal);
 
 		/// <summary>
-		/// Every exact machine-readable reason identifier in the trace, with occurrence count.
+		/// Every exact machine-readable reason identifier in evaluations, assessments, and
+		/// doctrine changes, with occurrence count. Old traces fall back to issued decisions.
 		/// </summary>
 		public Dictionary<string, int> ReasonIdCounts { get; } = new(StringComparer.Ordinal);
 
@@ -188,6 +221,7 @@ namespace AutoCnC.Evidence
 				}
 			}
 
+			trace.IncludeLegacyIssuedReasonIds();
 			return trace;
 		}
 
@@ -238,6 +272,10 @@ namespace AutoCnC.Evidence
 				case "unit-decision":
 					AcceptUnitDecision(root);
 					break;
+
+				case "unit-decision-evaluated":
+					AcceptUnitDecisionEvaluation(root);
+					break;
 			}
 		}
 
@@ -257,15 +295,24 @@ namespace AutoCnC.Evidence
 				PowerBalance = Integer(state, "powerBalance"),
 				Harvesters = Integer(state, "harvesters"),
 				Refineries = Integer(state, "refineries"),
+				Units = Integer(state, "units"),
 				ArmyValue = Integer(state, "armyValue"),
 				Buildings = Integer(state, "buildings"),
+				BaseValue = Integer(state, "baseValue"),
+				WindowSeconds = Integer(state, "windowSeconds"),
+				UnitsLost = Integer(state, "unitsLost"),
+				BuildingsLost = Integer(state, "buildingsLost"),
+				UnitsKilled = Integer(state, "unitsKilled"),
 				CreditsKilled = Integer(state, "creditsKilled"),
 				CreditsLost = Integer(state, "creditsLost"),
+				HasValueTradeData = Flag(state, "hasValueTradeData"),
 				IncomeEarned = Integer(state, "incomeEarned"),
 				VisibleEnemyValue = Integer(state, "visibleEnemyValue"),
 				EnemyValueNearBase = Integer(state, "enemyValueNearBase"),
 				OwnArmyValueNearBase = Integer(state, "ownArmyValueNearBase"),
 				VisibleEnemyMix = ThreatValues(state, "visibleEnemyMix"),
+				EnemiesInSight = Integer(state, "enemiesInSight"),
+				EnemiesNearBase = Integer(state, "enemiesNearBase"),
 				NearestEnemyCells = Integer(state, "nearestEnemyCells"),
 				SecondsSinceContact = Integer(state, "secondsSinceContact"),
 				EnemyBaseFound = Flag(state, "enemyBaseFound"),
@@ -306,13 +353,44 @@ namespace AutoCnC.Evidence
 			if (!string.IsNullOrEmpty(record.Reason))
 				ReasonCounts[record.Reason] = ReasonCounts.GetValueOrDefault(record.Reason) + 1;
 
-			RegisterReasonId(record.ReasonId);
+			if (!string.IsNullOrEmpty(record.ReasonId))
+				issuedReasonIdCounts[record.ReasonId] =
+					issuedReasonIdCounts.GetValueOrDefault(record.ReasonId) + 1;
 
 			if (!string.IsNullOrEmpty(record.Mode))
 				ModeDecisionCounts[record.Mode] = ModeDecisionCounts.GetValueOrDefault(record.Mode) + 1;
 
 			if (!string.IsNullOrEmpty(record.Action))
 				ActionCounts[record.Action] = ActionCounts.GetValueOrDefault(record.Action) + 1;
+		}
+
+		void AcceptUnitDecisionEvaluation(JsonElement root)
+		{
+			var record = new UnitDecisionEvaluationRecord
+			{
+				Seconds = Integer(root, "seconds"),
+				Actor = Text(root, "actor"),
+				ActorId = (uint)Math.Max(0, Integer(root, "actorId")),
+				Mode = Text(root, "mode"),
+				Action = Text(root, "action"),
+				ItemName = Text(root, "itemName"),
+				Queue = Text(root, "queue"),
+				Reason = Text(root, "reason"),
+				ReasonId = Text(root, "reasonId"),
+				Outcome = Text(root, "outcome")
+			};
+
+			UnitDecisionEvaluations.Add(record);
+			RegisterReasonId(record.ReasonId);
+		}
+
+		void IncludeLegacyIssuedReasonIds()
+		{
+			if (SchemaVersion >= 3)
+				return;
+
+			foreach (var pair in issuedReasonIdCounts)
+				ReasonIdCounts[pair.Key] = ReasonIdCounts.GetValueOrDefault(pair.Key) + pair.Value;
 		}
 
 		void RegisterReasonId(string reasonId)

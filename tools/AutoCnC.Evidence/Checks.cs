@@ -46,7 +46,8 @@ namespace AutoCnC.Evidence
 		/// <item><c>summary.&lt;dotted.path&gt;</c> — any field of <c>summary.json</c>.</item>
 		/// <item><c>summary.unitTypes[e1].creditsPerKill</c> — a unit type's ledger entry.</item>
 		/// <item><c>summary.production[Infantry].deepestPlanStepIndex</c> — one queue.</item>
-		/// <item><c>reason-id:&lt;id&gt;</c> — exact machine-readable reason identifier.</item>
+		/// <item><c>reason-id:&lt;id&gt;</c> — exact machine-readable identifier across unit
+		/// evaluations, assessment decisions, and doctrine changes.</item>
 		/// <item><c>reason:&lt;literal&gt;</c> — exact ID when present, otherwise the legacy
 		/// case-insensitive prose substring query.</item>
 		/// <item><c>units.count(type=e1)</c>, <c>units.sum(kills,type=e1)</c>,

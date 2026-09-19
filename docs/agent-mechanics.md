@@ -88,7 +88,7 @@ spent in gaps longer than 15 seconds between that unit's own decisions.
 - `battle.csv` — what this side could observe: `spotted`, `attacked`, `dealt`, `built`, `lost`,
   `killed`, `doctrine`, `player`, `over`.
 - `telemetry.csv` — both sides' curves at one-second resolution.
-- `decisions.jsonl` — assessments and every issued unit decision.
+- `decisions.jsonl` — assessments, every unit evaluation and outcome, and issued unit decisions.
 - `game-rules.json` — the resolved ruleset, including each actor's `freeActors`.
 - `replay.orarep` — the match itself.
 
@@ -114,9 +114,10 @@ Queries: `summary.<dotted.path>`, `summary.unitTypes[<type>].<column>`,
 `units.mean(<field>,type=x)`, `units.max(...)`, `units.min(...)`,
 `reason-id:<id>` for an exact machine-readable identifier, and `reason:<literal>` for compatibility.
 `reason:` prefers an exact `ReasonId` when present, then falls back to the legacy
-case-insensitive prose substring match. Exact-ID counts include every matching unit decision,
-assessment decision, and doctrine-change field in the trace. Operators: `>=`, `>`, `<=`, `<`,
-`==`, `!=`, `contains`, `present`, `absent`.
+case-insensitive prose substring match. Exact-ID counts include every matching unit evaluation,
+assessment decision, and doctrine-change field in the trace; issued-decision events retain their
+legacy meaning but do not double-count evaluations. Operators: `>=`, `>`, `<=`, `<`, `==`, `!=`,
+`contains`, `present`, `absent`.
 
 The `reason-id:` form is the preferred one. Give any new code path a stable ID and assert it:
 that is what separates "the new branch is wrong" from "the new branch never ran", without coupling
@@ -192,9 +193,9 @@ permitted way to know where anything is.
   encode facts that the side could not know during the match.
 - Own economy, forces, queues, and buildings are known exactly. Enemy actors are known only when
   visible, except for facts the bot legitimately remembers such as having found an enemy base.
-- `BattleState` includes rolling income and killed/lost value, visible enemy value and mix, and
-  own versus enemy value near the base. Enemy totals use the same visibility predicate as
-  `SenseThreats`.
+- `BattleState` includes rolling income, exact own value lost, observed enemy value killed,
+  visible enemy value and mix, and own versus enemy value near the base. Enemy totals use the
+  same visibility sampling as `SenseThreats`; unseen kills add no value.
 - `ThreatSnapshot` includes actor type, cell coordinates, value, and maximum enabled weapon range.
 - **Reading the resource layer through `ModeContext` is fair play, not cheating.** Those reads are
   shroud-filtered for you: a cell the side has never explored reads as empty, exactly as it does
@@ -239,7 +240,7 @@ permitted way to know where anything is.
   about and make strategy changes explainable.
 - A doctrine switch changes plans and assignments for the whole side. Switches are rate-limited;
   do not create rules that oscillate between doctrines. The only early-switch path is an explicit
-  `DoctrineDecision.SwitchUrgentlyTo(...)` while `BattleState.BaseUnderAttack` is true.
+  `DoctrineDecision.SwitchUrgentlyTo("Defence", ...)` while `BattleState.EnemiesNearBase > 0`.
 - Mode assignment is by unit type, control group, or globally. Precedence is most-specific-wins:
   unit override, then control group, then unit type, then the actor's YAML default, then global.
 - A plan step that no driven queue can build is skipped silently, without an error.

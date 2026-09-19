@@ -9,6 +9,7 @@
  */
 #endregion
 
+using System;
 using System.Collections.Generic;
 
 namespace AutoCnC.Core
@@ -64,11 +65,17 @@ namespace AutoCnC.Core
 		int SecondsSinceContact,     // since you last saw any enemy, or -1 if you never have
 		bool EnemyBaseFound)         // true once you have seen an enemy structure
 	{
-		/// <summary>Build value destroyed during the rolling assessment window.</summary>
+		/// <summary>
+		/// Build value of enemy kills observed by your side during the rolling assessment window.
+		/// </summary>
+		/// <remarks>Conservative by design: enemies killed outside current visibility are omitted.</remarks>
 		public int CreditsKilled { get; init; }
 
-		/// <summary>Build value lost during the rolling assessment window.</summary>
+		/// <summary>Exact own build value lost during the rolling assessment window.</summary>
 		public int CreditsLost { get; init; }
+
+		/// <summary>Whether the value-trade fields were populated by the platform.</summary>
+		public bool HasValueTradeData { get; init; }
 
 		/// <summary>Income earned during the rolling assessment window.</summary>
 		public int IncomeEarned { get; init; }
@@ -107,13 +114,14 @@ namespace AutoCnC.Core
 		/// You are trading well by value and the base is not under attack.
 		/// </summary>
 		/// <remarks>
-		/// Legacy states without value data fall back to unit counts. Once either value field is
-		/// populated, value exchange is authoritative, so killing cheap units while losing
-		/// expensive ones cannot report a winning position.
+		/// Legacy states without value data fall back to unit counts. Platform assessments set
+		/// <see cref="HasValueTradeData"/>, making the visibility-safe value exchange
+		/// authoritative even when both values are zero; explicitly populated non-zero values
+		/// also retain the behaviour introduced with those fields.
 		/// </remarks>
 		public bool Winning =>
 			!BaseUnderAttack &&
-			(CreditsKilled != 0 || CreditsLost != 0
+			(HasValueTradeData || CreditsKilled != 0 || CreditsLost != 0
 				? CreditsKilled > CreditsLost
 				: UnitsKilled > UnitsLost);
 	}
@@ -141,8 +149,8 @@ namespace AutoCnC.Core
 		/// Explicitly asks the platform to consider bypassing its minimum doctrine dwell.
 		/// </summary>
 		/// <remarks>
-		/// Urgency alone never bypasses the dwell: the current <see cref="BattleState"/> must also
-		/// report <see cref="BattleState.BaseUnderAttack"/>.
+		/// Urgency alone never bypasses the dwell: the destination must be <c>Defence</c> and the
+		/// current <see cref="BattleState"/> must report visible enemies near the base.
 		/// </remarks>
 		public bool IsUrgent { get; init; }
 
@@ -158,8 +166,8 @@ namespace AutoCnC.Core
 			new(doctrine, reason) { ReasonId = reasonId };
 
 		/// <summary>
-		/// Request an emergency switch. It bypasses minimum dwell only while the base is under
-		/// attack; the platform does not infer urgency from the doctrine name.
+		/// Request an emergency switch. It bypasses minimum dwell only when switching to
+		/// <c>Defence</c> while visible enemies are near the base.
 		/// </summary>
 		public static DoctrineDecision SwitchUrgentlyTo(string doctrine, string reason) =>
 			SwitchUrgentlyTo(doctrine, reason, null);
@@ -171,6 +179,9 @@ namespace AutoCnC.Core
 		public bool WantsChange => !string.IsNullOrEmpty(Doctrine);
 
 		/// <summary>Whether this explicit decision may bypass the platform's minimum dwell.</summary>
-		public bool CanBypassMinimumDwell(in BattleState state) => IsUrgent && state.BaseUnderAttack;
+		public bool CanBypassMinimumDwell(in BattleState state) =>
+			IsUrgent &&
+			state.EnemiesNearBase > 0 &&
+			string.Equals(Doctrine, "Defence", StringComparison.OrdinalIgnoreCase);
 	}
 }

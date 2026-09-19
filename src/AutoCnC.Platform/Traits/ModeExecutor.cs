@@ -40,7 +40,8 @@ namespace AutoCnC.Platform.Traits
 
 		[Desc("Seconds a doctrine must run before another can replace it. This is what stops two",
 			"rules that disagree from flipping the army back and forth; a bot can be stricter",
-			"still by reading BattleState.DoctrineSeconds.")]
+			"still by reading BattleState.DoctrineSeconds. Only an explicit urgent switch to",
+			"Defence during visible pressure at the base can bypass this.")]
 		public readonly int MinimumDoctrineSeconds = 30;
 
 		[Desc("How far back BattleState's loss and kill counts reach, in seconds of game time.")]
@@ -366,10 +367,10 @@ namespace AutoCnC.Platform.Traits
 			var dwell = DoctrineTransitionPolicy.CheckDwell(
 				decision, LastAssessment, info.MinimumDoctrineSeconds);
 			if (dwell == DoctrineDwellResult.MinimumDwell ||
-				dwell == DoctrineDwellResult.UrgentWithoutBaseAttack)
+				dwell == DoctrineDwellResult.UrgentWithoutImmediateDefencePressure)
 			{
-				var outcome = dwell == DoctrineDwellResult.UrgentWithoutBaseAttack
-					? "minimum-dwell-no-base-attack"
+				var outcome = dwell == DoctrineDwellResult.UrgentWithoutImmediateDefencePressure
+					? "minimum-dwell-no-immediate-defence-pressure"
 					: "minimum-dwell";
 				decisionTrace?.Assessment(GameSeconds, LastAssessment, botDecision, asked, decision, outcome);
 				return;
@@ -505,7 +506,11 @@ namespace AutoCnC.Platform.Traits
 			}
 
 			if (decision.Action == UnitAction.Continue)
+			{
+				decisionTrace?.UnitDecisionEvaluated(GameSeconds, actor.Info.Name, actor.ActorID,
+					controller.ActiveModeName, decision, "continue");
 				return;
+			}
 
 			// A unit that is already idle has achieved Hold, so re-sending Stop would spam the
 			// order stream every evaluation for every idle unit — which is most of an army, most
@@ -513,6 +518,8 @@ namespace AutoCnC.Platform.Traits
 			if (decision.Action == UnitAction.Hold && actor.IsIdle)
 			{
 				controller.LastIssued = decision;
+				decisionTrace?.UnitDecisionEvaluated(GameSeconds, actor.Info.Name, actor.ActorID,
+					controller.ActiveModeName, decision, "already-idle");
 				return;
 			}
 
@@ -520,17 +527,27 @@ namespace AutoCnC.Platform.Traits
 			// something done. Otherwise a steady decision would emit an order every evaluation.
 			var repeat = decision.SameIntent(controller.LastIssued);
 			if (repeat && !actor.IsIdle)
+			{
+				decisionTrace?.UnitDecisionEvaluated(GameSeconds, actor.Info.Name, actor.ActorID,
+					controller.ActiveModeName, decision, "duplicate-intent");
 				return;
+			}
 
 			var order = controller.Context.BuildOrder(decision);
 			if (order == null)
+			{
+				decisionTrace?.UnitDecisionEvaluated(GameSeconds, actor.Info.Name, actor.ActorID,
+					controller.ActiveModeName, decision, "no-order");
 				return;
+			}
 
 			if (LogDecisions)
 				Log.Write("debug", $"[mode] {actor.Info.Name}#{actor.ActorID} {controller.ActiveModeName}: " +
 					$"{decision.Action}{(decision.ItemName != null ? " " + decision.ItemName : "")} " +
 					$"-> {order.OrderString} ({decision.Reason})");
 
+			decisionTrace?.UnitDecisionEvaluated(GameSeconds, actor.Info.Name, actor.ActorID,
+				controller.ActiveModeName, decision, "issued");
 			decisionTrace?.UnitDecisionIssued(GameSeconds, actor.Info.Name, actor.ActorID,
 				controller.ActiveModeName, decision, order.OrderString);
 			controller.LastIssued = decision;

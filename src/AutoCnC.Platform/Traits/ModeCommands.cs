@@ -238,7 +238,8 @@ namespace AutoCnC.Platform.Traits
 
 			Debug($"For {s.DoctrineSeconds}s. Army {s.ArmyValue} in {s.Units} units, {s.Buildings} buildings, {s.Cash} cash.");
 			Debug($"Last {s.WindowSeconds}s: lost {s.UnitsLost} units/{s.CreditsLost} value and " +
-				$"{s.BuildingsLost} buildings, killed {s.UnitsKilled}/{s.CreditsKilled} value, earned {s.IncomeEarned}.");
+				$"{s.BuildingsLost} buildings, killed {s.UnitsKilled}/{s.CreditsKilled} observed value, " +
+				$"earned {s.IncomeEarned}.");
 			Debug($"Visible enemy value {s.VisibleEnemyValue}; near base enemy {s.EnemyValueNearBase}, " +
 				$"own army {s.OwnArmyValueNearBase}.");
 

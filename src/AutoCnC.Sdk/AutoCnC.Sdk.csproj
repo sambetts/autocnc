@@ -17,6 +17,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="AutoCnC.Platform" />
     <InternalsVisibleTo Include="AutoCnC.Sdk.Tests" />
   </ItemGroup>
 

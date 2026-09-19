@@ -78,11 +78,16 @@ it as authoritative context alongside the source and the evidence from one compl
   orders a few ticks later. Do not assume an order applies immediately.
 - Building repair is player-scoped: choose a damaged entry from `ctx.OwnedBuildingStates()` and
   return `UnitDecision.RepairBuilding(id, reason)`. The SDK rejects enemy, dead, non-repairable,
-  full-health, and already-requested targets.
+  full-health, already-active, and already-requested targets, including a synchronized recheck
+  before applying the engine repair order.
 - Production cancellation is exact: queue, item, and positive count must still match the live
-  queue. `ctx.QueueStates()` exposes current item/progress/cost and counts.
+  queue when the synchronized order resolves, or nothing is cancelled. `ctx.QueueStates()` exposes
+  current item/progress/cost and counts.
 - Support powers come from `ctx.SupportPowerStates()`, not faction-specific constants. Activate a
-  ready active key or configured order name at a cell with `UnitDecision.ActivateSupportPower`.
+  ready active key or configured order name at a cell with `UnitDecision.ActivateSupportPower`;
+  configured names resolve to concrete ready keys before duplicate suppression.
+- Player-scoped repair, cancellation, and support-power requests are coalesced across all
+  controllers before the tick's orders are issued.
 - Returning the same intent repeatedly is cheap because the host suppresses duplicate orders.
 - Target selection should be stable. Re-picking equivalent targets every evaluation makes units
   dither.

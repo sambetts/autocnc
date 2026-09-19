@@ -136,11 +136,15 @@ ModeExecutor.Tick                          (client-local, local player only)
        ├─ SyncMode      ← ModeAssignments.Resolve(override, group, actorType)
        ├─ due this tick? (staggered by TickInterval)
        └─ mode.OnTick → UnitDecision
+            ├─ resolve queue items and concrete support-power keys
             ├─ SameIntent as last issued, and unit not idle? → skip
+            ├─ coalesce player-scoped actions across all controllers
             └─ ModeContext.BuildOrder → world.IssueOrder
 ```
 
 Two throttles keep the order stream sane: duplicate-intent suppression, and `MaxOrdersPerTick`.
+Repair and exact production cancellation use synchronized player-actor requests handled by
+`SdkActionResolver`; it revalidates live simulation state before applying the native OpenRA order.
 
 ### Assignment precedence
 

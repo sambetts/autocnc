@@ -79,6 +79,11 @@ jobs:
       - name: Build AutoC&C platform
         run: dotnet build AutoCnC.sln -c Release -v minimal --nologo
 
+      - name: Test engine-backed SDK and platform
+        run: |
+          dotnet test src/AutoCnC.Sdk.Tests/AutoCnC.Sdk.Tests.csproj -c Release --no-build --nologo
+          dotnet test src/AutoCnC.Platform.Tests/AutoCnC.Platform.Tests.csproj -c Release --no-build --nologo
+
       # Battle bots consume AutoC&C via NuGet, so this also proves the packaged SDK works.
       - name: Pack AutoC&C packages
         run: dotnet pack AutoCnC.sln -c Release -v minimal --nologo

@@ -907,6 +907,32 @@ namespace AutoCnC.Sdk
 
 		#region Acting
 
+		internal UnitDecision? ResolveAction(in UnitDecision decision)
+		{
+			switch (decision.Action)
+			{
+				case UnitAction.CancelProduction:
+					{
+						var queue = QueueFor(decision.Queue);
+						if (queue == null)
+							return null;
+
+						return ActionOrderBuilder.ResolveCancellation(
+							decision,
+							queue.Actor.ActorID,
+							queue.Info.Group ?? queue.Info.Type,
+							queue.AllQueued().Select(queued => queued.Item));
+					}
+
+				case UnitAction.ActivateSupportPower:
+					return ActionOrderBuilder.ResolveSupportPower(
+						decision, SupportPowerStates());
+
+				default:
+					return decision;
+			}
+		}
+
 		/// <summary>
 		/// Translates a decision into the order that carries it out, or null.
 		/// </summary>
@@ -967,7 +993,7 @@ namespace AutoCnC.Sdk
 						!ActionOrderBuilder.CanStartRepair(building))
 						return null;
 
-					return ActionOrderBuilder.RepairBuilding(
+					return ActionOrderBuilder.RequestRepairBuilding(
 						self.Owner.PlayerActor, Target.FromActor(target));
 				}
 
@@ -986,16 +1012,23 @@ namespace AutoCnC.Sdk
 				case UnitAction.CancelProduction:
 				{
 					var queue = QueueFor(decision.Queue);
-					if (queue == null)
+					if (queue == null ||
+						(decision.TargetActorId != 0 && queue.Actor.ActorID != decision.TargetActorId))
 						return null;
 
 					var item = ActionOrderBuilder.FindQueuedItem(
 						queue.AllQueued().Select(queued => queued.Item),
 						decision.ItemName,
 						decision.Count);
-					return item == null
+					var queueIndex = item == null ? -1 : QueueIndex(queue);
+					return queueIndex < 0
 						? null
-						: ActionOrderBuilder.CancelProduction(queue.Actor, item, decision.Count);
+						: ActionOrderBuilder.RequestCancelProduction(
+							self.Owner.PlayerActor,
+							Target.FromActor(queue.Actor),
+							queueIndex,
+							item,
+							decision.Count);
 				}
 
 				case UnitAction.PlaceBuilding:
@@ -1046,6 +1079,20 @@ namespace AutoCnC.Sdk
 
 		Order AttackMoveOrder(CPos cell) =>
 			move == null ? null : new Order("AttackMove", self, Target.FromCell(World, cell), false);
+
+		static int QueueIndex(ProductionQueue queue)
+		{
+			var index = 0;
+			foreach (var candidate in queue.Actor.TraitsImplementing<ProductionQueue>())
+			{
+				if (ReferenceEquals(candidate, queue))
+					return index;
+
+				index++;
+			}
+
+			return -1;
+		}
 
 		#endregion
 	}

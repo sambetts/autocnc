@@ -20,7 +20,24 @@ namespace AutoCnC.Sdk.Tests
 	public sealed class ActionOrderBuilderTests
 	{
 		[Test]
-		public void RepairBuildingUsesThePlayerScopedOpenRaOrder()
+		public void RepairRequestUsesAPlayerScopedSynchronizedOrder()
+		{
+			var target = Target.FromPos(new WPos(1024, 2048, 0));
+			var order = ActionOrderBuilder.RequestRepairBuilding(null, target);
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(order.OrderString, Is.EqualTo(ActionOrderBuilder.EnsureRepairOrder));
+				Assert.That(order.Subject, Is.Null);
+				Assert.That(order.Queued, Is.False);
+				Assert.That(order.Target.Type, Is.EqualTo(TargetType.Terrain));
+				Assert.That(order.Target.CenterPosition, Is.EqualTo(target.CenterPosition));
+				Assert.That(order.SuppressVisualFeedback, Is.True);
+			});
+		}
+
+		[Test]
+		public void RepairResolutionUsesTheActualOpenRaPlayerOrder()
 		{
 			var target = Target.FromPos(new WPos(1024, 2048, 0));
 			var order = ActionOrderBuilder.RepairBuilding(null, target);
@@ -36,7 +53,28 @@ namespace AutoCnC.Sdk.Tests
 		}
 
 		[Test]
-		public void CancelProductionUsesTheExactItemAndCountOrderShape()
+		public void CancellationRequestIdentifiesQueueItemAndCount()
+		{
+			var target = Target.FromPos(new WPos(3072, 4096, 0));
+			var order = ActionOrderBuilder.RequestCancelProduction(
+				null, target, queueIndex: 3, item: "mtnk", count: 2);
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(order.OrderString, Is.EqualTo(ActionOrderBuilder.ExactCancelProductionOrder));
+				Assert.That(order.Subject, Is.Null);
+				Assert.That(order.Target.Type, Is.EqualTo(TargetType.Terrain));
+				Assert.That(order.Target.CenterPosition, Is.EqualTo(target.CenterPosition));
+				Assert.That(order.TargetString, Is.EqualTo("mtnk"));
+				Assert.That(order.ExtraLocation.X, Is.EqualTo(3));
+				Assert.That(order.ExtraData, Is.EqualTo(2u));
+				Assert.That(order.Queued, Is.False);
+				Assert.That(order.SuppressVisualFeedback, Is.True);
+			});
+		}
+
+		[Test]
+		public void CancellationResolutionUsesTheActualProductionQueueOrderShape()
 		{
 			var order = ActionOrderBuilder.CancelProduction(null, "mtnk", 2);
 
@@ -65,6 +103,22 @@ namespace AutoCnC.Sdk.Tests
 		}
 
 		[Test]
+		public void CancellationResolutionCanonicalizesTheQueueActorAndItem()
+		{
+			var requested = UnitDecision.CancelProduction("Vehicle.GDI", "MTNK", 2, "cancel");
+			var resolved = ActionOrderBuilder.ResolveCancellation(
+				requested, 41, "Vehicle", new[] { "mtnk", "mtnk" }).Value;
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(resolved.TargetActorId, Is.EqualTo(41u));
+				Assert.That(resolved.Queue, Is.EqualTo("Vehicle"));
+				Assert.That(resolved.ItemName, Is.EqualTo("mtnk"));
+				Assert.That(resolved.Count, Is.EqualTo(2));
+			});
+		}
+
+		[Test]
 		public void RepairRequiresDamageCapabilityAndNoExistingRequest()
 		{
 			var damaged = Building(75, repairable: true, requested: false);
@@ -78,6 +132,8 @@ namespace AutoCnC.Sdk.Tests
 					Building(75, repairable: false, requested: false)), Is.False);
 				Assert.That(ActionOrderBuilder.CanStartRepair(
 					Building(75, repairable: true, requested: true)), Is.False);
+				Assert.That(ActionOrderBuilder.CanStartRepair(
+					Building(75, repairable: true, requested: false, active: true)), Is.False);
 			});
 		}
 
@@ -107,6 +163,32 @@ namespace AutoCnC.Sdk.Tests
 		}
 
 		[Test]
+		public void ConcreteSupportPowerKeysProduceDistinctSuccessiveIntents()
+		{
+			var requested = UnitDecision.ActivateSupportPower("AirstrikeOrder", 4, 5, "fire");
+			var firstPowers = new[]
+			{
+				Power("AirstrikeOrder_3", "AirstrikeOrder", active: true, ready: true),
+				Power("AirstrikeOrder_5", "AirstrikeOrder", active: true, ready: true)
+			};
+			var secondPowers = new[]
+			{
+				Power("AirstrikeOrder_3", "AirstrikeOrder", active: true, ready: false),
+				Power("AirstrikeOrder_5", "AirstrikeOrder", active: true, ready: true)
+			};
+
+			var first = ActionOrderBuilder.ResolveSupportPower(requested, firstPowers).Value;
+			var second = ActionOrderBuilder.ResolveSupportPower(requested, secondPowers).Value;
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(first.Power, Is.EqualTo("AirstrikeOrder_3"));
+				Assert.That(second.Power, Is.EqualTo("AirstrikeOrder_5"));
+				Assert.That(first.SameIntent(second), Is.False);
+			});
+		}
+
+		[Test]
 		public void SupportPowerOrderUsesTheResolvedKeyAndTarget()
 		{
 			var target = Target.FromPos(new WPos(3072, 4096, 0));
@@ -132,8 +214,9 @@ namespace AutoCnC.Sdk.Tests
 			int totalTime, int remainingTime, bool done, int expected) =>
 			Assert.That(ActionOrderBuilder.ProgressPercent(totalTime, remainingTime, done), Is.EqualTo(expected));
 
-		static OwnedBuildingState Building(int health, bool repairable, bool requested) =>
-			new(1, "proc", 2, 3, health, repairable, requested, false);
+		static OwnedBuildingState Building(
+			int health, bool repairable, bool requested, bool active = false) =>
+			new(1, "proc", 2, 3, health, repairable, requested, active);
 
 		static SupportPowerState Power(string key, string orderName, bool active, bool ready) =>
 			new(key, orderName, active, ready, false, ready ? 0 : 10, 100);

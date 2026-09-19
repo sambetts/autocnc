@@ -20,6 +20,28 @@ using OpenRA.Traits;
 
 namespace AutoCnC.Platform.Traits
 {
+	internal readonly record struct PlayerScopedActionKey(
+		UnitAction Action,
+		uint TargetActorId,
+		string Queue,
+		string ItemName)
+	{
+		public static PlayerScopedActionKey? From(in UnitDecision decision)
+		{
+			return decision.Action switch
+			{
+				UnitAction.RepairBuilding =>
+					new PlayerScopedActionKey(decision.Action, decision.TargetActorId, null, null),
+				UnitAction.CancelProduction =>
+					new PlayerScopedActionKey(
+						decision.Action, decision.TargetActorId, decision.Queue, decision.ItemName),
+				UnitAction.ActivateSupportPower =>
+					new PlayerScopedActionKey(decision.Action, 0, null, decision.Power),
+				_ => null
+			};
+		}
+	}
+
 	[TraitLocation(SystemActors.World)]
 	[Desc("Runs the loaded battle bot for the local player: picks its doctrine as the match turns,",
 		"and turns that doctrine's decisions into orders. Attach this to the world actor.")]
@@ -82,6 +104,7 @@ namespace AutoCnC.Platform.Traits
 		readonly World world;
 		readonly ModeExecutorInfo info;
 		readonly List<Order> pending = [];
+		readonly HashSet<PlayerScopedActionKey> pendingPlayerActions = [];
 
 		BattleAssessor assessor;
 		BattleLog battleLog;
@@ -455,6 +478,7 @@ namespace AutoCnC.Platform.Traits
 				return;
 
 			pending.Clear();
+			pendingPlayerActions.Clear();
 
 			foreach (var pair in world.ActorsWithTrait<ProgrammableController>())
 			{
@@ -515,6 +539,19 @@ namespace AutoCnC.Platform.Traits
 				return;
 			}
 
+			var resolvedDecision = controller.Context.ResolveAction(decision);
+			if (!resolvedDecision.HasValue)
+			{
+				if (IsSingleShotAction(controller.LastIssued.Action))
+					controller.LastIssued = UnitDecision.Continue;
+
+				decisionTrace?.UnitDecisionEvaluated(GameSeconds, actor.Info.Name, actor.ActorID,
+					controller.ActiveModeName, decision, "no-order");
+				return;
+			}
+
+			decision = resolvedDecision.Value;
+
 			// A unit that is already idle has achieved Hold, so re-sending Stop would spam the
 			// order stream every evaluation for every idle unit — which is most of an army, most
 			// of the time.
@@ -529,7 +566,8 @@ namespace AutoCnC.Platform.Traits
 			// Re-issue only when the intent changed, or the unit has gone idle and still wants
 			// something done. Otherwise a steady decision would emit an order every evaluation.
 			var repeat = decision.SameIntent(controller.LastIssued);
-			if (ShouldSuppressRepeatedIntent(decision.Action, repeat, actor.IsIdle))
+			var singleShot = IsSingleShotAction(decision.Action);
+			if (!singleShot && ShouldSuppressRepeatedIntent(decision.Action, repeat, actor.IsIdle))
 			{
 				decisionTrace?.UnitDecisionEvaluated(GameSeconds, actor.Info.Name, actor.ActorID,
 					controller.ActiveModeName, decision, "duplicate-intent");
@@ -539,8 +577,27 @@ namespace AutoCnC.Platform.Traits
 			var order = controller.Context.BuildOrder(decision);
 			if (order == null)
 			{
+				if (singleShot)
+					controller.LastIssued = UnitDecision.Continue;
+
 				decisionTrace?.UnitDecisionEvaluated(GameSeconds, actor.Info.Name, actor.ActorID,
 					controller.ActiveModeName, decision, "no-order");
+				return;
+			}
+
+			if (singleShot && ShouldSuppressRepeatedIntent(decision.Action, repeat, actor.IsIdle))
+			{
+				decisionTrace?.UnitDecisionEvaluated(GameSeconds, actor.Info.Name, actor.ActorID,
+					controller.ActiveModeName, decision, "duplicate-intent");
+				return;
+			}
+
+			var playerAction = PlayerScopedActionKey.From(decision);
+			if (playerAction.HasValue && !pendingPlayerActions.Add(playerAction.Value))
+			{
+				controller.LastIssued = decision;
+				decisionTrace?.UnitDecisionEvaluated(GameSeconds, actor.Info.Name, actor.ActorID,
+					controller.ActiveModeName, decision, "coalesced-pending-action");
 				return;
 			}
 

@@ -19,8 +19,24 @@ namespace AutoCnC.Sdk
 {
 	internal static class ActionOrderBuilder
 	{
+		public const string EnsureRepairOrder = "AutoCnCEnsureRepair";
+		public const string ExactCancelProductionOrder = "AutoCnCExactCancelProduction";
+
+		public static Order RequestRepairBuilding(Actor playerActor, in Target target) =>
+			new(EnsureRepairOrder, playerActor, target, false) { SuppressVisualFeedback = true };
+
 		public static Order RepairBuilding(Actor playerActor, in Target target) =>
 			new("RepairBuilding", playerActor, target, false);
+
+		public static Order RequestCancelProduction(
+			Actor playerActor, in Target queueTarget, int queueIndex, string item, int count) =>
+			new(ExactCancelProductionOrder, playerActor, queueTarget, false)
+			{
+				TargetString = item,
+				ExtraLocation = new CPos(queueIndex, 0),
+				ExtraData = (uint)count,
+				SuppressVisualFeedback = true
+			};
 
 		public static Order CancelProduction(Actor queueActor, string item, int count) =>
 			Order.CancelProduction(queueActor, item, count);
@@ -33,7 +49,10 @@ namespace AutoCnC.Sdk
 			};
 
 		public static bool CanStartRepair(in OwnedBuildingState building) =>
-			building.IsRepairable && building.HealthPercent < 100 && !building.RepairRequested;
+			building.IsRepairable &&
+			building.HealthPercent < 100 &&
+			!building.RepairRequested &&
+			!building.RepairActive;
 
 		public static string FindQueuedItem(
 			IEnumerable<string> queuedItems, string requestedItem, int requestedCount)
@@ -54,6 +73,23 @@ namespace AutoCnC.Sdk
 			}
 
 			return null;
+		}
+
+		public static UnitDecision? ResolveCancellation(
+			in UnitDecision decision,
+			uint queueActorId,
+			string queueName,
+			IEnumerable<string> queuedItems)
+		{
+			var item = FindQueuedItem(queuedItems, decision.ItemName, decision.Count);
+			return item == null
+				? null
+				: decision with
+				{
+					TargetActorId = queueActorId,
+					Queue = queueName,
+					ItemName = item
+				};
 		}
 
 		public static string FindReadySupportPower(
@@ -89,6 +125,13 @@ namespace AutoCnC.Sdk
 			}
 
 			return orderNameMatch;
+		}
+
+		public static UnitDecision? ResolveSupportPower(
+			in UnitDecision decision, IEnumerable<SupportPowerState> powers)
+		{
+			var key = FindReadySupportPower(powers, decision.Power);
+			return key == null ? null : decision with { ItemName = key };
 		}
 
 		public static int ProgressPercent(int totalTime, int remainingTime, bool done)

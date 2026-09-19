@@ -430,17 +430,26 @@ stopping it harvesting. Only return an action when you want to override what the
 
 `RepairBuilding` is an ensure-start action, not a repair toggle: it only emits the engine's
 player-scoped repair order for a live owned `RepairableBuilding` that is damaged and does not
-already have this player's repair request. Read `OwnedBuildingStates()` for health,
-`IsRepairable`, `RepairRequested`, and `RepairActive`.
+already have this player's repair request or an active repair. The synchronized resolver repeats
+that validation immediately before applying the engine order. Read `OwnedBuildingStates()` for
+health, `IsRepairable`, `RepairRequested`, and `RepairActive`.
 
 `CancelProduction` names one queue, one item, and an exact positive count. It emits no order when
-the queue does not contain that many matching entries, so a stale decision never becomes a broad
-or partial cancellation. `QueueStates()` includes the current item, completion percentage, cost,
-matching item count, and total queue length.
+the queue does not contain that many matching entries, and the synchronized platform resolver
+atomically checks the selected queue again before applying the engine cancellation. A stale
+request therefore cancels the exact count or nothing, never a partial count. `QueueStates()`
+includes the current item, completion percentage, cost, matching item count, and total queue
+length.
 
 `ActivateSupportPower` accepts either a key from `SupportPowerState.Key` or its configured
 `OrderName`. The power must be active and ready. The SDK sends the same player-scoped, cell-targeted
-order as the engine UI; it does not pick targets or reveal anything about the target cell.
+order as the engine UI; it does not pick targets or reveal anything about the target cell. An
+order name is resolved to a concrete ready key before duplicate comparison, so multiple charged
+instances can fire on successive evaluations.
+
+Repair, cancellation, and support-power requests are coalesced across every controller before
+orders are issued. Two modes cannot toggle the same repair off, multiply a cancellation count, or
+activate the same concrete power twice in one tick.
 
 ### Sense → decide → act
 

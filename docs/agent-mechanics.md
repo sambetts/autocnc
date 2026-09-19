@@ -230,12 +230,18 @@ permitted way to know where anything is.
   dither.
 - Drive a production queue only when `ctx.OwnsQueue(category)` is true.
 - `CancelProduction` requires an exact queue, item, and positive count. It emits no partial or
-  broad cancellation when the queue no longer matches.
+  broad cancellation when the queue no longer matches: a synchronized player-order resolver
+  atomically revalidates the selected queue at order resolution and cancels the exact count or
+  nothing.
 - `RepairBuilding` starts repair only for a live owned damaged `RepairableBuilding` without an
-  existing repair request. Inspect `OwnedBuildingStates()` before deciding.
+  existing repair request or active repair. The synchronized resolver repeats that check before
+  applying OpenRA's player-scoped repair order.
 - Resolve support powers from `SupportPowerStates()` rather than faction names. Activation accepts
   either the manager key or configured order name, requires an active ready power, and targets the
-  supplied cell without revealing anything about it.
+  supplied cell without revealing anything about it. Order names resolve to concrete ready keys
+  before duplicate comparison, allowing multiple charged instances to fire successively.
+- The host coalesces repair, cancellation, and support-power requests globally for the local
+  player before issuing orders, rather than relying on each controller's duplicate history.
 - For deployment, check both `ctx.CanDeploy` and `ctx.DeploysIntoBuilding`; otherwise a
   construction yard can repeatedly pack and unpack.
 - Do not retain lists returned by sensing methods; their buffers are reused.

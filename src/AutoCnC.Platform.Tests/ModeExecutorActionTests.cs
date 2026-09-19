@@ -51,5 +51,64 @@ namespace AutoCnC.Platform.Tests
 					Is.False);
 			});
 		}
+
+		[Test]
+		public void PlayerScopedActionsCoalesceAcrossControllers()
+		{
+			var repair = PlayerScopedActionKey.From(
+				UnitDecision.RepairBuilding(12, "repair")).Value;
+			var sameRepair = PlayerScopedActionKey.From(
+				UnitDecision.RepairBuilding(12, "other reason")).Value;
+			var cancelOne = PlayerScopedActionKey.From(
+				UnitDecision.CancelProduction("Vehicle", "mtnk", 1, "cancel") with
+				{ TargetActorId = 20 }).Value;
+			var cancelTwo = PlayerScopedActionKey.From(
+				UnitDecision.CancelProduction("Vehicle", "mtnk", 2, "cancel more") with
+				{ TargetActorId = 20 }).Value;
+			var otherQueue = PlayerScopedActionKey.From(
+				UnitDecision.CancelProduction("Vehicle", "mtnk", 1, "cancel") with
+				{ TargetActorId = 21 }).Value;
+			var firstPower = PlayerScopedActionKey.From(
+				UnitDecision.ActivateSupportPower("AirstrikeOrder_3", 4, 5, "fire")).Value;
+			var samePowerElsewhere = PlayerScopedActionKey.From(
+				UnitDecision.ActivateSupportPower("AirstrikeOrder_3", 9, 10, "fire")).Value;
+			var otherPower = PlayerScopedActionKey.From(
+				UnitDecision.ActivateSupportPower("AirstrikeOrder_5", 4, 5, "fire")).Value;
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(repair, Is.EqualTo(sameRepair));
+				Assert.That(cancelOne, Is.EqualTo(cancelTwo),
+					"counts must not accumulate through multiple controllers in one tick");
+				Assert.That(cancelOne, Is.Not.EqualTo(otherQueue));
+				Assert.That(firstPower, Is.EqualTo(samePowerElsewhere),
+					"one concrete power key can only be activated once per tick");
+				Assert.That(firstPower, Is.Not.EqualTo(otherPower),
+					"different concrete instances remain independently actionable");
+				Assert.That(PlayerScopedActionKey.From(UnitDecision.MoveTo(1, 2, "move")), Is.Null);
+			});
+		}
+
+		[Test]
+		public void ExactCancellationRejectsPartialResolution()
+		{
+			var queued = new[] { "e1", "mtnk" };
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(
+					SdkActionResolver.FindExactCancellationItem(queued, "MTNK", 1),
+					Is.EqualTo("mtnk"));
+				Assert.That(
+					SdkActionResolver.FindExactCancellationItem(queued, "mtnk", 2),
+					Is.Null);
+				Assert.That(
+					SdkActionResolver.FindExactCancellationItem(queued, "mtnk", 0),
+					Is.Null);
+				Assert.That(
+					SdkActionResolver.FindExactCancellationItem(queued, "mtnk", uint.MaxValue),
+					Is.Null);
+			});
+		}
 	}
 }

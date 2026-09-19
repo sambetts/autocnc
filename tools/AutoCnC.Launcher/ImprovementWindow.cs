@@ -503,6 +503,11 @@ namespace AutoCnC.Launcher
 			SetShownRun(current);
 			LoadInputs(current);
 			LoadChanges(current);
+		}
+
+		public void ReloadPromptTransition(TrainingRun current)
+		{
+			SetShownRun(current);
 			LoadNextPrompt(current);
 		}
 

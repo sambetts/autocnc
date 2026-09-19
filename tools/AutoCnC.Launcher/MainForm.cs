@@ -1658,6 +1658,15 @@ namespace AutoCnC.Launcher
 			activeWorkspaceMutation = null;
 		}
 
+		void ClearContinuousState()
+		{
+			continuousLoop.Stop();
+			pendingContinuousAction = ContinuousTrainingAction.None;
+			continuousCandidateRun = null;
+			continuousEvaluationPlan = null;
+			ReleaseWorkspaceMutation();
+		}
+
 		void ReplaceRunReference(TrainingRun previous, TrainingRun current)
 		{
 			if (SamePath(lastRun?.RunDirectory, previous?.RunDirectory))
@@ -2644,6 +2653,7 @@ namespace AutoCnC.Launcher
 			PersistSettings();
 			if (improvementWindow != null)
 			{
+				improvementWindow.ReloadPromptTransition(current);
 				improvementWindow.CurrentPromptTemplate = approved;
 				improvementWindow.MarkNextPromptSaved();
 			}
@@ -2663,9 +2673,10 @@ namespace AutoCnC.Launcher
 			if (run == null)
 				return;
 
+			TrainingRun current;
 			try
 			{
-				var current = TrainingRun.RejectLatestSuggestedNextPrompt(run);
+				current = TrainingRun.RejectLatestSuggestedNextPrompt(run);
 				ReplaceRunReference(run, current);
 			}
 			catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
@@ -2677,7 +2688,11 @@ namespace AutoCnC.Launcher
 				return;
 			}
 
-			improvementWindow?.MarkNextPromptRejected();
+			if (improvementWindow != null)
+			{
+				improvementWindow.ReloadPromptTransition(current);
+				improvementWindow.MarkNextPromptRejected();
+			}
 		}
 
 		/// <summary>

@@ -429,6 +429,46 @@ namespace AutoCnC.Launcher.Tests
 			Assert.That(File.ReadAllText(Path.Combine(workspace, "bin", "ignored.txt")), Is.EqualTo("changed build output"));
 		}
 
+		[TestCase("missing")]
+		[TestCase("corrupt")]
+		[TestCase("outside")]
+		public void SnapshotPreflightFailureLeavesWorkspaceByteIdentical(string fault)
+		{
+			var run = NewRun();
+			WorkspaceSnapshot.Capture(run);
+			File.WriteAllText(Path.Combine(workspace, "Strategy.cs"), "candidate");
+			File.WriteAllText(Path.Combine(workspace, "Added.cs"), "candidate addition");
+			var before = BotWorkspace.Fingerprint(workspace);
+			var manifest = JsonSerializer.Deserialize<WorkspaceSnapshotManifest>(
+				File.ReadAllText(run.SnapshotManifestPath));
+			var entry = manifest.Files.Single(file =>
+				file.RelativePath.EndsWith("Strategy.cs", StringComparison.OrdinalIgnoreCase));
+			var snapshotFile = Path.Combine(run.SnapshotDirectory, entry.RelativePath);
+
+			switch (fault)
+			{
+				case "missing":
+					File.Delete(snapshotFile);
+					break;
+				case "corrupt":
+					File.WriteAllText(snapshotFile, "corrupt snapshot");
+					break;
+				default:
+					entry.RelativePath = "..\\outside.cs";
+					File.WriteAllText(run.SnapshotManifestPath,
+						JsonSerializer.Serialize(manifest));
+					break;
+			}
+
+			Assert.That(() => WorkspaceSnapshot.Restore(run),
+				Throws.TypeOf<InvalidDataException>());
+			Assert.That(BotWorkspace.Fingerprint(workspace), Is.EqualTo(before));
+			Assert.That(File.ReadAllText(Path.Combine(workspace, "Strategy.cs")),
+				Is.EqualTo("candidate"));
+			Assert.That(File.ReadAllText(Path.Combine(workspace, "Added.cs")),
+				Is.EqualTo("candidate addition"));
+		}
+
 		[Test]
 		public void AgentPacketIsProviderNeutralAndReferencesFightEvidence()
 		{

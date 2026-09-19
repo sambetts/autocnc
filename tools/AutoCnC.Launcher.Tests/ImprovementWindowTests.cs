@@ -228,9 +228,15 @@ namespace AutoCnC.Launcher.Tests
 
 				using var window = new ImprovementWindow();
 				window.ShowAgentRun(stale);
+				window.NextPromptText = "unsaved local draft";
 				window.RebindRun(stale, current);
 
 				Assert.That(window.ShownRun, Is.SameAs(current));
+				Assert.That(window.NextPromptText, Is.EqualTo("unsaved local draft"));
+
+				window.ReloadPromptTransition(current);
+
+				Assert.That(window.NextPromptText, Is.EqualTo(Template("draft")));
 				Assert.That(window.NextPromptStatusText, Does.Contain("Saved"));
 			}
 			finally

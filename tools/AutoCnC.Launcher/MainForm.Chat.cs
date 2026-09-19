@@ -156,50 +156,66 @@ namespace AutoCnC.Launcher
 				return AbandonTurn(thread, ex.Message);
 			}
 
-			var window = ShowImprovementWindow();
-			window.ShowConversation(thread);
-			window.BeginChatTurn();
-			queue.Enqueue(new ScriptJob
+			var leaseTransferred = false;
+			try
 			{
-				// Named for what it is rather than for the agent it reaches. "Improvement" in a
-				// status line is read as the improvement, and a message answered the moment a
-				// round ends would otherwise report the finished round as still running.
-				Title = "Answering your message",
-				ScriptPath = repo.ChatBotScript,
-				Arguments =
-				[
-					"-BattleBot", run.Manifest.BotProject,
-					"-RunDirectory", run.RunDirectory,
-					"-MessageFile", run.ChatMessagePath
-				],
-				PreserveColor = true,
-				Kind = ScriptJobKind.Chat,
-				Output = AppendChatOutput,
-
-				// The conversation is captured rather than looked up again, so a turn started
-				// against one fight still completes against that fight even if the window has
-				// been pointed at another one in the meantime.
-				Completed = code =>
+				var window = ShowImprovementWindow();
+				window.ShowConversation(thread);
+				window.BeginChatTurn();
+				queue.Enqueue(new ScriptJob
 				{
-					try
-					{
-						FinishChatTurn(thread, code, continuousFingerprint);
-					}
-					finally
-					{
-						chatWorkspaceMutation.Dispose();
-					}
-				}
-			});
+					// Named for what it is rather than for the agent it reaches. "Improvement" in a
+					// status line is read as the improvement, and a message answered the moment a
+					// round ends would otherwise report the finished round as still running.
+					Title = "Answering your message",
+					ScriptPath = repo.ChatBotScript,
+					Arguments =
+					[
+						"-BattleBot", run.Manifest.BotProject,
+						"-RunDirectory", run.RunDirectory,
+						"-MessageFile", run.ChatMessagePath
+					],
+					PreserveColor = true,
+					Kind = ScriptJobKind.Chat,
+					Output = AppendChatOutput,
 
-			RunNext();
+					// The conversation is captured rather than looked up again, so a turn started
+					// against one fight still completes against that fight even if the window has
+					// been pointed at another one in the meantime.
+					Completed = code =>
+					{
+						try
+						{
+							FinishChatTurn(thread, code, continuousFingerprint);
+						}
+						finally
+						{
+							chatWorkspaceMutation.Dispose();
+						}
+					}
+				});
 
-			// After RunNext, which sets the status from the job it started. What just finished is
-			// the more valuable half of the sentence and would otherwise never be said at all.
-			if (!string.IsNullOrWhiteSpace(finishedWith))
+				RunNext();
+				leaseTransferred = true;
+
+				// After RunNext, which sets the status from the job it started. What just finished is
+				// the more valuable half of the sentence and would otherwise never be said at all.
+				if (!string.IsNullOrWhiteSpace(finishedWith))
 				Status($"{finishedWith} Answering your message…");
 
-			return true;
+				return true;
+			}
+			catch (Exception ex) when (ex is InvalidOperationException or IOException or
+				UnauthorizedAccessException or System.ComponentModel.Win32Exception)
+			{
+				queue.Clear();
+				return AbandonTurn(thread, ex.Message);
+			}
+			finally
+			{
+				if (!leaseTransferred)
+				chatWorkspaceMutation.Dispose();
+			}
 		}
 
 		bool AbandonTurn(AgentConversation thread, string reason)
@@ -235,8 +251,7 @@ namespace AutoCnC.Launcher
 					"The launcher could not compare source after chat: " + ex.Message);
 				AbortUnresolvedContinuousExperiment(
 					"Source could not be reconciled after edit-capable agent chat.");
-				continuousLoop.Stop();
-				pendingContinuousAction = ContinuousTrainingAction.None;
+				ClearContinuousState();
 				Status("Continuous improvement stopped because source could not be verified after chat.");
 			}
 

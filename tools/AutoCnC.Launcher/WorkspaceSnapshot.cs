@@ -214,6 +214,7 @@ namespace AutoCnC.Launcher
 
 			var snapshot = Read(run);
 			EnsureSameWorkspace(run, snapshot);
+			var files = PreflightRestore(run, snapshot);
 			var changes = Compare(run);
 
 			foreach (var added in changes.Where(c => c.Kind == "added"))
@@ -223,16 +224,53 @@ namespace AutoCnC.Launcher
 					File.Delete(path);
 			}
 
-			foreach (var entry in snapshot.Files)
+			foreach (var (entry, source, destination) in files)
 			{
-				var source = Under(run.SnapshotDirectory, entry.RelativePath);
-				var destination = Under(snapshot.WorkspaceRoot, entry.RelativePath);
 				Directory.CreateDirectory(Path.GetDirectoryName(destination));
 				File.Copy(source, destination, true);
 			}
 
+			foreach (var (entry, _, destination) in files)
+				if (!File.Exists(destination) ||
+					!string.Equals(BotWorkspace.Sha256(destination), entry.Sha256,
+						StringComparison.OrdinalIgnoreCase))
+					throw new IOException(
+						$"Restored file '{entry.RelativePath}' does not match its snapshot.");
+
 			WriteAtomic(run.ChangesPath, "[]");
 			run.MarkRestored();
+		}
+
+		static List<(WorkspaceSnapshotEntry Entry, string Source, string Destination)>
+			PreflightRestore(TrainingRun run, WorkspaceSnapshotManifest snapshot)
+		{
+			var files = new List<(WorkspaceSnapshotEntry, string, string)>();
+			var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+			foreach (var entry in snapshot.Files ?? [])
+			{
+				if (entry == null || string.IsNullOrWhiteSpace(entry.RelativePath) ||
+					string.IsNullOrWhiteSpace(entry.Sha256) ||
+					!seen.Add(entry.RelativePath))
+					throw new InvalidDataException(
+						"The source snapshot contains an invalid or duplicate file entry.");
+
+				var source = Under(run.SnapshotDirectory, entry.RelativePath);
+				var destination = Under(snapshot.WorkspaceRoot, entry.RelativePath);
+				if (!File.Exists(source))
+					throw new InvalidDataException(
+						$"The source snapshot file '{entry.RelativePath}' is missing.");
+				if ((File.GetAttributes(source) & FileAttributes.ReparsePoint) != 0)
+					throw new InvalidDataException(
+						$"The source snapshot file '{entry.RelativePath}' is a link.");
+				if (!string.Equals(BotWorkspace.Sha256(source), entry.Sha256,
+					StringComparison.OrdinalIgnoreCase))
+					throw new InvalidDataException(
+						$"The source snapshot file '{entry.RelativePath}' is corrupt.");
+
+				files.Add((entry, source, destination));
+			}
+
+			return files;
 		}
 
 		static WorkspaceSnapshotManifest Read(TrainingRun run)

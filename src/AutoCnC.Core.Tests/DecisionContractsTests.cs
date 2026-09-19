@@ -283,5 +283,34 @@ namespace AutoCnC.Core.Tests
 			Assert.That(ledger.ObserveKill(4, killedBySelf: true, valueFactory: () => 1000), Is.False,
 				"visibility does not carry across samples");
 		}
+
+		[Test]
+		public void VisibleOneShotKillBetweenScansUsesCapturedDamageVisibility()
+		{
+			var ledger = new ObservedKillValueLedger();
+			ledger.BeginVisibilitySample();
+
+			// The victim was not present in the last periodic sample. A lethal damage callback
+			// captures that it was visible before the immediately following kill callback.
+			ledger.ObserveDamage(9, wasVisible: true);
+			var counted = ledger.ObserveKill(
+				9, killedBySelf: true, valueFactory: () => 450);
+			var hiddenValueRead = false;
+			ledger.ObserveDamage(10, wasVisible: false);
+			var hiddenCounted = ledger.ObserveKill(10, killedBySelf: true, valueFactory: () =>
+			{
+				hiddenValueRead = true;
+				return 900;
+			});
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(counted, Is.True);
+				Assert.That(ledger.TotalValue, Is.EqualTo(450));
+				Assert.That(hiddenCounted, Is.False);
+				Assert.That(hiddenValueRead, Is.False,
+					"death-tolerant capture must retain the normal visibility gate");
+			});
+		}
 	}
 }

@@ -42,8 +42,9 @@
 # code was in a position to react to — enemies coming into view, hits taken, units lost and
 # killed, and every doctrine the bot switched to and why — using the same visibility rule
 # ctx.SenseThreats filters with. Read the graph to see how a bot did; read the log to see what it
-# knew when it decided. ReportsToBattleLog is the player-actor half of it, because the engine
-# delivers damage and death notifications to the damaged actor's owner rather than to the world.
+# knew when it decided. Its kill-value ledger also captures visible lethal damage between scans
+# without accepting hidden deaths. ReportsToBattleLog is the player-actor half of it, because the
+# engine delivers damage and death notifications to the damaged actor's owner rather than to the world.
 #
 # Launch.DecisionTrace optionally asks ModeExecutor to write the missing reasoning bridge as JSONL:
 # each bot assessment, doctrine outcome, every mode evaluation and its outcome, and the legacy

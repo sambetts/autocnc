@@ -89,8 +89,9 @@ simulates the whole world, so this filtering has to be deliberate: without it a 
 to an attack doctrine on the strength of an army value no unit of yours has ever seen. Your own
 economy and forces are read exactly, because they are yours. The assessment carries rolling
 income, exact own value lost, observed enemy value killed, visible enemy value/mix, and own versus
-enemy value near the base. The kill-value ledger only accepts enemies present in the latest
-visibility sample.
+enemy value near the base. The kill-value ledger accepts enemies present in the latest visibility
+sample or confirmed visible by their damage callback. Its death-tolerant predicate relaxes only
+the dead-actor guard, so visible one-shot kills are retained without admitting hidden deaths.
 
 ---
 

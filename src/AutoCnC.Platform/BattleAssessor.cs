@@ -34,8 +34,9 @@ namespace AutoCnC.Platform
 	/// <para>
 	/// Loss counts, exact own value lost, and earned income are differences in the engine's
 	/// running totals across a rolling window. Enemy value killed comes from the battle log's
-	/// visibility-sampled kill ledger, so artillery or splash kills in unexplored fog cannot leak
-	/// enemy composition or value into the bot's assessment.
+	/// visibility-sampled kill ledger, augmented by damage-time visibility for lethal hits between
+	/// samples, so artillery or splash kills in unexplored fog cannot leak enemy composition or
+	/// value into the bot's assessment.
 	/// </para>
 	/// </remarks>
 	public sealed class BattleAssessor

@@ -72,7 +72,9 @@ namespace AutoCnC.Platform.Traits
 	/// </para>
 	/// <para>
 	/// The same one-second visibility sample also feeds BattleState's observed enemy kill value,
-	/// even when CSV output is disabled. A kill outside that sample contributes no value.
+	/// even when CSV output is disabled. Damage notifications capture visible enemies between
+	/// samples too, including lethal hits whose HP has already reached zero. Hidden deaths still
+	/// contribute no value.
 	/// </para>
 	/// <para>
 	/// The file opens with a <c>player</c> row per side — name, faction, colour, whether it is a
@@ -133,7 +135,7 @@ namespace AutoCnC.Platform.Traits
 		/// <summary>True while CSV output is active.</summary>
 		public bool IsRecording => writer != null;
 
-		/// <summary>Cumulative value of enemy kills visible to this side at the last sighting scan.</summary>
+		/// <summary>Cumulative value of enemy kills observed by this side before death.</summary>
 		internal int ObservedKillsValue => observedKillValues.TotalValue;
 
 		void IWorldLoaded.WorldLoaded(World w, WorldRenderer wr)
@@ -322,9 +324,9 @@ namespace AutoCnC.Platform.Traits
 				return;
 
 			var attacker = attack.Attacker;
-			if (actor.Owner != self && attacker != null && attacker.Owner == self &&
-				ModeContext.IsVisibleEnemy(self, actor))
-				observedKillValues.ObserveVisibleEnemy(actor.ActorID);
+			if (actor.Owner != self && attacker != null && attacker.Owner == self)
+				observedKillValues.ObserveDamage(
+					actor.ActorID, ModeContext.IsVisibleEnemyAtDamage(self, actor));
 
 			if (writer == null)
 				return;

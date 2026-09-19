@@ -518,7 +518,12 @@ namespace AutoCnC.Platform.Tests
 
 			ledger.Refresh(
 				worldTick: 101,
-				current => !current.HasQueueRevision || current.QueueRevision == 7);
+				_ => new ProductionCommitmentObservation(
+					IsValid: true,
+					QueueRevision: 7,
+					HasQueueRevision: true,
+					OrderRevision: 0,
+					HasOrderRevision: true));
 			var committed = ledger.ProjectedSpend(scope);
 			var secondEvaluation = ProductionBudgetArbitrator.EvaluatePrioritized(
 				budget,
@@ -536,7 +541,9 @@ namespace AutoCnC.Platform.Tests
 				Assert.That(commitment.QueueIndex, Is.Zero);
 				Assert.That(commitment.Item, Is.EqualTo("mtnk"));
 				Assert.That(commitment.Cost, Is.EqualTo(600));
-				Assert.That(commitment.QueueRevision, Is.EqualTo(7));
+				Assert.That(commitment.IssuedQueueRevision, Is.EqualTo(7));
+				Assert.That(commitment.ExpectedQueueRevision, Is.EqualTo(8));
+				Assert.That(commitment.ExpectedOrderRevision, Is.EqualTo(1));
 				Assert.That(committed.OwnerCost, Is.Zero);
 				Assert.That(committed.NonOwnerCost, Is.EqualTo(600));
 				Assert.That(secondEvaluation.Outcome,
@@ -546,7 +553,12 @@ namespace AutoCnC.Platform.Tests
 
 			ledger.Refresh(
 				worldTick: 102,
-				current => !current.HasQueueRevision || current.QueueRevision == 8);
+				_ => new ProductionCommitmentObservation(
+					IsValid: true,
+					QueueRevision: 8,
+					HasQueueRevision: true,
+					OrderRevision: 1,
+					HasOrderRevision: true));
 			var cleared = ledger.ProjectedSpend(scope);
 			var afterSynchronizedChange = ProductionBudgetArbitrator.EvaluatePrioritized(
 				budget,
@@ -578,13 +590,115 @@ namespace AutoCnC.Platform.Tests
 				issuedTick: 100,
 				timeoutTicks: 10);
 
-			ledger.Refresh(worldTick: 109, _ => true);
+			ledger.Refresh(
+				worldTick: 109,
+				_ => new ProductionCommitmentObservation(IsValid: true, 0, false, 0, false));
 			var beforeTimeout = ledger.ProjectedSpend(scope);
-			ledger.Refresh(worldTick: 110, _ => true);
+			ledger.Refresh(
+				worldTick: 110,
+				_ => new ProductionCommitmentObservation(IsValid: true, 0, false, 0, false));
 
 			Assert.Multiple(() =>
 			{
 				Assert.That(beforeTimeout.NonOwnerCost, Is.EqualTo(600));
+				Assert.That(ledger.Current, Is.Empty);
+			});
+		}
+
+		[Test]
+		public void SameQueueCommitmentsRetireOnePerSynchronizedOrder()
+		{
+			var ledger = new ProductionCommitmentLedger();
+			var candidate = Candidate(
+				10,
+				100,
+				"Vehicle",
+				"mtnk",
+				600,
+				ownsReservation: false,
+				queueRevision: 7,
+				orderRevision: 20);
+			var first = ledger.Commit(candidate, issuedTick: 100, timeoutTicks: 1000);
+			var second = ledger.Commit(
+				candidate with { ControllerActorId = 20 },
+				issuedTick: 101,
+				timeoutTicks: 1000);
+
+			ledger.Refresh(
+				worldTick: 102,
+				_ => new ProductionCommitmentObservation(
+					IsValid: true,
+					QueueRevision: 8,
+					HasQueueRevision: true,
+					OrderRevision: 21,
+					HasOrderRevision: true));
+			var afterFirstAcknowledgement = ledger.Current.Single();
+
+			ledger.Refresh(
+				worldTick: 103,
+				_ => new ProductionCommitmentObservation(
+					IsValid: true,
+					QueueRevision: 50,
+					HasQueueRevision: true,
+					OrderRevision: 21,
+					HasOrderRevision: true));
+			var afterUnrelatedMutation = ledger.Current.Single();
+
+			ledger.Refresh(
+				worldTick: 104,
+				_ => new ProductionCommitmentObservation(
+					IsValid: true,
+					QueueRevision: 51,
+					HasQueueRevision: true,
+					OrderRevision: 22,
+					HasOrderRevision: true));
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(first.ExpectedOrderRevision, Is.EqualTo(21));
+				Assert.That(second.ExpectedOrderRevision, Is.EqualTo(22));
+				Assert.That(afterFirstAcknowledgement.OrderId, Is.EqualTo(second.OrderId));
+				Assert.That(afterUnrelatedMutation.OrderId, Is.EqualTo(second.OrderId),
+					"an unrelated queue revision must not retire the later production order");
+				Assert.That(ledger.Current, Is.Empty);
+			});
+		}
+
+		[Test]
+		public void ProductionCommitmentTimeoutCoversMaximumConfiguredLatency()
+		{
+			const int MaximumOrderLatency = 120;
+			const int NetFrameInterval = 3;
+			var timeout = ProductionCommitmentLedger.SafeTimeoutTicks(
+				MaximumOrderLatency, NetFrameInterval);
+			var ledger = new ProductionCommitmentLedger();
+			ledger.Commit(
+				Candidate(
+					10,
+					100,
+					"Vehicle",
+					"mtnk",
+					600,
+					ownsReservation: false,
+					queueRevision: 0,
+					hasQueueRevision: false,
+					orderRevision: 0,
+					hasOrderRevision: false),
+				issuedTick: 100,
+				timeoutTicks: timeout);
+
+			ledger.Refresh(
+				worldTick: 100 + MaximumOrderLatency * NetFrameInterval,
+				_ => new ProductionCommitmentObservation(IsValid: true, 0, false, 0, false));
+			var beforeMargin = ledger.Current.Count;
+			ledger.Refresh(
+				worldTick: 100 + timeout,
+				_ => new ProductionCommitmentObservation(IsValid: true, 0, false, 0, false));
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(timeout, Is.GreaterThan(MaximumOrderLatency * NetFrameInterval));
+				Assert.That(beforeMargin, Is.EqualTo(1));
 				Assert.That(ledger.Current, Is.Empty);
 			});
 		}
@@ -818,7 +932,9 @@ namespace AutoCnC.Platform.Tests
 			string queueGroup = null,
 			string queueType = null,
 			ulong queueRevision = 1,
-			bool hasQueueRevision = true) =>
+			bool hasQueueRevision = true,
+			ulong orderRevision = 0,
+			bool hasOrderRevision = true) =>
 			new(
 				controllerActorId,
 				queueActorId,
@@ -830,7 +946,9 @@ namespace AutoCnC.Platform.Tests
 				cost,
 				ownsReservation,
 				queueRevision,
-				hasQueueRevision);
+				hasQueueRevision,
+				orderRevision,
+				hasOrderRevision);
 
 		static uint LegacyQueueFingerprint(ProductionQueueEntry[] entries)
 		{

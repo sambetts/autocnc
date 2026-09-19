@@ -91,7 +91,9 @@ namespace AutoCnC.Platform.Traits
 		int Cost,
 		bool OwnsReservation,
 		ulong QueueRevision,
-		bool HasQueueRevision);
+		bool HasQueueRevision,
+		ulong OrderRevision,
+		bool HasOrderRevision);
 
 	internal readonly record struct ProductionCommitmentKey(
 		ulong OrderId,
@@ -101,8 +103,19 @@ namespace AutoCnC.Platform.Traits
 		string QueueType,
 		string Item,
 		int Cost,
+		ulong IssuedQueueRevision,
+		ulong ExpectedQueueRevision,
+		bool HasQueueRevision,
+		ulong IssuedOrderRevision,
+		ulong ExpectedOrderRevision,
+		bool HasOrderRevision);
+
+	internal readonly record struct ProductionCommitmentObservation(
+		bool IsValid,
 		ulong QueueRevision,
-		bool HasQueueRevision);
+		bool HasQueueRevision,
+		ulong OrderRevision,
+		bool HasOrderRevision);
 
 	internal readonly record struct ProductionCommitmentSpend(
 		long OwnerCost,
@@ -116,14 +129,32 @@ namespace AutoCnC.Platform.Traits
 		public IReadOnlyCollection<ProductionCommitmentKey> Current => commitments.Keys;
 
 		public ProductionCommitmentKey Commit(
-			in ProductionBudgetCandidate candidate,
+			ProductionBudgetCandidate candidate,
 			int issuedTick,
-			int timeoutTicks)
+			long timeoutTicks)
 		{
 			nextOrderId++;
 			if (nextOrderId == 0)
 				nextOrderId++;
 
+			var expectedQueueRevision = candidate.HasQueueRevision
+				? NextExpectedRevision(
+					candidate.QueueRevision,
+					commitments.Keys
+						.Where(commitment =>
+							SameQueue(commitment, candidate) &&
+							commitment.HasQueueRevision)
+						.Select(commitment => commitment.ExpectedQueueRevision))
+				: 0;
+			var expectedOrderRevision = candidate.HasOrderRevision
+				? NextExpectedRevision(
+					candidate.OrderRevision,
+					commitments.Keys
+						.Where(commitment =>
+							SameQueueItem(commitment, candidate) &&
+							commitment.HasOrderRevision)
+						.Select(commitment => commitment.ExpectedOrderRevision))
+				: 0;
 			var key = new ProductionCommitmentKey(
 				nextOrderId,
 				candidate.QueueActorId,
@@ -133,21 +164,35 @@ namespace AutoCnC.Platform.Traits
 				candidate.Item,
 				Math.Max(0, candidate.Cost),
 				candidate.QueueRevision,
-				candidate.HasQueueRevision);
-			commitments.Add(key, (long)issuedTick + Math.Max(1, timeoutTicks));
+				expectedQueueRevision,
+				candidate.HasQueueRevision,
+				candidate.OrderRevision,
+				expectedOrderRevision,
+				candidate.HasOrderRevision);
+			commitments.Add(key, AddSaturating(issuedTick, Math.Max(1L, timeoutTicks)));
 			return key;
 		}
 
 		public void Refresh(
-			int worldTick,
-			Func<ProductionCommitmentKey, bool> commitmentIsCurrent)
+			long worldTick,
+			Func<ProductionCommitmentKey, ProductionCommitmentObservation> observe)
 		{
-			foreach (var pair in commitments
-				.Where(pair =>
-					worldTick >= pair.Value ||
-					!commitmentIsCurrent(pair.Key))
-				.ToArray())
-				commitments.Remove(pair.Key);
+			foreach (var pair in commitments.ToArray())
+			{
+				if (worldTick >= pair.Value)
+				{
+					commitments.Remove(pair.Key);
+					continue;
+				}
+
+				var observation = observe(pair.Key);
+				var acknowledged = pair.Key.HasOrderRevision && observation.HasOrderRevision
+					? RevisionReached(observation.OrderRevision, pair.Key.ExpectedOrderRevision)
+					: pair.Key.HasQueueRevision && observation.HasQueueRevision &&
+						RevisionReached(observation.QueueRevision, pair.Key.ExpectedQueueRevision);
+				if (!observation.IsValid || acknowledged)
+					commitments.Remove(pair.Key);
+			}
 		}
 
 		public ProductionCommitmentSpend ProjectedSpend(in ProductionBudgetScope scope)
@@ -165,8 +210,49 @@ namespace AutoCnC.Platform.Traits
 			return new ProductionCommitmentSpend(ownerCost, nonOwnerCost);
 		}
 
+		public static long SafeTimeoutTicks(
+			int orderLatency,
+			int netFrameInterval,
+			int marginNetFrames = 2)
+		{
+			var frames = AddSaturating(
+				Math.Max(0L, orderLatency),
+				Math.Max(1L, marginNetFrames));
+			return MultiplySaturating(frames, Math.Max(1L, netFrameInterval));
+		}
+
+		static bool SameQueue(
+			in ProductionCommitmentKey commitment,
+			in ProductionBudgetCandidate candidate) =>
+			commitment.QueueActorId == candidate.QueueActorId &&
+			commitment.QueueIndex == candidate.QueueIndex;
+
+		static bool SameQueueItem(
+			in ProductionCommitmentKey commitment,
+			in ProductionBudgetCandidate candidate) =>
+			SameQueue(commitment, candidate) &&
+			string.Equals(commitment.Item, candidate.Item, StringComparison.Ordinal);
+
+		static ulong NextExpectedRevision(ulong observed, IEnumerable<ulong> pending)
+		{
+			var latest = observed;
+			foreach (var revision in pending)
+				if (revision > latest)
+					latest = revision;
+
+			latest++;
+			return latest == 0 ? 1 : latest;
+		}
+
+		static bool RevisionReached(ulong current, ulong expected) => current >= expected;
+
 		static long AddSaturating(long value, long addition) =>
 			addition > long.MaxValue - value ? long.MaxValue : value + addition;
+
+		static long MultiplySaturating(long value, long multiplier) =>
+			value != 0 && multiplier > long.MaxValue / value
+				? long.MaxValue
+				: value * multiplier;
 	}
 
 	internal enum ProductionBudgetOutcome : byte

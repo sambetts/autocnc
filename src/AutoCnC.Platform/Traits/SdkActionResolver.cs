@@ -20,6 +20,10 @@ using OpenRA.Traits;
 
 namespace AutoCnC.Platform.Traits
 {
+	internal readonly record struct ProductionOrderRevisionKey(
+		ProductionQueue Queue,
+		string Item);
+
 	internal sealed class ProductionQueueRevisionState<TItem>
 		where TItem : class
 	{
@@ -117,6 +121,7 @@ namespace AutoCnC.Platform.Traits
 		readonly Actor self;
 		readonly World world;
 		readonly Dictionary<ProductionQueue, ProductionQueueRevisionState<ProductionItem>> queues = [];
+		readonly Dictionary<ProductionOrderRevisionKey, ulong> productionOrderRevisions = [];
 		readonly Dictionary<Actor, RepairStateRevision> repairs = [];
 
 		[VerifySync]
@@ -180,7 +185,7 @@ namespace AutoCnC.Platform.Traits
 		void ActorRemoved(Actor actor)
 		{
 			foreach (var queue in actor.TraitsImplementing<ProductionQueue>())
-				queues.Remove(queue);
+				RemoveQueue(queue);
 
 			repairs.Remove(actor);
 		}
@@ -191,7 +196,7 @@ namespace AutoCnC.Platform.Traits
 				.Where(queue => queue.Actor.Owner != self.Owner ||
 					queue.Actor.IsDead || !queue.Actor.IsInWorld)
 				.ToArray())
-				queues.Remove(queue);
+				RemoveQueue(queue);
 
 			foreach (var pair in world.ActorsWithTrait<ProductionQueue>())
 				if (pair.Actor.Owner == self.Owner && !pair.Actor.IsDead && pair.Actor.IsInWorld)
@@ -231,6 +236,15 @@ namespace AutoCnC.Platform.Traits
 			var state = EnsureQueue(queue);
 			var snapshot = Snapshot(queue);
 			state.Advance(snapshot.Entries, snapshot.Items);
+		}
+
+		void RemoveQueue(ProductionQueue queue)
+		{
+			queues.Remove(queue);
+			foreach (var key in productionOrderRevisions.Keys
+				.Where(key => ReferenceEquals(key.Queue, queue))
+				.ToArray())
+				productionOrderRevisions.Remove(key);
 		}
 
 		static (ProductionQueueEntry[] Entries, ProductionItem[] Items) Snapshot(
@@ -309,6 +323,20 @@ namespace AutoCnC.Platform.Traits
 			return false;
 		}
 
+		bool IProductionQueueRevisionProvider.TryGetOrderRevision(
+			ProductionQueue queue, string item, out ulong revision)
+		{
+			if (queue != null && queues.ContainsKey(queue) && !string.IsNullOrEmpty(item))
+			{
+				revision = productionOrderRevisions.GetValueOrDefault(
+					new ProductionOrderRevisionKey(queue, item.ToLowerInvariant()));
+				return true;
+			}
+
+			revision = 0;
+			return false;
+		}
+
 		bool IRepairStateRevisionProvider.TryGetRevision(
 			Actor building, out ulong revision)
 		{
@@ -332,6 +360,39 @@ namespace AutoCnC.Platform.Traits
 				RefreshQueue(queue);
 				AdvanceQueue(queue);
 			}
+		}
+
+		internal bool ObserveProductionOrder(Actor queueActor, string item)
+		{
+			if (queueActor == null || queueActor.Owner != self.Owner ||
+				string.IsNullOrEmpty(item) ||
+				!world.Map.Rules.Actors.TryGetValue(item.ToLowerInvariant(), out var actorInfo))
+			{
+				ObservePotentialMutation(queueActor);
+				return false;
+			}
+
+			var buildable = actorInfo.TraitInfoOrDefault<BuildableInfo>();
+			var observed = false;
+			if (buildable != null)
+				foreach (var queue in queueActor.TraitsImplementing<ProductionQueue>())
+				{
+					if (!buildable.Queue.Contains(queue.Info.Type))
+						continue;
+
+					EnsureQueue(queue);
+					var key = new ProductionOrderRevisionKey(queue, actorInfo.Name.ToLowerInvariant());
+					var revision = productionOrderRevisions.GetValueOrDefault(key);
+					revision++;
+					if (revision == 0)
+						revision = 1;
+
+					productionOrderRevisions[key] = revision;
+					observed = true;
+				}
+
+			ObservePotentialMutation(queueActor);
+			return observed;
 		}
 
 		public void ResolveOrder(Actor self, Order order)
@@ -449,6 +510,9 @@ namespace AutoCnC.Platform.Traits
 			switch (order.OrderString)
 			{
 				case "StartProduction":
+					ObserveProduction(order.Subject, order.TargetString);
+					break;
+
 				case "CancelProduction":
 				case "ReturnOrder":
 				case "PurchaseOrder":
@@ -463,6 +527,15 @@ namespace AutoCnC.Platform.Traits
 			}
 
 			return true;
+		}
+
+		internal static bool ObserveProduction(Actor queueActor, string item)
+		{
+			if (queueActor?.Owner?.PlayerActor == null)
+				return false;
+
+			var resolver = queueActor.Owner.PlayerActor.TraitOrDefault<SdkActionResolver>();
+			return resolver != null && resolver.ObserveProductionOrder(queueActor, item);
 		}
 
 		internal static bool Observe(Actor queueActor)

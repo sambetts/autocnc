@@ -891,6 +891,10 @@ namespace AutoCnC.Platform.Traits
 			ulong queueRevision = 0;
 			var hasQueueRevision =
 				revisions != null && revisions.TryGetRevision(queue, out queueRevision);
+			ulong orderRevision = 0;
+			var hasOrderRevision =
+				revisions != null &&
+				revisions.TryGetOrderRevision(queue, actorInfo.Name, out orderRevision);
 			resolvedDecision = requestedDecision with
 			{
 				TargetActorId = queue.Actor.ActorID,
@@ -909,7 +913,9 @@ namespace AutoCnC.Platform.Traits
 				cost,
 				budgetScope.OwnsQueue(queue.Info.Group, queue.Info.Type),
 				queueRevision,
-				hasQueueRevision);
+				hasQueueRevision,
+				orderRevision,
+				hasOrderRevision);
 			outcome = null;
 			return true;
 		}
@@ -1070,42 +1076,48 @@ namespace AutoCnC.Platform.Traits
 			return true;
 		}
 
-		int ProductionCommitmentTimeoutTicks =>
-			Math.Max(1, 10 * 1000 / TurboSpeed.NominalTimestep);
+		long ProductionCommitmentTimeoutTicks =>
+			ProductionCommitmentLedger.SafeTimeoutTicks(
+				world.GameSpeed.OrderLatency,
+				world.LobbyInfo.GlobalSettings.NetFrameInterval);
 
-		bool ProductionCommitmentIsCurrent(
+		ProductionCommitmentObservation ProductionCommitmentIsCurrent(
 			Player player,
 			in ProductionCommitmentKey commitment)
 		{
 			var queueActor = world.GetActorById(commitment.QueueActorId);
 			if (queueActor == null || queueActor.IsDead || !queueActor.IsInWorld ||
 				queueActor.Owner != player)
-				return false;
+				return default;
 
 			var queues = queueActor.TraitsImplementing<ProductionQueue>().ToArray();
 			if (commitment.QueueIndex < 0 || commitment.QueueIndex >= queues.Length)
-				return false;
+				return default;
 
 			var queue = queues[commitment.QueueIndex];
-			if (!queue.Enabled ||
-				!string.Equals(queue.Info.Group, commitment.QueueGroup, StringComparison.Ordinal) ||
+			if (!string.Equals(queue.Info.Group, commitment.QueueGroup, StringComparison.Ordinal) ||
 				!string.Equals(queue.Info.Type, commitment.QueueType, StringComparison.Ordinal))
-				return false;
+				return default;
 
-			var committedItem = commitment.Item;
-			var buildable = queue.BuildableItems().FirstOrDefault(item =>
-				string.Equals(item.Name, committedItem, StringComparison.OrdinalIgnoreCase));
-			if (buildable == null ||
-				Math.Max(0, queue.GetProductionCost(buildable)) != commitment.Cost)
-				return false;
-
-			if (!commitment.HasQueueRevision)
-				return true;
+			if (!world.Map.Rules.Actors.TryGetValue(
+				commitment.Item.ToLowerInvariant(), out var actorInfo) ||
+				Math.Max(0, queue.GetProductionCost(actorInfo)) != commitment.Cost)
+				return default;
 
 			var revisions = player.PlayerActor.TraitOrDefault<IProductionQueueRevisionProvider>();
-			return revisions == null ||
-				!revisions.TryGetRevision(queue, out var currentRevision) ||
-				currentRevision == commitment.QueueRevision;
+			ulong queueRevision = 0;
+			var hasQueueRevision =
+				revisions != null && revisions.TryGetRevision(queue, out queueRevision);
+			ulong orderRevision = 0;
+			var hasOrderRevision =
+				revisions != null &&
+				revisions.TryGetOrderRevision(queue, commitment.Item, out orderRevision);
+			return new ProductionCommitmentObservation(
+				IsValid: true,
+				queueRevision,
+				hasQueueRevision,
+				orderRevision,
+				hasOrderRevision);
 		}
 
 		static int QueueIndex(ProductionQueue queue)

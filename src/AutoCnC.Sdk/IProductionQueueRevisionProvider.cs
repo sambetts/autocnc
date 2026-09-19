@@ -17,6 +17,8 @@ namespace AutoCnC.Sdk
 	internal interface IProductionQueueRevisionProvider
 	{
 		bool TryGetRevision(ProductionQueue queue, out ulong revision);
+
+		bool TryGetOrderRevision(ProductionQueue queue, string item, out ulong revision);
 	}
 
 	internal interface IRepairStateRevisionProvider

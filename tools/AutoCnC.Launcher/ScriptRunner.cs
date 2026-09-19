@@ -128,9 +128,22 @@ namespace AutoCnC.Launcher
 			if (IsRunning)
 				throw new InvalidOperationException("Something is already running.");
 
-			var preparedCancellationFile = PrepareCancellationFile(job.CancellationFile);
-			var preparedWorker = PrepareWorkerFiles(job.WorkerOwnershipFile);
-			var startInfo = CreateStartInfo(job, workingDirectory);
+			string preparedCancellationFile = null;
+			(string Ownership, string Gate) preparedWorker = (null, null);
+			ProcessStartInfo startInfo;
+			try
+			{
+				preparedCancellationFile = PrepareCancellationFile(job.CancellationFile);
+				preparedWorker = PrepareWorkerFiles(job.WorkerOwnershipFile);
+				startInfo = CreateStartInfo(job, workingDirectory);
+			}
+			catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
+				JsonException)
+			{
+				CleanupWorkerFiles(preparedWorker.Ownership, preparedWorker.Gate);
+				throw new InvalidOperationException(
+					"Could not prepare the worker process: " + ex.Message, ex);
+			}
 			if (preparedCancellationFile != null)
 				startInfo.Environment["AUTOCNC_CANCELLATION_PRECLEARED"] = "1";
 			if (preparedWorker.Ownership != null)
@@ -147,18 +160,19 @@ namespace AutoCnC.Launcher
 			}
 
 			var started = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
+			WindowsProcessJob jobObject = null;
+			var startFailed = false;
 			process = started;
 			cancellationFile = preparedCancellationFile;
 			workerOwnershipFile = preparedWorker.Ownership;
 			workerGateFile = preparedWorker.Gate;
-			var jobObject = preparedWorker.Ownership != null
-				? WindowsProcessJob.Create()
-				: null;
-			processJob = jobObject;
 			started.OutputDataReceived += (_, e) => Emit(e.Data);
 			started.ErrorDataReceived += (_, e) => Emit(e.Data);
 			started.Exited += (_, _) =>
 			{
+				if (startFailed)
+					return;
+
 				// The asynchronous readers can still have buffered lines at this point; the
 				// parameterless wait is what flushes them, so nothing is lost off the end.
 				started.WaitForExit();
@@ -183,7 +197,13 @@ namespace AutoCnC.Launcher
 
 			try
 			{
-				started.Start();
+				jobObject = preparedWorker.Ownership != null
+					? WindowsProcessJob.Create()
+					: null;
+				processJob = jobObject;
+				if (!started.Start())
+					throw new InvalidOperationException(
+						"PowerShell did not start the worker process.");
 				jobObject?.Assign(started);
 				if (preparedWorker.Gate != null)
 				{
@@ -195,16 +215,31 @@ namespace AutoCnC.Launcher
 			}
 			catch (System.ComponentModel.Win32Exception)
 			{
+				startFailed = true;
 				CleanupFailedStart(started, jobObject);
 				throw;
 			}
 			catch (InvalidOperationException)
 			{
+				startFailed = true;
 				CleanupFailedStart(started, jobObject);
 				throw;
 			}
 			catch (IOException)
 			{
+				startFailed = true;
+				CleanupFailedStart(started, jobObject);
+				throw;
+			}
+			catch (UnauthorizedAccessException)
+			{
+				startFailed = true;
+				CleanupFailedStart(started, jobObject);
+				throw;
+			}
+			catch (JsonException)
+			{
+				startFailed = true;
 				CleanupFailedStart(started, jobObject);
 				throw;
 			}

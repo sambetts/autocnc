@@ -276,6 +276,35 @@ namespace AutoCnC.Launcher.Tests
 			Assert.That(process.WaitForExit(5000), Is.True);
 		}
 
+		[Test]
+		public void WorkerGateWriteFailureKillsWorkerAndResetsRunnerState()
+		{
+			var directory = TempDirectory();
+			var script = Path.Combine(directory, "sleep.ps1");
+			var ownership = Path.Combine(directory, "worker.json");
+			var gate = ownership + ".gate";
+			File.WriteAllText(script,
+				"param()\nStart-Sleep -Seconds 30\n");
+			Directory.CreateDirectory(gate);
+			var runner = new ScriptRunner();
+
+			try
+			{
+				Assert.That(() => runner.Start(new ScriptJob
+				{
+					ScriptPath = script,
+					WorkerOwnershipFile = ownership
+				}, directory), Throws.TypeOf<UnauthorizedAccessException>());
+				Assert.That(runner.IsRunning, Is.False);
+				Assert.That(File.Exists(ownership), Is.False);
+			}
+			finally
+			{
+				Directory.Delete(gate);
+				Directory.Delete(directory, true);
+			}
+		}
+
 		internal static (int ExitCode, System.Collections.Generic.IReadOnlyList<string> Output) Run(
 			string script, string directory, string[] arguments)
 		{

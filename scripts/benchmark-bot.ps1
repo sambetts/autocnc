@@ -37,6 +37,9 @@
     How many matches to run at once. Defaults to 1. Each match is a separate process with its own
     evidence directory, so they do not interfere; the ceiling is CPU and memory.
 
+.PARAMETER MatchRetries
+    How many times to retry a match whose game process fails before recording it as Undefined.
+
 .PARAMETER Difficulty
     Overrides the difficulty named by the benchmark set.
 
@@ -65,6 +68,8 @@ param(
     [string]$Control,
     [ValidateRange(1, 16)]
     [int]$Parallel = 1,
+    [ValidateRange(0, 5)]
+    [int]$MatchRetries = 1,
     [string]$Difficulty,
     [string]$OutputDirectory,
     [string]$ResultPath,
@@ -184,6 +189,9 @@ function New-MatchPlan($arm, $root, $revision, $bot) {
                 BotFaction = $match.botFaction
                 Seed = $match.seed
                 Script = (Join-Path $repoRoot 'scripts\run-bot.ps1')
+                Succeeded = $false
+                Attempts = 0
+                Error = $null
 
                 # A hashtable, not an array. Array splatting binds positionally, so
                 # @('-Map', 'x', '-Seed', 1) reaches run-bot.ps1 as -BattleBot '-Map' and fails on
@@ -227,10 +235,31 @@ function Invoke-Arm($plan) {
             Write-Host "    [$($job.Arm)] $($job.Map) $($job.Faction) vs $($job.BotFaction) seed $($job.Seed)" -ForegroundColor DarkGray
             New-Item -ItemType Directory -Path $job.Evidence -Force | Out-Null
 
-            # Splatting needs a variable: `@($job.Arguments)` is array syntax, and an array splat
-            # binds positionally rather than by name.
-            $arguments = $job.Arguments
-            & $job.Script @arguments 2>&1 | Out-String -Width 200 | Write-Verbose
+            for ($attempt = 1; $attempt -le $MatchRetries + 1; $attempt++) {
+                $job.Attempts = $attempt
+                try {
+                    # Splatting needs a variable: `@($job.Arguments)` is array syntax, and an
+                    # array splat binds positionally rather than by name.
+                    $arguments = $job.Arguments
+                    & $job.Script @arguments 2>&1 | Out-String -Width 200 | Write-Verbose
+                    $job.Succeeded = $true
+                    $job.Error = $null
+                    break
+                }
+                catch {
+                    $job.Succeeded = $false
+                    $job.Error = $_.Exception.Message
+                    if ($attempt -le $MatchRetries) {
+                        Write-Warning ("Match failed; retrying attempt {0} of {1}. {2}" -f `
+                                ($attempt + 1), ($MatchRetries + 1), $job.Error)
+                    }
+                }
+            }
+
+            if (-not $job.Succeeded) {
+                Write-Warning ("Match remained Undefined after {0} attempt(s): {1}" -f `
+                        $job.Attempts, $job.Error)
+            }
         }
     }
 
@@ -306,7 +335,28 @@ function Complete-Match($job) {
     $battleLog = Join-Path $job.Evidence 'battle.csv'
     if (-not (Test-Path -LiteralPath $battleLog)) {
         Write-Warning "[$($job.Arm)] $($job.Map) seed $($job.Seed): no battle log, the match did not record."
-        return $null
+        return [pscustomobject]@{
+            RunId = $job.Id
+            Evidence = $job.Evidence
+            Arm = $job.Arm
+            Repeat = $job.Repeat
+            Scenario = $job.Index
+            Map = $job.Map
+            Faction = $job.Faction
+            BotFaction = $job.BotFaction
+            Seed = $job.Seed
+            Status = 'Undefined'
+            Succeeded = $false
+            Attempts = $job.Attempts
+            Error = $job.Error ?? 'No battle log was recorded.'
+            Outcome = 'Undefined'
+            Fitness = $null
+            EarnedPerSecond = $null
+            SpentPerSecond = $null
+            Exchange = $null
+            BuildingsKilled = $null
+            DurationSeconds = 0
+        }
     }
 
     # The battle log's closing row is the authoritative result: it is written by the engine at
@@ -326,6 +376,7 @@ function Complete-Match($job) {
     dotnet $evidenceDll summarise $job.Evidence --history $historyPath --bot $botName | Out-Null
 
     $summary = Get-Content -LiteralPath (Join-Path $job.Evidence 'summary.json') -Raw | ConvertFrom-Json
+    $valid = $summary.fight.outcome -in @('Won', 'Lost')
     return [pscustomobject]@{
         RunId = $job.Id
         Evidence = $job.Evidence
@@ -336,6 +387,10 @@ function Complete-Match($job) {
         Faction = $job.Faction
         BotFaction = $job.BotFaction
         Seed = $job.Seed
+        Status = if ($valid) { 'Completed' } else { 'Undefined' }
+        Succeeded = $valid
+        Attempts = [math]::Max(1, $job.Attempts)
+        Error = if ($valid) { $null } else { $job.Error ?? "Outcome was $($summary.fight.outcome)." }
         Outcome = $summary.fight.outcome
         Fitness = $summary.fitness.total
         EarnedPerSecond = $summary.headline.creditsEarnedPerSecond
@@ -361,20 +416,23 @@ function Show-Arm($name, $results) {
         return $null
     }
 
-    $wins = @($results | Where-Object { $_.Outcome -eq 'Won' }).Count
+    $completed = @($results | Where-Object { $_.Succeeded })
+    $wins = @($completed | Where-Object { $_.Outcome -eq 'Won' }).Count
     $summary = [pscustomobject]@{
         Arm = $name
         Wins = $wins
-        Played = $results.Count
-        MedianFitness = [math]::Round((Get-Median ($results | ForEach-Object { $_.Fitness })), 4)
-        MedianEarnedPerSecond = [math]::Round((Get-Median ($results | ForEach-Object { $_.EarnedPerSecond })), 2)
-        MedianSpentPerSecond = [math]::Round((Get-Median ($results | ForEach-Object { $_.SpentPerSecond })), 2)
-        MedianExchange = [math]::Round((Get-Median ($results | ForEach-Object { $_.Exchange })), 3)
-        MedianBuildingsKilled = Get-Median ($results | ForEach-Object { $_.BuildingsKilled })
+        Expected = $results.Count
+        Played = $completed.Count
+        Undefined = $results.Count - $completed.Count
+        MedianFitness = [math]::Round((Get-Median ($completed | ForEach-Object { $_.Fitness })), 4)
+        MedianEarnedPerSecond = [math]::Round((Get-Median ($completed | ForEach-Object { $_.EarnedPerSecond })), 2)
+        MedianSpentPerSecond = [math]::Round((Get-Median ($completed | ForEach-Object { $_.SpentPerSecond })), 2)
+        MedianExchange = [math]::Round((Get-Median ($completed | ForEach-Object { $_.Exchange })), 3)
+        MedianBuildingsKilled = Get-Median ($completed | ForEach-Object { $_.BuildingsKilled })
     }
 
-    Write-Host ("  {0,-10} {1} of {2} won; median fitness {3}, spend {4} cr/s, exchange {5}, buildings {6}" -f `
-            $name, $wins, $results.Count, $summary.MedianFitness, $summary.MedianSpentPerSecond,
+    Write-Host ("  {0,-10} {1} of {2} completed won ({3} undefined); median fitness {4}, spend {5} cr/s, exchange {6}, buildings {7}" -f `
+            $name, $wins, $completed.Count, $summary.Undefined, $summary.MedianFitness, $summary.MedianSpentPerSecond,
         $summary.MedianExchange, $summary.MedianBuildingsKilled) -ForegroundColor Green
     return $summary
 }
@@ -518,6 +576,7 @@ try {
         Benchmark = $set.name
         Batch = $batch
         Difficulty = if ($Difficulty) { $Difficulty } else { $set.difficulty }
+        ExpectedMatchesPerArm = $matchCount
         Candidate = $candidate
         Control = $control
         Paired = @($pairs)
@@ -534,6 +593,10 @@ try {
 
     Write-Host "  Machine-readable result: $ResultPath" -ForegroundColor DarkGray
     $results | Format-Table Arm, Repeat, Scenario, Map, Faction, BotFaction, Seed, Outcome, Fitness, SpentPerSecond, Exchange, BuildingsKilled -AutoSize
+
+    if (@($results | Where-Object { -not $_.Succeeded }).Count -gt 0) {
+        exit 1
+    }
 }
 finally {
     Remove-ControlWorktree $controlWorktree

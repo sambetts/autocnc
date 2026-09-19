@@ -49,7 +49,7 @@
       "name": "hard-16-9",
       "summary": "Eight pinned Hard matches on the training map, with two seeds for every faction matchup.",
       "difficulty": "Hard",
-      "maxGameSeconds": 5400,
+      "maxGameSeconds": 2400,
       "matches": [
         { "map": "16-9.oramap", "faction": "gdi", "botFaction": "nod", "seed": 300001 },
         { "map": "16-9.oramap", "faction": "gdi", "botFaction": "nod", "seed": 300002 },

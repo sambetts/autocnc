@@ -121,16 +121,19 @@ An unresolvable query produces a failed result carrying an `Error`. It never thr
 
 ### Paired benchmark promotion evaluation — `schemaVersion` 1
 
-`PairedBenchmarkEvaluator` reads the machine result written by `benchmark-bot.ps1`, requires both
-arms to name the same benchmark batch and the same unique repeat/scenario configurations, and
-cross-checks the paired rows against the raw match rows. Missing arms, duplicate or mismatched
-scenarios, failed statuses, non-finite fitness, and outcomes other than `Won` or `Lost` produce an
-`Undefined` verdict, which cannot promote.
+`PairedBenchmarkEvaluator` reads the machine result written by `benchmark-bot.ps1`, including
+`expectedMatchesPerArm` and one explicit success/failure row for every planned match. It requires
+both arms to fill that count in the same combined batch and cover the same unique repeat/scenario
+configurations, then cross-checks the paired rows against the raw match rows. Symmetric omissions,
+missing arms, duplicate or mismatched scenarios, failed statuses, non-finite fitness, and outcomes
+other than `Won` or `Lost` produce an `Undefined` verdict, which cannot promote.
 
 Complete evidence is ranked lexicographically: candidate wins against control wins first, then
 the median of per-scenario fitness deltas when wins tie. The result is written as
 `promotion-evaluation.json` with `Promote`, `Restore`, or `Undefined`, the basis, reason, aggregate
-counts, median paired delta, and every validated pair. It never uses check pass percentage.
+counts, median paired delta, and every validated pair. The launcher composes two immutable
+single-arm runs into this paired batch, preserving their raw batch ids in the training manifest.
+It never uses check pass percentage.
 
 ### `history.json` and `trend.json` — `schemaVersion` 1
 

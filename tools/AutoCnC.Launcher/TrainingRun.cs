@@ -175,16 +175,34 @@ namespace AutoCnC.Launcher
 		public DateTime? EvaluationCompletedUtc { get; set; }
 		public DateTime? PromotedUtc { get; set; }
 		public DateTime? RestoredUtc { get; set; }
+		public DateTime? InvalidatedUtc { get; set; }
+		public int EvaluationAttempt { get; set; }
 		public string ChampionSourceRevision { get; set; }
 		public string CandidateSourceRevision { get; set; }
 		public string ControlRevision { get; set; }
+		public string ChampionFingerprint { get; set; }
+		public string CandidateFingerprint { get; set; }
+		public string ExpectedLiveFingerprint { get; set; }
 		public string ChampionSnapshotFile { get; set; }
+		public string ChampionSourceManifestFile { get; set; }
+		public string CandidateSourceManifestFile { get; set; }
+		public string CandidateAssemblyFile { get; set; }
+		public string CandidateAssemblySha256 { get; set; }
+		public string ControlAssemblyFile { get; set; }
+		public string ControlAssemblySha256 { get; set; }
+		public string CandidateBenchmarkResultFile { get; set; }
+		public string ControlBenchmarkResultFile { get; set; }
 		public string BenchmarkResultFile { get; set; }
 		public string EvaluationFile { get; set; }
 		public string Benchmark { get; set; }
 		public string Batch { get; set; }
+		public int? ExpectedMatchesPerArm { get; set; }
+		public string CandidateBatch { get; set; }
+		public string ControlBatch { get; set; }
 		public string Decision { get; set; }
 		public string Reason { get; set; }
+		public string InvalidationReason { get; set; }
+		public bool? RequiresReevaluation { get; set; }
 
 		/// <summary>
 		/// True records that continuous mode kept the current prompt until a player reviewed the
@@ -195,7 +213,7 @@ namespace AutoCnC.Launcher
 
 	public sealed class TrainingRunManifest
 	{
-		public int SchemaVersion { get; set; } = 8;
+		public int SchemaVersion { get; set; } = 9;
 		public string Id { get; set; }
 		public string Status { get; set; }
 
@@ -292,7 +310,16 @@ namespace AutoCnC.Launcher
 		public string SnapshotManifestPath => Path.Combine(RunDirectory, "source-before-agent.json");
 		public string ChangesPath => Path.Combine(RunDirectory, "agent-changes.json");
 		public string ExperimentDirectory => Path.Combine(RunDirectory, "experiment");
-		public string BenchmarkRunsDirectory => Path.Combine(ExperimentDirectory, "benchmark-runs");
+		public string CandidateSourceDirectory => Path.Combine(ExperimentDirectory, "candidate-source");
+		public string ControlSourceDirectory => Path.Combine(ExperimentDirectory, "control-source");
+		public string CandidateSourceManifestPath => Path.Combine(ExperimentDirectory, "candidate-source.json");
+		public string ControlSourceManifestPath => Path.Combine(ExperimentDirectory, "control-source.json");
+		public string CandidateArtifactDirectory => Path.Combine(ExperimentDirectory, "candidate-artifact");
+		public string ControlArtifactDirectory => Path.Combine(ExperimentDirectory, "control-artifact");
+		public string CandidateBenchmarkRunsDirectory => Path.Combine(ExperimentDirectory, "candidate-benchmark");
+		public string ControlBenchmarkRunsDirectory => Path.Combine(ExperimentDirectory, "control-benchmark");
+		public string CandidateBenchmarkResultPath => Path.Combine(ExperimentDirectory, "candidate-result.json");
+		public string ControlBenchmarkResultPath => Path.Combine(ExperimentDirectory, "control-result.json");
 		public string BenchmarkResultPath => Path.Combine(ExperimentDirectory, "benchmark-result.json");
 		public string PromotionEvaluationPath => Path.Combine(ExperimentDirectory, "promotion-evaluation.json");
 
@@ -698,7 +725,16 @@ namespace AutoCnC.Launcher
 				State = TrainingExperimentStates.Prepared,
 				StartedUtc = DateTime.UtcNow,
 				ChampionSourceRevision = BotWorkspace.SourceRevision(Manifest.BotDirectory),
+				ChampionFingerprint = WorkspaceSnapshot.Fingerprint(this),
 				ChampionSnapshotFile = Path.GetRelativePath(RunDirectory, SnapshotManifestPath),
+				ChampionSourceManifestFile =
+					Path.GetRelativePath(RunDirectory, ControlSourceManifestPath),
+				CandidateSourceManifestFile =
+					Path.GetRelativePath(RunDirectory, CandidateSourceManifestPath),
+				CandidateBenchmarkResultFile =
+					Path.GetRelativePath(RunDirectory, CandidateBenchmarkResultPath),
+				ControlBenchmarkResultFile =
+					Path.GetRelativePath(RunDirectory, ControlBenchmarkResultPath),
 				BenchmarkResultFile = Path.GetRelativePath(RunDirectory, BenchmarkResultPath),
 				EvaluationFile = Path.GetRelativePath(RunDirectory, PromotionEvaluationPath),
 				PromptRewriteFrozen = true
@@ -706,7 +742,8 @@ namespace AutoCnC.Launcher
 			Save();
 		}
 
-		public void BeginContinuousEvaluation(string controlRevision)
+		public void BeginContinuousEvaluation(string candidateFingerprint,
+			string championFingerprint)
 		{
 			var experiment = Manifest.Experiment;
 			if (experiment?.Continuous != true ||
@@ -716,16 +753,64 @@ namespace AutoCnC.Launcher
 
 			Directory.CreateDirectory(ExperimentDirectory);
 			experiment.State = TrainingExperimentStates.Evaluating;
+			experiment.EvaluationAttempt++;
 			experiment.EvaluationStartedUtc = DateTime.UtcNow;
+			experiment.EvaluationCompletedUtc = null;
+			experiment.PromotedUtc = null;
+			experiment.RestoredUtc = null;
 			experiment.CandidateSourceRevision = BotWorkspace.SourceRevision(Manifest.BotDirectory);
-			experiment.ControlRevision = controlRevision;
+			experiment.ControlRevision = null;
+			experiment.CandidateFingerprint = candidateFingerprint;
+			experiment.ChampionFingerprint = championFingerprint;
+			experiment.ExpectedLiveFingerprint = candidateFingerprint;
+			experiment.CandidateAssemblyFile = null;
+			experiment.CandidateAssemblySha256 = null;
+			experiment.ControlAssemblyFile = null;
+			experiment.ControlAssemblySha256 = null;
+			experiment.CandidateBatch = null;
+			experiment.ControlBatch = null;
+			experiment.Batch = null;
+			experiment.Benchmark = null;
+			experiment.ExpectedMatchesPerArm = null;
+			experiment.Decision = null;
+			experiment.Reason = null;
+			experiment.RequiresReevaluation = false;
+			experiment.InvalidationReason = null;
 			Manifest.Status = "evaluating";
 			Manifest.Owner = ProcessOwnership.Claim();
 			Save();
 		}
 
+		public void RecordContinuousArmArtifacts(string candidateAssembly,
+			string candidateSha256, string controlAssembly, string controlSha256)
+		{
+			var experiment = Manifest.Experiment;
+			if (experiment?.Continuous != true ||
+				!string.Equals(experiment.State, TrainingExperimentStates.Evaluating,
+					StringComparison.OrdinalIgnoreCase))
+				throw new InvalidOperationException("This run has no continuous evaluation in progress.");
+
+			experiment.CandidateAssemblyFile = Path.GetRelativePath(RunDirectory, candidateAssembly);
+			experiment.CandidateAssemblySha256 = candidateSha256;
+			experiment.ControlAssemblyFile = Path.GetRelativePath(RunDirectory, controlAssembly);
+			experiment.ControlAssemblySha256 = controlSha256;
+			Save();
+		}
+
+		public void RecordContinuousCandidateFingerprint(string fingerprint)
+		{
+			var experiment = Manifest.Experiment;
+			if (experiment?.Continuous != true)
+				throw new InvalidOperationException("This run has no continuous experiment.");
+
+			experiment.CandidateFingerprint = fingerprint;
+			experiment.ExpectedLiveFingerprint = fingerprint;
+			Save();
+		}
+
 		public void RecordContinuousEvaluation(string decision, string reason,
-			string benchmark = null, string batch = null)
+			string benchmark = null, string batch = null,
+			int? expectedMatchesPerArm = null)
 		{
 			var experiment = Manifest.Experiment;
 			if (experiment?.Continuous != true ||
@@ -741,6 +826,35 @@ namespace AutoCnC.Launcher
 			experiment.Reason = reason;
 			experiment.Benchmark = benchmark;
 			experiment.Batch = batch;
+			experiment.ExpectedMatchesPerArm = expectedMatchesPerArm;
+			experiment.ExpectedLiveFingerprint = experiment.CandidateFingerprint;
+			Manifest.Owner = null;
+			Save();
+		}
+
+		public void RecordContinuousBenchmarkBatches(string candidateBatch, string controlBatch)
+		{
+			var experiment = Manifest.Experiment ??
+				throw new InvalidOperationException("This run has no continuous experiment.");
+			experiment.CandidateBatch = candidateBatch;
+			experiment.ControlBatch = controlBatch;
+			Save();
+		}
+
+		public void InvalidateContinuousEvaluation(string reason)
+		{
+			var experiment = Manifest.Experiment;
+			if (experiment?.Continuous != true)
+				throw new InvalidOperationException("This run has no continuous experiment.");
+
+			experiment.State = TrainingExperimentStates.Candidate;
+			experiment.InvalidatedUtc = DateTime.UtcNow;
+			experiment.InvalidationReason = reason;
+			experiment.RequiresReevaluation = true;
+			experiment.Decision = "Undefined";
+			experiment.Reason = reason;
+			experiment.ExpectedLiveFingerprint = null;
+			Manifest.Status = "candidate";
 			Manifest.Owner = null;
 			Save();
 		}
@@ -756,6 +870,8 @@ namespace AutoCnC.Launcher
 
 			experiment.State = TrainingExperimentStates.Promoted;
 			experiment.PromotedUtc = DateTime.UtcNow;
+			experiment.ExpectedLiveFingerprint = experiment.CandidateFingerprint;
+			experiment.RequiresReevaluation = false;
 			Manifest.Status = "promoted";
 			Manifest.Owner = null;
 			Save();
@@ -881,6 +997,9 @@ namespace AutoCnC.Launcher
 			{
 				Manifest.Experiment.State = TrainingExperimentStates.Restored;
 				Manifest.Experiment.RestoredUtc = Manifest.Agent.RestoredUtc;
+				Manifest.Experiment.ExpectedLiveFingerprint =
+					Manifest.Experiment.ChampionFingerprint;
+				Manifest.Experiment.RequiresReevaluation = false;
 			}
 			Manifest.Status = "restored";
 			Manifest.Owner = null;
@@ -939,10 +1058,16 @@ namespace AutoCnC.Launcher
 
 			// Keep the manifest until the evidence is removed so a failed deletion remains visible and retryable.
 			foreach (var directory in Directory.EnumerateDirectories(RunDirectory))
+			{
+				ClearReadOnlyFiles(directory);
 				Directory.Delete(directory, recursive: true);
+			}
 			foreach (var file in Directory.EnumerateFiles(RunDirectory))
 				if (!string.Equals(file, ManifestPath, StringComparison.OrdinalIgnoreCase))
+				{
+					File.SetAttributes(file, File.GetAttributes(file) & ~FileAttributes.ReadOnly);
 					File.Delete(file);
+				}
 			File.Delete(ManifestPath);
 			Directory.Delete(RunDirectory);
 		}
@@ -976,6 +1101,12 @@ namespace AutoCnC.Launcher
 		{
 			if (File.Exists(source))
 				File.Copy(source, destination, true);
+		}
+
+		static void ClearReadOnlyFiles(string directory)
+		{
+			foreach (var file in Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories))
+				File.SetAttributes(file, File.GetAttributes(file) & ~FileAttributes.ReadOnly);
 		}
 
 		void InferLegacyFailure()

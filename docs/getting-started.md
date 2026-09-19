@@ -590,11 +590,13 @@ In **AI training**, check **Repeat: fight > analyze > improve > fight**, then pr
 until **Stop operation**, always improving from the battle just fought rather than an older manual
 selection. Wins rank first and median paired fitness is the tie-break; missing, failed, mismatched,
 or `Undefined` evidence restores the pre-agent snapshot and stops instead of treating an
-unmeasured edit as progress. The current benchmark script needs a clean Git champion under this
-checkout's `bots` directory for its control arm. Switch Execution to **Rendered** when you want to
+unmeasured edit as progress. Candidate and champion are copied from the live workspace and its
+pre-agent snapshot, built into separate immutable directories, and benchmarked from those copied
+assemblies. This also supports an uncommitted champion from a previous promotion. If the live
+workspace changes or an agent chat starts after capture, the result is invalidated and reevaluated
+rather than restoring over unbenchmarked edits. Switch Execution to **Rendered** when you want to
 watch the same loop. It never pauses for feedback; review those battles from **History & trends**
-after stopping. Feedback actions are locked only while an operation is running, not merely because
-the repeat checkbox is selected.
+after stopping.
 
 Fight and rules JSON are shown as collapsible trees. When the run finishes, the agent drafts an
 entire replacement prompt template and the window opens **Next prompt*** on it. The top pane shows

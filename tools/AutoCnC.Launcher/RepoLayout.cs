@@ -52,6 +52,8 @@ namespace AutoCnC.Launcher
 		public string AgentGameGuide => Path.Combine(Root, "docs", "agent-game-guide.md");
 		public string AgentMechanics => Path.Combine(Root, "docs", "agent-mechanics.md");
 		public string AgentPromptTemplate => Path.Combine(Root, "docs", "agent-prompt-template.md");
+		public string BuildExperimentArmScript =>
+			Path.Combine(Root, "tools", "AutoCnC.Launcher", "build-experiment-arm.ps1");
 
 		public string ReferenceBot => Path.Combine(Root, "bots", "Reference", "ReferenceBot.csproj");
 

@@ -116,6 +116,10 @@ namespace AutoCnC.Launcher
 
 			try
 			{
+				if (continuousLoop.IsRunning &&
+					SamePath(continuousCandidateRun?.RunDirectory, run.RunDirectory))
+					continuousPromotion.InvalidateForAgentChat(run);
+
 				run.EnsureAgentSessionId();
 
 				// The improvement round is what normally records which agent this fight uses, and

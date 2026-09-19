@@ -428,8 +428,16 @@ through `AutoCnC.Evidence.PairedBenchmarkEvaluator`, and persists both raw and e
 Candidate and control must share benchmark, batch and repeat/scenario configurations. Wins rank
 first and median paired fitness is the tie-break. Failed, incomplete, mismatched, or `Undefined`
 evidence cannot promote and restores through `WorkspaceSnapshot`, never checkout/reset. The
-current script can materialize a control only from a clean Git revision under the checkout's
-`bots` directory; otherwise evaluation is explicitly `Undefined`.
+runner materializes both the pre-agent champion and current candidate as immutable source copies,
+builds them into distinct artifact directories outside `engine/bin/bots`, and invokes the existing
+benchmark script once per prebuilt DLL. It combines those single-arm outputs into one batch only
+after validating their declared expected match counts and scenario sets. This works for dirty
+champions without manufacturing commits or resetting a workspace.
+
+The candidate snapshot has a content fingerprint. That fingerprint is checked before a decision,
+again before restoration or promotion, and immediately before the next fight. Any live workspace
+change or edit-capable agent chat after capture marks the experiment for reevaluation. An invalid
+result is never used to restore over those unbenchmarked edits.
 
 The loop stops on user request or any non-zero game, agent, or build exit. Headless also treats 90
 nominal game minutes without a result as a failed stalemate (configurable with

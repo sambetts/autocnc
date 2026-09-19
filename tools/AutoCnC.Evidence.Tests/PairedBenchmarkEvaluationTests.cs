@@ -87,11 +87,11 @@ namespace AutoCnC.Evidence.Tests
 			Assert.That(evaluation.Reason, Does.Contain("different batch"));
 		}
 
-		[TestCase("Undefined", null, null)]
-		[TestCase("Failed", null, null)]
-		[TestCase("Won", "failed", null)]
-		[TestCase("Won", null, false)]
-		public void FailedOrUndefinedRunsCannotPromote(string outcome, string status, bool? succeeded)
+		[TestCase("Undefined", "completed", true)]
+		[TestCase("Failed", "completed", true)]
+		[TestCase("Won", "failed", false)]
+		[TestCase("Won", "completed", false)]
+		public void FailedOrUndefinedRunsCannotPromote(string outcome, string status, bool succeeded)
 		{
 			var result = Result(("Won", "Lost", 0.7, 0.5));
 			var candidate = result.Matches.Single(m => m.Arm == "candidate");
@@ -121,6 +121,42 @@ namespace AutoCnC.Evidence.Tests
 			Assert.That(evaluation.Reason, Does.Contain("incomplete"));
 		}
 
+		[Test]
+		public void SymmetricScenarioOmissionIsUndefinedAgainstTheExpectedPlan()
+		{
+			var result = Result(
+				("Won", "Lost", 0.7, 0.5),
+				("Lost", "Won", 0.4, 0.6));
+			result.Matches.RemoveAll(match => match.Scenario == 2);
+			result.Paired.RemoveAll(pair => pair.Scenario == 2);
+			result.Candidate.Played = 1;
+			result.Control.Played = 1;
+
+			var evaluation = PairedBenchmarkEvaluator.Evaluate(result);
+
+			Assert.That(evaluation.Verdict, Is.EqualTo(PromotionVerdicts.Undefined));
+			Assert.That(evaluation.Reason, Does.Contain("serialized match plan is incomplete"));
+		}
+
+		[Test]
+		public void TwoSingleArmResultsComposeIntoOneExplicitPairedBatch()
+		{
+			var candidate = SingleArm("candidate-raw", "Won", 0.7);
+			var control = SingleArm("control-raw", "Lost", 0.5);
+
+			var combined = PairedBenchmarkResultComposer.Combine(
+				candidate, control, "promotion-20260919-093437");
+			var evaluation = PairedBenchmarkEvaluator.Evaluate(combined);
+
+			Assert.That(combined.ExpectedMatchesPerArm, Is.EqualTo(1));
+			Assert.That(combined.Matches.Select(match => match.Arm),
+				Is.EquivalentTo(new[] { "candidate", "control" }));
+			Assert.That(combined.Matches.All(match =>
+				match.Succeeded && match.Status == "completed" && match.Error == ""), Is.True);
+			Assert.That(combined.Paired, Has.Count.EqualTo(1));
+			Assert.That(evaluation.Verdict, Is.EqualTo(PromotionVerdicts.Promote));
+		}
+
 		static BenchmarkResultDocument Result(
 			params (string CandidateOutcome, string ControlOutcome,
 				double CandidateFitness, double ControlFitness)[] scenarios)
@@ -129,8 +165,9 @@ namespace AutoCnC.Evidence.Tests
 			{
 				SchemaVersion = 1,
 				Benchmark = "standard",
-				Batch = "standard-20260919-083633-test",
+				Batch = "standard-20260919-093437-test",
 				Difficulty = "Hard",
+				ExpectedMatchesPerArm = scenarios.Length,
 				Candidate = new BenchmarkArmResult { Arm = "candidate" },
 				Control = new BenchmarkArmResult { Arm = "control" }
 			};
@@ -153,7 +190,10 @@ namespace AutoCnC.Evidence.Tests
 					Seed = seed,
 					Outcome = scenario.CandidateOutcome,
 					Fitness = scenario.CandidateFitness,
-					DurationSeconds = 600
+					DurationSeconds = 600,
+					Succeeded = true,
+					Status = "completed",
+					Error = ""
 				});
 				result.Matches.Add(new BenchmarkMatchResult
 				{
@@ -167,7 +207,10 @@ namespace AutoCnC.Evidence.Tests
 					Seed = seed,
 					Outcome = scenario.ControlOutcome,
 					Fitness = scenario.ControlFitness,
-					DurationSeconds = 600
+					DurationSeconds = 600,
+					Succeeded = true,
+					Status = "completed",
+					Error = ""
 				});
 				result.Paired.Add(new BenchmarkPairResult
 				{
@@ -189,6 +232,45 @@ namespace AutoCnC.Evidence.Tests
 			result.Candidate.Wins = scenarios.Count(s => s.CandidateOutcome == "Won");
 			result.Control.Wins = scenarios.Count(s => s.ControlOutcome == "Won");
 			return result;
+		}
+
+		static BenchmarkResultDocument SingleArm(string batch, string outcome, double fitness)
+		{
+			return new BenchmarkResultDocument
+			{
+				SchemaVersion = 1,
+				Benchmark = "standard",
+				Batch = batch,
+				Difficulty = "Hard",
+				ExpectedMatchesPerArm = 1,
+				Candidate = new BenchmarkArmResult
+				{
+					Arm = "candidate",
+					Wins = outcome == "Won" ? 1 : 0,
+					Played = 1,
+					MedianFitness = fitness
+				},
+				Matches =
+				[
+					new BenchmarkMatchResult
+					{
+						RunId = batch,
+						Arm = "candidate",
+						Repeat = 1,
+						Scenario = 1,
+						Map = "map",
+						Faction = "gdi",
+						BotFaction = "nod",
+						Seed = 123,
+						Outcome = outcome,
+						Fitness = fitness,
+						DurationSeconds = 600,
+						Succeeded = true,
+						Status = "completed",
+						Error = ""
+					}
+				]
+			};
 		}
 	}
 }

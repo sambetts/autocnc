@@ -373,12 +373,13 @@ prompt, game guide, resolved unit/weapon stats, fight manifest, and changed file
 
 Check **Continuous improvement** before starting to repeat Fight -> candidate edit -> paired
 evaluation -> promote or restore -> Fight until **Stop**. A successful edit is only a candidate:
-the launcher keeps the pre-agent `WorkspaceSnapshot`, runs the candidate against a control on the
-same benchmark scenarios, ranks wins first and paired fitness second, and restores the snapshot
-unless the candidate wins that decision. Missing, failed, mismatched, or `Undefined` benchmark
-evidence cannot promote. With the current benchmark script the control must be a clean Git
-revision under this checkout's `bots` directory; otherwise the candidate is restored and the loop
-stops rather than guessing.
+the launcher materializes the pre-agent `WorkspaceSnapshot` and a candidate snapshot, builds each
+to a different immutable artifact directory, then runs both over the same benchmark scenarios.
+It ranks wins first and paired fitness second, and restores the snapshot unless the candidate wins
+that decision. Missing, failed, mismatched, or `Undefined` benchmark evidence cannot promote.
+Dirty promoted champions remain valid controls because the control comes from the snapshot, not a
+Git revision. Workspace edits or agent chat after capture invalidate the result and force a new
+evaluation; restoration never overwrites those unbenchmarked edits.
 
 Resolved rules and fight JSON use lazy, collapsible trees rather than raw text. At the end of an
 improvement the agent drafts an entirely new prompt template in **Next prompt***. In manual mode the

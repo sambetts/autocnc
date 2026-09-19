@@ -12,6 +12,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 
 namespace AutoCnC.Launcher
@@ -119,6 +121,87 @@ namespace AutoCnC.Launcher
 				File.ReadAllText(run.ChangesPath), JsonOptions) ?? [];
 		}
 
+		public static string Fingerprint(TrainingRun run)
+		{
+			var snapshot = Read(run);
+			using var aggregate = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+			foreach (var entry in snapshot.Files
+				.OrderBy(file => file.RelativePath, StringComparer.OrdinalIgnoreCase))
+			{
+				var relative = entry.RelativePath.Replace(Path.DirectorySeparatorChar, '/');
+				aggregate.AppendData(Encoding.UTF8.GetBytes(relative));
+				aggregate.AppendData([0]);
+				aggregate.AppendData(Convert.FromHexString(entry.Sha256));
+			}
+
+			return Convert.ToHexString(aggregate.GetHashAndReset()).ToLowerInvariant();
+		}
+
+		public static string CaptureImmutableCurrent(TrainingRun run, string destination,
+			string manifestPath)
+		{
+			if (!run.IsEditable)
+				throw new InvalidOperationException("Only a battle bot project can be snapshotted.");
+
+			EnsureExperimentDestination(run, destination);
+			var before = BotWorkspace.Fingerprint(run.Manifest.BotDirectory);
+			PrepareDestination(destination);
+			var manifest = CopyWorkspace(run.Manifest.BotDirectory, destination);
+			var after = BotWorkspace.Fingerprint(run.Manifest.BotDirectory);
+			var captured = BotWorkspace.Fingerprint(destination);
+
+			if (!string.Equals(before, after, StringComparison.Ordinal) ||
+				!string.Equals(before, captured, StringComparison.Ordinal))
+			{
+				DeleteTree(destination);
+				throw new InvalidOperationException(
+					"The bot workspace changed while its immutable candidate snapshot was being captured.");
+			}
+
+			WriteAtomic(manifestPath, JsonSerializer.Serialize(manifest, JsonOptions));
+			MakeReadOnly(destination);
+			return captured;
+		}
+
+		public static string MaterializeImmutableChampion(TrainingRun run, string destination,
+			string manifestPath)
+		{
+			EnsureExperimentDestination(run, destination);
+			var snapshot = Read(run);
+			EnsureSameWorkspace(run, snapshot);
+			PrepareDestination(destination);
+
+			var materialized = new WorkspaceSnapshotManifest
+			{
+				WorkspaceRoot = Path.GetFullPath(destination),
+				CreatedUtc = DateTime.UtcNow
+			};
+
+			foreach (var entry in snapshot.Files)
+			{
+				var source = Under(run.SnapshotDirectory, entry.RelativePath);
+				if (!File.Exists(source) ||
+					!string.Equals(BotWorkspace.Sha256(source), entry.Sha256,
+						StringComparison.OrdinalIgnoreCase))
+					throw new InvalidDataException(
+						$"The champion snapshot file '{entry.RelativePath}' is missing or changed.");
+
+				var copy = Under(destination, entry.RelativePath);
+				Directory.CreateDirectory(Path.GetDirectoryName(copy));
+				File.Copy(source, copy);
+				materialized.Files.Add(new WorkspaceSnapshotEntry
+				{
+					RelativePath = entry.RelativePath,
+					Sha256 = entry.Sha256
+				});
+			}
+
+			WriteAtomic(manifestPath, JsonSerializer.Serialize(materialized, JsonOptions));
+			var fingerprint = BotWorkspace.Fingerprint(destination);
+			MakeReadOnly(destination);
+			return fingerprint;
+		}
+
 		public static void Restore(TrainingRun run)
 		{
 			var snapshot = Read(run);
@@ -159,6 +242,64 @@ namespace AutoCnC.Launcher
 			if (!string.Equals(Path.GetFullPath(run.Manifest.BotDirectory),
 				Path.GetFullPath(snapshot.WorkspaceRoot), StringComparison.OrdinalIgnoreCase))
 				throw new InvalidOperationException("The snapshot belongs to a different bot workspace.");
+		}
+
+		static WorkspaceSnapshotManifest CopyWorkspace(string sourceRoot, string destination)
+		{
+			var manifest = new WorkspaceSnapshotManifest
+			{
+				WorkspaceRoot = Path.GetFullPath(destination),
+				CreatedUtc = DateTime.UtcNow
+			};
+
+			foreach (var file in BotWorkspace.SourceFiles(sourceRoot))
+			{
+				var relative = Path.GetRelativePath(sourceRoot, file);
+				var copy = Under(destination, relative);
+				Directory.CreateDirectory(Path.GetDirectoryName(copy));
+				File.Copy(file, copy);
+				manifest.Files.Add(new WorkspaceSnapshotEntry
+				{
+					RelativePath = relative,
+					Sha256 = BotWorkspace.Sha256(copy)
+				});
+			}
+
+			return manifest;
+		}
+
+		static void EnsureExperimentDestination(TrainingRun run, string destination)
+		{
+			var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(run.ExperimentDirectory));
+			var full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(destination));
+			if (string.Equals(root, full, StringComparison.OrdinalIgnoreCase) ||
+				!full.StartsWith(root + Path.DirectorySeparatorChar,
+					StringComparison.OrdinalIgnoreCase))
+				throw new InvalidDataException(
+					"Immutable evaluation snapshots must stay inside the experiment directory.");
+		}
+
+		static void PrepareDestination(string destination)
+		{
+			if (Directory.Exists(destination))
+				DeleteTree(destination);
+			Directory.CreateDirectory(destination);
+		}
+
+		static void MakeReadOnly(string directory)
+		{
+			foreach (var file in Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories))
+				File.SetAttributes(file, File.GetAttributes(file) | FileAttributes.ReadOnly);
+		}
+
+		static void DeleteTree(string directory)
+		{
+			if (!Directory.Exists(directory))
+				return;
+
+			foreach (var file in Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories))
+				File.SetAttributes(file, File.GetAttributes(file) & ~FileAttributes.ReadOnly);
+			Directory.Delete(directory, recursive: true);
 		}
 
 		static string Under(string root, string relative)

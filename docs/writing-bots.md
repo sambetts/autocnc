@@ -273,7 +273,10 @@ The launcher preserves every fight as a unique training run under
 | `evidence/decisions.jsonl` | What the bot assessed and which mode decisions became orders |
 | `evidence/replay.orarep` | What the fight looked like |
 | `source-before-agent.json` + `source-before-agent/` | The champion snapshot used for safe restoration |
-| `experiment/benchmark-result.json` | Raw paired candidate/control benchmark output |
+| `experiment/candidate-source/` + `control-source/` | Immutable sources used to build each arm |
+| `experiment/candidate-artifact/` + `control-artifact/` | Distinct immutable assemblies actually benchmarked |
+| `experiment/candidate-result.json` + `control-result.json` | Raw single-arm benchmark outputs |
+| `experiment/benchmark-result.json` | Combined paired result with the expected scenario count |
 | `experiment/promotion-evaluation.json` | Validated `Promote`, `Restore`, or `Undefined` decision |
 
 That is enough to correlate cause and effect without giving strategy code omniscient information
@@ -346,18 +349,23 @@ opponents' total.
 
 Checking **Continuous improvement** starts a stateful Fight -> candidate edit -> paired evaluation
 -> promote or restore -> Fight loop. Every candidate has durable experiment metadata, its
-pre-agent champion `WorkspaceSnapshot`, independent verification, the raw benchmark result and a
-machine-readable promotion evaluation. Candidate and control must cover the same benchmark, batch,
-repeat and scenario set. The decision ranks wins first and the median paired fitness delta second;
-check pass percentages never decide promotion. Missing, failed, mismatched, or `Undefined` runs
-produce an `Undefined` decision, restore the champion and stop the loop.
+pre-agent champion `WorkspaceSnapshot`, independent verification, immutable candidate/control source copies and
+assemblies, raw arm benchmark results, and a machine-readable promotion evaluation. Each arm is
+built into its own experiment directory, never the shared `engine/bin/bots` output, and the
+launcher verifies that the artifact paths and hashes differ before either is benchmarked.
+Candidate and control must cover the declared `ExpectedMatchesPerArm` with explicit successful
+rows over the same benchmark, combined batch, repeat, and scenario set. The decision ranks wins
+first and the median paired fitness delta second; check pass percentages never decide promotion.
+Missing, failed, mismatched, or `Undefined` runs produce an `Undefined` decision.
 
-The current benchmark script materializes controls from clean Git revisions under this checkout's
-`bots` directory. If the champion is dirty or external, the launcher records that limitation as an
-`Undefined` evaluation and restores rather than using a stale commit. Each automatic improvement
-uses the battle just fought, rather than an older manually selected battle. Continuous mode does
-not pause for feedback or prompt review: an agent-authored next prompt remains a draft on the run,
-the current prompt stays frozen, and the player can review the draft after the loop stops.
+The champion comes directly from the pre-agent snapshot, so a previously promoted but uncommitted
+workspace can be the next control. The candidate also runs from an immutable snapshot. The live
+workspace fingerprint is checked before applying the decision and before the next fight. A
+workspace edit or edit-capable agent chat invalidates the result and requires reevaluation; the
+launcher never restores over those unbenchmarked edits. Each automatic improvement uses the
+battle just fought. Continuous mode does not pause for feedback or prompt review: an agent-authored
+next prompt remains a draft on the run, the current prompt stays frozen, and the player can review
+the draft after the loop stops.
 
 An agent exit and a host verification failure are recorded separately. Verification always cleans
 the bot's generated `bin`/`obj` output before building. If it still fails, **Retry verification**

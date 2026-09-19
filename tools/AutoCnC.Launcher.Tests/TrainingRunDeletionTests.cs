@@ -85,6 +85,20 @@ namespace AutoCnC.Launcher.Tests
 			Assert.That(Directory.Exists(run.RunDirectory), Is.False);
 		}
 
+		[Test]
+		public void DeletionRemovesReadOnlyImmutableExperimentArtifacts()
+		{
+			var run = NewRun();
+			Directory.CreateDirectory(run.CandidateArtifactDirectory);
+			var artifact = Path.Combine(run.CandidateArtifactDirectory, "Bot.dll");
+			File.WriteAllText(artifact, "immutable");
+			File.SetAttributes(artifact, FileAttributes.ReadOnly);
+
+			run.Delete(runs);
+
+			Assert.That(Directory.Exists(run.RunDirectory), Is.False);
+		}
+
 		[TestCase("running")]
 		[TestCase("improving")]
 		[TestCase("verifying")]

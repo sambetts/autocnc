@@ -63,7 +63,7 @@ namespace AutoCnC.Evidence
 		public string Benchmark { get; set; }
 		public string Batch { get; set; }
 		public string Status { get; set; }
-		public bool? Succeeded { get; set; }
+		public bool Succeeded { get; set; }
 		public string Error { get; set; }
 	}
 
@@ -95,10 +95,155 @@ namespace AutoCnC.Evidence
 		public string Benchmark { get; set; }
 		public string Batch { get; set; }
 		public string Difficulty { get; set; }
+		public int ExpectedMatchesPerArm { get; set; }
 		public BenchmarkArmResult Candidate { get; set; }
 		public BenchmarkArmResult Control { get; set; }
 		public List<BenchmarkPairResult> Paired { get; set; } = [];
 		public List<BenchmarkMatchResult> Matches { get; set; } = [];
+	}
+
+	/// <summary>Combines two immutable single-arm benchmark runs into one paired batch.</summary>
+	public static class PairedBenchmarkResultComposer
+	{
+		readonly record struct ScenarioKey(int Repeat, int Scenario);
+
+		public static BenchmarkResultDocument Combine(BenchmarkResultDocument candidate,
+			BenchmarkResultDocument control, string batch)
+		{
+			if (candidate == null || control == null)
+				throw new InvalidDataException("Both immutable arm results are required.");
+			if (string.IsNullOrWhiteSpace(batch))
+				throw new InvalidDataException("The combined paired batch needs an identifier.");
+			if (string.IsNullOrWhiteSpace(candidate.Batch) ||
+				string.IsNullOrWhiteSpace(control.Batch))
+				throw new InvalidDataException(
+					"Each immutable arm result must identify its raw benchmark batch.");
+			if (!string.Equals(candidate.Benchmark, control.Benchmark,
+				StringComparison.OrdinalIgnoreCase))
+				throw new InvalidDataException(
+					"Candidate and control were run against different benchmarks.");
+			if (!string.Equals(candidate.Difficulty, control.Difficulty,
+				StringComparison.OrdinalIgnoreCase))
+				throw new InvalidDataException(
+					"Candidate and control were run at different difficulties.");
+			if (candidate.ExpectedMatchesPerArm <= 0 ||
+				candidate.ExpectedMatchesPerArm != control.ExpectedMatchesPerArm)
+				throw new InvalidDataException(
+					"Candidate and control do not declare the same expected match count.");
+
+			var candidateRows = SingleArm(candidate, "candidate");
+			var controlRows = SingleArm(control, "control");
+			var combined = new BenchmarkResultDocument
+			{
+				SchemaVersion = Math.Max(candidate.SchemaVersion, control.SchemaVersion),
+				GeneratedUtc = DateTime.UtcNow,
+				Benchmark = candidate.Benchmark,
+				Batch = batch,
+				Difficulty = candidate.Difficulty,
+				ExpectedMatchesPerArm = candidate.ExpectedMatchesPerArm,
+				Candidate = Clone(candidate.Candidate, "candidate"),
+				Control = Clone(control.Candidate ?? control.Control, "control"),
+				Matches =
+				[
+					.. candidateRows.Select(row => Clone(row, "candidate",
+						candidate.Benchmark, batch)),
+					.. controlRows.Select(row => Clone(row, "control",
+						candidate.Benchmark, batch))
+				]
+			};
+
+			var controlByScenario = controlRows
+				.GroupBy(row => new ScenarioKey(row.Repeat, row.Scenario))
+				.Where(group => group.Count() == 1)
+				.ToDictionary(group => group.Key, group => group.Single());
+
+			foreach (var candidateRow in candidateRows)
+			{
+				var key = new ScenarioKey(candidateRow.Repeat, candidateRow.Scenario);
+				if (!controlByScenario.TryGetValue(key, out var controlRow))
+					continue;
+
+				combined.Paired.Add(new BenchmarkPairResult
+				{
+					Repeat = key.Repeat,
+					Scenario = key.Scenario,
+					Map = candidateRow.Map,
+					Faction = candidateRow.Faction,
+					BotFaction = candidateRow.BotFaction,
+					Seed = candidateRow.Seed,
+					CandidateOutcome = candidateRow.Outcome,
+					ControlOutcome = controlRow.Outcome,
+					FitnessDelta = Math.Round(candidateRow.Fitness - controlRow.Fitness, 4),
+					EarnedPerSecondDelta = Math.Round(
+						candidateRow.EarnedPerSecond - controlRow.EarnedPerSecond, 3),
+					SpentPerSecondDelta = Math.Round(
+						candidateRow.SpentPerSecond - controlRow.SpentPerSecond, 3),
+					ExchangeDelta = Math.Round(candidateRow.Exchange - controlRow.Exchange, 4),
+					BuildingsKilledDelta =
+						candidateRow.BuildingsKilled - controlRow.BuildingsKilled,
+					Benchmark = candidate.Benchmark,
+					Batch = batch
+				});
+			}
+
+			return combined;
+		}
+
+		static List<BenchmarkMatchResult> SingleArm(BenchmarkResultDocument document,
+			string arm)
+		{
+			var rows = document.Matches ?? [];
+			if (rows.Any(row => row == null ||
+				!string.Equals(row.Arm, "candidate", StringComparison.OrdinalIgnoreCase)))
+				throw new InvalidDataException(
+					$"The immutable {arm} benchmark result is not a single candidate arm.");
+
+			return rows;
+		}
+
+		static BenchmarkArmResult Clone(BenchmarkArmResult source, string arm)
+		{
+			if (source == null)
+				return null;
+
+			return new BenchmarkArmResult
+			{
+				Arm = arm,
+				Wins = source.Wins,
+				Played = source.Played,
+				MedianFitness = source.MedianFitness,
+				MedianEarnedPerSecond = source.MedianEarnedPerSecond,
+				MedianSpentPerSecond = source.MedianSpentPerSecond,
+				MedianExchange = source.MedianExchange,
+				MedianBuildingsKilled = source.MedianBuildingsKilled
+			};
+		}
+
+		static BenchmarkMatchResult Clone(BenchmarkMatchResult source, string arm,
+			string benchmark, string batch) => new()
+		{
+			RunId = source.RunId,
+			Evidence = source.Evidence,
+			Arm = arm,
+			Repeat = source.Repeat,
+			Scenario = source.Scenario,
+			Map = source.Map,
+			Faction = source.Faction,
+			BotFaction = source.BotFaction,
+			Seed = source.Seed,
+			Outcome = source.Outcome,
+			Fitness = source.Fitness,
+			EarnedPerSecond = source.EarnedPerSecond,
+			SpentPerSecond = source.SpentPerSecond,
+			Exchange = source.Exchange,
+			BuildingsKilled = source.BuildingsKilled,
+			DurationSeconds = source.DurationSeconds,
+			Benchmark = benchmark,
+			Batch = batch,
+			Status = source.Status,
+			Succeeded = source.Succeeded,
+			Error = source.Error ?? ""
+		};
 	}
 
 	public sealed class PairedScenarioEvaluation
@@ -127,6 +272,7 @@ namespace AutoCnC.Evidence
 		public string Basis { get; set; }
 		public string Reason { get; set; }
 		public int PairsCompared { get; set; }
+		public int ExpectedMatchesPerArm { get; set; }
 		public int CandidateWins { get; set; }
 		public int ControlWins { get; set; }
 		public int CandidateFitnessPairs { get; set; }
@@ -165,8 +311,7 @@ namespace AutoCnC.Evidence
 
 			try
 			{
-				var document = JsonSerializer.Deserialize<BenchmarkResultDocument>(
-					File.ReadAllText(path), JsonOptions);
+				var document = ReadResult(path);
 				return Evaluate(document);
 			}
 			catch (JsonException ex)
@@ -197,6 +342,9 @@ namespace AutoCnC.Evidence
 			if (document.Candidate == null || document.Control == null)
 				return Undefined("Both candidate and control summaries are required.",
 					document.Benchmark, document.Batch);
+			if (document.ExpectedMatchesPerArm <= 0)
+				return Undefined("The paired benchmark result has no expected match count.",
+					document.Benchmark, document.Batch);
 
 			var matches = document.Matches ?? [];
 			if (matches.Any(m => m == null ||
@@ -206,8 +354,10 @@ namespace AutoCnC.Evidence
 
 			var candidate = matches.Where(m => Arm(m, "candidate")).ToList();
 			var control = matches.Where(m => Arm(m, "control")).ToList();
-			if (candidate.Count == 0 || control.Count == 0)
-				return Undefined("Both benchmark arms must contain completed matches.",
+			if (matches.Count != document.ExpectedMatchesPerArm * 2 ||
+				candidate.Count != document.ExpectedMatchesPerArm ||
+				control.Count != document.ExpectedMatchesPerArm)
+				return Undefined("The serialized match plan is incomplete for one or both arms.",
 					document.Benchmark, document.Batch);
 
 			if (!TryIndex(candidate, out var candidateByScenario, out var duplicateReason) ||
@@ -218,9 +368,8 @@ namespace AutoCnC.Evidence
 				return Undefined("Candidate and control did not run the same repeat/scenario set.",
 					document.Benchmark, document.Batch);
 
-			if (document.Candidate.Played != candidate.Count ||
-				document.Control.Played != control.Count ||
-				document.Candidate.Played != document.Control.Played)
+			if (document.Candidate.Played != document.ExpectedMatchesPerArm ||
+				document.Control.Played != document.ExpectedMatchesPerArm)
 				return Undefined("Arm summaries do not describe the complete paired match set.",
 					document.Benchmark, document.Batch);
 
@@ -233,7 +382,7 @@ namespace AutoCnC.Evidence
 			var pairs = document.Paired ?? [];
 			if (!TryIndex(pairs, out var pairedByScenario, out duplicateReason))
 				return Undefined(duplicateReason, document.Benchmark, document.Batch);
-			if (pairs.Count != candidate.Count ||
+			if (pairs.Count != document.ExpectedMatchesPerArm ||
 				!pairedByScenario.Keys.ToHashSet().SetEquals(candidateByScenario.Keys))
 				return Undefined("The paired rows are incomplete or name a different scenario set.",
 					document.Benchmark, document.Batch);
@@ -243,6 +392,7 @@ namespace AutoCnC.Evidence
 				GeneratedUtc = DateTime.UtcNow,
 				Benchmark = document.Benchmark,
 				Batch = document.Batch,
+				ExpectedMatchesPerArm = document.ExpectedMatchesPerArm,
 				PairsCompared = candidate.Count,
 				CandidateWins = candidateWins,
 				ControlWins = controlWins
@@ -331,6 +481,17 @@ namespace AutoCnC.Evidence
 				new UTF8Encoding(false));
 		}
 
+		public static BenchmarkResultDocument ReadResult(string path) =>
+			JsonSerializer.Deserialize<BenchmarkResultDocument>(File.ReadAllText(path), JsonOptions);
+
+		public static void WriteResult(string path, BenchmarkResultDocument result)
+		{
+			var full = Path.GetFullPath(path);
+			Directory.CreateDirectory(Path.GetDirectoryName(full));
+			File.WriteAllText(full, JsonSerializer.Serialize(result, JsonOptions) + "\n",
+				new UTF8Encoding(false));
+		}
+
 		static string ValidateScenario(BenchmarkResultDocument document,
 			BenchmarkMatchResult candidate, BenchmarkMatchResult control, BenchmarkPairResult pair)
 		{
@@ -405,12 +566,12 @@ namespace AutoCnC.Evidence
 		static bool Complete(BenchmarkMatchResult match) =>
 			!string.IsNullOrWhiteSpace(match.RunId) &&
 			match.DurationSeconds > 0 &&
-			match.Succeeded != false &&
+			match.Succeeded &&
 			string.IsNullOrWhiteSpace(match.Error) &&
-			(string.IsNullOrWhiteSpace(match.Status) ||
-				match.Status.Equals("completed", StringComparison.OrdinalIgnoreCase) ||
+			(!string.IsNullOrWhiteSpace(match.Status) &&
+				(match.Status.Equals("completed", StringComparison.OrdinalIgnoreCase) ||
 				match.Status.Equals("finished", StringComparison.OrdinalIgnoreCase) ||
-				match.Status.Equals("succeeded", StringComparison.OrdinalIgnoreCase));
+				match.Status.Equals("succeeded", StringComparison.OrdinalIgnoreCase)));
 
 		static bool ValidOutcome(string outcome) =>
 			string.Equals(outcome, "Won", StringComparison.OrdinalIgnoreCase) ||

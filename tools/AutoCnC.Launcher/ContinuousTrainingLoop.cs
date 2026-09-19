@@ -32,7 +32,8 @@ namespace AutoCnC.Launcher
 	{
 		Undefined,
 		Promote,
-		Restore
+		Restore,
+		Reevaluate
 	}
 
 	/// <summary>Controls the promotion-gated unattended cycle independently of the UI queue.</summary>
@@ -77,6 +78,9 @@ namespace AutoCnC.Launcher
 			if (Stage != ContinuousTrainingStage.Evaluating)
 				return ContinuousTrainingAction.None;
 
+			if (decision == ContinuousEvaluationDecision.Reevaluate)
+				return ContinuousTrainingAction.Evaluate;
+
 			if (decision == ContinuousEvaluationDecision.Promote)
 			{
 				stopAfterRestore = false;
@@ -98,6 +102,16 @@ namespace AutoCnC.Launcher
 			stopAfterRestore = false;
 			Stage = stop ? ContinuousTrainingStage.Idle : ContinuousTrainingStage.Fighting;
 			return stop ? ContinuousTrainingAction.None : ContinuousTrainingAction.Fight;
+		}
+
+		public ContinuousTrainingAction WorkspaceChangedBeforeFight()
+		{
+			if (Stage != ContinuousTrainingStage.Fighting)
+				return ContinuousTrainingAction.None;
+
+			stopAfterRestore = false;
+			Stage = ContinuousTrainingStage.Evaluating;
+			return ContinuousTrainingAction.Evaluate;
 		}
 
 		public void Stop()

@@ -24,7 +24,7 @@ namespace AutoCnC.Launcher
 	/// The launcher window: point it at your battle code, choose who to fight, press play.
 	/// </summary>
 	/// <remarks>
-	/// Every button here runs a script from <c>scripts/</c> and shows you its output, so nothing
+	/// Every button here runs a repository script and shows you its output, so nothing
 	/// you can do in this window is something you could not have typed yourself. That is
 	/// deliberate: the window is a convenience over the authoring loop, not a second
 	/// implementation of it.
@@ -86,6 +86,7 @@ namespace AutoCnC.Launcher
 		TrainingRun activeRun;
 		TrainingRun lastRun;
 		TrainingRun continuousCandidateRun;
+		ContinuousEvaluationPlan continuousEvaluationPlan;
 		TrainingHistory loadedHistory = TrainingHistory.Empty;
 		string loadedHistoryBot;
 		DateTime battleStartedUtc;
@@ -1444,6 +1445,7 @@ namespace AutoCnC.Launcher
 					BotWorkspace.ResolveProject(botBox.Text.Trim()) != null);
 				pendingContinuousAction = ContinuousTrainingAction.None;
 				continuousCandidateRun = null;
+				continuousEvaluationPlan = null;
 			}
 
 			Save();
@@ -1855,16 +1857,37 @@ namespace AutoCnC.Launcher
 				{
 					try
 					{
-						var evaluation = continuousPromotion.RecordFailedCandidate(run,
+						var completion = continuousPromotion.RecordFailedCandidate(run,
 							failureMessage ?? "The candidate improvement failed before paired evaluation.");
-						continuousPromotion.ApplyDecision(run, evaluation);
-						continuousLoop.RestorationCompleted();
-						AppendImprovementOutput(
-							"The failed continuous candidate was restored to its pre-agent champion snapshot.");
+						var decision = continuousPromotion.ApplyDecision(run, null,
+							completion.Evaluation);
+						if (decision == ContinuousEvaluationDecision.Reevaluate)
+							AppendImprovementOutput(
+								"The failed candidate was not restored because the live workspace changed.");
+						else
+						{
+							continuousLoop.RestorationCompleted();
+							AppendImprovementOutput(
+								"The failed continuous candidate was restored to its pre-agent champion snapshot.");
+						}
 					}
 					catch (Exception ex) when (ex is InvalidDataException or IOException or
 						UnauthorizedAccessException or InvalidOperationException)
 					{
+						continuousEvaluationPlan = null;
+						if (SamePath(activeTrainingRun?.RunDirectory, run.RunDirectory))
+							activeTrainingRun = null;
+						try
+						{
+							continuousPromotion.InvalidateEvaluation(run,
+								"Paired evaluation preparation failed: " + ex.Message);
+						}
+						catch (Exception saveError) when (saveError is IOException or
+							UnauthorizedAccessException or InvalidOperationException)
+						{
+							AppendImprovementOutput(
+								"Could not persist evaluation invalidation: " + saveError.Message);
+						}
 						continuousLoop.Stop();
 						AppendImprovementOutput(
 							"Could not restore the failed continuous candidate: " + ex.Message);
@@ -1889,37 +1912,14 @@ namespace AutoCnC.Launcher
 
 			try
 			{
-				var plan = continuousPromotion.PrepareEvaluation(repo, run);
-				if (!plan.CanRun)
-				{
-					FinishContinuousEvaluation(run, plan.ImmediateEvaluation);
-					if (pendingContinuousAction == ContinuousTrainingAction.Fight)
-					{
-						pendingContinuousAction = ContinuousTrainingAction.None;
-						StartNextContinuousFight();
-					}
-					else
-					{
-						Status("Candidate restored. Continuous improvement stopped because evaluation was undefined.");
-						UpdateEnabledState();
-					}
-
-					return;
-				}
-
+				continuousEvaluationPlan = continuousPromotion.PrepareEvaluation(repo, run);
 				activeTrainingRun = run;
 				queue.Clear();
-				queue.Enqueue(new ScriptJob
-				{
-					Title = "Evaluating the candidate against its paired control",
-					ScriptPath = plan.ScriptPath,
-					Arguments = plan.Arguments,
-					PreserveColor = true,
-					Kind = ScriptJobKind.Improvement,
-					Output = AppendImprovementOutput,
-					Completed = code => FinishContinuousEvaluation(run, code)
-				});
-
+				EnqueueContinuousStep(
+					continuousPromotion.BuildArm(repo, continuousEvaluationPlan,
+						ContinuousEvaluationArm.Candidate),
+					code => FinishContinuousArmBuild(run,
+						ContinuousEvaluationArm.Candidate, code));
 				RunNext();
 			}
 			catch (Exception ex) when (ex is InvalidDataException or IOException or
@@ -1933,7 +1933,78 @@ namespace AutoCnC.Launcher
 			}
 		}
 
-		void FinishContinuousEvaluation(TrainingRun run, int exitCode)
+		void FinishContinuousArmBuild(TrainingRun run, ContinuousEvaluationArm arm,
+			int exitCode)
+		{
+			if (exitCode != 0)
+			{
+				FinishContinuousFailure(run,
+					$"The immutable {arm.ToString().ToLowerInvariant()} build exited with code {exitCode}.");
+				return;
+			}
+
+			try
+			{
+				continuousPromotion.CaptureBuiltArm(run, continuousEvaluationPlan, arm);
+				if (arm == ContinuousEvaluationArm.Candidate)
+					EnqueueContinuousStep(
+						continuousPromotion.BuildArm(repo, continuousEvaluationPlan,
+							ContinuousEvaluationArm.Control),
+						code => FinishContinuousArmBuild(run,
+							ContinuousEvaluationArm.Control, code));
+				else
+					EnqueueContinuousStep(
+						continuousPromotion.BenchmarkArm(repo, run,
+							continuousEvaluationPlan, ContinuousEvaluationArm.Candidate),
+						code => FinishContinuousArmBenchmark(run,
+							ContinuousEvaluationArm.Candidate, code));
+			}
+			catch (Exception ex) when (ex is InvalidDataException or IOException or
+				UnauthorizedAccessException or InvalidOperationException)
+			{
+				FinishContinuousFailure(run,
+					$"Could not capture the immutable {arm.ToString().ToLowerInvariant()} arm: " +
+					ex.Message);
+			}
+		}
+
+		void FinishContinuousArmBenchmark(TrainingRun run, ContinuousEvaluationArm arm,
+			int exitCode)
+		{
+			if (exitCode != 0)
+			{
+				FinishContinuousFailure(run,
+					$"The immutable {arm.ToString().ToLowerInvariant()} benchmark exited with code {exitCode}.");
+				return;
+			}
+
+			try
+			{
+				if (arm == ContinuousEvaluationArm.Candidate)
+					EnqueueContinuousStep(
+						continuousPromotion.BenchmarkArm(repo, run,
+							continuousEvaluationPlan, ContinuousEvaluationArm.Control),
+						code => FinishContinuousArmBenchmark(run,
+							ContinuousEvaluationArm.Control, code));
+				else
+				{
+					if (SamePath(activeTrainingRun?.RunDirectory, run.RunDirectory))
+						activeTrainingRun = null;
+					FinishContinuousEvaluation(run,
+						continuousPromotion.CompleteEvaluation(run,
+							continuousEvaluationPlan, exitCode));
+				}
+			}
+			catch (Exception ex) when (ex is InvalidDataException or IOException or
+				UnauthorizedAccessException or InvalidOperationException)
+			{
+				FinishContinuousFailure(run,
+					$"Could not continue the immutable {arm.ToString().ToLowerInvariant()} benchmark: " +
+					ex.Message);
+			}
+		}
+
+		void FinishContinuousFailure(TrainingRun run, string reason)
 		{
 			if (SamePath(activeTrainingRun?.RunDirectory, run.RunDirectory))
 				activeTrainingRun = null;
@@ -1941,36 +2012,60 @@ namespace AutoCnC.Launcher
 			try
 			{
 				FinishContinuousEvaluation(run,
-					continuousPromotion.CompleteEvaluation(run, exitCode));
+					continuousPromotion.FailEvaluation(run, continuousEvaluationPlan, reason));
 			}
 			catch (Exception ex) when (ex is InvalidDataException or IOException or
 				UnauthorizedAccessException or InvalidOperationException)
 			{
 				continuousLoop.Stop();
 				pendingContinuousAction = ContinuousTrainingAction.None;
-				AppendImprovementOutput("Could not finish paired evaluation: " + ex.Message);
+				continuousEvaluationPlan = null;
+				AppendImprovementOutput("Could not settle the failed paired evaluation: " + ex.Message);
 			}
 		}
 
-		void FinishContinuousEvaluation(TrainingRun run, PairedBenchmarkEvaluation evaluation)
+		void FinishContinuousEvaluation(TrainingRun run,
+			ContinuousEvaluationCompletion completion)
 		{
-			var decision = ContinuousPromotionRunner.DecisionFor(evaluation);
-			var action = continuousLoop.EvaluationCompleted(decision);
-			if (action == ContinuousTrainingAction.None)
+			if (completion.RequiresReevaluation)
+			{
+				pendingContinuousAction = continuousLoop.EvaluationCompleted(
+					ContinuousEvaluationDecision.Reevaluate);
+				continuousCandidateRun = run;
+				continuousEvaluationPlan = null;
+				AppendImprovementOutput(
+					"Paired evaluation was invalidated and will be rerun: " +
+					completion.InvalidationReason);
+				RefreshFeedbackRun(run);
 				return;
+			}
 
 			try
 			{
-				continuousPromotion.ApplyDecision(run, evaluation);
+				var decision = continuousPromotion.ApplyDecision(run,
+					continuousEvaluationPlan, completion.Evaluation);
+				if (decision == ContinuousEvaluationDecision.Reevaluate)
+				{
+					pendingContinuousAction = continuousLoop.EvaluationCompleted(decision);
+					continuousCandidateRun = run;
+					continuousEvaluationPlan = null;
+					AppendImprovementOutput(
+						"The live workspace changed before the decision could be applied; reevaluating it.");
+					RefreshFeedbackRun(run);
+					return;
+				}
+
+				var action = continuousLoop.EvaluationCompleted(decision);
 				if (action == ContinuousTrainingAction.Restore)
 					action = continuousLoop.RestorationCompleted();
 
 				pendingContinuousAction = action;
-				continuousCandidateRun = null;
-				AppendImprovementOutput(evaluation.CanPromote
-					? "Paired evaluation promoted the candidate."
+				continuousCandidateRun = run;
+				continuousEvaluationPlan = null;
+				AppendImprovementOutput(completion.Evaluation.CanPromote
+					? "Paired evaluation promoted the immutable candidate."
 					: "Paired evaluation did not promote the candidate; the pre-agent champion was restored. " +
-						evaluation.Reason);
+						completion.Evaluation.Reason);
 				RefreshFeedbackRun(run);
 			}
 			catch (Exception ex) when (ex is InvalidDataException or IOException or
@@ -1978,18 +2073,69 @@ namespace AutoCnC.Launcher
 			{
 				continuousLoop.Stop();
 				pendingContinuousAction = ContinuousTrainingAction.None;
+				continuousEvaluationPlan = null;
 				AppendImprovementOutput("Could not apply the paired evaluation decision: " + ex.Message);
 			}
 		}
 
+		void EnqueueContinuousStep(ContinuousScriptPlan plan, Action<int> completed)
+		{
+			queue.Enqueue(new ScriptJob
+			{
+				Title = plan.Title,
+				ScriptPath = plan.ScriptPath,
+				Arguments = plan.Arguments,
+				PreserveColor = true,
+				Kind = ScriptJobKind.Improvement,
+				Output = AppendImprovementOutput,
+				Completed = completed
+			});
+		}
+
 		void StartNextContinuousFight()
 		{
+			try
+			{
+				if (continuousCandidateRun != null &&
+					!continuousPromotion.ValidateForNextFight(
+						continuousCandidateRun, out var invalidation))
+				{
+					var action = continuousLoop.WorkspaceChangedBeforeFight();
+					if (action == ContinuousTrainingAction.Evaluate)
+					{
+						AppendImprovementOutput(
+							"Champion fight deferred until the changed workspace is reevaluated: " +
+							invalidation);
+						StartContinuousEvaluation();
+						return;
+					}
+
+					continuousLoop.Stop();
+					Status("Continuous improvement stopped because the changed workspace could not be reevaluated.");
+					UpdateEnabledState();
+					return;
+				}
+			}
+			catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
+				InvalidOperationException)
+			{
+				continuousLoop.Stop();
+				Status("Continuous improvement stopped before the next fight: " + ex.Message);
+				UpdateEnabledState();
+				return;
+			}
+
 			Status("Promotion decision settled. Starting the next champion fight...");
 			if (!Launch(play: true, continuousContinuation: true))
 			{
 				continuousLoop.Stop();
 				Status("Continuous improvement stopped before the next fight could start.");
 				UpdateEnabledState();
+			}
+			else
+			{
+				continuousCandidateRun = null;
+				continuousEvaluationPlan = null;
 			}
 		}
 
@@ -2348,6 +2494,7 @@ namespace AutoCnC.Launcher
 				continuousLoop.Stop();
 				pendingContinuousAction = ContinuousTrainingAction.None;
 				continuousCandidateRun = null;
+				continuousEvaluationPlan = null;
 			}
 			catch (InvalidOperationException ex)
 			{
@@ -2360,6 +2507,7 @@ namespace AutoCnC.Launcher
 				continuousLoop.Stop();
 				pendingContinuousAction = ContinuousTrainingAction.None;
 				continuousCandidateRun = null;
+				continuousEvaluationPlan = null;
 			}
 
 			UpdateEnabledState();
@@ -2380,6 +2528,7 @@ namespace AutoCnC.Launcher
 				continuousLoop.Stop();
 				pendingContinuousAction = ContinuousTrainingAction.None;
 				continuousCandidateRun = null;
+				continuousEvaluationPlan = null;
 				battleJustCompleted = false;
 				Status("Stopped.");
 				stopRequested = false;
@@ -2407,6 +2556,7 @@ namespace AutoCnC.Launcher
 				continuousLoop.Stop();
 				pendingContinuousAction = ContinuousTrainingAction.None;
 				continuousCandidateRun = null;
+				continuousEvaluationPlan = null;
 				battleJustCompleted = false;
 				Status($"Stopped with exit code {exitCode}. See the {(completed?.Kind == ScriptJobKind.Generic ? "output" : "improvement")} window.");
 				queue.Clear();
@@ -2462,6 +2612,7 @@ namespace AutoCnC.Launcher
 			{
 				continuousLoop.Stop();
 				continuousCandidateRun = null;
+				continuousEvaluationPlan = null;
 			}
 			pendingContinuousAction = ContinuousTrainingAction.None;
 			queue.Clear();
@@ -2581,6 +2732,7 @@ namespace AutoCnC.Launcher
 				StopWatchingBattle("stopped");
 				continuousLoop.Stop();
 				continuousCandidateRun = null;
+				continuousEvaluationPlan = null;
 			}
 
 			if (IsHandleCreated)

@@ -125,8 +125,6 @@ namespace AutoCnC.Reference.Modes
 		readonly CPos?[] plannedLocation = new CPos?[ConstructionQueues.Length];
 		readonly string[] plannedItem = new string[ConstructionQueues.Length];
 
-		bool deferredConstructionForHarvester;
-
 		public override void OnEnter(Actor self, ModeContext ctx)
 		{
 			for (var i = 0; i < ConstructionQueues.Length; i++)
@@ -137,7 +135,6 @@ namespace AutoCnC.Reference.Modes
 
 			fields.Clear();
 			evaluationsSinceScan = int.MaxValue;
-			deferredConstructionForHarvester = false;
 		}
 
 		public override UnitDecision OnTick(Actor self, ModeContext ctx)
@@ -239,26 +236,7 @@ namespace AutoCnC.Reference.Modes
 			if (order.Action == ConstructionAction.None)
 				order = AirDefence(ctx, owned);
 
-			// Starting a construction item is not a cash reservation: it draws from the same
-			// income as every production queue. Do not let a new refinery or tower strand an
-			// active recovery harvester when the completed fleet is still below its established
-			// release band. Owned counts include an active production item once its order is
-			// visible, so exclude that item here: starting a harvester does not mean its income
-			// has arrived. TrainUnitsMode keeps the harvester rung first until that floor is
-			// restored. Finished structures still place, and emergency power remains available
-			// because a brownout would slow the harvester too.
-			var standingHarvesters = ExpansionLogic.Standing(
-				ctx.OwnedUnitCounts(), HarvesterCandidates);
-			if (standingHarvesters > 0
-				&& Named(HarvesterCandidates, ctx.ProducingItem("Vehicle")))
-				standingHarvesters--;
-
 			var refineryCount = ExpansionLogic.Standing(owned, RefineryCandidates);
-			var harvesterRelease = ArmyBalanceLogic.ReleaseAt(
-				ExpansionLogic.DesiredHarvesters(refineryCount, 0, expansion), balance);
-			var factoryBackedHarvesterRecovery =
-				standingHarvesters < harvesterRelease
-				&& ExpansionLogic.Standing(owned, VehicleFactoryCandidates) > 0;
 			var fundingCriticalRefinery = IncomeFirstLogic.ShouldFundCriticalRefinery(
 				refineryCount,
 				Named(RefineryCandidates, ctx.ProducingItem("Building")));
@@ -266,30 +244,7 @@ namespace AutoCnC.Reference.Modes
 			if (fundingCriticalRefinery
 				&& order.Action == ConstructionAction.Produce
 				&& !string.Equals(order.Queue, "Building", System.StringComparison.OrdinalIgnoreCase))
-			{
-				if (factoryBackedHarvesterRecovery)
-					deferredConstructionForHarvester = true;
-
 				return UnitDecision.Hold("support queue yielding shared cash to active critical refinery");
-			}
-
-			if (factoryBackedHarvesterRecovery
-				&& order.Action == ConstructionAction.Produce
-				&& !Named(PowerCandidates, order.Item))
-			{
-				deferredConstructionForHarvester = true;
-				return UnitDecision.Hold(
-					"construction cash held until recovery harvester delivery");
-			}
-
-			if (deferredConstructionForHarvester
-				&& !factoryBackedHarvesterRecovery
-				&& order.Action == ConstructionAction.Produce)
-			{
-				order = new ConstructionOrder(order.Action, order.Queue, order.Item,
-					$"{order.Reason}, construction resumed after recovery harvester delivered");
-				deferredConstructionForHarvester = false;
-			}
 
 			// --- Act ---------------------------------------------------------------
 			switch (order.Action)

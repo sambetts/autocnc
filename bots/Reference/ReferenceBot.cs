@@ -61,5 +61,8 @@ namespace AutoCnC.Reference
 		/// </remarks>
 		public override DoctrineDecision Reassess(in BattleState state) =>
 			ReferenceBotLogic.Decide(state);
+
+		public override ProductionBudget ReserveProductionBudget(in BattleState state) =>
+			ReferenceBotLogic.ReserveProductionBudget(state);
 	}
 }

@@ -1,7 +1,15 @@
 {
   "schemaVersion": 1,
-  "authoredForRevision": "7fdbc489c04f16b7289acb4d493d2af4d119efaa",
+  "authoredForRevision": "a4b0516218a7894bf46a360f9aba4ec41bcfcca8",
   "checks": [
+    {
+      "id": "harvester-recovery-budget-runs",
+      "category": "activation",
+      "description": "The strategic bot reserves shared cash for the Vehicle queue while the harvester fleet is below its release band.",
+      "query": "reason-id:reference.production.harvester-recovery-budget",
+      "operator": ">=",
+      "value": "1"
+    },
     {
       "id": "cleared-base-assault-launch-runs",
       "description": "The changed Defence exit launches a formed assault only after immediate base pressure has cleared.",
@@ -48,13 +56,6 @@
       "id": "first-screen-precedes-recovery",
       "description": "One faction-portable light screen retains priority while a surviving harvester can fund recovery.",
       "query": "reason:first light screen before harvester recovery",
-      "operator": ">=",
-      "value": "1"
-    },
-    {
-      "id": "prequeue-harvester-reservation-still-runs",
-      "description": "An understrength Vehicle request still reserves shared cash before queue visibility updates.",
-      "query": "reason:reserving construction cash before harvester queue visibility",
       "operator": ">=",
       "value": "1"
     },

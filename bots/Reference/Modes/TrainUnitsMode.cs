@@ -253,11 +253,6 @@ namespace AutoCnC.Reference.Modes
 			var fundingCriticalRefinery = IncomeFirstLogic.ShouldFundCriticalRefinery(
 				refineries,
 				ArmyMixLogic.Names(ReferencePlans.Refineries, ctx.ProducingItem("Building")));
-			var incomeHold = IncomeFirstLogic.Hold(
-				plan, ReferencePlans.InfantryQueue, ctx.Cash,
-				standingHarvesters, shortBelow, factories > 0, income);
-
-			plan = incomeHold.Plan;
 
 			// A cash hold protects the Vehicle queue from other queues, but not from cheaper
 			// rungs in the Vehicle queue itself. Recovery normally leads them. Preserve one
@@ -340,12 +335,6 @@ namespace AutoCnC.Reference.Modes
 			if (defenceArmourRelease.Released)
 				why += $", defence armour floor released: {defenceArmourRelease.Standing} of {defenceArmourRelease.Target} standing";
 
-			// The income gate is invisible in what got built — a barracks that buys four rifles
-			// looks the same whether it was capped at four or simply had no fifth rung to reach
-			// — so it says so itself, on whichever queue's order survived it.
-			if (incomeHold.Held)
-				why += $", income first: {incomeHold.Standing} of {incomeHold.ShortBelow} harvesters on {incomeHold.Cash} cash, {incomeHold.RungsCapped} infantry rung(s) capped at {income.GarrisonBodies}";
-
 			if (screenHold.Held)
 				why += $", light vehicle screen first: {screenHold.Standing} of {screenHold.ShortBelow} on {screenHold.Cash} cash, {screenHold.RungsCapped} infantry rung(s) capped at {income.GarrisonBodies}";
 
@@ -377,9 +366,9 @@ namespace AutoCnC.Reference.Modes
 			// settle. Re-asking the unretargeted plan costs one walk of thirteen steps and only
 			// while the swap is on.
 			//
-			// The baseline has to carry both funding caps too, or a difference they caused would
-			// be reported as the mix rule's doing. Capping rewrites counts and retargeting
-			// rewrites candidates, so re-deriving them here keeps the comparison to one variable.
+			// The baseline carries the light-screen cap too, or a difference it caused would be
+			// reported as the mix rule's doing. Capping rewrites counts and retargeting rewrites
+			// candidates, so re-deriving it here keeps the comparison to one variable.
 			if (retargeted
 				&& ArmyMixLogic.Names(ReferencePlans.RocketBodies, choice.ActorType))
 			{
@@ -387,9 +376,6 @@ namespace AutoCnC.Reference.Modes
 					unretargeted, ReferencePlans.InfantryQueue, ctx.Cash,
 					standingScreenVehicles, screenVehicleShortBelow,
 					screenVehicleBuildable, income.ScreenVehiclePrice, income).Plan;
-				baseline = IncomeFirstLogic.Hold(
-					baseline, ReferencePlans.InfantryQueue, ctx.Cash,
-					standingHarvesters, shortBelow, factories > 0, income).Plan;
 				if (!preserveFirstScreen)
 					baseline = IncomeFirstLogic.PrioritizeRecovery(
 						baseline, ReferencePlans.HarvesterUnits,
@@ -399,10 +385,6 @@ namespace AutoCnC.Reference.Modes
 				if (before.IsValid && ArmyMixLogic.Names(ReferencePlans.RifleBodies, before.ActorType))
 					why += $", rifles swapped for rockets, {seen.Armour} of {seen.Total} seen wear armour";
 			}
-
-			if (standingHarvesters < shortBelow
-				&& ArmyMixLogic.Names(ReferencePlans.HarvesterUnits, choice.ActorType))
-				why += ", reserving construction cash before harvester queue visibility";
 
 			return UnitDecision.Produce(choice.Queue, choice.ActorType, why);
 		}

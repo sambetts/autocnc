@@ -10,8 +10,10 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Threading;
+using System.Text.Json;
 using NUnit.Framework;
 
 namespace AutoCnC.Launcher.Tests
@@ -212,6 +214,66 @@ namespace AutoCnC.Launcher.Tests
 			{
 				Directory.Delete(directory, true);
 			}
+		}
+
+		[Test]
+		public void WorkerOwnershipIsLiveForTheScriptLifetimeAndRemovedAfterward()
+		{
+			var directory = TempDirectory();
+			var script = Path.Combine(directory, "worker.ps1");
+			var ready = Path.Combine(directory, "ready");
+			var release = Path.Combine(directory, "release");
+			var ownership = Path.Combine(directory, "worker.json");
+			File.WriteAllText(script,
+				"param([string]$ReadyFile, [string]$ReleaseFile)\n" +
+				"Set-Content -LiteralPath $ReadyFile -Value ready\n" +
+				"while (-not (Test-Path -LiteralPath $ReleaseFile)) { Start-Sleep -Milliseconds 10 }\n");
+
+			try
+			{
+				using var finished = new ManualResetEventSlim();
+				var runner = new ScriptRunner();
+				runner.Finished += _ => finished.Set();
+				runner.Start(new ScriptJob
+				{
+					ScriptPath = script,
+					Arguments = ["-ReadyFile", ready, "-ReleaseFile", release],
+					WorkerOwnershipFile = ownership
+				}, directory);
+
+				Assert.That(SpinWait.SpinUntil(() =>
+					File.Exists(ready) && File.Exists(ownership),
+					TimeSpan.FromSeconds(10)), Is.True);
+				var worker = JsonSerializer.Deserialize<ProcessOwnership>(
+					File.ReadAllText(ownership));
+				Assert.That(ProcessOwnership.IsLive(worker), Is.True);
+
+				File.WriteAllText(release, "go");
+				Assert.That(finished.Wait(TimeSpan.FromSeconds(10)), Is.True);
+				Assert.That(File.Exists(ownership), Is.False);
+			}
+			finally
+			{
+				Directory.Delete(directory, true);
+			}
+		}
+
+		[Test]
+		public void ClosingAWorkerJobKillsItsProcess()
+		{
+			using var process = Process.Start(new ProcessStartInfo
+			{
+				FileName = Path.Combine(Environment.SystemDirectory,
+					"WindowsPowerShell", "v1.0", "powershell.exe"),
+				Arguments = "-NoProfile -Command \"Start-Sleep -Seconds 30\"",
+				UseShellExecute = false,
+				CreateNoWindow = true
+			});
+			Assert.That(process, Is.Not.Null);
+			using (var job = WindowsProcessJob.Create())
+				job.Assign(process);
+
+			Assert.That(process.WaitForExit(5000), Is.True);
 		}
 
 		internal static (int ExitCode, System.Collections.Generic.IReadOnlyList<string> Output) Run(

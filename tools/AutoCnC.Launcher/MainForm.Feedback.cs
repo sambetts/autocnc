@@ -159,6 +159,7 @@ namespace AutoCnC.Launcher
 				Title = $"Watching battle {run.Manifest.CreatedUtc.ToLocalTime():g}",
 				ScriptPath = repo.LaunchScript,
 				Arguments = ["-Replay", run.ReplayPath],
+				WorkerOwnershipFile = run.WorkerOwnershipPath,
 				Completed = code => FinishReplayReview(run, code, improveAfterWatching)
 			});
 			RunNext();

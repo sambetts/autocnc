@@ -1563,7 +1563,8 @@ namespace AutoCnC.Launcher
 					: "Building your bot",
 				ScriptPath = repo.RunBotScript,
 				Arguments = RunBotArguments(play),
-				CancellationFile = play && IsHeadlessSelected() ? activeRun.CancellationPath : null
+				CancellationFile = play && IsHeadlessSelected() ? activeRun.CancellationPath : null,
+				WorkerOwnershipFile = play ? activeRun.WorkerOwnershipPath : null
 			});
 
 			RunNext();
@@ -1598,7 +1599,8 @@ namespace AutoCnC.Launcher
 					ReplaceRunReference(rememberedRun, run);
 					runs.Add(run);
 				}
-				catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+				catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
+					System.Text.Json.JsonException)
 				{
 					Append("Could not reconcile an interrupted continuous experiment: " + ex.Message);
 				}
@@ -1714,7 +1716,7 @@ namespace AutoCnC.Launcher
 				return true;
 			}
 			catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
-				InvalidOperationException)
+				InvalidOperationException or System.Text.Json.JsonException)
 			{
 				AbortUnresolvedContinuousExperiment(
 					"Recovery failed before the interrupted candidate could be reevaluated.");
@@ -2008,6 +2010,15 @@ namespace AutoCnC.Launcher
 					MessageBoxIcon.Error, automatic);
 				return false;
 			}
+			catch (System.Text.Json.JsonException ex)
+			{
+				if (!hadWorkspaceMutation)
+					ReleaseWorkspaceMutation();
+				ReportAutomationFailure(
+					$"Could not prepare the improvement: {ex.Message}",
+					MessageBoxIcon.Error, automatic);
+				return false;
+			}
 			finally
 			{
 				agentMutation?.Dispose();
@@ -2030,6 +2041,7 @@ namespace AutoCnC.Launcher
 				],
 				PreserveColor = true,
 				Kind = ScriptJobKind.Improvement,
+				WorkerOwnershipFile = run.WorkerOwnershipPath,
 				Output = AppendImprovementOutput,
 				Completed = code => FinishImprovement(run, code)
 			});
@@ -2092,41 +2104,35 @@ namespace AutoCnC.Launcher
 			var suggestedNextPrompt = !failed
 				? TrainingAgent.FindSuggestedNextPrompt(runner.LastOutput, run)
 				: null;
+			var changeCount = TrainingAgentResult.UnknownChangeCount;
 			try
 			{
-				var changes = WorkspaceSnapshot.Compare(run);
+				changeCount = WorkspaceSnapshot.Compare(run).Count;
+			}
+			catch (Exception ex) when (ex is InvalidDataException or IOException or
+				UnauthorizedAccessException or System.Text.Json.JsonException)
+			{
+				AppendImprovementOutput(
+					$"Could not record the agent's changes: {ex.Message}");
+			}
+
+			try
+			{
 				var current = TrainingRun.FinishLatestAgent(run, exitCode,
-					changes.Count, suggestedNextPrompt, failurePhase,
+					changeCount, suggestedNextPrompt, failurePhase,
 					failureMessage, cancelled);
 				ReplaceRunReference(run, current);
 				run = current;
 			}
-			catch (InvalidDataException ex)
+			catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
+				InvalidOperationException or System.Text.Json.JsonException)
 			{
-				AppendImprovementOutput($"Could not record the agent's changes: {ex.Message}");
-				var current = TrainingRun.FinishLatestAgent(run, exitCode,
-					TrainingAgentResult.UnknownChangeCount, suggestedNextPrompt,
-					failurePhase, failureMessage, cancelled);
-				ReplaceRunReference(run, current);
-				run = current;
-			}
-			catch (IOException ex)
-			{
-				AppendImprovementOutput($"Could not record the agent's changes: {ex.Message}");
-				var current = TrainingRun.FinishLatestAgent(run, exitCode,
-					TrainingAgentResult.UnknownChangeCount, suggestedNextPrompt,
-					failurePhase, failureMessage, cancelled);
-				ReplaceRunReference(run, current);
-				run = current;
-			}
-			catch (System.Text.Json.JsonException ex)
-			{
-				AppendImprovementOutput($"Could not record the agent's changes: {ex.Message}");
-				var current = TrainingRun.FinishLatestAgent(run, exitCode,
-					TrainingAgentResult.UnknownChangeCount, suggestedNextPrompt,
-					failurePhase, failureMessage, cancelled);
-				ReplaceRunReference(run, current);
-				run = current;
+				AppendImprovementOutput(
+					"Could not persist the completed improvement: " + ex.Message);
+				AbortUnresolvedContinuousExperiment(
+					"The completed worker result could not be reconciled.");
+				ClearContinuousState();
+				return;
 			}
 
 			// Deliberately outside the block above: this only draws what was just recorded, and a
@@ -2167,7 +2173,8 @@ namespace AutoCnC.Launcher
 						}
 					}
 					catch (Exception ex) when (ex is InvalidDataException or IOException or
-						UnauthorizedAccessException or InvalidOperationException)
+						UnauthorizedAccessException or InvalidOperationException or
+						System.Text.Json.JsonException)
 					{
 						continuousEvaluationPlan = null;
 						if (SamePath(activeTrainingRun?.RunDirectory, run.RunDirectory))
@@ -2212,7 +2219,7 @@ namespace AutoCnC.Launcher
 				continuousCandidateRun = run;
 				activeTrainingRun = run;
 				queue.Clear();
-				EnqueueContinuousStep(
+				EnqueueContinuousStep(run,
 					continuousPromotion.BuildArm(repo, continuousEvaluationPlan,
 						ContinuousEvaluationArm.Candidate),
 					code => FinishContinuousArmBuild(run,
@@ -2220,7 +2227,8 @@ namespace AutoCnC.Launcher
 				RunNext();
 			}
 			catch (Exception ex) when (ex is InvalidDataException or IOException or
-				UnauthorizedAccessException or InvalidOperationException)
+				UnauthorizedAccessException or InvalidOperationException or
+				System.Text.Json.JsonException)
 			{
 				continuousEvaluationPlan = null;
 				if (SamePath(activeTrainingRun?.RunDirectory, run.RunDirectory))
@@ -2231,7 +2239,8 @@ namespace AutoCnC.Launcher
 						"Paired evaluation preparation failed: " + ex.Message);
 				}
 				catch (Exception saveError) when (saveError is IOException or
-					UnauthorizedAccessException or InvalidOperationException)
+					UnauthorizedAccessException or InvalidOperationException or
+					System.Text.Json.JsonException)
 				{
 					AppendImprovementOutput(
 						"Could not persist evaluation invalidation: " + saveError.Message);
@@ -2261,20 +2270,21 @@ namespace AutoCnC.Launcher
 			{
 				continuousPromotion.CaptureBuiltArm(run, continuousEvaluationPlan, arm);
 				if (arm == ContinuousEvaluationArm.Candidate)
-					EnqueueContinuousStep(
+					EnqueueContinuousStep(run,
 						continuousPromotion.BuildArm(repo, continuousEvaluationPlan,
 							ContinuousEvaluationArm.Control),
 						code => FinishContinuousArmBuild(run,
 							ContinuousEvaluationArm.Control, code));
 				else
-					EnqueueContinuousStep(
+					EnqueueContinuousStep(run,
 						continuousPromotion.BenchmarkArm(repo, run,
 							continuousEvaluationPlan, ContinuousEvaluationArm.Candidate),
 						code => FinishContinuousArmBenchmark(run,
 							ContinuousEvaluationArm.Candidate, code));
 			}
 			catch (Exception ex) when (ex is InvalidDataException or IOException or
-				UnauthorizedAccessException or InvalidOperationException)
+				UnauthorizedAccessException or InvalidOperationException or
+				System.Text.Json.JsonException)
 			{
 				FinishContinuousFailure(run,
 					$"Could not capture the immutable {arm.ToString().ToLowerInvariant()} arm: " +
@@ -2295,7 +2305,7 @@ namespace AutoCnC.Launcher
 			try
 			{
 				if (arm == ContinuousEvaluationArm.Candidate)
-					EnqueueContinuousStep(
+					EnqueueContinuousStep(run,
 						continuousPromotion.BenchmarkArm(repo, run,
 							continuousEvaluationPlan, ContinuousEvaluationArm.Control),
 						code => FinishContinuousArmBenchmark(run,
@@ -2310,7 +2320,8 @@ namespace AutoCnC.Launcher
 				}
 			}
 			catch (Exception ex) when (ex is InvalidDataException or IOException or
-				UnauthorizedAccessException or InvalidOperationException)
+				UnauthorizedAccessException or InvalidOperationException or
+				System.Text.Json.JsonException)
 			{
 				FinishContinuousFailure(run,
 					$"Could not continue the immutable {arm.ToString().ToLowerInvariant()} benchmark: " +
@@ -2329,7 +2340,8 @@ namespace AutoCnC.Launcher
 					continuousPromotion.FailEvaluation(run, continuousEvaluationPlan, reason));
 			}
 			catch (Exception ex) when (ex is InvalidDataException or IOException or
-				UnauthorizedAccessException or InvalidOperationException)
+				UnauthorizedAccessException or InvalidOperationException or
+				System.Text.Json.JsonException)
 			{
 				AbortUnresolvedContinuousExperiment(
 					"The failed paired evaluation could not be settled.");
@@ -2388,7 +2400,8 @@ namespace AutoCnC.Launcher
 					ReleaseWorkspaceMutation();
 			}
 			catch (Exception ex) when (ex is InvalidDataException or IOException or
-				UnauthorizedAccessException or InvalidOperationException)
+				UnauthorizedAccessException or InvalidOperationException or
+				System.Text.Json.JsonException)
 			{
 				AbortUnresolvedContinuousExperiment(
 					"The paired evaluation decision could not be applied.");
@@ -2400,7 +2413,8 @@ namespace AutoCnC.Launcher
 			}
 		}
 
-		void EnqueueContinuousStep(ContinuousScriptPlan plan, Action<int> completed)
+		void EnqueueContinuousStep(TrainingRun run, ContinuousScriptPlan plan,
+			Action<int> completed)
 		{
 			queue.Enqueue(new ScriptJob
 			{
@@ -2409,6 +2423,7 @@ namespace AutoCnC.Launcher
 				Arguments = plan.Arguments,
 				PreserveColor = true,
 				Kind = ScriptJobKind.Improvement,
+				WorkerOwnershipFile = run.WorkerOwnershipPath,
 				Output = AppendImprovementOutput,
 				Completed = completed
 			});
@@ -2442,7 +2457,7 @@ namespace AutoCnC.Launcher
 				}
 			}
 			catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
-				InvalidOperationException)
+				InvalidOperationException or System.Text.Json.JsonException)
 			{
 				AbortUnresolvedContinuousExperiment(
 					"The live workspace could not be reconciled before the next fight.");
@@ -2485,7 +2500,7 @@ namespace AutoCnC.Launcher
 				run = current;
 			}
 			catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
-				InvalidOperationException)
+				InvalidOperationException or System.Text.Json.JsonException)
 			{
 				ReleaseWorkspaceMutation();
 				MessageBox.Show(this,
@@ -2507,6 +2522,7 @@ namespace AutoCnC.Launcher
 				],
 				PreserveColor = true,
 				Kind = ScriptJobKind.Improvement,
+				WorkerOwnershipFile = run.WorkerOwnershipPath,
 				Output = AppendImprovementOutput,
 				Completed = code => FinishImprovement(run, code)
 			});
@@ -2774,6 +2790,12 @@ namespace AutoCnC.Launcher
 			catch (InvalidOperationException ex)
 			{
 				MessageBox.Show(this, ex.Message, "AutoC&C", MessageBoxButtons.OK, MessageBoxIcon.Error);
+			}
+			catch (System.Text.Json.JsonException ex)
+			{
+				MessageBox.Show(this,
+					$"Could not read the source snapshot: {ex.Message}", "AutoC&C",
+					MessageBoxButtons.OK, MessageBoxIcon.Error);
 			}
 		}
 
@@ -3064,7 +3086,7 @@ namespace AutoCnC.Launcher
 				RefreshFeedbackRun(current);
 			}
 			catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
-				InvalidOperationException)
+				InvalidOperationException or System.Text.Json.JsonException)
 			{
 				AppendImprovementOutput(
 					"Could not persist the interrupted continuous experiment: " + ex.Message);

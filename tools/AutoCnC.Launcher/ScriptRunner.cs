@@ -35,6 +35,7 @@ namespace AutoCnC.Launcher
 		public ScriptJobKind Kind { get; init; } = ScriptJobKind.Generic;
 		public bool PreserveColor { get; init; }
 		public string CancellationFile { get; init; }
+		public string WorkerOwnershipFile { get; init; }
 		public Action<TerminalLine> Output { get; init; }
 		public Action<int> Completed { get; init; }
 	}
@@ -66,41 +67,52 @@ namespace AutoCnC.Launcher
 			"if (Get-Variable PSStyle -ErrorAction SilentlyContinue) {\n" +
 			"    $PSStyle.OutputRendering = if ($env:AUTOCNC_PRESERVE_COLOR -eq '1') { 'Ansi' } else { 'PlainText' }\n" +
 			"}\n" +
-			"$job = @((ConvertFrom-Json -InputObject $env:AUTOCNC_SCRIPT_JOB))\n" +
-			"$script = [string]$job[0]\n" +
-			"$command = Get-Command -Name $script -CommandType ExternalScript\n" +
-			"$declared = $command.Parameters\n" +
-			"if ($null -eq $declared -or $declared.Count -eq 0) {\n" +
-			"    $parseTokens = $null\n" +
-			"    $parseErrors = $null\n" +
-			"    [void][System.Management.Automation.Language.Parser]::ParseFile($script, [ref]$parseTokens, [ref]$parseErrors)\n" +
-			"    if ($parseErrors -and $parseErrors.Count -gt 0) {\n" +
-			"        throw \"$script is not valid PowerShell $($PSVersionTable.PSVersion): $($parseErrors[0].Message) (line $($parseErrors[0].Extent.StartLineNumber))\"\n" +
+			"$workerPath = $env:AUTOCNC_WORKER_OWNERSHIP\n" +
+			"$workerGate = $env:AUTOCNC_WORKER_GATE\n" +
+			"if ($workerGate) { while (-not (Test-Path -LiteralPath $workerGate)) { Start-Sleep -Milliseconds 10 } }\n" +
+			"try {\n" +
+			"    $job = @((ConvertFrom-Json -InputObject $env:AUTOCNC_SCRIPT_JOB))\n" +
+			"    $script = [string]$job[0]\n" +
+			"    $command = Get-Command -Name $script -CommandType ExternalScript\n" +
+			"    $declared = $command.Parameters\n" +
+			"    if ($null -eq $declared -or $declared.Count -eq 0) {\n" +
+			"        $parseTokens = $null\n" +
+			"        $parseErrors = $null\n" +
+			"        [void][System.Management.Automation.Language.Parser]::ParseFile($script, [ref]$parseTokens, [ref]$parseErrors)\n" +
+			"        if ($parseErrors -and $parseErrors.Count -gt 0) {\n" +
+			"            throw \"$script is not valid PowerShell $($PSVersionTable.PSVersion): $($parseErrors[0].Message) (line $($parseErrors[0].Extent.StartLineNumber))\"\n" +
+			"        }\n" +
+			"        throw \"$script exposes no parameter metadata.\"\n" +
 			"    }\n" +
-			"    throw \"$script exposes no parameter metadata.\"\n" +
-			"}\n" +
-			"$parameters = @{}\n" +
-			"for ($i = 1; $i -lt $job.Count; $i++) {\n" +
-			"    $name = ([string]$job[$i]).TrimStart('-')\n" +
-			"    $metadata = $declared[$name]\n" +
-			"    if ($null -eq $metadata) {\n" +
-			"        $metadata = @($declared.Values | Where-Object { $_.Aliases -contains $name })[0]\n" +
+			"    $parameters = @{}\n" +
+			"    for ($i = 1; $i -lt $job.Count; $i++) {\n" +
+			"        $name = ([string]$job[$i]).TrimStart('-')\n" +
+			"        $metadata = $declared[$name]\n" +
+			"        if ($null -eq $metadata) {\n" +
+			"            $metadata = @($declared.Values | Where-Object { $_.Aliases -contains $name })[0]\n" +
+			"        }\n" +
+			"        if ($null -eq $metadata) { throw \"Unknown parameter '-$name' for $script.\" }\n" +
+			"        if ($metadata.ParameterType -eq [System.Management.Automation.SwitchParameter]) {\n" +
+			"            $parameters[$metadata.Name] = $true\n" +
+			"        } else {\n" +
+			"            if (++$i -ge $job.Count) { throw \"Parameter '-$name' needs a value.\" }\n" +
+			"            $parameters[$metadata.Name] = [string]$job[$i]\n" +
+			"        }\n" +
 			"    }\n" +
-			"    if ($null -eq $metadata) { throw \"Unknown parameter '-$name' for $script.\" }\n" +
-			"    if ($metadata.ParameterType -eq [System.Management.Automation.SwitchParameter]) {\n" +
-			"        $parameters[$metadata.Name] = $true\n" +
-			"    } else {\n" +
-			"        if (++$i -ge $job.Count) { throw \"Parameter '-$name' needs a value.\" }\n" +
-			"        $parameters[$metadata.Name] = [string]$job[$i]\n" +
-			"    }\n" +
-			"}\n" +
-			"& $command @parameters\n";
+			"    & $command @parameters\n" +
+			"} finally {\n" +
+			"    if ($workerPath) { Remove-Item -LiteralPath $workerPath -Force -ErrorAction SilentlyContinue }\n" +
+			"    if ($workerGate) { Remove-Item -LiteralPath $workerGate -Force -ErrorAction SilentlyContinue }\n" +
+			"}\n";
 
 		readonly object outputLock = new();
 		readonly List<string> currentOutput = [];
 		readonly TerminalTextParser terminalParser = new();
 		Process process;
+		WindowsProcessJob processJob;
 		string cancellationFile;
+		string workerOwnershipFile;
+		string workerGateFile;
 
 		/// <summary>Every line of output, in order, from both stdout and stderr.</summary>
 		public event Action<TerminalLine> Output;
@@ -117,9 +129,15 @@ namespace AutoCnC.Launcher
 				throw new InvalidOperationException("Something is already running.");
 
 			var preparedCancellationFile = PrepareCancellationFile(job.CancellationFile);
+			var preparedWorker = PrepareWorkerFiles(job.WorkerOwnershipFile);
 			var startInfo = CreateStartInfo(job, workingDirectory);
 			if (preparedCancellationFile != null)
 				startInfo.Environment["AUTOCNC_CANCELLATION_PRECLEARED"] = "1";
+			if (preparedWorker.Ownership != null)
+			{
+				startInfo.Environment["AUTOCNC_WORKER_OWNERSHIP"] = preparedWorker.Ownership;
+				startInfo.Environment["AUTOCNC_WORKER_GATE"] = preparedWorker.Gate;
+			}
 
 			lock (outputLock)
 			{
@@ -131,6 +149,12 @@ namespace AutoCnC.Launcher
 			var started = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
 			process = started;
 			cancellationFile = preparedCancellationFile;
+			workerOwnershipFile = preparedWorker.Ownership;
+			workerGateFile = preparedWorker.Gate;
+			var jobObject = preparedWorker.Ownership != null
+				? WindowsProcessJob.Create()
+				: null;
+			processJob = jobObject;
 			started.OutputDataReceived += (_, e) => Emit(e.Data);
 			started.ErrorDataReceived += (_, e) => Emit(e.Data);
 			started.Exited += (_, _) =>
@@ -147,7 +171,12 @@ namespace AutoCnC.Launcher
 				{
 					process = null;
 					cancellationFile = null;
+					workerOwnershipFile = null;
+					workerGateFile = null;
+					processJob = null;
 				}
+				CleanupWorkerFiles(preparedWorker.Ownership, preparedWorker.Gate);
+				jobObject?.Dispose();
 				started.Dispose();
 				Finished?.Invoke(code);
 			};
@@ -155,17 +184,28 @@ namespace AutoCnC.Launcher
 			try
 			{
 				started.Start();
+				jobObject?.Assign(started);
+				if (preparedWorker.Gate != null)
+				{
+					WriteWorkerOwnership(preparedWorker.Ownership, started);
+					File.WriteAllText(preparedWorker.Gate, "go");
+				}
 				started.BeginOutputReadLine();
 				started.BeginErrorReadLine();
 			}
 			catch (System.ComponentModel.Win32Exception)
 			{
-				CleanupFailedStart(started);
+				CleanupFailedStart(started, jobObject);
 				throw;
 			}
 			catch (InvalidOperationException)
 			{
-				CleanupFailedStart(started);
+				CleanupFailedStart(started, jobObject);
+				throw;
+			}
+			catch (IOException)
+			{
+				CleanupFailedStart(started, jobObject);
 				throw;
 			}
 		}
@@ -216,12 +256,15 @@ namespace AutoCnC.Launcher
 			return startInfo;
 		}
 
-		void CleanupFailedStart(Process started)
+		void CleanupFailedStart(Process started, WindowsProcessJob jobObject)
 		{
 			if (ReferenceEquals(process, started))
 			{
 				process = null;
 				cancellationFile = null;
+				workerOwnershipFile = null;
+				workerGateFile = null;
+				processJob = null;
 			}
 
 			try
@@ -236,7 +279,49 @@ namespace AutoCnC.Launcher
 			{
 			}
 
+			started.StartInfo.Environment.TryGetValue(
+				"AUTOCNC_WORKER_OWNERSHIP", out var ownership);
+			started.StartInfo.Environment.TryGetValue(
+				"AUTOCNC_WORKER_GATE", out var gate);
+			CleanupWorkerFiles(ownership, gate);
+			jobObject?.Dispose();
 			started.Dispose();
+		}
+
+		static (string Ownership, string Gate) PrepareWorkerFiles(string path)
+		{
+			if (string.IsNullOrWhiteSpace(path))
+				return (null, null);
+
+			var ownership = Path.GetFullPath(path);
+			var gate = ownership + ".gate";
+			Directory.CreateDirectory(Path.GetDirectoryName(ownership));
+			CleanupWorkerFiles(ownership, gate);
+			return (ownership, gate);
+		}
+
+		static void WriteWorkerOwnership(string path, Process process)
+		{
+			var temporary = path + ".tmp";
+			File.WriteAllText(temporary,
+				JsonSerializer.Serialize(ProcessOwnership.ForProcess(process)));
+			File.Move(temporary, path, true);
+		}
+
+		static void CleanupWorkerFiles(string ownership, string gate)
+		{
+			foreach (var path in new[] { ownership, gate })
+				if (!string.IsNullOrWhiteSpace(path))
+					try
+					{
+						File.Delete(path);
+					}
+					catch (IOException)
+					{
+					}
+					catch (UnauthorizedAccessException)
+					{
+					}
 		}
 
 		static string PrepareCancellationFile(string path)

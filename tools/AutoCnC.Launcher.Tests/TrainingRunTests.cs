@@ -306,6 +306,48 @@ namespace AutoCnC.Launcher.Tests
 		}
 
 		[Test]
+		public void LiveOrphanWorkerDefersRecoveryUntilItsProcessTreeEnds()
+		{
+			var run = NewRun();
+			WorkspaceSnapshot.Capture(run);
+			run.ContinuousAgentStarted("agent");
+			File.WriteAllText(Path.Combine(workspace, "Strategy.cs"), "candidate");
+			run.AgentFinished(0, 1);
+			run.Manifest.Owner = new ProcessOwnership { ProcessId = -1 };
+			run.Save();
+
+			using var worker = Process.Start(new ProcessStartInfo
+			{
+				FileName = Path.Combine(Environment.SystemDirectory,
+					"WindowsPowerShell", "v1.0", "powershell.exe"),
+				Arguments = "-NoProfile -Command \"Start-Sleep -Seconds 30\"",
+				UseShellExecute = false,
+				CreateNoWindow = true
+			});
+			Assert.That(worker, Is.Not.Null);
+			try
+			{
+				File.WriteAllText(run.WorkerOwnershipPath,
+					JsonSerializer.Serialize(ProcessOwnership.ForProcess(worker)));
+
+				var blocked = TrainingRun.Load(run.RunDirectory);
+				Assert.That(blocked.IsBusy, Is.True);
+				Assert.That(blocked.Manifest.Experiment.State,
+					Is.EqualTo(TrainingExperimentStates.Candidate));
+			}
+			finally
+			{
+				if (!worker.HasExited)
+					worker.Kill(entireProcessTree: true);
+				worker.WaitForExit();
+			}
+
+			var recovered = TrainingRun.Load(run.RunDirectory);
+			Assert.That(recovered.Manifest.Experiment.State,
+				Is.EqualTo(TrainingExperimentStates.Aborted));
+		}
+
+		[Test]
 		public void WorkspaceLockIsCanonicalAcrossRunsAndBlocksOlderRestore()
 		{
 			var older = NewRun();
@@ -1507,6 +1549,7 @@ namespace AutoCnC.Launcher.Tests
 		{
 			run.Manifest.Status = "finished";
 			run.Manifest.CompletedUtc = DateTime.UtcNow;
+			run.Manifest.Owner = null;
 			run.Manifest.Result = new TrainingBattleResult
 			{
 				DurationSeconds = duration,

@@ -309,6 +309,7 @@ namespace AutoCnC.Launcher
 		public string AgentConfigurationPath => Path.Combine(RunDirectory, "agent-command.json");
 		public string AgentTranscriptPath => Path.Combine(RunDirectory, "agent-transcript.txt");
 		public string AgentStatusPath => Path.Combine(RunDirectory, "agent-status.json");
+		public string WorkerOwnershipPath => Path.Combine(RunDirectory, "worker.json");
 		public string ChatPath => Path.Combine(RunDirectory, "agent-chat.jsonl");
 		public string ChatMessagePath => Path.Combine(RunDirectory, "agent-chat-message.txt");
 		public string ChatTranscriptPath => Path.Combine(RunDirectory, "agent-chat-turn.txt");
@@ -364,8 +365,31 @@ namespace AutoCnC.Launcher
 			string.Equals(Manifest.Status, "evaluating", StringComparison.OrdinalIgnoreCase) ||
 			string.Equals(Manifest.Status, "restoring", StringComparison.OrdinalIgnoreCase);
 
+		public bool HasLiveWorker
+		{
+			get
+			{
+				if (!File.Exists(WorkerOwnershipPath))
+					return false;
+
+				try
+				{
+					var worker = JsonSerializer.Deserialize<ProcessOwnership>(
+						File.ReadAllText(WorkerOwnershipPath), JsonOptions);
+					return ProcessOwnership.IsLive(worker);
+				}
+				catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
+					JsonException)
+				{
+					// An unreadable worker claim is not evidence the worker is gone.
+					return true;
+				}
+			}
+		}
+
 		/// <summary>True while that work is genuinely still going on somewhere.</summary>
-		public bool IsBusy => HasUnfinishedWork && ProcessOwnership.IsLive(Manifest.Owner);
+		public bool IsBusy =>
+			ProcessOwnership.IsLive(Manifest.Owner) || HasLiveWorker;
 
 		/// <summary>
 		/// True when the session was left mid-battle or mid-improvement by a launcher that is gone.
@@ -447,7 +471,7 @@ namespace AutoCnC.Launcher
 		{
 			var run = LoadUnreconciled(directory);
 			if (run == null || !run.HasUnresolvedContinuousExperiment ||
-				ProcessOwnership.IsLive(run.Manifest.Owner))
+				run.IsBusy)
 				return run;
 
 			try

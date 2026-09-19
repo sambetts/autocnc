@@ -155,6 +155,11 @@ namespace AutoCnC.Launcher
 				chatWorkspaceMutation?.Dispose();
 				return AbandonTurn(thread, ex.Message);
 			}
+			catch (System.Text.Json.JsonException ex)
+			{
+				chatWorkspaceMutation?.Dispose();
+				return AbandonTurn(thread, ex.Message);
+			}
 
 			var leaseTransferred = false;
 			try
@@ -177,6 +182,7 @@ namespace AutoCnC.Launcher
 					],
 					PreserveColor = true,
 					Kind = ScriptJobKind.Chat,
+					WorkerOwnershipFile = run.WorkerOwnershipPath,
 					Output = AppendChatOutput,
 
 					// The conversation is captured rather than looked up again, so a turn started
@@ -206,7 +212,8 @@ namespace AutoCnC.Launcher
 				return true;
 			}
 			catch (Exception ex) when (ex is InvalidOperationException or IOException or
-				UnauthorizedAccessException or System.ComponentModel.Win32Exception)
+				UnauthorizedAccessException or System.ComponentModel.Win32Exception or
+				System.Text.Json.JsonException)
 			{
 				queue.Clear();
 				return AbandonTurn(thread, ex.Message);
@@ -245,7 +252,7 @@ namespace AutoCnC.Launcher
 						"The chat changed source, so the continuous candidate will be reevaluated.");
 			}
 			catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
-				InvalidOperationException)
+				InvalidOperationException or System.Text.Json.JsonException)
 			{
 				thread.Note(
 					"The launcher could not compare source after chat: " + ex.Message);

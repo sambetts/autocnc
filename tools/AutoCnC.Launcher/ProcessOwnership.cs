@@ -41,6 +41,11 @@ namespace AutoCnC.Launcher
 		public static ProcessOwnership Claim()
 		{
 			using var process = Process.GetCurrentProcess();
+			return ForProcess(process);
+		}
+
+		internal static ProcessOwnership ForProcess(Process process)
+		{
 			return new ProcessOwnership
 			{
 				ProcessId = process.Id,

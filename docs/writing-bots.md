@@ -309,6 +309,8 @@ Manifest-only actions such as feedback, replay review, verification retry and pr
 also reload under the workspace/run locks and merge only their own fields. Deletion first renames
 the run to a tombstone under those locks. A restore interrupted halfway is never resumable as a
 candidate; explicit restore safely finishes it.
+Run-bound PowerShell workers publish their process identity and live inside a kill-on-close Windows
+job, preventing an orphaned agent tree from racing crash recovery.
 
 **Train from battle** in AI training chooses which recording supplies the evidence. The selection
 is independent of the latest fight and survives launcher restarts. Its replay, feedback, prompt,

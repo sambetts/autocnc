@@ -466,6 +466,11 @@ the selected project to still exist. A snapshot restore can therefore recreate a
 file or remove a renamed replacement.
 Prompt accept/reject reloads under the run lock and changes only the latest agent prompt fields;
 modeless windows and cached conversations are rebound to that fresh run object.
+Repository workers tied to a run are assigned to a Windows job with kill-on-close and publish
+`worker.json` before a launcher gate lets the script proceed. If the launcher dies, Windows kills
+the worker tree; recovery also refuses to proceed while a persisted worker identity is still live.
+Malformed JSON from preparation, build, evaluation or restore is normalized through the same
+continuous cleanup paths as I/O failures, so state and workspace leases cannot leak.
 Deletion takes the workspace and external per-run locks, atomically renames the session to a
 `.deleting-*` tombstone, releases the locks, then removes the tombstone. Active operations retain
 all original evidence instead of observing a partially deleted run.

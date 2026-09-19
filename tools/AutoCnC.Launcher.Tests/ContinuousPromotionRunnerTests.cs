@@ -343,6 +343,25 @@ namespace AutoCnC.Launcher.Tests
 		}
 
 		[Test]
+		public void MalformedBenchmarkJsonUsesUndefinedCleanupAndRestoresChampion()
+		{
+			var run = Candidate();
+			var plan = PreparedArms(run);
+			run = plan.Run;
+			WriteArmResults(run, candidateOutcome: "Won", controlOutcome: "Lost",
+				candidateFitness: 0.6, controlFitness: 0.5);
+			File.WriteAllText(run.CandidateBenchmarkResultPath, "{");
+
+			var completion = promotion.CompleteEvaluation(run, plan, exitCode: 0);
+			var decision = promotion.ApplyDecision(run, plan, completion.Evaluation);
+
+			Assert.That(completion.Evaluation.Verdict,
+				Is.EqualTo(PromotionVerdicts.Undefined));
+			Assert.That(decision, Is.EqualTo(ContinuousEvaluationDecision.Undefined));
+			Assert.That(File.ReadAllText(strategy), Is.EqualTo("champion"));
+		}
+
+		[Test]
 		public void LiveWorkspaceChangeInvalidatesEvaluationWithoutRestoringUserEdits()
 		{
 			var run = Candidate();

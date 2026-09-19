@@ -91,16 +91,19 @@ namespace AutoCnC.Sdk
 		/// </remarks>
 		DoctrineDecision Reassess(in BattleState state);
 
-		/// <summary>
-		/// Called after doctrine selection at every strategic assessment. Return cash to reserve
-		/// for one production queue category, or <see cref="ProductionBudget.None"/>.
-		/// </summary>
-		/// <remarks>
-		/// This default keeps bots written before production arbitration source-compatible. The
-		/// platform refreshes the reservation on every assessment; modes do not need to coordinate
-		/// with each other or issue <see cref="UnitDecision.Hold"/>.
-		/// </remarks>
-		ProductionBudget ReserveProductionBudget(in BattleState state) => ProductionBudget.None;
+	}
+
+	/// <summary>
+	/// Optional strategic policy for reserving cash for one production queue category.
+	/// </summary>
+	/// <remarks>
+	/// Kept separate from <see cref="IBattleBot"/> so existing direct implementations remain
+	/// source- and reflection-compatible. <see cref="BattleBot"/> implements it with a no-op
+	/// default.
+	/// </remarks>
+	public interface IProductionBudgetBot
+	{
+		ProductionBudget ReserveProductionBudget(in BattleState state);
 	}
 
 	/// <summary>Fluent surface a bot uses to declare which doctrines it owns.</summary>
@@ -123,7 +126,7 @@ namespace AutoCnC.Sdk
 	/// The default <see cref="Reassess"/> never switches, which makes a bot that simply bundles
 	/// one doctrine a three-line class rather than a ceremony.
 	/// </remarks>
-	public abstract class BattleBot : IBattleBot
+	public abstract class BattleBot : IBattleBot, IProductionBudgetBot
 	{
 		public abstract string Name { get; }
 

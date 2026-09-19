@@ -27,8 +27,7 @@ namespace AutoCnC.Sdk.Tests
 
 			Assert.Multiple(() =>
 			{
-				Assert.That(bot.ReserveProductionBudget(BattleState.Empty),
-					Is.EqualTo(ProductionBudget.None));
+				Assert.That(bot, Is.Not.InstanceOf<IProductionBudgetBot>());
 				Assert.That(host.CurrentProductionBudget, Is.EqualTo(ProductionBudget.None));
 			});
 		}

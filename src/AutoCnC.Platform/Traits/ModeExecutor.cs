@@ -566,7 +566,9 @@ namespace AutoCnC.Platform.Traits
 
 			try
 			{
-				var proposed = brain.ReserveProductionBudget(state);
+				var proposed = brain is IProductionBudgetBot budgetBot
+					? budgetBot.ReserveProductionBudget(state)
+					: ProductionBudget.None;
 				var resolution = ProductionBudgetArbitrator.Resolve(
 					proposed, ProductionQueues(world.LocalPlayer));
 				if (resolution.IsActive)

@@ -91,7 +91,7 @@ it as authoritative context alongside the source and the evidence from one compl
   configured names resolve to concrete ready keys before duplicate suppression.
 - Player-scoped repair and cancellation requests remain coalesced while their orders are in
   flight; support-power requests are coalesced within the issuing tick.
-- `IBattleBot.ReserveProductionBudget` may reserve cash for one production queue Group/Type until
+- `IProductionBudgetBot.ReserveProductionBudget` may reserve cash for one production queue Group/Type until
   the next assessment. The owner may spend it; other new `Produce` decisions are centrally
   suppressed when their full rules cost would take live cash below the remaining reservation.
   Arbitration is deterministic across controller order. Existing queued items, cancellation and

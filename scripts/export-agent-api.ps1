@@ -181,7 +181,11 @@ try {
         'One instance per unit. This is the complete public surface; nothing else is reachable from a mode.'
 
     Add-Section 'IBattleBot — strategic assessment policy' $sdk.GetType('AutoCnC.Sdk.IBattleBot') `
-        'Existing direct implementations may omit `ReserveProductionBudget`; its default returns no reservation.'
+        'The required strategic surface implemented by every battle bot.'
+
+    Add-Section 'IProductionBudgetBot — optional production reservation policy' `
+        $sdk.GetType('AutoCnC.Sdk.IProductionBudgetBot') `
+        'BattleBot implements this optional interface with a no-reservation default.'
 
     Add-Section 'BattleBot — convenience base class' $sdk.GetType('AutoCnC.Sdk.BattleBot') `
         'Override only the strategic policies the bot needs.'
@@ -202,7 +206,7 @@ try {
         'Returned from `IBattleBot.Reassess` to continue or request a doctrine transition.'
 
     Add-Section 'ProductionBudget' $core.GetType('AutoCnC.Core.ProductionBudget') `
-        'Returned from `IBattleBot.ReserveProductionBudget`; the queue is the reservation owner.'
+        'Returned from `IProductionBudgetBot.ReserveProductionBudget`; the queue is the reservation owner.'
 
     foreach ($typeName in 'ThreatValueSummary', 'ResourceCell', 'ResourceField', 'ThreatSnapshot',
         'OwnedBuildingState', 'ProductionQueueState', 'SupportPowerState', 'ThreatKind') {

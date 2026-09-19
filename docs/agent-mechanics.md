@@ -224,7 +224,7 @@ permitted way to know where anything is.
   activation, and placement decisions become normal player orders a few ticks later. Do not
   assume an order applies immediately.
 - Returning the same intent repeatedly is cheap because the host suppresses duplicate orders.
-- `IBattleBot.ReserveProductionBudget` may reserve cash for one production queue Group/Type until
+- `IProductionBudgetBot.ReserveProductionBudget` may reserve cash for one production queue Group/Type until
   the next assessment. The owner may spend it; other new `Produce` decisions are centrally
   suppressed when their full rules cost would take live cash below the remaining reservation.
   Arbitration is deterministic across controller order. Existing queued items, cancellation and
@@ -361,13 +361,20 @@ void SwitchDoctrine(string doctrine, string reason, string reasonId)
 
 ### IBattleBot — strategic assessment policy
 
-Existing direct implementations may omit `ReserveProductionBudget`; its default returns no reservation.
+The required strategic surface implemented by every battle bot.
 
 ```
 string Description { get }
 string Name { get }
 void Configure(IBattleBotBuilder builder)
 DoctrineDecision Reassess(in BattleState state)
+```
+
+### IProductionBudgetBot — optional production reservation policy
+
+BattleBot implements this optional interface with a no-reservation default.
+
+```
 ProductionBudget ReserveProductionBudget(in BattleState state)
 ```
 
@@ -510,7 +517,7 @@ static DoctrineDecision SwitchUrgentlyTo(string doctrine, string reason, string 
 
 ### ProductionBudget
 
-Returned from `IBattleBot.ReserveProductionBudget`; the queue is the reservation owner.
+Returned from `IProductionBudgetBot.ReserveProductionBudget`; the queue is the reservation owner.
 
 ```
 bool IsActive { get }

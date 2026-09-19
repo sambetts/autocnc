@@ -224,6 +224,7 @@ namespace AutoCnC.Platform.Traits
 		readonly List<PendingModeOrder> pendingBudgetedOrders = [];
 		readonly PendingPlayerActions pendingPlayerActions = new();
 		readonly ProductionBudgetLease productionBudget = new();
+		readonly ProductionCommitmentLedger productionCommitments = new();
 
 		BattleAssessor assessor;
 		BattleLog battleLog;
@@ -659,6 +660,9 @@ namespace AutoCnC.Platform.Traits
 			if (Doctrine == null)
 				return;
 
+			productionCommitments.Refresh(
+				world.WorldTick,
+				commitment => ProductionCommitmentIsCurrent(player, commitment));
 			pending.Clear();
 			pendingBudgetedOrders.Clear();
 			pendingPlayerActions.BeginTick(
@@ -876,6 +880,17 @@ namespace AutoCnC.Platform.Traits
 
 			var canonicalQueue = queue.Info.Group ?? queue.Info.Type ?? requestedDecision.Queue;
 			var cost = Math.Max(0, queue.GetProductionCost(buildable));
+			var queueIndex = QueueIndex(queue);
+			if (queueIndex < 0)
+			{
+				outcome = "production-queue-missing";
+				return false;
+			}
+
+			var revisions = actor.Owner.PlayerActor.TraitOrDefault<IProductionQueueRevisionProvider>();
+			ulong queueRevision = 0;
+			var hasQueueRevision =
+				revisions != null && revisions.TryGetRevision(queue, out queueRevision);
 			resolvedDecision = requestedDecision with
 			{
 				TargetActorId = queue.Actor.ActorID,
@@ -886,10 +901,15 @@ namespace AutoCnC.Platform.Traits
 			candidate = new ProductionBudgetCandidate(
 				actor.ActorID,
 				queue.Actor.ActorID,
+				queueIndex,
+				queue.Info.Group,
+				queue.Info.Type,
 				canonicalQueue,
 				actorInfo.Name,
 				cost,
-				budgetScope.OwnsQueue(queue.Info.Group, queue.Info.Type));
+				budgetScope.OwnsQueue(queue.Info.Group, queue.Info.Type),
+				queueRevision,
+				hasQueueRevision);
 			outcome = null;
 			return true;
 		}
@@ -929,6 +949,7 @@ namespace AutoCnC.Platform.Traits
 
 			var resources = player.PlayerActor.TraitOrDefault<PlayerResources>();
 			var currentCash = resources?.GetCashAndResources() ?? 0;
+			var committed = productionCommitments.ProjectedSpend(budgetScope);
 			var prioritized = RotateAdmission(
 				pendingBudgetedOrders.OrderBy(item => item.Actor.ActorID).ToArray(),
 				admissionRound).ToArray();
@@ -938,7 +959,9 @@ namespace AutoCnC.Platform.Traits
 				prioritized
 					.Where(item => item.ProductionCandidate.HasValue)
 					.Select(item => item.ProductionCandidate.Value),
-				int.MaxValue)
+				int.MaxValue,
+				committed.OwnerCost,
+				committed.NonOwnerCost)
 				.ToDictionary(evaluation => evaluation.Candidate.ControllerActorId);
 			var eligible = new List<PendingModeOrder>(prioritized.Length);
 
@@ -989,12 +1012,17 @@ namespace AutoCnC.Platform.Traits
 					continue;
 				}
 
-				QueueIssuedDecision(
-					item.Actor, item.Controller, item.Decision, item.Order, enforceOrderLimit: true);
+				if (QueueIssuedDecision(
+					item.Actor, item.Controller, item.Decision, item.Order, enforceOrderLimit: true) &&
+					item.ProductionCandidate.HasValue)
+					productionCommitments.Commit(
+						item.ProductionCandidate.Value,
+						world.WorldTick,
+						ProductionCommitmentTimeoutTicks);
 			}
 		}
 
-		void QueueIssuedDecision(
+		bool QueueIssuedDecision(
 			Actor actor,
 			ProgrammableController controller,
 			in UnitDecision decision,
@@ -1007,7 +1035,7 @@ namespace AutoCnC.Platform.Traits
 				RetryNextTick(controller);
 				decisionTrace?.UnitDecisionEvaluated(GameSeconds, actor.Info.Name, actor.ActorID,
 					controller.ActiveModeName, decision, "order-limit");
-				return;
+				return false;
 			}
 
 			var playerActorId = actor.Owner.PlayerActor.ActorID;
@@ -1016,7 +1044,7 @@ namespace AutoCnC.Platform.Traits
 				controller.LastIssued = decision;
 				decisionTrace?.UnitDecisionEvaluated(GameSeconds, actor.Info.Name, actor.ActorID,
 					controller.ActiveModeName, decision, "coalesced-pending-action");
-				return;
+				return false;
 			}
 
 			pending.Add(order);
@@ -1026,7 +1054,7 @@ namespace AutoCnC.Platform.Traits
 				controller.LastIssued = decision;
 				decisionTrace?.UnitDecisionEvaluated(GameSeconds, actor.Info.Name, actor.ActorID,
 					controller.ActiveModeName, decision, "coalesced-pending-action");
-				return;
+				return false;
 			}
 
 			if (LogDecisions)
@@ -1039,6 +1067,59 @@ namespace AutoCnC.Platform.Traits
 			decisionTrace?.UnitDecisionIssued(GameSeconds, actor.Info.Name, actor.ActorID,
 				controller.ActiveModeName, decision, order.OrderString);
 			controller.LastIssued = decision;
+			return true;
+		}
+
+		int ProductionCommitmentTimeoutTicks =>
+			Math.Max(1, 10 * 1000 / TurboSpeed.NominalTimestep);
+
+		bool ProductionCommitmentIsCurrent(
+			Player player,
+			in ProductionCommitmentKey commitment)
+		{
+			var queueActor = world.GetActorById(commitment.QueueActorId);
+			if (queueActor == null || queueActor.IsDead || !queueActor.IsInWorld ||
+				queueActor.Owner != player)
+				return false;
+
+			var queues = queueActor.TraitsImplementing<ProductionQueue>().ToArray();
+			if (commitment.QueueIndex < 0 || commitment.QueueIndex >= queues.Length)
+				return false;
+
+			var queue = queues[commitment.QueueIndex];
+			if (!queue.Enabled ||
+				!string.Equals(queue.Info.Group, commitment.QueueGroup, StringComparison.Ordinal) ||
+				!string.Equals(queue.Info.Type, commitment.QueueType, StringComparison.Ordinal))
+				return false;
+
+			var committedItem = commitment.Item;
+			var buildable = queue.BuildableItems().FirstOrDefault(item =>
+				string.Equals(item.Name, committedItem, StringComparison.OrdinalIgnoreCase));
+			if (buildable == null ||
+				Math.Max(0, queue.GetProductionCost(buildable)) != commitment.Cost)
+				return false;
+
+			if (!commitment.HasQueueRevision)
+				return true;
+
+			var revisions = player.PlayerActor.TraitOrDefault<IProductionQueueRevisionProvider>();
+			return revisions == null ||
+				!revisions.TryGetRevision(queue, out var currentRevision) ||
+				currentRevision == commitment.QueueRevision;
+		}
+
+		static int QueueIndex(ProductionQueue queue)
+		{
+			var index = 0;
+			foreach (var candidate in queue.Actor.TraitsImplementing<ProductionQueue>())
+			{
+				if (ReferenceEquals(candidate, queue))
+					return index;
+
+				index++;
+			}
+
+			return -1;
 		}
 
 		void RetryNextTick(ProgrammableController controller) =>

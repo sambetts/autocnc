@@ -500,6 +500,96 @@ namespace AutoCnC.Platform.Tests
 		}
 
 		[Test]
+		public void InFlightProductionCommitmentProtectsCashAcrossNetworkFrameLatency()
+		{
+			var budget = ProductionBudget.Reserve(1000, "Building", "save");
+			var scope = new ProductionBudgetScope(budget, UsesGroup: true);
+			var first = Candidate(
+				10, 100, "Vehicle", "mtnk", 600, ownsReservation: false,
+				queueRevision: 7);
+			var second = Candidate(
+				20, 200, "Infantry", "e1", 600, ownsReservation: false,
+				queueRevision: 11);
+			var ledger = new ProductionCommitmentLedger();
+
+			var firstEvaluation = ProductionBudgetArbitrator.EvaluatePrioritized(
+				budget, currentCash: 2000, [first], maxOrders: 1).Single();
+			var commitment = ledger.Commit(first, issuedTick: 100, timeoutTicks: 10);
+
+			ledger.Refresh(
+				worldTick: 101,
+				current => !current.HasQueueRevision || current.QueueRevision == 7);
+			var committed = ledger.ProjectedSpend(scope);
+			var secondEvaluation = ProductionBudgetArbitrator.EvaluatePrioritized(
+				budget,
+				currentCash: 2000,
+				[second],
+				maxOrders: 1,
+				committed.OwnerCost,
+				committed.NonOwnerCost).Single();
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(firstEvaluation.Outcome, Is.EqualTo(ProductionBudgetOutcome.Allowed));
+				Assert.That(commitment.OrderId, Is.GreaterThan(0));
+				Assert.That(commitment.QueueActorId, Is.EqualTo(100));
+				Assert.That(commitment.QueueIndex, Is.Zero);
+				Assert.That(commitment.Item, Is.EqualTo("mtnk"));
+				Assert.That(commitment.Cost, Is.EqualTo(600));
+				Assert.That(commitment.QueueRevision, Is.EqualTo(7));
+				Assert.That(committed.OwnerCost, Is.Zero);
+				Assert.That(committed.NonOwnerCost, Is.EqualTo(600));
+				Assert.That(secondEvaluation.Outcome,
+					Is.EqualTo(ProductionBudgetOutcome.BudgetSuppressed));
+				Assert.That(secondEvaluation.PostOrderCash, Is.EqualTo(800));
+			});
+
+			ledger.Refresh(
+				worldTick: 102,
+				current => !current.HasQueueRevision || current.QueueRevision == 8);
+			var cleared = ledger.ProjectedSpend(scope);
+			var afterSynchronizedChange = ProductionBudgetArbitrator.EvaluatePrioritized(
+				budget,
+				currentCash: 2000,
+				[second],
+				maxOrders: 1,
+				cleared.OwnerCost,
+				cleared.NonOwnerCost).Single();
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(ledger.Current, Is.Empty);
+				Assert.That(afterSynchronizedChange.Outcome,
+					Is.EqualTo(ProductionBudgetOutcome.Allowed));
+			});
+		}
+
+		[Test]
+		public void InFlightProductionCommitmentExpiresWithoutARevisionSignal()
+		{
+			var budget = ProductionBudget.Reserve(1000, "Building", "save");
+			var scope = new ProductionBudgetScope(budget, UsesGroup: true);
+			var ledger = new ProductionCommitmentLedger();
+			ledger.Commit(
+				Candidate(
+					10, 100, "Vehicle", "mtnk", 600, ownsReservation: false,
+					queueRevision: 0,
+					hasQueueRevision: false),
+				issuedTick: 100,
+				timeoutTicks: 10);
+
+			ledger.Refresh(worldTick: 109, _ => true);
+			var beforeTimeout = ledger.ProjectedSpend(scope);
+			ledger.Refresh(worldTick: 110, _ => true);
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(beforeTimeout.NonOwnerCost, Is.EqualTo(600));
+				Assert.That(ledger.Current, Is.Empty);
+			});
+		}
+
+		[Test]
 		public void ReservationLeaseRefreshesExpiresAndClearsInvalidValues()
 		{
 			var lease = new ProductionBudgetLease();
@@ -723,8 +813,24 @@ namespace AutoCnC.Platform.Tests
 			string queue,
 			string item,
 			int cost,
-			bool ownsReservation) =>
-			new(controllerActorId, queueActorId, queue, item, cost, ownsReservation);
+			bool ownsReservation,
+			int queueIndex = 0,
+			string queueGroup = null,
+			string queueType = null,
+			ulong queueRevision = 1,
+			bool hasQueueRevision = true) =>
+			new(
+				controllerActorId,
+				queueActorId,
+				queueIndex,
+				queueGroup ?? queue,
+				queueType ?? queue,
+				queue,
+				item,
+				cost,
+				ownsReservation,
+				queueRevision,
+				hasQueueRevision);
 
 		static uint LegacyQueueFingerprint(ProductionQueueEntry[] entries)
 		{

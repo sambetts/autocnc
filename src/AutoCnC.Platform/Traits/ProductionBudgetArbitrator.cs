@@ -83,10 +83,91 @@ namespace AutoCnC.Platform.Traits
 	internal readonly record struct ProductionBudgetCandidate(
 		uint ControllerActorId,
 		uint QueueActorId,
+		int QueueIndex,
+		string QueueGroup,
+		string QueueType,
 		string Queue,
 		string Item,
 		int Cost,
-		bool OwnsReservation);
+		bool OwnsReservation,
+		ulong QueueRevision,
+		bool HasQueueRevision);
+
+	internal readonly record struct ProductionCommitmentKey(
+		ulong OrderId,
+		uint QueueActorId,
+		int QueueIndex,
+		string QueueGroup,
+		string QueueType,
+		string Item,
+		int Cost,
+		ulong QueueRevision,
+		bool HasQueueRevision);
+
+	internal readonly record struct ProductionCommitmentSpend(
+		long OwnerCost,
+		long NonOwnerCost);
+
+	internal sealed class ProductionCommitmentLedger
+	{
+		readonly Dictionary<ProductionCommitmentKey, long> commitments = [];
+		ulong nextOrderId;
+
+		public IReadOnlyCollection<ProductionCommitmentKey> Current => commitments.Keys;
+
+		public ProductionCommitmentKey Commit(
+			in ProductionBudgetCandidate candidate,
+			int issuedTick,
+			int timeoutTicks)
+		{
+			nextOrderId++;
+			if (nextOrderId == 0)
+				nextOrderId++;
+
+			var key = new ProductionCommitmentKey(
+				nextOrderId,
+				candidate.QueueActorId,
+				candidate.QueueIndex,
+				candidate.QueueGroup,
+				candidate.QueueType,
+				candidate.Item,
+				Math.Max(0, candidate.Cost),
+				candidate.QueueRevision,
+				candidate.HasQueueRevision);
+			commitments.Add(key, (long)issuedTick + Math.Max(1, timeoutTicks));
+			return key;
+		}
+
+		public void Refresh(
+			int worldTick,
+			Func<ProductionCommitmentKey, bool> commitmentIsCurrent)
+		{
+			foreach (var pair in commitments
+				.Where(pair =>
+					worldTick >= pair.Value ||
+					!commitmentIsCurrent(pair.Key))
+				.ToArray())
+				commitments.Remove(pair.Key);
+		}
+
+		public ProductionCommitmentSpend ProjectedSpend(in ProductionBudgetScope scope)
+		{
+			var ownerCost = 0L;
+			var nonOwnerCost = 0L;
+			foreach (var commitment in commitments.Keys)
+			{
+				if (scope.OwnsQueue(commitment.QueueGroup, commitment.QueueType))
+					ownerCost = AddSaturating(ownerCost, commitment.Cost);
+				else
+					nonOwnerCost = AddSaturating(nonOwnerCost, commitment.Cost);
+			}
+
+			return new ProductionCommitmentSpend(ownerCost, nonOwnerCost);
+		}
+
+		static long AddSaturating(long value, long addition) =>
+			addition > long.MaxValue - value ? long.MaxValue : value + addition;
+	}
 
 	internal enum ProductionBudgetOutcome : byte
 	{
@@ -165,7 +246,9 @@ namespace AutoCnC.Platform.Traits
 			int currentCash,
 			IEnumerable<ProductionBudgetCandidate> candidates,
 			int maxOrders,
-			ulong admissionRound = 0)
+			ulong admissionRound = 0,
+			long committedOwnerCost = 0,
+			long committedNonOwnerCost = 0)
 		{
 			var ordered = candidates
 				.OrderBy(candidate => candidate.ControllerActorId)
@@ -179,14 +262,18 @@ namespace AutoCnC.Platform.Traits
 				proposed,
 				currentCash,
 				Rotate(ordered, admissionRound),
-				maxOrders);
+				maxOrders,
+				committedOwnerCost,
+				committedNonOwnerCost);
 		}
 
 		public static IReadOnlyList<ProductionBudgetEvaluation> EvaluatePrioritized(
 			in ProductionBudget proposed,
 			int currentCash,
 			IEnumerable<ProductionBudgetCandidate> prioritizedCandidates,
-			int maxOrders)
+			int maxOrders,
+			long committedOwnerCost = 0,
+			long committedNonOwnerCost = 0)
 		{
 			var budget = ProductionBudgetLease.Normalize(proposed);
 			var cash = Math.Max(0L, currentCash);
@@ -201,10 +288,10 @@ namespace AutoCnC.Platform.Traits
 					admitted.Contains(candidate.ControllerActorId) &&
 					candidate.OwnsReservation)
 				.Aggregate(
-					0L,
+					Math.Max(0L, committedOwnerCost),
 					(total, candidate) => AddSaturating(total, Math.Max(0L, candidate.Cost)));
-			var ownerSpendSoFar = 0L;
-			var nonOwnerSpend = 0L;
+			var ownerSpendSoFar = Math.Max(0L, committedOwnerCost);
+			var nonOwnerSpend = Math.Max(0L, committedNonOwnerCost);
 			var results = new List<ProductionBudgetEvaluation>(admissionOrder.Length);
 
 			foreach (var candidate in admissionOrder)

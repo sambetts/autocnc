@@ -138,11 +138,13 @@ full rules cost would take live cash below the remaining reservation. Arbitratio
 stable across controller evaluation order, so modes do not call `Hold` or register claims in a
 particular sequence.
 
-Only new production starts are gated. Existing queue entries keep running, cancellation still
-works, and a completed building can still be placed. A reservation with a non-positive amount,
-an empty category, no matching enabled queue, or an expired assessment is not enforced. Modes can
-read the effective assessment value through `ctx.CurrentProductionBudget`, but they do not need
-to enforce it themselves.
+Only new production starts are gated. Existing queue entries keep running, but their
+`RemainingCost` stays in projected spend until it is paid, refunded, or removed; an accepted
+entry replaces its matching in-flight commitment instead of being counted twice. Cancellation
+still works, and a completed building can still be placed. A reservation with a non-positive
+amount, an empty category, no matching enabled queue, or an expired assessment is not enforced.
+Modes can read the effective assessment value through `ctx.CurrentProductionBudget`, but they do
+not need to enforce it themselves.
 
 ### A lone doctrine is still a bot
 

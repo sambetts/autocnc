@@ -523,7 +523,8 @@ namespace AutoCnC.Platform.Tests
 					QueueRevision: 7,
 					HasQueueRevision: true,
 					OrderRevision: 0,
-					HasOrderRevision: true));
+					HasOrderRevision: true,
+					QueuedItemCount: 0));
 			var committed = ledger.ProjectedSpend(scope);
 			var secondEvaluation = ProductionBudgetArbitrator.EvaluatePrioritized(
 				budget,
@@ -558,7 +559,8 @@ namespace AutoCnC.Platform.Tests
 					QueueRevision: 8,
 					HasQueueRevision: true,
 					OrderRevision: 1,
-					HasOrderRevision: true));
+					HasOrderRevision: true,
+					QueuedItemCount: 1));
 			var cleared = ledger.ProjectedSpend(scope);
 			var afterSynchronizedChange = ProductionBudgetArbitrator.EvaluatePrioritized(
 				budget,
@@ -617,7 +619,8 @@ namespace AutoCnC.Platform.Tests
 					QueueRevision: 7,
 					HasQueueRevision: true,
 					OrderRevision: 20,
-					HasOrderRevision: true));
+					HasOrderRevision: true,
+					QueuedItemCount: 0));
 
 			var activatedBudget = ProductionBudget.Reserve(1000, "Building", "save");
 			var committed = ledger.ProjectedSpend(
@@ -658,11 +661,11 @@ namespace AutoCnC.Platform.Tests
 
 			ledger.Refresh(
 				worldTick: 109,
-				_ => new ProductionCommitmentObservation(IsValid: true, 0, false, 0, false));
+				_ => new ProductionCommitmentObservation(IsValid: true, 0, false, 0, false, 0));
 			var beforeTimeout = ledger.ProjectedSpend(scope);
 			ledger.Refresh(
 				worldTick: 110,
-				_ => new ProductionCommitmentObservation(IsValid: true, 0, false, 0, false));
+				_ => new ProductionCommitmentObservation(IsValid: true, 0, false, 0, false, 0));
 
 			Assert.Multiple(() =>
 			{
@@ -697,7 +700,8 @@ namespace AutoCnC.Platform.Tests
 					QueueRevision: 8,
 					HasQueueRevision: true,
 					OrderRevision: 21,
-					HasOrderRevision: true));
+					HasOrderRevision: true,
+					QueuedItemCount: 1));
 			var afterFirstAcknowledgement = ledger.Current.Single();
 
 			ledger.Refresh(
@@ -707,7 +711,8 @@ namespace AutoCnC.Platform.Tests
 					QueueRevision: 50,
 					HasQueueRevision: true,
 					OrderRevision: 21,
-					HasOrderRevision: true));
+					HasOrderRevision: true,
+					QueuedItemCount: 1));
 			var afterUnrelatedMutation = ledger.Current.Single();
 
 			ledger.Refresh(
@@ -717,7 +722,8 @@ namespace AutoCnC.Platform.Tests
 					QueueRevision: 51,
 					HasQueueRevision: true,
 					OrderRevision: 22,
-					HasOrderRevision: true));
+					HasOrderRevision: true,
+					QueuedItemCount: 2));
 
 			Assert.Multiple(() =>
 			{
@@ -727,6 +733,115 @@ namespace AutoCnC.Platform.Tests
 				Assert.That(afterUnrelatedMutation.OrderId, Is.EqualTo(second.OrderId),
 					"an unrelated queue revision must not retire the later production order");
 				Assert.That(ledger.Current, Is.Empty);
+			});
+		}
+
+		[Test]
+		public void QueuedRemainingCostReplacesInFlightCommitmentDuringIncrementalPayment()
+		{
+			var budget = ProductionBudget.Reserve(1000, "Building", "save");
+			var scope = new ProductionBudgetScope(budget, UsesGroup: true);
+			var first = Candidate(
+				10,
+				100,
+				"Vehicle",
+				"mtnk",
+				600,
+				ownsReservation: false,
+				queueRevision: 7,
+				orderRevision: 20,
+				queuedItemCount: 0);
+			var second = Candidate(
+				20,
+				200,
+				"Infantry",
+				"e1",
+				600,
+				ownsReservation: false);
+			var ledger = new ProductionCommitmentLedger();
+			ledger.Commit(first, issuedTick: 100, timeoutTicks: 1000);
+
+			var inFlight = ProductionCommitmentLedger.IncludeQueuedProduction(
+				scope,
+				ledger.ProjectedSpend(scope),
+				[]);
+			var beforeSynchronization = ProductionBudgetArbitrator.EvaluatePrioritized(
+				budget,
+				currentCash: 1700,
+				[second],
+				maxOrders: 1,
+				inFlight.OwnerCost,
+				inFlight.NonOwnerCost).Single();
+
+			ledger.Refresh(
+				worldTick: 101,
+				_ => new ProductionCommitmentObservation(
+					IsValid: true,
+					QueueRevision: 8,
+					HasQueueRevision: true,
+					OrderRevision: 20,
+					HasOrderRevision: true,
+					QueuedItemCount: 1));
+			var synchronized = ProductionCommitmentLedger.IncludeQueuedProduction(
+				scope,
+				ledger.ProjectedSpend(scope),
+				[new QueuedProductionCost("Vehicle", "Vehicle.GDI", 600)]);
+			var afterSynchronization = ProductionBudgetArbitrator.EvaluatePrioritized(
+				budget,
+				currentCash: 1700,
+				[second],
+				maxOrders: 1,
+				synchronized.OwnerCost,
+				synchronized.NonOwnerCost).Single();
+
+			var incrementallyPaid = ProductionCommitmentLedger.IncludeQueuedProduction(
+				scope,
+				ledger.ProjectedSpend(scope),
+				[new QueuedProductionCost("Vehicle", "Vehicle.GDI", 500)]);
+			var afterIncrementalPayment = ProductionBudgetArbitrator.EvaluatePrioritized(
+				budget,
+				currentCash: 1600,
+				[second],
+				maxOrders: 1,
+				incrementallyPaid.OwnerCost,
+				incrementallyPaid.NonOwnerCost).Single();
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(inFlight.NonOwnerCost, Is.EqualTo(600));
+				Assert.That(beforeSynchronization.Outcome,
+					Is.EqualTo(ProductionBudgetOutcome.BudgetSuppressed));
+				Assert.That(beforeSynchronization.PostOrderCash, Is.EqualTo(500));
+				Assert.That(ledger.Current, Is.Empty,
+					"the synchronized queue entry replaces its in-flight commitment");
+				Assert.That(synchronized.NonOwnerCost, Is.EqualTo(600),
+					"the accepted item must be counted once, not as both queued and in-flight");
+				Assert.That(afterSynchronization.Outcome,
+					Is.EqualTo(ProductionBudgetOutcome.BudgetSuppressed));
+				Assert.That(afterSynchronization.PostOrderCash, Is.EqualTo(500));
+				Assert.That(incrementallyPaid.NonOwnerCost, Is.EqualTo(500));
+				Assert.That(afterIncrementalPayment.Outcome,
+					Is.EqualTo(ProductionBudgetOutcome.BudgetSuppressed));
+				Assert.That(afterIncrementalPayment.PostOrderCash, Is.EqualTo(500));
+			});
+		}
+
+		[Test]
+		public void QueuedRemainingCostUsesCurrentOwnerClassification()
+		{
+			var budget = ProductionBudget.Reserve(1000, "Building", "save");
+			var projected = ProductionCommitmentLedger.IncludeQueuedProduction(
+				new ProductionBudgetScope(budget, UsesGroup: true),
+				default,
+				[
+					new QueuedProductionCost("Building", "Building.GDI", 400),
+					new QueuedProductionCost("Factory", "Vehicle", 600)
+				]);
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(projected.OwnerCost, Is.EqualTo(400));
+				Assert.That(projected.NonOwnerCost, Is.EqualTo(600));
 			});
 		}
 
@@ -755,11 +870,11 @@ namespace AutoCnC.Platform.Tests
 
 			ledger.Refresh(
 				worldTick: 100 + MaximumOrderLatency * NetFrameInterval,
-				_ => new ProductionCommitmentObservation(IsValid: true, 0, false, 0, false));
+				_ => new ProductionCommitmentObservation(IsValid: true, 0, false, 0, false, 0));
 			var beforeMargin = ledger.Current.Count;
 			ledger.Refresh(
 				worldTick: 100 + timeout,
-				_ => new ProductionCommitmentObservation(IsValid: true, 0, false, 0, false));
+				_ => new ProductionCommitmentObservation(IsValid: true, 0, false, 0, false, 0));
 
 			Assert.Multiple(() =>
 			{
@@ -1000,7 +1115,8 @@ namespace AutoCnC.Platform.Tests
 			ulong queueRevision = 1,
 			bool hasQueueRevision = true,
 			ulong orderRevision = 0,
-			bool hasOrderRevision = true) =>
+			bool hasOrderRevision = true,
+			int queuedItemCount = 0) =>
 			new(
 				controllerActorId,
 				queueActorId,
@@ -1014,7 +1130,8 @@ namespace AutoCnC.Platform.Tests
 				queueRevision,
 				hasQueueRevision,
 				orderRevision,
-				hasOrderRevision);
+				hasOrderRevision,
+				queuedItemCount);
 
 		static uint LegacyQueueFingerprint(ProductionQueueEntry[] entries)
 		{

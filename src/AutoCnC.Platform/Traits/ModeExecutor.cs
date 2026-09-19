@@ -910,6 +910,8 @@ namespace AutoCnC.Platform.Traits
 			var hasOrderRevision =
 				revisions != null &&
 				revisions.TryGetOrderRevision(queue, actorInfo.Name, out orderRevision);
+			var queuedItemCount = queue.AllQueued().Count(item =>
+				string.Equals(item.Item, actorInfo.Name, StringComparison.OrdinalIgnoreCase));
 			resolvedDecision = requestedDecision with
 			{
 				TargetActorId = queue.Actor.ActorID,
@@ -931,7 +933,8 @@ namespace AutoCnC.Platform.Traits
 				queueRevision,
 				hasQueueRevision,
 				orderRevision,
-				hasOrderRevision);
+				hasOrderRevision,
+				queuedItemCount);
 			outcome = null;
 			return true;
 		}
@@ -961,6 +964,18 @@ namespace AutoCnC.Platform.Traits
 					pair.Trait.Info.Group,
 					pair.Trait.Info.Type));
 
+		IEnumerable<QueuedProductionCost> QueuedProductionCosts(Player player) =>
+			world.ActorsWithTrait<ProductionQueue>()
+				.Where(pair =>
+					pair.Actor.Owner == player &&
+					!pair.Actor.IsDead &&
+					pair.Actor.IsInWorld)
+				.SelectMany(pair => pair.Trait.AllQueued().Select(item =>
+					new QueuedProductionCost(
+						pair.Trait.Info.Group,
+						pair.Trait.Info.Type,
+						Math.Max(0, item.RemainingCost))));
+
 		void FlushBudgetedOrders(
 			Player player,
 			in ProductionBudgetScope budgetScope,
@@ -971,7 +986,10 @@ namespace AutoCnC.Platform.Traits
 
 			var resources = player.PlayerActor.TraitOrDefault<PlayerResources>();
 			var currentCash = resources?.GetCashAndResources() ?? 0;
-			var committed = productionCommitments.ProjectedSpend(budgetScope);
+			var committed = ProductionCommitmentLedger.IncludeQueuedProduction(
+				budgetScope,
+				productionCommitments.ProjectedSpend(budgetScope),
+				QueuedProductionCosts(player));
 			var prioritized = RotateAdmission(
 				pendingBudgetedOrders.OrderBy(item => item.Actor.ActorID).ToArray(),
 				admissionRound).ToArray();
@@ -1128,12 +1146,16 @@ namespace AutoCnC.Platform.Traits
 			var hasOrderRevision =
 				revisions != null &&
 				revisions.TryGetOrderRevision(queue, commitment.Item, out orderRevision);
+			var committedItem = commitment.Item;
+			var queuedItemCount = queue.AllQueued().Count(item =>
+				string.Equals(item.Item, committedItem, StringComparison.OrdinalIgnoreCase));
 			return new ProductionCommitmentObservation(
 				IsValid: true,
 				queueRevision,
 				hasQueueRevision,
 				orderRevision,
-				hasOrderRevision);
+				hasOrderRevision,
+				queuedItemCount);
 		}
 
 		static int QueueIndex(ProductionQueue queue)

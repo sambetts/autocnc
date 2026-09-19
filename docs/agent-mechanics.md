@@ -228,10 +228,12 @@ permitted way to know where anything is.
   the next assessment. The owner may spend it; other new `Produce` decisions are centrally
   suppressed when their full rules cost would take live cash below the remaining reservation.
   Arbitration is deterministic across controller order. Existing queued items, cancellation and
-  completed-building placement are not gated. Modes may inspect `ctx.CurrentProductionBudget`
-  but must not coordinate reservations with `Hold` or evaluation sequence. Every assessment
-  records the normalized policy and its active/inactive/invalid/unmatched status; its nested
-  `ReasonId` is available to evidence `reason-id:` checks even when no decision is suppressed.
+  completed-building placement are not gated, but queued `RemainingCost` remains projected until
+  paid, refunded, or removed, replacing rather than duplicating its matching in-flight
+  commitment. Modes may inspect `ctx.CurrentProductionBudget` but must not coordinate
+  reservations with `Hold` or evaluation sequence. Every assessment records the normalized policy
+  and its active/inactive/invalid/unmatched status; its nested `ReasonId` is available to evidence
+  `reason-id:` checks even when no decision is suppressed.
 - Give decisions a stable `ReasonId` through the final factory argument. Human `Reason` prose and
   `ReasonId` are both ignored by duplicate-intent suppression.
 - Target selection should be stable. Re-picking equivalent targets every evaluation makes units

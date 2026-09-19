@@ -93,7 +93,8 @@ namespace AutoCnC.Platform.Traits
 		ulong QueueRevision,
 		bool HasQueueRevision,
 		ulong OrderRevision,
-		bool HasOrderRevision);
+		bool HasOrderRevision,
+		int QueuedItemCount = 0);
 
 	internal readonly record struct ProductionCommitmentKey(
 		ulong OrderId,
@@ -108,18 +109,26 @@ namespace AutoCnC.Platform.Traits
 		bool HasQueueRevision,
 		ulong IssuedOrderRevision,
 		ulong ExpectedOrderRevision,
-		bool HasOrderRevision);
+		bool HasOrderRevision,
+		int IssuedQueuedItemCount,
+		int ExpectedQueuedItemCount);
 
 	internal readonly record struct ProductionCommitmentObservation(
 		bool IsValid,
 		ulong QueueRevision,
 		bool HasQueueRevision,
 		ulong OrderRevision,
-		bool HasOrderRevision);
+		bool HasOrderRevision,
+		int QueuedItemCount = 0);
 
 	internal readonly record struct ProductionCommitmentSpend(
 		long OwnerCost,
 		long NonOwnerCost);
+
+	internal readonly record struct QueuedProductionCost(
+		string QueueGroup,
+		string QueueType,
+		int RemainingCost);
 
 	internal sealed class ProductionCommitmentLedger
 	{
@@ -155,6 +164,11 @@ namespace AutoCnC.Platform.Traits
 							commitment.HasOrderRevision)
 						.Select(commitment => commitment.ExpectedOrderRevision))
 				: 0;
+			var expectedQueuedItemCount = NextExpectedCount(
+				candidate.QueuedItemCount,
+				commitments.Keys
+					.Where(commitment => SameQueueItem(commitment, candidate))
+					.Select(commitment => commitment.ExpectedQueuedItemCount));
 			var key = new ProductionCommitmentKey(
 				nextOrderId,
 				candidate.QueueActorId,
@@ -168,7 +182,9 @@ namespace AutoCnC.Platform.Traits
 				candidate.HasQueueRevision,
 				candidate.OrderRevision,
 				expectedOrderRevision,
-				candidate.HasOrderRevision);
+				candidate.HasOrderRevision,
+				candidate.QueuedItemCount,
+				expectedQueuedItemCount);
 			commitments.Add(key, AddSaturating(issuedTick, Math.Max(1L, timeoutTicks)));
 			return key;
 		}
@@ -190,7 +206,8 @@ namespace AutoCnC.Platform.Traits
 					? RevisionReached(observation.OrderRevision, pair.Key.ExpectedOrderRevision)
 					: pair.Key.HasQueueRevision && observation.HasQueueRevision &&
 						RevisionReached(observation.QueueRevision, pair.Key.ExpectedQueueRevision);
-				if (!observation.IsValid || acknowledged)
+				var queued = observation.QueuedItemCount >= pair.Key.ExpectedQueuedItemCount;
+				if (!observation.IsValid || acknowledged || queued)
 					commitments.Remove(pair.Key);
 			}
 		}
@@ -205,6 +222,25 @@ namespace AutoCnC.Platform.Traits
 					ownerCost = AddSaturating(ownerCost, commitment.Cost);
 				else
 					nonOwnerCost = AddSaturating(nonOwnerCost, commitment.Cost);
+			}
+
+			return new ProductionCommitmentSpend(ownerCost, nonOwnerCost);
+		}
+
+		public static ProductionCommitmentSpend IncludeQueuedProduction(
+			in ProductionBudgetScope scope,
+			in ProductionCommitmentSpend commitments,
+			IEnumerable<QueuedProductionCost> queued)
+		{
+			var ownerCost = Math.Max(0L, commitments.OwnerCost);
+			var nonOwnerCost = Math.Max(0L, commitments.NonOwnerCost);
+			foreach (var item in queued)
+			{
+				var cost = Math.Max(0L, item.RemainingCost);
+				if (scope.OwnsQueue(item.QueueGroup, item.QueueType))
+					ownerCost = AddSaturating(ownerCost, cost);
+				else
+					nonOwnerCost = AddSaturating(nonOwnerCost, cost);
 			}
 
 			return new ProductionCommitmentSpend(ownerCost, nonOwnerCost);
@@ -242,6 +278,16 @@ namespace AutoCnC.Platform.Traits
 
 			latest++;
 			return latest == 0 ? 1 : latest;
+		}
+
+		static int NextExpectedCount(int observed, IEnumerable<int> pending)
+		{
+			var latest = Math.Max(0, observed);
+			foreach (var count in pending)
+				if (count > latest)
+					latest = count;
+
+			return latest == int.MaxValue ? int.MaxValue : latest + 1;
 		}
 
 		static bool RevisionReached(ulong current, ulong expected) => current >= expected;

@@ -161,6 +161,7 @@ namespace AutoCnC.Launcher
 		public const string Promoted = "promoted";
 		public const string Restoring = "restoring";
 		public const string Restored = "restored";
+		public const string Aborted = "aborted";
 	}
 
 	/// <summary>Durable promotion state for one continuous candidate.</summary>
@@ -176,6 +177,7 @@ namespace AutoCnC.Launcher
 		public DateTime? PromotedUtc { get; set; }
 		public DateTime? RestoredUtc { get; set; }
 		public DateTime? InvalidatedUtc { get; set; }
+		public DateTime? AbortedUtc { get; set; }
 		public int EvaluationAttempt { get; set; }
 		public string ChampionSourceRevision { get; set; }
 		public string CandidateSourceRevision { get; set; }
@@ -202,7 +204,9 @@ namespace AutoCnC.Launcher
 		public string Decision { get; set; }
 		public string Reason { get; set; }
 		public string InvalidationReason { get; set; }
+		public string AbortReason { get; set; }
 		public bool? RequiresReevaluation { get; set; }
+		public bool? CanResumeEvaluation { get; set; }
 
 		/// <summary>
 		/// True records that continuous mode kept the current prompt until a player reviewed the
@@ -213,7 +217,7 @@ namespace AutoCnC.Launcher
 
 	public sealed class TrainingRunManifest
 	{
-		public int SchemaVersion { get; set; } = 9;
+		public int SchemaVersion { get; set; } = 10;
 		public string Id { get; set; }
 		public string Status { get; set; }
 
@@ -333,10 +337,20 @@ namespace AutoCnC.Launcher
 			BattleExecutionModes.Headless, StringComparison.OrdinalIgnoreCase);
 		public bool NeedsReplayForFeedback => IsHeadless && Manifest.ReplayWatchedUtc == null;
 		public bool CanProvideFeedback => HasRecordedBattle && !NeedsReplayForFeedback;
+		public bool HasUnresolvedContinuousExperiment =>
+			Manifest.Experiment?.Continuous == true &&
+			!string.Equals(Manifest.Experiment.State, TrainingExperimentStates.Promoted,
+				StringComparison.OrdinalIgnoreCase) &&
+			!string.Equals(Manifest.Experiment.State, TrainingExperimentStates.Restored,
+				StringComparison.OrdinalIgnoreCase);
+		public bool CanResumeContinuousEvaluation =>
+			HasUnresolvedContinuousExperiment &&
+			Manifest.Experiment?.CanResumeEvaluation == true;
 
 		/// <summary>True while the manifest still describes a battle or improvement as under way.</summary>
 		public bool HasUnfinishedWork => Manifest.CompletedUtc == null ||
 			Manifest.Agent is { StartedUtc: not null, CompletedUtc: null } ||
+			HasUnresolvedContinuousExperiment ||
 			string.Equals(Manifest.Status, "improving", StringComparison.OrdinalIgnoreCase) ||
 			string.Equals(Manifest.Status, "verifying", StringComparison.OrdinalIgnoreCase) ||
 			string.Equals(Manifest.Status, "candidate", StringComparison.OrdinalIgnoreCase) ||
@@ -360,10 +374,10 @@ namespace AutoCnC.Launcher
 		/// player wants swept up, and refusing to remove it because its manifest still reads
 		/// "improving" strands it in the history for ever with no way to clear it.
 		/// </remarks>
-		public bool CanDelete => !IsBusy;
+		public bool CanDelete => !IsBusy && !HasUnresolvedContinuousExperiment;
 		public bool HasImprovementEvidence => IsEditable && Manifest.CompletedUtc != null &&
 			File.Exists(BattleLogPath) && File.Exists(TelemetryPath) && File.Exists(DecisionTracePath);
-		public bool CanImprove => HasImprovementEvidence &&
+		public bool CanImprove => !HasUnresolvedContinuousExperiment && HasImprovementEvidence &&
 			(Manifest.Agent == null || Manifest.Agent.ChangeCount == 0 ||
 				Manifest.Agent.RestoredUtc != null || Manifest.Agent.Cancelled ||
 				Manifest.Agent.ExitCode is int exitCode && exitCode != 0);
@@ -440,6 +454,17 @@ namespace AutoCnC.Launcher
 			var run = new TrainingRun(full, manifest);
 			run.InferLegacyFailure();
 			run.RescoreLegacyResult();
+			try
+			{
+				run.ReconcileInterruptedContinuousExperiment();
+			}
+			catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+			{
+				run.Manifest.Warnings ??= [];
+				run.Manifest.Warnings.Add(
+					"The interrupted continuous experiment could not be reconciled on disk: " +
+					ex.Message);
+			}
 			return run;
 		}
 
@@ -710,7 +735,7 @@ namespace AutoCnC.Launcher
 			return Manifest.AgentSessionId;
 		}
 
-		public void BeginContinuousExperiment()
+		TrainingExperiment NewContinuousExperiment()
 		{
 			if (!File.Exists(SnapshotManifestPath))
 				throw new InvalidOperationException(
@@ -718,11 +743,11 @@ namespace AutoCnC.Launcher
 			if (Manifest.Experiment != null)
 				throw new InvalidOperationException("This training run already has an experiment.");
 
-			Manifest.Experiment = new TrainingExperiment
+			return new TrainingExperiment
 			{
 				Id = Guid.NewGuid().ToString("N"),
 				Continuous = true,
-				State = TrainingExperimentStates.Prepared,
+				State = TrainingExperimentStates.Improving,
 				StartedUtc = DateTime.UtcNow,
 				ChampionSourceRevision = BotWorkspace.SourceRevision(Manifest.BotDirectory),
 				ChampionFingerprint = WorkspaceSnapshot.Fingerprint(this),
@@ -739,7 +764,6 @@ namespace AutoCnC.Launcher
 				EvaluationFile = Path.GetRelativePath(RunDirectory, PromotionEvaluationPath),
 				PromptRewriteFrozen = true
 			};
-			Save();
 		}
 
 		public void BeginContinuousEvaluation(string candidateFingerprint,
@@ -775,6 +799,7 @@ namespace AutoCnC.Launcher
 			experiment.Decision = null;
 			experiment.Reason = null;
 			experiment.RequiresReevaluation = false;
+			experiment.CanResumeEvaluation = false;
 			experiment.InvalidationReason = null;
 			Manifest.Status = "evaluating";
 			Manifest.Owner = ProcessOwnership.Claim();
@@ -828,7 +853,7 @@ namespace AutoCnC.Launcher
 			experiment.Batch = batch;
 			experiment.ExpectedMatchesPerArm = expectedMatchesPerArm;
 			experiment.ExpectedLiveFingerprint = experiment.CandidateFingerprint;
-			Manifest.Owner = null;
+			Manifest.Owner = ProcessOwnership.Claim();
 			Save();
 		}
 
@@ -855,7 +880,75 @@ namespace AutoCnC.Launcher
 			experiment.Reason = reason;
 			experiment.ExpectedLiveFingerprint = null;
 			Manifest.Status = "candidate";
+			Manifest.Owner = ProcessOwnership.Claim();
+			Save();
+		}
+
+		public bool ReconcileInterruptedContinuousExperiment()
+		{
+			var experiment = Manifest.Experiment;
+			if (!HasUnresolvedContinuousExperiment ||
+				string.Equals(experiment.State, TrainingExperimentStates.Aborted,
+					StringComparison.OrdinalIgnoreCase) ||
+				ProcessOwnership.IsLive(Manifest.Owner))
+				return false;
+
+			var resumable = Manifest.Agent is
+			{
+				CompletedUtc: not null,
+				ExitCode: 0
+			} && File.Exists(SnapshotManifestPath) && IsEditable;
+			AbortContinuousExperiment(
+				"The launcher stopped before this continuous candidate reached a durable promotion decision.",
+				resumable);
+			return true;
+		}
+
+		public void AbortContinuousExperiment(string reason, bool canResumeEvaluation)
+		{
+			var experiment = Manifest.Experiment;
+			if (experiment?.Continuous != true)
+				return;
+
+			experiment.State = TrainingExperimentStates.Aborted;
+			experiment.AbortedUtc = DateTime.UtcNow;
+			experiment.AbortReason = reason;
+			experiment.CanResumeEvaluation = canResumeEvaluation;
+			experiment.RequiresReevaluation = canResumeEvaluation;
+			experiment.ExpectedLiveFingerprint = null;
+			if (string.IsNullOrWhiteSpace(experiment.CandidateFingerprint) && IsEditable)
+				experiment.CandidateFingerprint = BotWorkspace.Fingerprint(Manifest.BotDirectory);
+			Manifest.Status = "experiment-aborted";
 			Manifest.Owner = null;
+			Save();
+		}
+
+		public void AbortContinuousExperiment(string reason)
+		{
+			var resumable = Manifest.Agent is
+			{
+				CompletedUtc: not null,
+				ExitCode: 0
+			} && File.Exists(SnapshotManifestPath) && IsEditable;
+			AbortContinuousExperiment(reason, resumable);
+		}
+
+		public void ResumeContinuousExperiment()
+		{
+			var experiment = Manifest.Experiment;
+			if (!CanResumeContinuousEvaluation ||
+				!string.Equals(experiment.State, TrainingExperimentStates.Aborted,
+					StringComparison.OrdinalIgnoreCase) ||
+				!File.Exists(SnapshotManifestPath) || !IsEditable)
+				throw new InvalidOperationException(
+					"This interrupted continuous candidate cannot be resumed.");
+
+			experiment.State = TrainingExperimentStates.Candidate;
+			experiment.RequiresReevaluation = true;
+			experiment.CanResumeEvaluation = false;
+			experiment.ExpectedLiveFingerprint = null;
+			Manifest.Status = "candidate";
+			Manifest.Owner = ProcessOwnership.Claim();
 			Save();
 		}
 
@@ -872,6 +965,7 @@ namespace AutoCnC.Launcher
 			experiment.PromotedUtc = DateTime.UtcNow;
 			experiment.ExpectedLiveFingerprint = experiment.CandidateFingerprint;
 			experiment.RequiresReevaluation = false;
+			experiment.CanResumeEvaluation = false;
 			Manifest.Status = "promoted";
 			Manifest.Owner = null;
 			Save();
@@ -891,8 +985,19 @@ namespace AutoCnC.Launcher
 		}
 
 		public void AgentStarted(string command, string recoveryTranscript = null,
-			bool repairing = false)
+			bool repairing = false) =>
+			StartAgent(command, recoveryTranscript, repairing, continuous: false);
+
+		public void ContinuousAgentStarted(string command, string recoveryTranscript = null,
+			bool repairing = false) =>
+			StartAgent(command, recoveryTranscript, repairing, continuous: true);
+
+		void StartAgent(string command, string recoveryTranscript, bool repairing,
+			bool continuous)
 		{
+			var previousAgent = Manifest.Agent;
+			var previousStatus = Manifest.Status;
+			var previousOwner = Manifest.Owner;
 			var attempt = Manifest.Agent == null
 				? 1
 				: Math.Max(1, Manifest.Agent.Attempt) + 1;
@@ -902,6 +1007,10 @@ namespace AutoCnC.Launcher
 				File.Delete(ChangesPath);
 			if (File.Exists(AgentStatusPath))
 				File.Delete(AgentStatusPath);
+
+			var previousExperiment = Manifest.Experiment;
+			if (continuous)
+				Manifest.Experiment = NewContinuousExperiment();
 
 			Manifest.Agent = new TrainingAgentResult
 			{
@@ -913,11 +1022,26 @@ namespace AutoCnC.Launcher
 			};
 			Manifest.Status = "improving";
 			Manifest.Owner = ProcessOwnership.Claim();
-			if (Manifest.Experiment?.Continuous == true &&
-				string.Equals(Manifest.Experiment.State, TrainingExperimentStates.Prepared,
-					StringComparison.OrdinalIgnoreCase))
-				Manifest.Experiment.State = TrainingExperimentStates.Improving;
-			Save();
+			try
+			{
+				Save();
+			}
+			catch (IOException)
+			{
+				Manifest.Agent = previousAgent;
+				Manifest.Status = previousStatus;
+				Manifest.Owner = previousOwner;
+				Manifest.Experiment = previousExperiment;
+				throw;
+			}
+			catch (UnauthorizedAccessException)
+			{
+				Manifest.Agent = previousAgent;
+				Manifest.Status = previousStatus;
+				Manifest.Owner = previousOwner;
+				Manifest.Experiment = previousExperiment;
+				throw;
+			}
 		}
 
 		public void VerificationStarted()
@@ -963,7 +1087,9 @@ namespace AutoCnC.Launcher
 			Manifest.Status = exitCode == 0
 				? continuousCandidate ? "candidate" : "improved"
 				: cancelled ? "improvement-cancelled" : "improvement-failed";
-			Manifest.Owner = null;
+			Manifest.Owner = continuousCandidate
+				? ProcessOwnership.Claim()
+				: null;
 			Save();
 		}
 
@@ -1000,6 +1126,7 @@ namespace AutoCnC.Launcher
 				Manifest.Experiment.ExpectedLiveFingerprint =
 					Manifest.Experiment.ChampionFingerprint;
 				Manifest.Experiment.RequiresReevaluation = false;
+				Manifest.Experiment.CanResumeEvaluation = false;
 			}
 			Manifest.Status = "restored";
 			Manifest.Owner = null;

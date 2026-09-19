@@ -79,6 +79,36 @@ namespace AutoCnC.Launcher.Tests
 				Assert.That(run.Manifest.Agent.SuggestedNextPrompt, Is.EqualTo("agent draft"));
 				Assert.That(run.Manifest.Agent.SuggestedNextPromptAccepted, Is.False);
 			});
+
+			Assert.That(TrainingRun.Load(run.RunDirectory).Manifest.Experiment.State,
+				Is.EqualTo(TrainingExperimentStates.Candidate),
+				"a live owner must not be reconciled as an interrupted experiment");
+		}
+
+		[Test]
+		public void ChampionIsCapturedBeforeQueuedChatCanEditTheCandidate()
+		{
+			var run = TrainingRun.Create(project, new TrainingBattleConfiguration(),
+				Path.Combine(root, "chat-runs"));
+			promotion.CaptureChampion(run);
+			Assert.That(TrainingRun.Load(run.RunDirectory).Manifest.Experiment, Is.Null,
+				"capturing the champion must not persist a Prepared experiment");
+
+			File.WriteAllText(strategy, "queued chat edit");
+			run.ContinuousAgentStarted("agent");
+			Assert.That(run.Manifest.Experiment.State,
+				Is.EqualTo(TrainingExperimentStates.Improving),
+				"the experiment is created only with the prepared agent attempt");
+			run.AgentFinished(0, 1);
+
+			promotion.PrepareEvaluation(repo, run);
+
+			Assert.That(File.ReadAllText(
+				Path.Combine(run.ControlSourceDirectory, "Strategy.cs")),
+				Is.EqualTo("champion"));
+			Assert.That(File.ReadAllText(
+				Path.Combine(run.CandidateSourceDirectory, "Strategy.cs")),
+				Is.EqualTo("queued chat edit"));
 		}
 
 		[Test]
@@ -301,9 +331,8 @@ namespace AutoCnC.Launcher.Tests
 
 			var second = TrainingRun.Create(project, new TrainingBattleConfiguration(),
 				Path.Combine(root, "second-runs"));
-			WorkspaceSnapshot.Capture(second);
-			promotion.BeginCandidate(second);
-			second.AgentStarted("agent");
+			promotion.CaptureChampion(second);
+			second.ContinuousAgentStarted("agent");
 			File.WriteAllText(strategy, "second candidate");
 			second.AgentFinished(0, 1);
 
@@ -320,9 +349,8 @@ namespace AutoCnC.Launcher.Tests
 		{
 			var run = TrainingRun.Create(project, new TrainingBattleConfiguration(),
 				Path.Combine(root, "runs"));
-			WorkspaceSnapshot.Capture(run);
-			promotion.BeginCandidate(run);
-			run.AgentStarted("agent");
+			promotion.CaptureChampion(run);
+			run.ContinuousAgentStarted("agent");
 			File.WriteAllText(strategy, "candidate");
 			run.AgentFinished(0, 1, suggestedPrompt);
 			return run;

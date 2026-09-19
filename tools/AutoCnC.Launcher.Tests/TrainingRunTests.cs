@@ -107,6 +107,76 @@ namespace AutoCnC.Launcher.Tests
 		}
 
 		[Test]
+		public void InterruptedCandidateIsDurablyAbortedAndResumesWithoutOverwritingUserWork()
+		{
+			var run = NewRun();
+			WorkspaceSnapshot.Capture(run);
+			run.ContinuousAgentStarted("agent");
+			File.WriteAllText(Path.Combine(workspace, "Strategy.cs"), "candidate");
+			run.AgentFinished(0, 1);
+			File.WriteAllText(Path.Combine(workspace, "Strategy.cs"), "user work after interruption");
+			run.Manifest.Owner = new ProcessOwnership { ProcessId = -1 };
+			run.Save();
+
+			var loaded = TrainingRun.Load(run.RunDirectory);
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(loaded.Manifest.Experiment.State,
+					Is.EqualTo(TrainingExperimentStates.Aborted));
+				Assert.That(loaded.Manifest.Status, Is.EqualTo("experiment-aborted"));
+				Assert.That(loaded.CanResumeContinuousEvaluation, Is.True);
+				Assert.That(loaded.CanImprove, Is.False);
+				Assert.That(loaded.CanDelete, Is.False);
+				Assert.That(File.ReadAllText(Path.Combine(workspace, "Strategy.cs")),
+					Is.EqualTo("user work after interruption"));
+			});
+
+			loaded.ResumeContinuousExperiment();
+
+			Assert.That(loaded.Manifest.Experiment.State,
+				Is.EqualTo(TrainingExperimentStates.Candidate));
+			Assert.That(File.ReadAllText(Path.Combine(workspace, "Strategy.cs")),
+				Is.EqualTo("user work after interruption"));
+		}
+
+		[Test]
+		public void LegacyPreparedExperimentAbortsWithoutPretendingItCanResume()
+		{
+			var run = NewRun();
+			WorkspaceSnapshot.Capture(run);
+			run.Manifest.Experiment = new TrainingExperiment
+			{
+				Continuous = true,
+				State = TrainingExperimentStates.Prepared
+			};
+			run.Manifest.Owner = new ProcessOwnership { ProcessId = -1 };
+			run.Save();
+
+			var loaded = TrainingRun.Load(run.RunDirectory);
+
+			Assert.That(loaded.Manifest.Experiment.State,
+				Is.EqualTo(TrainingExperimentStates.Aborted));
+			Assert.That(loaded.CanResumeContinuousEvaluation, Is.False);
+			Assert.That(loaded.CanDelete, Is.False);
+		}
+
+		[Test]
+		public void FailedContinuousAgentStartDoesNotPersistAnExperiment()
+		{
+			var run = NewRun();
+			WorkspaceSnapshot.Capture(run);
+			Directory.CreateDirectory(run.ManifestPath + ".tmp");
+
+			Assert.That(() => run.ContinuousAgentStarted("agent"),
+				Throws.TypeOf<UnauthorizedAccessException>());
+
+			var loaded = TrainingRun.Load(run.RunDirectory);
+			Assert.That(loaded.Manifest.Experiment, Is.Null);
+			Assert.That(loaded.Manifest.Agent, Is.Null);
+		}
+
+		[Test]
 		public void DiscoverySkipsAnIncompatibleRememberedCheckout()
 		{
 			var oldRoot = Path.Combine(root, "old-checkout");
@@ -762,7 +832,7 @@ namespace AutoCnC.Launcher.Tests
 			run.Finish("finished", match, battle);
 
 			var loaded = TrainingRun.Load(run.RunDirectory);
-			Assert.That(loaded.Manifest.SchemaVersion, Is.EqualTo(9));
+			Assert.That(loaded.Manifest.SchemaVersion, Is.EqualTo(10));
 			Assert.That(loaded.Manifest.Result.Outcome, Is.EqualTo("Won"));
 			Assert.That(loaded.Manifest.Performance.SimulationSpeed, Is.EqualTo(100));
 			Assert.That(loaded.Manifest.Performance.TicksPerSecond, Is.EqualTo(2500));

@@ -439,6 +439,14 @@ again before restoration or promotion, and immediately before the next fight. An
 change or edit-capable agent chat after capture marks the experiment for reevaluation. An invalid
 result is never used to restore over those unbenchmarked edits.
 
+The champion snapshot is captured with the training run before its fight starts, so a queued chat
+turn after the result cannot silently redefine the control. Experiment metadata is created
+atomically with the successfully prepared agent attempt rather than leaving a `Prepared` record
+when setup fails. Loading an ownerless nonterminal experiment reconciles it to durable `aborted`
+state without touching source. New fights are blocked; a successfully verified candidate can be
+resumed into evaluation, while every unresolved run can still be explicitly restored from its
+snapshot.
+
 The loop stops on user request or any non-zero game, agent, or build exit. Headless also treats 90
 nominal game minutes without a result as a failed stalemate (configurable with
 `-MaxGameSeconds`). Stop writes the run's cancellation sentinel first, allowing the world,

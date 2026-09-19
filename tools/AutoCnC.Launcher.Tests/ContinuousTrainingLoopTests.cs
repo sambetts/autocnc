@@ -48,6 +48,8 @@ namespace AutoCnC.Launcher.Tests
 			Assert.That(loop.EvaluationCompleted(ContinuousEvaluationDecision.Promote),
 				Is.EqualTo(ContinuousTrainingAction.None));
 			Assert.That(loop.RestorationCompleted(), Is.EqualTo(ContinuousTrainingAction.None));
+			Assert.That(loop.ResumeEvaluation(enabled: false),
+				Is.EqualTo(ContinuousTrainingAction.None));
 		}
 
 		[Test]
@@ -101,6 +103,18 @@ namespace AutoCnC.Launcher.Tests
 			Assert.That(loop.WorkspaceChangedBeforeFight(),
 				Is.EqualTo(ContinuousTrainingAction.Evaluate));
 			Assert.That(loop.Stage, Is.EqualTo(ContinuousTrainingStage.Evaluating));
+		}
+
+		[Test]
+		public void AbortedCandidateCanResumeDirectlyIntoEvaluation()
+		{
+			var loop = new ContinuousTrainingLoop();
+
+			Assert.That(loop.ResumeEvaluation(enabled: true),
+				Is.EqualTo(ContinuousTrainingAction.Evaluate));
+			Assert.That(loop.Stage, Is.EqualTo(ContinuousTrainingStage.Evaluating));
+			Assert.That(loop.ResumeEvaluation(enabled: true),
+				Is.EqualTo(ContinuousTrainingAction.None));
 		}
 
 		[Test]

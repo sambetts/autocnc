@@ -380,6 +380,10 @@ that decision. Missing, failed, mismatched, or `Undefined` benchmark evidence ca
 Dirty promoted champions remain valid controls because the control comes from the snapshot, not a
 Git revision. Workspace edits or agent chat after capture invalidate the result and force a new
 evaluation; restoration never overwrites those unbenchmarked edits.
+The champion snapshot is captured when the continuous fight is created, before any queued
+edit-capable chat can run. If the launcher exits mid-candidate, the manifest is durably marked
+aborted on reload: new fights stay blocked until the candidate is reevaluated or explicitly
+restored, without changing the live workspace.
 
 Resolved rules and fight JSON use lazy, collapsible trees rather than raw text. At the end of an
 improvement the agent drafts an entirely new prompt template in **Next prompt***. In manual mode the

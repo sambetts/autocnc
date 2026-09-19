@@ -367,6 +367,12 @@ battle just fought. Continuous mode does not pause for feedback or prompt review
 next prompt remains a draft on the run, the current prompt stays frozen, and the player can review
 the draft after the loop stops.
 
+The control snapshot is captured when the continuous fight's run is created, before queued chat
+can edit the workspace. No experiment is persisted merely for capturing it: experiment state and
+the agent attempt are saved together only after setup succeeds. On reload, an ownerless candidate
+is reconciled to `aborted` without restoring anything. A verified candidate can resume evaluation;
+otherwise new fights stay blocked until the player explicitly restores the snapshot.
+
 An agent exit and a host verification failure are recorded separately. Verification always cleans
 the bot's generated `bin`/`obj` output before building. If it still fails, **Retry verification**
 repeats that cheap check without spending another agent run; **Fix failed improvement** archives

@@ -598,6 +598,12 @@ rather than restoring over unbenchmarked edits. Switch Execution to **Rendered**
 watch the same loop. It never pauses for feedback; review those battles from **History & trends**
 after stopping.
 
+The champion snapshot is taken before the continuous fight starts, so chat queued behind that
+fight can only become part of the candidate. If the launcher closes or evaluation setup fails
+before a decision, the run is marked **experiment aborted** without modifying source. Starting
+continuous training again resumes a verified candidate's evaluation; ordinary fights remain
+blocked until reevaluation or **Restore previous iteration** resolves it.
+
 Fight and rules JSON are shown as collapsible trees. When the run finishes, the agent drafts an
 entire replacement prompt template and the window opens **Next prompt*** on it. The top pane shows
 what accepting would change in the prompt you are using now — added and removed lines only, with

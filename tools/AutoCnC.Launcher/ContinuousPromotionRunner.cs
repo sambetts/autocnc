@@ -53,12 +53,13 @@ namespace AutoCnC.Launcher
 	/// </summary>
 	public sealed class ContinuousPromotionRunner
 	{
-		public void BeginCandidate(TrainingRun run)
+		public void CaptureChampion(TrainingRun run)
 		{
 			if (run == null)
 				throw new ArgumentNullException(nameof(run));
 
-			run.BeginContinuousExperiment();
+			if (!File.Exists(run.SnapshotManifestPath))
+				WorkspaceSnapshot.Capture(run);
 		}
 
 		public ContinuousEvaluationPlan PrepareEvaluation(RepoLayout repo, TrainingRun run)

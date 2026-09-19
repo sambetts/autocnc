@@ -114,6 +114,16 @@ namespace AutoCnC.Launcher
 			return ContinuousTrainingAction.Evaluate;
 		}
 
+		public ContinuousTrainingAction ResumeEvaluation(bool enabled)
+		{
+			if (!enabled || Stage != ContinuousTrainingStage.Idle)
+				return ContinuousTrainingAction.None;
+
+			stopAfterRestore = false;
+			Stage = ContinuousTrainingStage.Evaluating;
+			return ContinuousTrainingAction.Evaluate;
+		}
+
 		public void Stop()
 		{
 			stopAfterRestore = false;

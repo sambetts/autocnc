@@ -127,6 +127,8 @@ both arms to fill that count in the same combined batch and cover the same uniqu
 configurations, then cross-checks the paired rows against the raw match rows. Symmetric omissions,
 missing arms, duplicate or mismatched scenarios, failed statuses, non-finite fitness, and outcomes
 other than `Won` or `Lost` produce an `Undefined` verdict, which cannot promote.
+Failure rows may serialize null duration and metric values. Those fields are required and checked
+for finiteness only when `succeeded` is true.
 
 Complete evidence is ranked lexicographically: candidate wins against control wins first, then
 the median of per-scenario fitness deltas when wins tie. The result is written as

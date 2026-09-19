@@ -439,6 +439,12 @@ again before restoration or promotion, and immediately before the next fight. An
 change or edit-capable agent chat after capture marks the experiment for reevaluation. An invalid
 result is never used to restore over those unbenchmarked edits.
 
+Continuous evaluation defaults to benchmark `hard-16-9` at difficulty `Hard`. Both are explicit
+arguments on each arm invocation and are checked against each returned result before composition.
+The isolated build helper asks evaluated MSBuild for `TargetPath` and records it in a build result;
+the launcher never guesses from project or assembly-name text, so imports, conditions and property
+expansion remain authoritative.
+
 The champion snapshot is captured with the training run before its fight starts, so a queued chat
 turn after the result cannot silently redefine the control. Experiment metadata is created
 atomically with the successfully prepared agent attempt rather than leaving a `Prepared` record
@@ -446,6 +452,10 @@ when setup fails. Loading an ownerless nonterminal experiment reconciles it to d
 state without touching source. New fights are blocked; a successfully verified candidate can be
 resumed into evaluation, while every unresolved run can still be explicitly restored from its
 snapshot.
+Abort, resume and restore reload the run and honor `ProcessOwnership`. A live claim from another
+launcher blocks mutation. Agent chat records the workspace fingerprint before the turn and only
+invalidates when the post-turn source fingerprint differs, so a no-edit answer after restoration
+continues with the restored champion.
 
 The loop stops on user request or any non-zero game, agent, or build exit. Headless also treats 90
 nominal game minutes without a result as a failed stalemate (configurable with

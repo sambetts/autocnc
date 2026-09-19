@@ -10,6 +10,7 @@
 
 using System;
 using System.IO;
+using System.Text.Json;
 using AutoCnC.Evidence;
 using NUnit.Framework;
 
@@ -42,6 +43,13 @@ namespace AutoCnC.Launcher.Tests
 			File.WriteAllText(Path.Combine(checkout, "AutoCnC.sln"), "");
 			File.WriteAllText(Path.Combine(scripts, "run-bot.ps1"), "param()");
 			File.WriteAllText(Path.Combine(scripts, "benchmark-bot.ps1"), "param()");
+			File.WriteAllText(Path.Combine(scripts, "benchmarks.json"),
+				"{\"default\":\"smoke\",\"sets\":[" +
+				"{\"name\":\"smoke\",\"difficulty\":\"Normal\",\"matches\":[{}]}," +
+				"{\"name\":\"hard-16-9\",\"difficulty\":\"Hard\",\"matches\":[{}]}]}");
+			File.WriteAllText(Path.Combine(scripts, "difficulties.json"),
+				"{\"default\":\"Normal\",\"levels\":[" +
+				"{\"name\":\"Normal\"},{\"name\":\"Hard\"}]}");
 			File.WriteAllText(Path.Combine(launcherTools, "build-experiment-arm.ps1"), "param()");
 			project = Path.Combine(workspace, "Bot.csproj");
 			strategy = Path.Combine(workspace, "Strategy.cs");
@@ -83,6 +91,15 @@ namespace AutoCnC.Launcher.Tests
 			Assert.That(TrainingRun.Load(run.RunDirectory).Manifest.Experiment.State,
 				Is.EqualTo(TrainingExperimentStates.Candidate),
 				"a live owner must not be reconciled as an interrupted experiment");
+		}
+
+		[Test]
+		public void ContinuousEvaluationDefaultsToHardTrainingBenchmark()
+		{
+			var settings = new LauncherSettings();
+
+			Assert.That(settings.ContinuousBenchmark, Is.EqualTo("hard-16-9"));
+			Assert.That(settings.ContinuousBenchmarkDifficulty, Is.EqualTo("Hard"));
 		}
 
 		[Test]
@@ -133,6 +150,17 @@ namespace AutoCnC.Launcher.Tests
 		}
 
 		[Test]
+		public void UnknownContinuousBenchmarkOrDifficultyIsRejected()
+		{
+			var run = Candidate();
+
+			Assert.That(() => promotion.PrepareEvaluation(repo, run,
+				"not-a-benchmark", "Hard"), Throws.InvalidOperationException);
+			Assert.That(() => promotion.PrepareEvaluation(repo, run,
+				"hard-16-9", "Impossible"), Throws.InvalidOperationException);
+		}
+
+		[Test]
 		public void BuiltArmsUseDistinctPathsAndMustHaveDifferentHashes()
 		{
 			var run = Candidate();
@@ -152,16 +180,32 @@ namespace AutoCnC.Launcher.Tests
 			Assert.Multiple(() =>
 			{
 				Assert.That(plan.CandidateAssemblyPath, Is.Not.EqualTo(plan.ControlAssemblyPath));
+				Assert.That(Path.GetFileName(plan.CandidateAssemblyPath),
+					Is.EqualTo("Expanded.AutoCnC.TestBot.dll"));
 				Assert.That(candidateBuild.Arguments,
 					Does.Contain(run.CandidateArtifactDirectory));
 				Assert.That(controlBuild.Arguments,
 					Does.Contain(run.ControlArtifactDirectory));
+				Assert.That(candidateBuild.Arguments,
+					Does.Contain(plan.CandidateBuildResultPath));
+				Assert.That(controlBuild.Arguments,
+					Does.Contain(plan.ControlBuildResultPath));
 				Assert.That(candidateBuild.Arguments,
 					Does.Not.Contain(Path.Combine(repo.EngineBinDir, "bots")));
 				Assert.That(candidateBenchmark.Arguments,
 					Does.Contain(plan.CandidateAssemblyPath).And.Not.Contain("-Control"));
 				Assert.That(controlBenchmark.Arguments,
 					Does.Contain(plan.ControlAssemblyPath).And.Not.Contain("-Control"));
+				Assert.That(plan.Benchmark, Is.EqualTo("hard-16-9"));
+				Assert.That(plan.Difficulty, Is.EqualTo("Hard"));
+				Assert.That(run.Manifest.Experiment.RequestedBenchmark,
+					Is.EqualTo("hard-16-9"));
+				Assert.That(run.Manifest.Experiment.RequestedDifficulty,
+					Is.EqualTo("Hard"));
+				Assert.That(candidateBenchmark.Arguments,
+					Does.Contain("-Benchmark").And.Contain("hard-16-9"));
+				Assert.That(candidateBenchmark.Arguments,
+					Does.Contain("-Difficulty").And.Contain("Hard"));
 				Assert.That(plan.CandidateAssemblySha256,
 					Is.Not.EqualTo(plan.ControlAssemblySha256));
 				Assert.That(File.ReadAllText(plan.CandidateAssemblyPath),
@@ -189,6 +233,34 @@ namespace AutoCnC.Launcher.Tests
 		}
 
 		[Test]
+		public void EvaluatedTargetPathSupportsImportedConditionalPropertyExpandedNames()
+		{
+			File.WriteAllText(Path.Combine(workspace, "Directory.Build.props"),
+				"<Project><PropertyGroup><ImportedPrefix>Imported</ImportedPrefix>" +
+				"</PropertyGroup></Project>");
+			File.WriteAllText(project,
+				"<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup>" +
+				"<AssemblyName Condition=\"'$(Configuration)' == 'Release'\">" +
+				"$(ImportedPrefix).Conditional</AssemblyName>" +
+				"</PropertyGroup></Project>");
+			var run = Candidate();
+			var plan = promotion.PrepareEvaluation(repo, run);
+			File.WriteAllText(Path.Combine(plan.CandidateOutputDirectory, "Bot.dll"),
+				"guessed project name");
+			File.WriteAllText(Path.Combine(plan.CandidateOutputDirectory,
+				"AutoCnC.TestBot.dll"), "unevaluated assembly name");
+			WriteBuilt(plan, ContinuousEvaluationArm.Candidate, "candidate binary",
+				"Imported.Conditional.dll");
+
+			promotion.CaptureBuiltArm(run, plan, ContinuousEvaluationArm.Candidate);
+
+			Assert.That(Path.GetFileName(plan.CandidateAssemblyPath),
+				Is.EqualTo("Imported.Conditional.dll"));
+			Assert.That(File.ReadAllText(plan.CandidateAssemblyPath),
+				Is.EqualTo("candidate binary"));
+		}
+
+		[Test]
 		public void PairedWinPromotesTheSnapshottedCandidate()
 		{
 			var run = Candidate();
@@ -206,12 +278,33 @@ namespace AutoCnC.Launcher.Tests
 				Assert.That(run.Manifest.Status, Is.EqualTo("promoted"));
 				Assert.That(run.Manifest.Experiment.Batch, Is.EqualTo(plan.Batch));
 				Assert.That(run.Manifest.Experiment.CandidateBatch,
-					Is.EqualTo("candidate-batch-20260919-093437"));
+					Is.EqualTo("candidate-batch-20260919-110459"));
 				Assert.That(run.Manifest.Experiment.ControlBatch,
-					Is.EqualTo("control-batch-20260919-093437"));
+					Is.EqualTo("control-batch-20260919-110459"));
 				Assert.That(run.Manifest.Experiment.ExpectedMatchesPerArm, Is.EqualTo(1));
 				Assert.That(File.Exists(run.BenchmarkResultPath), Is.True);
 			});
+		}
+
+		[TestCase("smoke", "Hard")]
+		[TestCase("hard-16-9", "Normal")]
+		public void ReturnedBenchmarkIdentityMustMatchTheConfiguredHardEvaluation(
+			string benchmark, string difficulty)
+		{
+			var run = Candidate();
+			var plan = PreparedArms(run);
+			PairedBenchmarkEvaluator.WriteResult(run.CandidateBenchmarkResultPath,
+				SingleArm("candidate-batch-20260919-110459", "Won", 0.7,
+					benchmark, difficulty));
+			PairedBenchmarkEvaluator.WriteResult(run.ControlBenchmarkResultPath,
+				SingleArm("control-batch-20260919-110459", "Lost", 0.5));
+
+			var completion = promotion.CompleteEvaluation(run, plan, exitCode: 0);
+
+			Assert.That(completion.Evaluation.Verdict,
+				Is.EqualTo(PromotionVerdicts.Undefined));
+			Assert.That(completion.Evaluation.CanPromote, Is.False);
+			Assert.That(completion.Evaluation.Reason, Does.Contain("instead of"));
 		}
 
 		[Test]
@@ -293,13 +386,35 @@ namespace AutoCnC.Launcher.Tests
 			var completion = promotion.CompleteEvaluation(run, plan, exitCode: 0);
 			promotion.ApplyDecision(run, plan, completion.Evaluation);
 
-			promotion.InvalidateForAgentChat(run);
+			var beforeChat = promotion.CaptureAgentChatFingerprint(run);
+			File.WriteAllText(strategy, "chat edit");
+			Assert.That(promotion.InvalidateAfterAgentChat(run, beforeChat), Is.True);
 
 			Assert.That(promotion.ValidateForNextFight(run, out var reason), Is.False);
-			Assert.That(reason, Does.Contain("agent chat"));
+			Assert.That(reason, Does.Contain("Agent chat"));
 			Assert.That(run.Manifest.Experiment.RequiresReevaluation, Is.True);
 			Assert.That(File.ReadAllText(run.PromotionEvaluationPath),
 				Does.Contain("\"verdict\": \"Undefined\""));
+		}
+
+		[Test]
+		public void NoEditChatAfterRestorationKeepsTheRestoredChampion()
+		{
+			var run = Candidate();
+			var plan = PreparedArms(run);
+			WriteArmResults(run, candidateOutcome: "Lost", controlOutcome: "Won",
+				candidateFitness: 0.3, controlFitness: 0.7);
+			var completion = promotion.CompleteEvaluation(run, plan, exitCode: 0);
+			promotion.ApplyDecision(run, plan, completion.Evaluation);
+			var beforeChat = promotion.CaptureAgentChatFingerprint(run);
+
+			var invalidated = promotion.InvalidateAfterAgentChat(run, beforeChat);
+
+			Assert.That(invalidated, Is.False);
+			Assert.That(run.Manifest.Experiment.State,
+				Is.EqualTo(TrainingExperimentStates.Restored));
+			Assert.That(promotion.ValidateForNextFight(run, out _), Is.True);
+			Assert.That(File.ReadAllText(strategy), Is.EqualTo("champion"));
 		}
 
 		[Test]
@@ -367,34 +482,47 @@ namespace AutoCnC.Launcher.Tests
 		}
 
 		static void WriteBuilt(ContinuousEvaluationPlan plan, ContinuousEvaluationArm arm,
-			string content)
+			string content, string fileName = "Expanded.AutoCnC.TestBot.dll")
 		{
-			var path = arm == ContinuousEvaluationArm.Candidate
-				? plan.CandidateAssemblyPath
-				: plan.ControlAssemblyPath;
+			var output = arm == ContinuousEvaluationArm.Candidate
+				? plan.CandidateOutputDirectory
+				: plan.ControlOutputDirectory;
+			var result = arm == ContinuousEvaluationArm.Candidate
+				? plan.CandidateBuildResultPath
+				: plan.ControlBuildResultPath;
+			var path = Path.Combine(output, fileName);
 			Directory.CreateDirectory(Path.GetDirectoryName(path));
 			File.WriteAllText(path, content);
+			File.WriteAllText(result, JsonSerializer.Serialize(new
+			{
+				SchemaVersion = 1,
+				TargetPath = path
+			}));
 		}
 
 		static void WriteArmResults(TrainingRun run, string candidateOutcome,
 			string controlOutcome, double candidateFitness, double controlFitness)
 		{
 			PairedBenchmarkEvaluator.WriteResult(run.CandidateBenchmarkResultPath,
-				SingleArm("candidate-batch-20260919-093437", candidateOutcome,
+				SingleArm("candidate-batch-20260919-110459", candidateOutcome,
 					candidateFitness));
 			PairedBenchmarkEvaluator.WriteResult(run.ControlBenchmarkResultPath,
-				SingleArm("control-batch-20260919-093437", controlOutcome,
+				SingleArm("control-batch-20260919-110459", controlOutcome,
 					controlFitness));
 		}
 
 		static BenchmarkResultDocument SingleArm(string batch, string outcome, double fitness)
+			=> SingleArm(batch, outcome, fitness, "hard-16-9", "Hard");
+
+		static BenchmarkResultDocument SingleArm(string batch, string outcome, double fitness,
+			string benchmark, string difficulty)
 		{
 			return new BenchmarkResultDocument
 			{
 				SchemaVersion = 1,
-				Benchmark = "standard",
+				Benchmark = benchmark,
 				Batch = batch,
-				Difficulty = "Hard",
+				Difficulty = difficulty,
 				ExpectedMatchesPerArm = 1,
 				Candidate = new BenchmarkArmResult
 				{
@@ -417,6 +545,10 @@ namespace AutoCnC.Launcher.Tests
 						Seed = 123,
 						Outcome = outcome,
 						Fitness = fitness,
+						EarnedPerSecond = 12,
+						SpentPerSecond = 10,
+						Exchange = 1.2,
+						BuildingsKilled = 2,
 						DurationSeconds = 600,
 						Succeeded = true,
 						Status = "completed",

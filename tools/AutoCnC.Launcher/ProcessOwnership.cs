@@ -85,6 +85,24 @@ namespace AutoCnC.Launcher
 			}
 		}
 
+		public static bool IsCurrent(ProcessOwnership claim)
+		{
+			if (claim == null)
+				return false;
+
+			using var process = Process.GetCurrentProcess();
+			if (claim.ProcessId != process.Id ||
+				(!string.IsNullOrEmpty(claim.ProcessName) &&
+					!string.Equals(claim.ProcessName, process.ProcessName,
+						StringComparison.OrdinalIgnoreCase)))
+				return false;
+
+			var started = StartTime(process);
+			return started == null || claim.StartedUtc == null ||
+				Math.Abs((started.Value - claim.StartedUtc.Value).TotalSeconds) <=
+					StartToleranceSeconds;
+		}
+
 		static DateTime? StartTime(Process process)
 		{
 			try

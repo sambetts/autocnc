@@ -9,6 +9,7 @@
 #endregion
 
 using System.Linq;
+using System.Text.Json;
 using NUnit.Framework;
 
 namespace AutoCnC.Evidence.Tests
@@ -31,6 +32,24 @@ namespace AutoCnC.Evidence.Tests
 			Assert.That(evaluation.CandidateWins, Is.EqualTo(2));
 			Assert.That(evaluation.MedianPairedFitnessDelta, Is.LessThan(0),
 				"paired fitness is only the tie-break after wins");
+		}
+
+		[Test]
+		public void Hard169EightMatchResultIsAccepted()
+		{
+			var scenarios = Enumerable.Range(0, 8)
+				.Select(index => (
+					CandidateOutcome: index < 5 ? "Won" : "Lost",
+					ControlOutcome: index < 3 ? "Won" : "Lost",
+					CandidateFitness: 0.6 + index / 100d,
+					ControlFitness: 0.5 + index / 100d))
+				.ToArray();
+
+			var evaluation = PairedBenchmarkEvaluator.Evaluate(Result(scenarios));
+
+			Assert.That(evaluation.Benchmark, Is.EqualTo("hard-16-9"));
+			Assert.That(evaluation.ExpectedMatchesPerArm, Is.EqualTo(8));
+			Assert.That(evaluation.Verdict, Is.EqualTo(PromotionVerdicts.Promote));
 		}
 
 		[Test]
@@ -108,6 +127,39 @@ namespace AutoCnC.Evidence.Tests
 		}
 
 		[Test]
+		public void NullMetricsOnExplicitFailureDeserializeAndYieldUndefined()
+		{
+			var result = Result(("Won", "Lost", 0.7, 0.5));
+			var candidate = result.Matches.Single(match => match.Arm == "candidate");
+			candidate.Succeeded = false;
+			candidate.Status = "failed";
+			candidate.Error = "process exited";
+			candidate.Outcome = "Undefined";
+			candidate.Fitness = null;
+			candidate.EarnedPerSecond = null;
+			candidate.SpentPerSecond = null;
+			candidate.Exchange = null;
+			candidate.BuildingsKilled = null;
+			candidate.DurationSeconds = null;
+			result.Paired[0].CandidateOutcome = "Undefined";
+			result.Paired[0].FitnessDelta = null;
+			result.Paired[0].EarnedPerSecondDelta = null;
+			result.Paired[0].SpentPerSecondDelta = null;
+			result.Paired[0].ExchangeDelta = null;
+			result.Paired[0].BuildingsKilledDelta = null;
+			result.Candidate.Wins = 0;
+			result.Candidate.MedianFitness = null;
+
+			var parsed = JsonSerializer.Deserialize<BenchmarkResultDocument>(
+				JsonSerializer.Serialize(result));
+			var evaluation = PairedBenchmarkEvaluator.Evaluate(parsed);
+
+			Assert.That(parsed.Matches.Single(match => match.Arm == "candidate").Fitness,
+				Is.Null);
+			Assert.That(evaluation.Verdict, Is.EqualTo(PromotionVerdicts.Undefined));
+		}
+
+		[Test]
 		public void MissingPairedRowsAreUndefined()
 		{
 			var result = Result(
@@ -145,7 +197,7 @@ namespace AutoCnC.Evidence.Tests
 			var control = SingleArm("control-raw", "Lost", 0.5);
 
 			var combined = PairedBenchmarkResultComposer.Combine(
-				candidate, control, "promotion-20260919-093437");
+				candidate, control, "promotion-20260919-110459");
 			var evaluation = PairedBenchmarkEvaluator.Evaluate(combined);
 
 			Assert.That(combined.ExpectedMatchesPerArm, Is.EqualTo(1));
@@ -164,8 +216,8 @@ namespace AutoCnC.Evidence.Tests
 			var result = new BenchmarkResultDocument
 			{
 				SchemaVersion = 1,
-				Benchmark = "standard",
-				Batch = "standard-20260919-093437-test",
+				Benchmark = "hard-16-9",
+				Batch = "hard-16-9-20260919-110459-test",
 				Difficulty = "Hard",
 				ExpectedMatchesPerArm = scenarios.Length,
 				Candidate = new BenchmarkArmResult { Arm = "candidate" },
@@ -190,6 +242,10 @@ namespace AutoCnC.Evidence.Tests
 					Seed = seed,
 					Outcome = scenario.CandidateOutcome,
 					Fitness = scenario.CandidateFitness,
+					EarnedPerSecond = 12,
+					SpentPerSecond = 10,
+					Exchange = 1.2,
+					BuildingsKilled = 2,
 					DurationSeconds = 600,
 					Succeeded = true,
 					Status = "completed",
@@ -207,6 +263,10 @@ namespace AutoCnC.Evidence.Tests
 					Seed = seed,
 					Outcome = scenario.ControlOutcome,
 					Fitness = scenario.ControlFitness,
+					EarnedPerSecond = 10,
+					SpentPerSecond = 9,
+					Exchange = 1,
+					BuildingsKilled = 1,
 					DurationSeconds = 600,
 					Succeeded = true,
 					Status = "completed",
@@ -223,7 +283,11 @@ namespace AutoCnC.Evidence.Tests
 					CandidateOutcome = scenario.CandidateOutcome,
 					ControlOutcome = scenario.ControlOutcome,
 					FitnessDelta = System.Math.Round(
-						scenario.CandidateFitness - scenario.ControlFitness, 4)
+						scenario.CandidateFitness - scenario.ControlFitness, 4),
+					EarnedPerSecondDelta = 2,
+					SpentPerSecondDelta = 1,
+					ExchangeDelta = 0.2,
+					BuildingsKilledDelta = 1
 				});
 			}
 
@@ -239,7 +303,7 @@ namespace AutoCnC.Evidence.Tests
 			return new BenchmarkResultDocument
 			{
 				SchemaVersion = 1,
-				Benchmark = "standard",
+				Benchmark = "hard-16-9",
 				Batch = batch,
 				Difficulty = "Hard",
 				ExpectedMatchesPerArm = 1,
@@ -264,6 +328,10 @@ namespace AutoCnC.Evidence.Tests
 						Seed = 123,
 						Outcome = outcome,
 						Fitness = fitness,
+						EarnedPerSecond = 12,
+						SpentPerSecond = 10,
+						Exchange = 1.2,
+						BuildingsKilled = 2,
 						DurationSeconds = 600,
 						Succeeded = true,
 						Status = "completed",

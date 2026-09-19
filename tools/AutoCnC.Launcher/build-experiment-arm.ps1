@@ -6,6 +6,10 @@
     Unlike run-bot.ps1, this never writes to engine/bin/bots. Candidate and control builds receive
     different output directories, so compiling the second arm cannot overwrite the first arm's
     assembly before its benchmark runs.
+
+.PARAMETER ResultPath
+    Writes the evaluated MSBuild TargetPath as JSON for the launcher. AssemblyName may come from
+    imports, conditions or property expansion, so the caller must not guess it.
 #>
 [CmdletBinding()]
 param(
@@ -15,6 +19,8 @@ param(
     [string]$OutputDirectory,
     [Parameter(Mandatory)]
     [string]$AutoCnCPath,
+    [Parameter(Mandatory)]
+    [string]$ResultPath,
     [ValidateSet('Debug', 'Release')]
     [string]$Configuration = 'Release'
 )
@@ -60,5 +66,14 @@ if (-not [string]::Equals($targetDirectory, $resolvedOutput,
         [StringComparison]::OrdinalIgnoreCase)) {
     throw "The immutable build escaped its output directory: $target"
 }
+
+$resultDirectory = Split-Path -Parent $ResultPath
+if ($resultDirectory) {
+    New-Item -ItemType Directory -Path $resultDirectory -Force | Out-Null
+}
+[ordered]@{
+    SchemaVersion = 1
+    TargetPath = [IO.Path]::GetFullPath($target)
+} | ConvertTo-Json | Set-Content -LiteralPath $ResultPath -Encoding utf8
 
 Write-Host "Immutable arm: $target"

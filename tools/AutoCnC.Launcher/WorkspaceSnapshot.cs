@@ -204,6 +204,10 @@ namespace AutoCnC.Launcher
 
 		public static void Restore(TrainingRun run)
 		{
+			if (run.IsBusy && !ProcessOwnership.IsCurrent(run.Manifest.Owner))
+				throw new InvalidOperationException(
+					"Another launcher still owns this source snapshot.");
+
 			var snapshot = Read(run);
 			EnsureSameWorkspace(run, snapshot);
 			var changes = Compare(run);

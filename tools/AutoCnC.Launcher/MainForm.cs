@@ -1015,6 +1015,7 @@ namespace AutoCnC.Launcher
 			// Any count but a confirmed zero. An unknown count means the workspace could not be
 			// inspected, which is the state where undoing matters most, not least.
 			restoreButton.Enabled = !busy && trainingRunMatches && run != null &&
+				!run.IsBusy &&
 				((agent != null && agent.ChangeCount != 0 && agent.RestoredUtc == null) ||
 					run.HasUnresolvedContinuousExperiment) &&
 				File.Exists(run.SnapshotManifestPath);
@@ -1456,6 +1457,14 @@ namespace AutoCnC.Launcher
 					PersistSettings();
 					RefreshTrainingBattleChoices();
 					UpdateEnabledState();
+					if (unresolved.IsBusy)
+					{
+						ReportAutomationFailure(
+							"Another launcher still owns the unresolved continuous candidate. " +
+							"Wait for it to finish or stop it there before starting another fight.",
+							MessageBoxIcon.Warning, automatic: false);
+						return false;
+					}
 					if (continuousBox.Checked && unresolved.CanResumeContinuousEvaluation)
 						return ResumeContinuousEvaluation(unresolved);
 
@@ -1533,25 +1542,24 @@ namespace AutoCnC.Launcher
 
 		TrainingRun UnresolvedContinuousExperiment()
 		{
-			var runs = loadedHistory.Runs
+			var remembered = loadedHistory.Runs
 				.Append(lastRun)
 				.Append(trainingRun)
 				.Where(run => run != null && RunMatchesSelectedBot(run))
 				.GroupBy(run => run.RunDirectory, StringComparer.OrdinalIgnoreCase)
 				.Select(group => group.First())
 				.ToList();
-			foreach (var run in runs)
+			var runs = new List<TrainingRun>();
+			foreach (var rememberedRun in remembered)
 				try
 				{
+					var run = TrainingRun.Load(rememberedRun.RunDirectory) ?? rememberedRun;
 					if (!continuousLoop.IsRunning &&
-						run.HasUnresolvedContinuousExperiment &&
-						!string.Equals(run.Manifest.Experiment.State,
-							TrainingExperimentStates.Aborted,
-							StringComparison.OrdinalIgnoreCase))
+						run.IsBusy && ProcessOwnership.IsCurrent(run.Manifest.Owner))
 						run.AbortContinuousExperiment(
 							"The in-memory continuous loop ended before a promotion decision.");
-					else
-						run.ReconcileInterruptedContinuousExperiment();
+					ReplaceRunReference(rememberedRun, run);
+					runs.Add(run);
 				}
 				catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
 				{
@@ -1564,10 +1572,38 @@ namespace AutoCnC.Launcher
 				.LastOrDefault();
 		}
 
+		TrainingRun ReloadForContinuousMutation(TrainingRun run, bool allowCurrentOwner)
+		{
+			var current = TrainingRun.Load(run?.RunDirectory) ??
+				throw new InvalidOperationException(
+					"The continuous experiment no longer exists on disk.");
+			if (current.IsBusy &&
+				!(allowCurrentOwner && ProcessOwnership.IsCurrent(current.Manifest.Owner)))
+				throw new InvalidOperationException(
+					"Another launcher still owns this continuous experiment.");
+
+			ReplaceRunReference(run, current);
+			return current;
+		}
+
+		void ReplaceRunReference(TrainingRun previous, TrainingRun current)
+		{
+			if (SamePath(lastRun?.RunDirectory, previous?.RunDirectory))
+				lastRun = current;
+			if (SamePath(trainingRun?.RunDirectory, previous?.RunDirectory))
+				trainingRun = current;
+			if (SamePath(activeTrainingRun?.RunDirectory, previous?.RunDirectory))
+				activeTrainingRun = current;
+			if (SamePath(continuousCandidateRun?.RunDirectory, previous?.RunDirectory))
+				continuousCandidateRun = current;
+			loadedHistory = loadedHistory.WithRun(current);
+		}
+
 		bool ResumeContinuousEvaluation(TrainingRun run)
 		{
 			try
 			{
+				run = ReloadForContinuousMutation(run, allowCurrentOwner: false);
 				run.ResumeContinuousExperiment();
 				if (continuousLoop.ResumeEvaluation(enabled: true) !=
 					ContinuousTrainingAction.Evaluate)
@@ -2020,7 +2056,9 @@ namespace AutoCnC.Launcher
 
 			try
 			{
-				continuousEvaluationPlan = continuousPromotion.PrepareEvaluation(repo, run);
+				continuousEvaluationPlan = continuousPromotion.PrepareEvaluation(repo, run,
+					settings.ContinuousBenchmark,
+					settings.ContinuousBenchmarkDifficulty);
 				activeTrainingRun = run;
 				queue.Clear();
 				EnqueueContinuousStep(
@@ -2493,6 +2531,7 @@ namespace AutoCnC.Launcher
 
 			try
 			{
+				run = ReloadForContinuousMutation(run, allowCurrentOwner: false);
 				WorkspaceSnapshot.Restore(run);
 				ShowImprovementWindow().ShowAgentRun(run);
 				Status("The previous source iteration has been restored.");
@@ -2771,13 +2810,27 @@ namespace AutoCnC.Launcher
 		void AbortUnresolvedContinuousExperiment(string reason)
 		{
 			var run = continuousCandidateRun ?? activeTrainingRun ?? trainingRun ?? lastRun;
-			if (run?.HasUnresolvedContinuousExperiment != true)
+			if (run == null)
 				return;
 
 			try
 			{
-				run.AbortContinuousExperiment(reason);
-				RefreshFeedbackRun(run);
+				var current = TrainingRun.Load(run.RunDirectory) ?? run;
+				if (!current.HasUnresolvedContinuousExperiment)
+					return;
+				if (current.IsBusy &&
+					!ProcessOwnership.IsCurrent(current.Manifest.Owner))
+				{
+					AppendImprovementOutput(
+						"Did not abort the continuous experiment because another launcher still owns it.");
+					return;
+				}
+
+				if (!string.Equals(current.Manifest.Experiment?.State,
+					TrainingExperimentStates.Aborted, StringComparison.OrdinalIgnoreCase))
+					current.AbortContinuousExperiment(reason);
+				ReplaceRunReference(run, current);
+				RefreshFeedbackRun(current);
 			}
 			catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
 				InvalidOperationException)

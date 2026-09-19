@@ -32,11 +32,11 @@ namespace AutoCnC.Evidence
 		public string Arm { get; set; }
 		public int Wins { get; set; }
 		public int Played { get; set; }
-		public double MedianFitness { get; set; }
-		public double MedianEarnedPerSecond { get; set; }
-		public double MedianSpentPerSecond { get; set; }
-		public double MedianExchange { get; set; }
-		public double MedianBuildingsKilled { get; set; }
+		public double? MedianFitness { get; set; }
+		public double? MedianEarnedPerSecond { get; set; }
+		public double? MedianSpentPerSecond { get; set; }
+		public double? MedianExchange { get; set; }
+		public double? MedianBuildingsKilled { get; set; }
 	}
 
 	/// <summary>One completed match from the machine-readable benchmark result.</summary>
@@ -52,12 +52,12 @@ namespace AutoCnC.Evidence
 		public string BotFaction { get; set; }
 		public int? Seed { get; set; }
 		public string Outcome { get; set; }
-		public double Fitness { get; set; }
-		public double EarnedPerSecond { get; set; }
-		public double SpentPerSecond { get; set; }
-		public double Exchange { get; set; }
-		public double BuildingsKilled { get; set; }
-		public int DurationSeconds { get; set; }
+		public double? Fitness { get; set; }
+		public double? EarnedPerSecond { get; set; }
+		public double? SpentPerSecond { get; set; }
+		public double? Exchange { get; set; }
+		public double? BuildingsKilled { get; set; }
+		public int? DurationSeconds { get; set; }
 
 		/// <summary>Optional fields accepted from newer producers without invalidating schema 1.</summary>
 		public string Benchmark { get; set; }
@@ -78,11 +78,11 @@ namespace AutoCnC.Evidence
 		public int? Seed { get; set; }
 		public string CandidateOutcome { get; set; }
 		public string ControlOutcome { get; set; }
-		public double FitnessDelta { get; set; }
-		public double EarnedPerSecondDelta { get; set; }
-		public double SpentPerSecondDelta { get; set; }
-		public double ExchangeDelta { get; set; }
-		public double BuildingsKilledDelta { get; set; }
+		public double? FitnessDelta { get; set; }
+		public double? EarnedPerSecondDelta { get; set; }
+		public double? SpentPerSecondDelta { get; set; }
+		public double? ExchangeDelta { get; set; }
+		public double? BuildingsKilledDelta { get; set; }
 		public string Benchmark { get; set; }
 		public string Batch { get; set; }
 	}
@@ -173,14 +173,14 @@ namespace AutoCnC.Evidence
 					Seed = candidateRow.Seed,
 					CandidateOutcome = candidateRow.Outcome,
 					ControlOutcome = controlRow.Outcome,
-					FitnessDelta = Math.Round(candidateRow.Fitness - controlRow.Fitness, 4),
-					EarnedPerSecondDelta = Math.Round(
-						candidateRow.EarnedPerSecond - controlRow.EarnedPerSecond, 3),
-					SpentPerSecondDelta = Math.Round(
-						candidateRow.SpentPerSecond - controlRow.SpentPerSecond, 3),
-					ExchangeDelta = Math.Round(candidateRow.Exchange - controlRow.Exchange, 4),
-					BuildingsKilledDelta =
-						candidateRow.BuildingsKilled - controlRow.BuildingsKilled,
+					FitnessDelta = Delta(candidateRow.Fitness, controlRow.Fitness, 4),
+					EarnedPerSecondDelta = Delta(
+						candidateRow.EarnedPerSecond, controlRow.EarnedPerSecond, 3),
+					SpentPerSecondDelta = Delta(
+						candidateRow.SpentPerSecond, controlRow.SpentPerSecond, 3),
+					ExchangeDelta = Delta(candidateRow.Exchange, controlRow.Exchange, 4),
+					BuildingsKilledDelta = Delta(
+						candidateRow.BuildingsKilled, controlRow.BuildingsKilled, 3),
 					Benchmark = candidate.Benchmark,
 					Batch = batch
 				});
@@ -188,6 +188,11 @@ namespace AutoCnC.Evidence
 
 			return combined;
 		}
+
+		static double? Delta(double? candidate, double? control, int digits) =>
+			candidate.HasValue && control.HasValue
+				? Math.Round(candidate.Value - control.Value, digits)
+				: null;
 
 		static List<BenchmarkMatchResult> SingleArm(BenchmarkResultDocument document,
 			string arm)
@@ -408,7 +413,7 @@ namespace AutoCnC.Evidence
 				if (invalid != null)
 					return Undefined(invalid, document.Benchmark, document.Batch);
 
-				var delta = candidateMatch.Fitness - controlMatch.Fitness;
+				var delta = candidateMatch.Fitness.Value - controlMatch.Fitness.Value;
 				if (delta > DeltaTolerance)
 					evaluation.CandidateFitnessPairs++;
 				else if (delta < -DeltaTolerance)
@@ -426,8 +431,8 @@ namespace AutoCnC.Evidence
 					Seed = candidateMatch.Seed,
 					CandidateOutcome = candidateMatch.Outcome,
 					ControlOutcome = controlMatch.Outcome,
-					CandidateFitness = candidateMatch.Fitness,
-					ControlFitness = controlMatch.Fitness,
+					CandidateFitness = candidateMatch.Fitness.Value,
+					ControlFitness = controlMatch.Fitness.Value,
 					FitnessDelta = Math.Round(delta, 4)
 				});
 			}
@@ -499,9 +504,9 @@ namespace AutoCnC.Evidence
 				return $"Repeat {candidate.Repeat}, scenario {candidate.Scenario} contains a failed or incomplete run.";
 			if (!ValidOutcome(candidate.Outcome) || !ValidOutcome(control.Outcome))
 				return $"Repeat {candidate.Repeat}, scenario {candidate.Scenario} has an Undefined outcome.";
-			if (!double.IsFinite(candidate.Fitness) || !double.IsFinite(control.Fitness) ||
-				!double.IsFinite(pair.FitnessDelta))
-				return $"Repeat {candidate.Repeat}, scenario {candidate.Scenario} has non-finite fitness.";
+			if (!CompleteMetrics(candidate) || !CompleteMetrics(control) ||
+				!CompleteMetrics(pair))
+				return $"Repeat {candidate.Repeat}, scenario {candidate.Scenario} has missing or non-finite metrics.";
 			if (!SameConfiguration(candidate, control) || !SameConfiguration(candidate, pair))
 				return $"Repeat {candidate.Repeat}, scenario {candidate.Scenario} was not paired on the same configuration.";
 			if (!SameOptional(document.Benchmark, candidate.Benchmark) ||
@@ -515,7 +520,8 @@ namespace AutoCnC.Evidence
 			if (!string.Equals(pair.CandidateOutcome, candidate.Outcome, StringComparison.OrdinalIgnoreCase) ||
 				!string.Equals(pair.ControlOutcome, control.Outcome, StringComparison.OrdinalIgnoreCase))
 				return $"Repeat {candidate.Repeat}, scenario {candidate.Scenario} has inconsistent paired outcomes.";
-			if (Math.Abs(pair.FitnessDelta - (candidate.Fitness - control.Fitness)) > DeltaTolerance)
+			if (Math.Abs(pair.FitnessDelta.Value -
+				(candidate.Fitness.Value - control.Fitness.Value)) > DeltaTolerance)
 				return $"Repeat {candidate.Repeat}, scenario {candidate.Scenario} has an inconsistent fitness delta.";
 
 			return null;
@@ -565,13 +571,30 @@ namespace AutoCnC.Evidence
 
 		static bool Complete(BenchmarkMatchResult match) =>
 			!string.IsNullOrWhiteSpace(match.RunId) &&
-			match.DurationSeconds > 0 &&
 			match.Succeeded &&
 			string.IsNullOrWhiteSpace(match.Error) &&
 			(!string.IsNullOrWhiteSpace(match.Status) &&
 				(match.Status.Equals("completed", StringComparison.OrdinalIgnoreCase) ||
 				match.Status.Equals("finished", StringComparison.OrdinalIgnoreCase) ||
 				match.Status.Equals("succeeded", StringComparison.OrdinalIgnoreCase)));
+
+		static bool CompleteMetrics(BenchmarkMatchResult match) =>
+			match.DurationSeconds is > 0 &&
+			Finite(match.Fitness) &&
+			Finite(match.EarnedPerSecond) &&
+			Finite(match.SpentPerSecond) &&
+			Finite(match.Exchange) &&
+			Finite(match.BuildingsKilled);
+
+		static bool CompleteMetrics(BenchmarkPairResult pair) =>
+			Finite(pair.FitnessDelta) &&
+			Finite(pair.EarnedPerSecondDelta) &&
+			Finite(pair.SpentPerSecondDelta) &&
+			Finite(pair.ExchangeDelta) &&
+			Finite(pair.BuildingsKilledDelta);
+
+		static bool Finite(double? value) =>
+			value.HasValue && double.IsFinite(value.Value);
 
 		static bool ValidOutcome(string outcome) =>
 			string.Equals(outcome, "Won", StringComparison.OrdinalIgnoreCase) ||

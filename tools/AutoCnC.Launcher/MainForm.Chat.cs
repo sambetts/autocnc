@@ -114,11 +114,13 @@ namespace AutoCnC.Launcher
 			if (!thread.TryStartNext(out var message))
 				return false;
 
+			string continuousFingerprint = null;
 			try
 			{
 				if (continuousLoop.IsRunning &&
 					SamePath(continuousCandidateRun?.RunDirectory, run.RunDirectory))
-					continuousPromotion.InvalidateForAgentChat(run);
+					continuousFingerprint =
+						continuousPromotion.CaptureAgentChatFingerprint(run);
 
 				run.EnsureAgentSessionId();
 
@@ -170,7 +172,7 @@ namespace AutoCnC.Launcher
 				// The conversation is captured rather than looked up again, so a turn started
 				// against one fight still completes against that fight even if the window has
 				// been pointed at another one in the meantime.
-				Completed = code => FinishChatTurn(thread, code)
+				Completed = code => FinishChatTurn(thread, code, continuousFingerprint)
 			});
 
 			RunNext();
@@ -190,7 +192,8 @@ namespace AutoCnC.Launcher
 			return false;
 		}
 
-		void FinishChatTurn(AgentConversation thread, int exitCode)
+		void FinishChatTurn(AgentConversation thread, int exitCode,
+			string continuousFingerprint)
 		{
 			var run = thread.Run;
 			if (exitCode == 0)
@@ -200,6 +203,25 @@ namespace AutoCnC.Launcher
 				thread.Fail(stopRequested
 					? "You stopped the agent before it answered."
 					: $"The agent could not answer; it exited with code {exitCode}.");
+
+			try
+			{
+				if (continuousPromotion.InvalidateAfterAgentChat(
+					run, continuousFingerprint))
+					thread.Note(
+						"The chat changed source, so the continuous candidate will be reevaluated.");
+			}
+			catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
+				InvalidOperationException)
+			{
+				thread.Note(
+					"The launcher could not compare source after chat: " + ex.Message);
+				AbortUnresolvedContinuousExperiment(
+					"Source could not be reconciled after edit-capable agent chat.");
+				continuousLoop.Stop();
+				pendingContinuousAction = ContinuousTrainingAction.None;
+				Status("Continuous improvement stopped because source could not be verified after chat.");
+			}
 
 			if (improvementWindow != null && !improvementWindow.IsDisposed &&
 				ReferenceEquals(conversation, thread))

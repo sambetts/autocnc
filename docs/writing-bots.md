@@ -367,6 +367,12 @@ battle just fought. Continuous mode does not pause for feedback or prompt review
 next prompt remains a draft on the run, the current prompt stays frozen, and the player can review
 the draft after the loop stops.
 
+The default continuous gate is `hard-16-9` at `Hard`. Each arm receives those explicit arguments,
+and results naming any other benchmark or difficulty are `Undefined`. Isolated builds record
+MSBuild's evaluated `TargetPath`; imported, conditional, or property-expanded assembly names are
+not guessed. Failed planned-match rows may carry null metrics, but their explicit
+`Succeeded`/`Status`/`Error` fields still make the whole paired result ineligible.
+
 The control snapshot is captured when the continuous fight's run is created, before queued chat
 can edit the workspace. No experiment is persisted merely for capturing it: experiment state and
 the agent attempt are saved together only after setup succeeds. On reload, an ownerless candidate

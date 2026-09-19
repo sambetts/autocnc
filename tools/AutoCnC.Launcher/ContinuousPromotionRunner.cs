@@ -11,6 +11,8 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
+using System.Text.Json;
 using AutoCnC.Evidence;
 
 namespace AutoCnC.Launcher
@@ -31,10 +33,16 @@ namespace AutoCnC.Launcher
 	public sealed class ContinuousEvaluationPlan
 	{
 		public string Batch { get; init; }
+		public string Benchmark { get; init; }
+		public string Difficulty { get; init; }
 		public string CandidateProjectPath { get; init; }
 		public string ControlProjectPath { get; init; }
-		public string CandidateAssemblyPath { get; init; }
-		public string ControlAssemblyPath { get; init; }
+		public string CandidateOutputDirectory { get; init; }
+		public string ControlOutputDirectory { get; init; }
+		public string CandidateBuildResultPath { get; init; }
+		public string ControlBuildResultPath { get; init; }
+		public string CandidateAssemblyPath { get; set; }
+		public string ControlAssemblyPath { get; set; }
 		public string CandidateFingerprint { get; init; }
 		public string ChampionFingerprint { get; init; }
 		public string CandidateAssemblySha256 { get; set; }
@@ -48,11 +56,25 @@ namespace AutoCnC.Launcher
 		public string InvalidationReason { get; init; }
 	}
 
+	public sealed class ContinuousArmBuildResult
+	{
+		public int SchemaVersion { get; set; }
+		public string TargetPath { get; set; }
+	}
+
 	/// <summary>
 	/// Materializes immutable arms, captures their built assemblies and evaluates paired results.
 	/// </summary>
 	public sealed class ContinuousPromotionRunner
 	{
+		public const string DefaultBenchmark = "hard-16-9";
+		public const string DefaultDifficulty = "Hard";
+
+		static readonly JsonSerializerOptions BuildJsonOptions = new()
+		{
+			PropertyNameCaseInsensitive = true
+		};
+
 		public void CaptureChampion(TrainingRun run)
 		{
 			if (run == null)
@@ -62,7 +84,8 @@ namespace AutoCnC.Launcher
 				WorkspaceSnapshot.Capture(run);
 		}
 
-		public ContinuousEvaluationPlan PrepareEvaluation(RepoLayout repo, TrainingRun run)
+		public ContinuousEvaluationPlan PrepareEvaluation(RepoLayout repo, TrainingRun run,
+			string benchmark = DefaultBenchmark, string difficulty = DefaultDifficulty)
 		{
 			if (repo == null)
 				throw new ArgumentNullException(nameof(repo));
@@ -75,6 +98,8 @@ namespace AutoCnC.Launcher
 			if (!run.IsEditable)
 				throw new InvalidOperationException(
 					"The continuous candidate no longer has an editable bot project.");
+			(benchmark, difficulty) = ValidateBenchmarkSelection(
+				repo, benchmark, difficulty);
 
 			var relativeProject = Path.GetRelativePath(run.Manifest.BotDirectory,
 				run.Manifest.BotProject);
@@ -103,13 +128,6 @@ namespace AutoCnC.Launcher
 				throw new InvalidDataException(
 					"The immutable candidate and control copies do not contain the bot project.");
 
-			var candidateAssemblyName = BotWorkspace.AssemblyName(candidateProject);
-			var controlAssemblyName = BotWorkspace.AssemblyName(controlProject);
-			if (!string.Equals(candidateAssemblyName, controlAssemblyName,
-				StringComparison.OrdinalIgnoreCase))
-				throw new InvalidDataException(
-					"Candidate and control materialized different assembly names.");
-
 			PrepareDirectory(run.CandidateArtifactDirectory);
 			PrepareDirectory(run.ControlArtifactDirectory);
 			PrepareDirectory(run.CandidateBenchmarkRunsDirectory);
@@ -117,27 +135,36 @@ namespace AutoCnC.Launcher
 			DeleteIfExists(run.CandidateBenchmarkResultPath);
 			DeleteIfExists(run.ControlBenchmarkResultPath);
 			DeleteIfExists(run.BenchmarkResultPath);
+			var candidateBuildResult = Path.Combine(
+				run.ExperimentDirectory, "candidate-build.json");
+			var controlBuildResult = Path.Combine(
+				run.ExperimentDirectory, "control-build.json");
+			DeleteIfExists(candidateBuildResult);
+			DeleteIfExists(controlBuildResult);
 
-			run.BeginContinuousEvaluation(candidateFingerprint, championFingerprint);
-			var experiment = run.Manifest.Experiment;
-			var assemblyFile = candidateAssemblyName + ".dll";
-			var candidateAssembly = Path.Combine(run.CandidateArtifactDirectory, assemblyFile);
-			var controlAssembly = Path.Combine(run.ControlArtifactDirectory, assemblyFile);
 			var sharedBotDirectory = Path.Combine(repo.EngineBinDir, "bots");
-			if (string.Equals(Path.GetFullPath(candidateAssembly),
-					Path.GetFullPath(controlAssembly), StringComparison.OrdinalIgnoreCase) ||
-				IsUnder(sharedBotDirectory, candidateAssembly) ||
-				IsUnder(sharedBotDirectory, controlAssembly))
+			if (string.Equals(Path.GetFullPath(run.CandidateArtifactDirectory),
+					Path.GetFullPath(run.ControlArtifactDirectory),
+					StringComparison.OrdinalIgnoreCase) ||
+				IsUnder(sharedBotDirectory, run.CandidateArtifactDirectory) ||
+				IsUnder(sharedBotDirectory, run.ControlArtifactDirectory))
 				throw new InvalidDataException(
 					"Candidate and control must use distinct immutable paths outside engine/bin/bots.");
 
+			run.BeginContinuousEvaluation(candidateFingerprint, championFingerprint,
+				benchmark, difficulty);
+			var experiment = run.Manifest.Experiment;
 			return new ContinuousEvaluationPlan
 			{
 				Batch = $"promotion-{experiment.Id}-{experiment.EvaluationAttempt:D2}",
+				Benchmark = benchmark,
+				Difficulty = difficulty,
 				CandidateProjectPath = candidateProject,
 				ControlProjectPath = controlProject,
-				CandidateAssemblyPath = candidateAssembly,
-				ControlAssemblyPath = controlAssembly,
+				CandidateOutputDirectory = run.CandidateArtifactDirectory,
+				ControlOutputDirectory = run.ControlArtifactDirectory,
+				CandidateBuildResultPath = candidateBuildResult,
+				ControlBuildResultPath = controlBuildResult,
 				CandidateFingerprint = candidateFingerprint,
 				ChampionFingerprint = championFingerprint
 			};
@@ -149,6 +176,12 @@ namespace AutoCnC.Launcher
 			var project = arm == ContinuousEvaluationArm.Candidate
 				? plan.CandidateProjectPath
 				: plan.ControlProjectPath;
+			var output = arm == ContinuousEvaluationArm.Candidate
+				? plan.CandidateOutputDirectory
+				: plan.ControlOutputDirectory;
+			var result = arm == ContinuousEvaluationArm.Candidate
+				? plan.CandidateBuildResultPath
+				: plan.ControlBuildResultPath;
 			return new ContinuousScriptPlan
 			{
 				Title = $"Building immutable {arm.ToString().ToLowerInvariant()} arm",
@@ -156,10 +189,9 @@ namespace AutoCnC.Launcher
 				Arguments =
 				[
 					"-Project", project,
-					"-OutputDirectory", arm == ContinuousEvaluationArm.Candidate
-						? Path.GetDirectoryName(plan.CandidateAssemblyPath)
-						: Path.GetDirectoryName(plan.ControlAssemblyPath),
-					"-AutoCnCPath", repo.Root
+					"-OutputDirectory", output,
+					"-AutoCnCPath", repo.Root,
+					"-ResultPath", result
 				]
 			};
 		}
@@ -167,9 +199,27 @@ namespace AutoCnC.Launcher
 		public void CaptureBuiltArm(TrainingRun run, ContinuousEvaluationPlan plan,
 			ContinuousEvaluationArm arm)
 		{
-			var destination = arm == ContinuousEvaluationArm.Candidate
-				? plan.CandidateAssemblyPath
-				: plan.ControlAssemblyPath;
+			var resultPath = arm == ContinuousEvaluationArm.Candidate
+				? plan.CandidateBuildResultPath
+				: plan.ControlBuildResultPath;
+			var outputDirectory = arm == ContinuousEvaluationArm.Candidate
+				? plan.CandidateOutputDirectory
+				: plan.ControlOutputDirectory;
+			if (!File.Exists(resultPath))
+				throw new InvalidDataException(
+					$"The {arm.ToString().ToLowerInvariant()} build did not report its evaluated TargetPath.");
+
+			var result = JsonSerializer.Deserialize<ContinuousArmBuildResult>(
+				File.ReadAllText(resultPath), BuildJsonOptions);
+			if (result?.SchemaVersion < 1 ||
+				string.IsNullOrWhiteSpace(result.TargetPath))
+				throw new InvalidDataException(
+					$"The {arm.ToString().ToLowerInvariant()} build reported no evaluated TargetPath.");
+
+			var destination = Path.GetFullPath(result.TargetPath);
+			if (!IsUnder(outputDirectory, destination))
+				throw new InvalidDataException(
+					$"The {arm.ToString().ToLowerInvariant()} TargetPath escaped its isolated output directory.");
 			if (!File.Exists(destination))
 				throw new InvalidDataException(
 					$"The {arm.ToString().ToLowerInvariant()} build did not produce " +
@@ -179,9 +229,15 @@ namespace AutoCnC.Launcher
 			var sha256 = BotWorkspace.Sha256(destination);
 
 			if (arm == ContinuousEvaluationArm.Candidate)
+			{
+				plan.CandidateAssemblyPath = destination;
 				plan.CandidateAssemblySha256 = sha256;
+			}
 			else
+			{
+				plan.ControlAssemblyPath = destination;
 				plan.ControlAssemblySha256 = sha256;
+			}
 
 			EnsureImmutableSources(plan);
 			if (arm == ContinuousEvaluationArm.Control)
@@ -212,7 +268,9 @@ namespace AutoCnC.Launcher
 						: run.ControlBenchmarkRunsDirectory,
 					"-ResultPath", candidate
 						? run.CandidateBenchmarkResultPath
-						: run.ControlBenchmarkResultPath
+						: run.ControlBenchmarkResultPath,
+					"-Benchmark", plan.Benchmark,
+					"-Difficulty", plan.Difficulty
 				]
 			};
 		}
@@ -235,6 +293,8 @@ namespace AutoCnC.Launcher
 						run.CandidateBenchmarkResultPath);
 					var control = PairedBenchmarkEvaluator.ReadResult(
 						run.ControlBenchmarkResultPath);
+					ValidateBenchmarkResult(plan, candidate, "candidate");
+					ValidateBenchmarkResult(plan, control, "control");
 					run.RecordContinuousBenchmarkBatches(candidate?.Batch, control?.Batch);
 					var combined = PairedBenchmarkResultComposer.Combine(
 						candidate, control, plan.Batch);
@@ -349,16 +409,29 @@ namespace AutoCnC.Launcher
 			return false;
 		}
 
-		public void InvalidateForAgentChat(TrainingRun run)
+		public string CaptureAgentChatFingerprint(TrainingRun run)
 		{
 			var experiment = run?.Manifest.Experiment;
 			if (experiment?.Continuous != true || experiment.EvaluationStartedUtc == null ||
 				string.Equals(experiment.State, TrainingExperimentStates.Candidate,
 					StringComparison.OrdinalIgnoreCase))
-				return;
+				return null;
+
+			return BotWorkspace.Fingerprint(run.Manifest.BotDirectory);
+		}
+
+		public bool InvalidateAfterAgentChat(TrainingRun run, string beforeFingerprint)
+		{
+			if (string.IsNullOrWhiteSpace(beforeFingerprint))
+				return false;
+
+			var after = BotWorkspace.Fingerprint(run.Manifest.BotDirectory);
+			if (string.Equals(beforeFingerprint, after, StringComparison.Ordinal))
+				return false;
 
 			Invalidate(run,
-				"An edit-capable agent chat started after the immutable candidate snapshot was captured.");
+				"Agent chat changed the workspace after the immutable candidate snapshot was captured.");
+			return true;
 		}
 
 		public void InvalidateEvaluation(TrainingRun run, string reason) =>
@@ -395,6 +468,67 @@ namespace AutoCnC.Launcher
 			Directory.CreateDirectory(run.ExperimentDirectory);
 			PairedBenchmarkEvaluator.Write(run.PromotionEvaluationPath, evaluation);
 			run.InvalidateContinuousEvaluation(reason);
+		}
+
+		static (string Benchmark, string Difficulty) ValidateBenchmarkSelection(
+			RepoLayout repo, string benchmark, string difficulty)
+		{
+			benchmark = string.IsNullOrWhiteSpace(benchmark)
+				? DefaultBenchmark
+				: benchmark.Trim();
+			difficulty = string.IsNullOrWhiteSpace(difficulty)
+				? DefaultDifficulty
+				: difficulty.Trim();
+
+			if (!File.Exists(repo.BenchmarksFile))
+				throw new InvalidOperationException("The benchmark catalogue is unavailable.");
+			using var document = JsonDocument.Parse(File.ReadAllText(repo.BenchmarksFile));
+			if (!document.RootElement.TryGetProperty("sets", out var sets) ||
+				sets.ValueKind != JsonValueKind.Array)
+				throw new InvalidDataException("The benchmark catalogue defines no sets.");
+
+			string resolvedBenchmark = null;
+			foreach (var set in sets.EnumerateArray())
+				if (set.TryGetProperty("name", out var name) &&
+					name.ValueKind == JsonValueKind.String &&
+					string.Equals(name.GetString(), benchmark,
+						StringComparison.OrdinalIgnoreCase))
+				{
+					resolvedBenchmark = name.GetString();
+					break;
+				}
+
+			if (resolvedBenchmark == null)
+				throw new InvalidOperationException(
+					$"Continuous benchmark '{benchmark}' is not defined.");
+
+			var difficulties = DifficultyTable.Load(repo.DifficultiesFile);
+			var resolvedDifficulty = difficulties.Levels
+				.FirstOrDefault(level => string.Equals(level.Name, difficulty,
+					StringComparison.OrdinalIgnoreCase))?.Name;
+			if (resolvedDifficulty == null)
+				throw new InvalidOperationException(
+					$"Continuous difficulty '{difficulty}' is not defined.");
+
+			return (resolvedBenchmark, resolvedDifficulty);
+		}
+
+		static void ValidateBenchmarkResult(ContinuousEvaluationPlan plan,
+			BenchmarkResultDocument result, string arm)
+		{
+			if (result == null)
+				throw new InvalidDataException(
+					$"The immutable {arm} benchmark result is empty.");
+			if (!string.Equals(result.Benchmark, plan.Benchmark,
+				StringComparison.OrdinalIgnoreCase))
+				throw new InvalidDataException(
+					$"The immutable {arm} result reported benchmark '{result.Benchmark}' " +
+					$"instead of '{plan.Benchmark}'.");
+			if (!string.Equals(result.Difficulty, plan.Difficulty,
+				StringComparison.OrdinalIgnoreCase))
+				throw new InvalidDataException(
+					$"The immutable {arm} result reported difficulty '{result.Difficulty}' " +
+					$"instead of '{plan.Difficulty}'.");
 		}
 
 		static string LiveCandidateInvalidation(TrainingRun run, ContinuousEvaluationPlan plan)

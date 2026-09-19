@@ -15,7 +15,6 @@ using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
-using System.Xml.Linq;
 
 namespace AutoCnC.Launcher
 {
@@ -119,29 +118,6 @@ namespace AutoCnC.Launcher
 			}
 
 			return Convert.ToHexString(aggregate.GetHashAndReset()).ToLowerInvariant();
-		}
-
-		public static string AssemblyName(string project)
-		{
-			var fallback = Path.GetFileNameWithoutExtension(project);
-			try
-			{
-				var value = XDocument.Load(project)
-					.Descendants()
-					.FirstOrDefault(element =>
-						string.Equals(element.Name.LocalName, "AssemblyName",
-							StringComparison.OrdinalIgnoreCase) &&
-						!string.IsNullOrWhiteSpace(element.Value))
-					?.Value.Trim();
-				return string.IsNullOrWhiteSpace(value) || value.Contains("$(", StringComparison.Ordinal)
-					? fallback
-					: value;
-			}
-			catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
-				System.Xml.XmlException)
-			{
-				return fallback;
-			}
 		}
 
 		public static string Sha256(string file)

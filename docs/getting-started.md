@@ -592,9 +592,11 @@ selection. Wins rank first and median paired fitness is the tie-break; missing, 
 or `Undefined` evidence restores the pre-agent snapshot and stops instead of treating an
 unmeasured edit as progress. Candidate and champion are copied from the live workspace and its
 pre-agent snapshot, built into separate immutable directories, and benchmarked from those copied
-assemblies. This also supports an uncommitted champion from a previous promotion. If the live
+assemblies. The default continuous gate is `hard-16-9` at `Hard`; both values are passed explicitly
+and the result must report them back. This also supports an uncommitted champion from a previous promotion. If the live
 workspace changes or an agent chat starts after capture, the result is invalidated and reevaluated
-rather than restoring over unbenchmarked edits. Switch Execution to **Rendered** when you want to
+rather than restoring over unbenchmarked edits. A chat that changes no source leaves a restored
+champion valid. Switch Execution to **Rendered** when you want to
 watch the same loop. It never pauses for feedback; review those battles from **History & trends**
 after stopping.
 
@@ -603,6 +605,7 @@ fight can only become part of the candidate. If the launcher closes or evaluatio
 before a decision, the run is marked **experiment aborted** without modifying source. Starting
 continuous training again resumes a verified candidate's evaluation; ordinary fights remain
 blocked until reevaluation or **Restore previous iteration** resolves it.
+Recovery reloads the run first; another live launcher's ownership claim is never overridden.
 
 Fight and rules JSON are shown as collapsible trees. When the run finishes, the agent drafts an
 entire replacement prompt template and the window opens **Next prompt*** on it. The top pane shows

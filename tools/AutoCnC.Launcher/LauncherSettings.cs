@@ -36,6 +36,8 @@ namespace AutoCnC.Launcher
 		public string Faction { get; set; } = "Random";
 		public string BotFaction { get; set; } = "Random";
 		public bool ContinuousImprovement { get; set; }
+		public string ContinuousBenchmark { get; set; } = "hard-16-9";
+		public string ContinuousBenchmarkDifficulty { get; set; } = "Hard";
 		public string LastTrainingRunDirectory { get; set; }
 		public string SelectedTrainingRunDirectory { get; set; }
 		public string AgentCommand { get; set; } = "copilot";

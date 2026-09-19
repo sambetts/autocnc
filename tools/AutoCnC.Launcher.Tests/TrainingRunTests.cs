@@ -9,6 +9,7 @@
 #endregion
 
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
@@ -174,6 +175,51 @@ namespace AutoCnC.Launcher.Tests
 			var loaded = TrainingRun.Load(run.RunDirectory);
 			Assert.That(loaded.Manifest.Experiment, Is.Null);
 			Assert.That(loaded.Manifest.Agent, Is.Null);
+		}
+
+		[Test]
+		public void ForeignLiveOwnerBlocksAbortResumeAndRestore()
+		{
+			var run = NewRun();
+			WorkspaceSnapshot.Capture(run);
+			run.ContinuousAgentStarted("agent");
+			File.WriteAllText(Path.Combine(workspace, "Strategy.cs"), "candidate");
+			run.AgentFinished(0, 1);
+			using var foreign = Process.Start(new ProcessStartInfo
+			{
+				FileName = Path.Combine(Environment.SystemDirectory,
+					"WindowsPowerShell", "v1.0", "powershell.exe"),
+				Arguments = "-NoProfile -Command \"Start-Sleep -Seconds 30\"",
+				UseShellExecute = false,
+				CreateNoWindow = true
+			});
+			Assert.That(foreign, Is.Not.Null);
+			try
+			{
+				run.Manifest.Owner = new ProcessOwnership
+				{
+					ProcessId = foreign.Id,
+					ClaimedUtc = DateTime.UtcNow
+				};
+				run.Save();
+
+				var loaded = TrainingRun.Load(run.RunDirectory);
+				Assert.That(loaded.IsBusy, Is.True);
+				Assert.That(() => loaded.AbortContinuousExperiment("do not steal"),
+					Throws.InvalidOperationException);
+				Assert.That(() => WorkspaceSnapshot.Restore(loaded),
+					Throws.InvalidOperationException);
+
+				loaded.Manifest.Experiment.State = TrainingExperimentStates.Aborted;
+				loaded.Manifest.Experiment.CanResumeEvaluation = true;
+				Assert.That(() => loaded.ResumeContinuousExperiment(),
+					Throws.InvalidOperationException);
+			}
+			finally
+			{
+				if (!foreign.HasExited)
+					foreign.Kill(entireProcessTree: true);
+			}
 		}
 
 		[Test]
@@ -832,7 +878,7 @@ namespace AutoCnC.Launcher.Tests
 			run.Finish("finished", match, battle);
 
 			var loaded = TrainingRun.Load(run.RunDirectory);
-			Assert.That(loaded.Manifest.SchemaVersion, Is.EqualTo(10));
+			Assert.That(loaded.Manifest.SchemaVersion, Is.EqualTo(11));
 			Assert.That(loaded.Manifest.Result.Outcome, Is.EqualTo("Won"));
 			Assert.That(loaded.Manifest.Performance.SimulationSpeed, Is.EqualTo(100));
 			Assert.That(loaded.Manifest.Performance.TicksPerSecond, Is.EqualTo(2500));

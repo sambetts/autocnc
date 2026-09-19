@@ -197,6 +197,8 @@ namespace AutoCnC.Launcher
 		public string BenchmarkResultFile { get; set; }
 		public string EvaluationFile { get; set; }
 		public string Benchmark { get; set; }
+		public string RequestedBenchmark { get; set; }
+		public string RequestedDifficulty { get; set; }
 		public string Batch { get; set; }
 		public int? ExpectedMatchesPerArm { get; set; }
 		public string CandidateBatch { get; set; }
@@ -217,7 +219,7 @@ namespace AutoCnC.Launcher
 
 	public sealed class TrainingRunManifest
 	{
-		public int SchemaVersion { get; set; } = 10;
+		public int SchemaVersion { get; set; } = 11;
 		public string Id { get; set; }
 		public string Status { get; set; }
 
@@ -767,7 +769,7 @@ namespace AutoCnC.Launcher
 		}
 
 		public void BeginContinuousEvaluation(string candidateFingerprint,
-			string championFingerprint)
+			string championFingerprint, string benchmark, string difficulty)
 		{
 			var experiment = Manifest.Experiment;
 			if (experiment?.Continuous != true ||
@@ -786,6 +788,8 @@ namespace AutoCnC.Launcher
 			experiment.ControlRevision = null;
 			experiment.CandidateFingerprint = candidateFingerprint;
 			experiment.ChampionFingerprint = championFingerprint;
+			experiment.RequestedBenchmark = benchmark;
+			experiment.RequestedDifficulty = difficulty;
 			experiment.ExpectedLiveFingerprint = candidateFingerprint;
 			experiment.CandidateAssemblyFile = null;
 			experiment.CandidateAssemblySha256 = null;
@@ -909,6 +913,9 @@ namespace AutoCnC.Launcher
 			var experiment = Manifest.Experiment;
 			if (experiment?.Continuous != true)
 				return;
+			if (IsBusy && !ProcessOwnership.IsCurrent(Manifest.Owner))
+				throw new InvalidOperationException(
+					"Another launcher still owns this continuous experiment.");
 
 			experiment.State = TrainingExperimentStates.Aborted;
 			experiment.AbortedUtc = DateTime.UtcNow;
@@ -936,6 +943,9 @@ namespace AutoCnC.Launcher
 		public void ResumeContinuousExperiment()
 		{
 			var experiment = Manifest.Experiment;
+			if (IsBusy)
+				throw new InvalidOperationException(
+					"Another launcher still owns this continuous experiment.");
 			if (!CanResumeContinuousEvaluation ||
 				!string.Equals(experiment.State, TrainingExperimentStates.Aborted,
 					StringComparison.OrdinalIgnoreCase) ||

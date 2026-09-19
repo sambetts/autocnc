@@ -32,6 +32,7 @@ namespace AutoCnC.Launcher
 
 	public sealed class ContinuousEvaluationPlan
 	{
+		public TrainingRun Run { get; init; }
 		public string Batch { get; init; }
 		public string Benchmark { get; init; }
 		public string Difficulty { get; init; }
@@ -91,6 +92,11 @@ namespace AutoCnC.Launcher
 				throw new ArgumentNullException(nameof(repo));
 			if (run == null)
 				throw new ArgumentNullException(nameof(run));
+			using var mutation = TrainingRun.AcquireMutation(run);
+			run = mutation.Run;
+			if (run.IsBusy && !ProcessOwnership.IsCurrent(run.Manifest.Owner))
+				throw new InvalidOperationException(
+					"Another launcher still owns this continuous experiment.");
 			if (!File.Exists(repo.BuildExperimentArmScript) ||
 				!File.Exists(repo.BenchmarkBotScript))
 				throw new InvalidOperationException(
@@ -156,6 +162,7 @@ namespace AutoCnC.Launcher
 			var experiment = run.Manifest.Experiment;
 			return new ContinuousEvaluationPlan
 			{
+				Run = run,
 				Batch = $"promotion-{experiment.Id}-{experiment.EvaluationAttempt:D2}",
 				Benchmark = benchmark,
 				Difficulty = difficulty,
@@ -199,6 +206,7 @@ namespace AutoCnC.Launcher
 		public void CaptureBuiltArm(TrainingRun run, ContinuousEvaluationPlan plan,
 			ContinuousEvaluationArm arm)
 		{
+			run = plan?.Run ?? run;
 			var resultPath = arm == ContinuousEvaluationArm.Candidate
 				? plan.CandidateBuildResultPath
 				: plan.ControlBuildResultPath;
@@ -252,6 +260,7 @@ namespace AutoCnC.Launcher
 		public ContinuousScriptPlan BenchmarkArm(RepoLayout repo, TrainingRun run,
 			ContinuousEvaluationPlan plan, ContinuousEvaluationArm arm)
 		{
+			run = plan?.Run ?? run;
 			EnsureReadyForBenchmark(run, plan);
 			var candidate = arm == ContinuousEvaluationArm.Candidate;
 			return new ContinuousScriptPlan
@@ -278,6 +287,7 @@ namespace AutoCnC.Launcher
 		public ContinuousEvaluationCompletion CompleteEvaluation(TrainingRun run,
 			ContinuousEvaluationPlan plan, int exitCode)
 		{
+			run = plan?.Run ?? run;
 			if (run == null)
 				throw new ArgumentNullException(nameof(run));
 
@@ -326,6 +336,7 @@ namespace AutoCnC.Launcher
 		public ContinuousEvaluationCompletion FailEvaluation(TrainingRun run,
 			ContinuousEvaluationPlan plan, string reason)
 		{
+			run = plan?.Run ?? run;
 			var evaluation = PairedBenchmarkEvaluator.Undefined(reason);
 			Record(run, evaluation);
 			var invalidation = plan == null ? null : LiveCandidateInvalidation(run, plan);
@@ -355,6 +366,7 @@ namespace AutoCnC.Launcher
 		public ContinuousEvaluationDecision ApplyDecision(TrainingRun run,
 			ContinuousEvaluationPlan plan, PairedBenchmarkEvaluation evaluation)
 		{
+			run = plan?.Run ?? run;
 			if (run == null)
 				throw new ArgumentNullException(nameof(run));
 			if (evaluation == null)

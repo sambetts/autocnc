@@ -592,8 +592,9 @@ namespace AutoCnC.Launcher
 
 			try
 			{
-				var selectedBot = BotExists()
-					? BotWorkspace.ResolveProject(botBox.Text.Trim()) ?? Path.GetFullPath(botBox.Text.Trim())
+				var selectedPath = botBox.Text.Trim();
+				var selectedBot = selectedPath.Length > 0
+					? BotWorkspace.ResolveProject(selectedPath) ?? Path.GetFullPath(selectedPath)
 					: null;
 				if (selectedBot == null)
 				{
@@ -603,6 +604,9 @@ namespace AutoCnC.Launcher
 				else if (reload || !SamePath(selectedBot, loadedHistoryBot))
 				{
 					loadedHistory = TrainingHistory.Load(botBox.Text.Trim(), trainingRunsRoot);
+					foreach (var unresolved in TrainingHistory.LoadUnresolved(
+						botBox.Text.Trim(), trainingRunsRoot))
+						loadedHistory = loadedHistory.WithRun(unresolved);
 					loadedHistoryBot = selectedBot;
 				}
 
@@ -1185,16 +1189,35 @@ namespace AutoCnC.Launcher
 
 		bool RunMatchesSelectedBot(TrainingRun run)
 		{
-			if (run == null || !BotExists())
+			if (run == null || string.IsNullOrWhiteSpace(botBox.Text))
 				return false;
 
-			var selectedProject = BotWorkspace.ResolveProject(botBox.Text.Trim());
-			if (selectedProject != null && run.Manifest.BotProject != null)
-				return string.Equals(Path.GetFullPath(selectedProject),
-					Path.GetFullPath(run.Manifest.BotProject), StringComparison.OrdinalIgnoreCase);
+			try
+			{
+				var selectedPath = Path.GetFullPath(botBox.Text.Trim());
+				var selectedProject = BotWorkspace.ResolveProject(selectedPath);
+				if (selectedProject != null && run.Manifest.BotProject != null)
+				{
+					if (string.Equals(Path.GetFullPath(selectedProject),
+						Path.GetFullPath(run.Manifest.BotProject), StringComparison.OrdinalIgnoreCase))
+						return true;
 
-			return string.Equals(Path.GetFullPath(botBox.Text.Trim()),
-				Path.GetFullPath(run.Manifest.BotPath), StringComparison.OrdinalIgnoreCase);
+					return !string.IsNullOrWhiteSpace(run.Manifest.BotDirectory) &&
+						string.Equals(Path.GetDirectoryName(Path.GetFullPath(selectedProject)),
+							Path.GetFullPath(run.Manifest.BotDirectory),
+							StringComparison.OrdinalIgnoreCase);
+				}
+
+				return SamePath(selectedPath, run.Manifest.BotPath) ||
+					SamePath(selectedPath, run.Manifest.BotProject) ||
+					SamePath(Directory.Exists(selectedPath)
+						? selectedPath
+						: Path.GetDirectoryName(selectedPath), run.Manifest.BotDirectory);
+			}
+			catch (Exception ex) when (ex is ArgumentException or NotSupportedException)
+			{
+				return false;
+			}
 		}
 
 		// -------------------------------------------------------------------
@@ -1543,6 +1566,8 @@ namespace AutoCnC.Launcher
 		TrainingRun UnresolvedContinuousExperiment()
 		{
 			var remembered = loadedHistory.Runs
+				.Concat(TrainingHistory.LoadUnresolved(
+					botBox.Text.Trim(), trainingRunsRoot))
 				.Append(lastRun)
 				.Append(trainingRun)
 				.Where(run => run != null && RunMatchesSelectedBot(run))
@@ -1556,8 +1581,13 @@ namespace AutoCnC.Launcher
 					var run = TrainingRun.Load(rememberedRun.RunDirectory) ?? rememberedRun;
 					if (!continuousLoop.IsRunning &&
 						run.IsBusy && ProcessOwnership.IsCurrent(run.Manifest.Owner))
+					{
+						using var mutation = LockForContinuousMutation(
+							run, allowCurrentOwner: true);
+						run = mutation.Run;
 						run.AbortContinuousExperiment(
 							"The in-memory continuous loop ended before a promotion decision.");
+					}
 					ReplaceRunReference(rememberedRun, run);
 					runs.Add(run);
 				}
@@ -1572,18 +1602,25 @@ namespace AutoCnC.Launcher
 				.LastOrDefault();
 		}
 
-		TrainingRun ReloadForContinuousMutation(TrainingRun run, bool allowCurrentOwner)
+		TrainingRunMutation LockForContinuousMutation(TrainingRun run,
+			bool allowCurrentOwner)
 		{
-			var current = TrainingRun.Load(run?.RunDirectory) ??
-				throw new InvalidOperationException(
-					"The continuous experiment no longer exists on disk.");
+			var mutation = TrainingRun.AcquireMutation(run);
+			var current = mutation.Run;
 			if (current.IsBusy &&
 				!(allowCurrentOwner && ProcessOwnership.IsCurrent(current.Manifest.Owner)))
+			{
+				mutation.Dispose();
 				throw new InvalidOperationException(
 					"Another launcher still owns this continuous experiment.");
+			}
+			if (!current.IsBusy && current.HasUnresolvedContinuousExperiment &&
+				!string.Equals(current.Manifest.Experiment.State,
+					TrainingExperimentStates.Aborted, StringComparison.OrdinalIgnoreCase))
+				current.ReconcileInterruptedContinuousExperiment();
 
 			ReplaceRunReference(run, current);
-			return current;
+			return mutation;
 		}
 
 		void ReplaceRunReference(TrainingRun previous, TrainingRun current)
@@ -1603,8 +1640,12 @@ namespace AutoCnC.Launcher
 		{
 			try
 			{
-				run = ReloadForContinuousMutation(run, allowCurrentOwner: false);
-				run.ResumeContinuousExperiment();
+				using (var mutation = LockForContinuousMutation(
+					run, allowCurrentOwner: false))
+				{
+					run = mutation.Run;
+					run.ResumeContinuousExperiment();
+				}
 				if (continuousLoop.ResumeEvaluation(enabled: true) !=
 					ContinuousTrainingAction.Evaluate)
 					throw new InvalidOperationException(
@@ -1833,8 +1874,16 @@ namespace AutoCnC.Launcher
 				!run.HasPlayerFeedback && !ReviewBattleFeedback(run, beforeImprovement: true))
 				return false;
 
+			TrainingRunMutation continuousMutation = null;
 			try
 			{
+				if (automatic)
+				{
+					continuousMutation = LockForContinuousMutation(
+						run, allowCurrentOwner: false);
+					run = continuousMutation.Run;
+					previousAgent = run.Manifest.Agent;
+				}
 				if (automatic && !File.Exists(run.SnapshotManifestPath))
 					throw new InvalidOperationException(
 						"The continuous champion snapshot was not captured before the battle.");
@@ -1861,7 +1910,8 @@ namespace AutoCnC.Launcher
 					CurrentPromptTemplate(), settings.AgentCommand, settings.AgentArguments,
 					settings.AgentStdin, recoveryContext);
 				if (automatic)
-					run.ContinuousAgentStarted(settings.AgentCommand, archivedTranscript, recovering);
+					run.ContinuousAgentStarted(
+						settings.AgentCommand, archivedTranscript, recovering);
 				else
 					run.AgentStarted(settings.AgentCommand, archivedTranscript, recovering);
 			}
@@ -1881,6 +1931,10 @@ namespace AutoCnC.Launcher
 				ReportAutomationFailure($"Could not prepare the improvement: {ex.Message}",
 					MessageBoxIcon.Error, automatic);
 				return false;
+			}
+			finally
+			{
+				continuousMutation?.Dispose();
 			}
 
 			trainingRun = run;
@@ -2059,6 +2113,8 @@ namespace AutoCnC.Launcher
 				continuousEvaluationPlan = continuousPromotion.PrepareEvaluation(repo, run,
 					settings.ContinuousBenchmark,
 					settings.ContinuousBenchmarkDifficulty);
+				run = continuousEvaluationPlan.Run;
+				continuousCandidateRun = run;
 				activeTrainingRun = run;
 				queue.Clear();
 				EnqueueContinuousStep(
@@ -2531,8 +2587,12 @@ namespace AutoCnC.Launcher
 
 			try
 			{
-				run = ReloadForContinuousMutation(run, allowCurrentOwner: false);
+				using var mutation = LockForContinuousMutation(
+					run, allowCurrentOwner: false);
+				run = mutation.Run;
 				WorkspaceSnapshot.Restore(run);
+				if (File.Exists(run.Manifest.BotProject))
+					botBox.Text = run.Manifest.BotProject;
 				ShowImprovementWindow().ShowAgentRun(run);
 				Status("The previous source iteration has been restored.");
 				RefreshFeedbackRun(run);
@@ -2815,20 +2875,25 @@ namespace AutoCnC.Launcher
 
 			try
 			{
-				var current = TrainingRun.Load(run.RunDirectory) ?? run;
-				if (!current.HasUnresolvedContinuousExperiment)
-					return;
-				if (current.IsBusy &&
-					!ProcessOwnership.IsCurrent(current.Manifest.Owner))
+				TrainingRun current;
+				using (var mutation = TrainingRun.AcquireMutation(run))
 				{
-					AppendImprovementOutput(
-						"Did not abort the continuous experiment because another launcher still owns it.");
-					return;
+					current = mutation.Run;
+					if (!current.HasUnresolvedContinuousExperiment)
+						return;
+					if (current.IsBusy &&
+						!ProcessOwnership.IsCurrent(current.Manifest.Owner))
+					{
+						AppendImprovementOutput(
+							"Did not abort the continuous experiment because another launcher still owns it.");
+						return;
+					}
+
+					if (!string.Equals(current.Manifest.Experiment?.State,
+						TrainingExperimentStates.Aborted, StringComparison.OrdinalIgnoreCase))
+						current.AbortContinuousExperiment(reason);
 				}
 
-				if (!string.Equals(current.Manifest.Experiment?.State,
-					TrainingExperimentStates.Aborted, StringComparison.OrdinalIgnoreCase))
-					current.AbortContinuousExperiment(reason);
 				ReplaceRunReference(run, current);
 				RefreshFeedbackRun(current);
 			}

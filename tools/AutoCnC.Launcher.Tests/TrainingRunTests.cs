@@ -223,6 +223,77 @@ namespace AutoCnC.Launcher.Tests
 		}
 
 		[Test]
+		public void ExclusiveRunMutationSerializesConcurrentExperimentClaims()
+		{
+			var run = NewRun();
+			Complete(run, "Lost", 180, army: 1000, opponentArmy: 2000);
+			WorkspaceSnapshot.Capture(run);
+
+			using (var first = TrainingRun.AcquireMutation(run))
+			{
+				Assert.That(() => TrainingRun.AcquireMutation(run),
+					Throws.TypeOf<IOException>());
+				first.Run.ContinuousAgentStarted("agent");
+			}
+
+			using var second = TrainingRun.AcquireMutation(run);
+			Assert.That(second.Run.Manifest.Experiment.State,
+				Is.EqualTo(TrainingExperimentStates.Improving));
+			Assert.That(second.Run.IsBusy, Is.True);
+		}
+
+		[Test]
+		public void ReconciliationCannotClaimARunWhileAnotherProcessLockIsHeld()
+		{
+			var run = NewRun();
+			Complete(run, "Lost", 180, army: 1000, opponentArmy: 2000);
+			WorkspaceSnapshot.Capture(run);
+			run.ContinuousAgentStarted("agent");
+			File.WriteAllText(Path.Combine(workspace, "Strategy.cs"), "candidate");
+			run.AgentFinished(0, 1);
+			run.Manifest.Owner = new ProcessOwnership { ProcessId = -1 };
+			run.Save();
+
+			using var mutation = TrainingRun.AcquireMutation(run);
+			var observed = TrainingRun.Load(run.RunDirectory);
+
+			Assert.That(observed.Manifest.Experiment.State,
+				Is.EqualTo(TrainingExperimentStates.Candidate));
+			Assert.That(observed.Manifest.Warnings,
+				Has.Some.Contains("locked by another launcher"));
+		}
+
+		[TestCase(false)]
+		[TestCase(true)]
+		public void UnresolvedRunCanRestoreADeletedOrRenamedProject(bool renamed)
+		{
+			var run = NewRun();
+			WorkspaceSnapshot.Capture(run);
+			run.ContinuousAgentStarted("agent");
+			var selectedPath = project;
+			if (renamed)
+			{
+				selectedPath = Path.Combine(workspace, "RenamedBot.csproj");
+				File.Move(project, selectedPath);
+			}
+			else
+				File.Delete(project);
+			run.AgentFinished(0, 1);
+			run.Manifest.Owner = new ProcessOwnership { ProcessId = -1 };
+			run.Save();
+
+			var unresolved = TrainingHistory.LoadUnresolved(selectedPath, runs).Single();
+			Assert.That(unresolved.HasUnresolvedContinuousExperiment, Is.True);
+			Assert.That(unresolved.IsBusy, Is.False);
+
+			WorkspaceSnapshot.Restore(unresolved);
+
+			Assert.That(File.Exists(project), Is.True);
+			Assert.That(File.Exists(Path.Combine(workspace, "RenamedBot.csproj")), Is.False);
+			Assert.That(unresolved.HasUnresolvedContinuousExperiment, Is.False);
+		}
+
+		[Test]
 		public void DiscoverySkipsAnIncompatibleRememberedCheckout()
 		{
 			var oldRoot = Path.Combine(root, "old-checkout");

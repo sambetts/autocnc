@@ -301,6 +301,10 @@ and all shared context before and after the run. Review the changed files before
 **Restore previous iteration** restores modified and deleted files
 and removes files added by that agent run; build output and git metadata are never part of the
 snapshot.
+Recovery uses the stored workspace identity, not the continued existence of the project file, so
+an interrupted deletion or rename of the `.csproj` cannot hide the restore action.
+An exclusive lock in the run directory covers recovery reload, ownership checks and claims, so a
+second launcher cannot race the first one into aborting, resuming or restoring live work.
 
 **Train from battle** in AI training chooses which recording supplies the evidence. The selection
 is independent of the latest fight and survives launcher restarts. Its replay, feedback, prompt,

@@ -456,6 +456,12 @@ Abort, resume and restore reload the run and honor `ProcessOwnership`. A live cl
 launcher blocks mutation. Agent chat records the workspace fingerprint before the turn and only
 invalidates when the post-turn source fingerprint differs, so a no-edit answer after restoration
 continues with the restored champion.
+The reload, ownership check, claim and manifest mutation are serialized by an exclusive per-run
+`experiment.lock`, closing the gap where two launchers could both observe an unowned manifest and
+claim it.
+Unresolved-run discovery compares the stored workspace and manifest paths rather than requiring
+the selected project to still exist. A snapshot restore can therefore recreate a deleted project
+file or remove a renamed replacement.
 
 The loop stops on user request or any non-zero game, agent, or build exit. Headless also treats 90
 nominal game minutes without a result as a failed stalemate (configurable with

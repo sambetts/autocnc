@@ -387,7 +387,9 @@ The champion snapshot is captured when the continuous fight is created, before a
 edit-capable chat can run. If the launcher exits mid-candidate, the manifest is durably marked
 aborted on reload: new fights stay blocked until the candidate is reevaluated or explicitly
 restored, without changing the live workspace. Recovery operations reload ownership first and
-will not mutate an experiment still owned by another launcher.
+will not mutate an experiment still owned by another launcher. Recovery is matched by the stored
+workspace, so snapshot restore remains available even if the candidate deleted or renamed its
+project file.
 
 Resolved rules and fight JSON use lazy, collapsible trees rather than raw text. At the end of an
 improvement the agent drafts an entirely new prompt template in **Next prompt***. In manual mode the

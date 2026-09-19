@@ -315,6 +315,7 @@ namespace AutoCnC.Launcher
 		public string SnapshotDirectory => Path.Combine(RunDirectory, "source-before-agent");
 		public string SnapshotManifestPath => Path.Combine(RunDirectory, "source-before-agent.json");
 		public string ChangesPath => Path.Combine(RunDirectory, "agent-changes.json");
+		public string MutationLockPath => Path.Combine(RunDirectory, "experiment.lock");
 		public string ExperimentDirectory => Path.Combine(RunDirectory, "experiment");
 		public string CandidateSourceDirectory => Path.Combine(ExperimentDirectory, "candidate-source");
 		public string ControlSourceDirectory => Path.Combine(ExperimentDirectory, "control-source");
@@ -440,6 +441,37 @@ namespace AutoCnC.Launcher
 
 		public static TrainingRun Load(string directory)
 		{
+			var run = LoadUnreconciled(directory);
+			if (run == null || !run.HasUnresolvedContinuousExperiment ||
+				ProcessOwnership.IsLive(run.Manifest.Owner))
+				return run;
+
+			try
+			{
+				using var mutation = AcquireMutation(run);
+				mutation.Run.ReconcileInterruptedContinuousExperiment();
+				return mutation.Run;
+			}
+			catch (IOException ex)
+			{
+				run.Manifest.Warnings ??= [];
+				run.Manifest.Warnings.Add(
+					"The interrupted continuous experiment is locked by another launcher: " +
+					ex.Message);
+				return run;
+			}
+			catch (UnauthorizedAccessException ex)
+			{
+				run.Manifest.Warnings ??= [];
+				run.Manifest.Warnings.Add(
+					"The interrupted continuous experiment could not be locked: " +
+					ex.Message);
+				return run;
+			}
+		}
+
+		internal static TrainingRun LoadUnreconciled(string directory)
+		{
 			if (string.IsNullOrWhiteSpace(directory))
 				return null;
 
@@ -456,18 +488,29 @@ namespace AutoCnC.Launcher
 			var run = new TrainingRun(full, manifest);
 			run.InferLegacyFailure();
 			run.RescoreLegacyResult();
+			return run;
+		}
+
+		public static TrainingRunMutation AcquireMutation(TrainingRun run)
+		{
+			if (run == null)
+				throw new ArgumentNullException(nameof(run));
+
+			Directory.CreateDirectory(run.RunDirectory);
+			var handle = new FileStream(run.MutationLockPath, FileMode.OpenOrCreate,
+				FileAccess.ReadWrite, FileShare.None, bufferSize: 1, FileOptions.WriteThrough);
 			try
 			{
-				run.ReconcileInterruptedContinuousExperiment();
+				var current = LoadUnreconciled(run.RunDirectory) ??
+					throw new InvalidOperationException(
+						"The training run no longer exists on disk.");
+				return new TrainingRunMutation(current, handle);
 			}
-			catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+			catch
 			{
-				run.Manifest.Warnings ??= [];
-				run.Manifest.Warnings.Add(
-					"The interrupted continuous experiment could not be reconciled on disk: " +
-					ex.Message);
+				handle.Dispose();
+				throw;
 			}
-			return run;
 		}
 
 		public void Finish(string status, MatchLog matchLog, BattleEventLog battleLog)

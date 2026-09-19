@@ -113,6 +113,45 @@ namespace AutoCnC.Launcher
 			return new TrainingHistory(runs, warnings);
 		}
 
+		public static IReadOnlyList<TrainingRun> LoadUnresolved(string botPath,
+			string runsRoot = null)
+		{
+			if (string.IsNullOrWhiteSpace(botPath))
+				return [];
+
+			var root = Path.GetFullPath(runsRoot ?? TrainingRun.DefaultRoot);
+			if (!Directory.Exists(root))
+				return [];
+
+			var selected = Path.GetFullPath(botPath);
+			var workspace = Directory.Exists(selected)
+				? BotWorkspace.ResolveRoot(selected)
+				: string.Equals(Path.GetExtension(selected), ".csproj",
+					StringComparison.OrdinalIgnoreCase)
+					? Path.GetDirectoryName(selected)
+					: null;
+			var runs = new List<TrainingRun>();
+			foreach (var botDirectory in Directory.EnumerateDirectories(root))
+				foreach (var runDirectory in Directory.EnumerateDirectories(botDirectory))
+					try
+					{
+						var run = TrainingRun.Load(runDirectory);
+						if (run?.HasUnresolvedContinuousExperiment == true &&
+							(SamePath(selected, run.Manifest.BotPath) ||
+								SamePath(selected, run.Manifest.BotProject) ||
+								SamePath(workspace, run.Manifest.BotDirectory)))
+							runs.Add(run);
+					}
+					catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
+						JsonException or ArgumentException or NotSupportedException)
+					{
+					}
+
+			return runs
+				.OrderBy(run => run.Manifest.CreatedUtc)
+				.ToList();
+		}
+
 		internal static TrainingHistory FromRuns(IEnumerable<TrainingRun> runs) =>
 			new((runs ?? []).OrderBy(run => run.Manifest.CreatedUtc).ToList(), []);
 
@@ -175,6 +214,8 @@ namespace AutoCnC.Launcher
 				: Path.GetFullPath(run.Manifest.BotPath);
 
 		static bool SamePath(string left, string right) =>
+			!string.IsNullOrWhiteSpace(left) &&
+			!string.IsNullOrWhiteSpace(right) &&
 			string.Equals(
 				Path.TrimEndingDirectorySeparator(Path.GetFullPath(left)),
 				Path.TrimEndingDirectorySeparator(Path.GetFullPath(right)),

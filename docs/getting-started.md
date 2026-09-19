@@ -606,6 +606,8 @@ before a decision, the run is marked **experiment aborted** without modifying so
 continuous training again resumes a verified candidate's evaluation; ordinary fights remain
 blocked until reevaluation or **Restore previous iteration** resolves it.
 Recovery reloads the run first; another live launcher's ownership claim is never overridden.
+If the interrupted candidate deleted or renamed its `.csproj`, the launcher still finds the run by
+its stored workspace and **Restore previous iteration** recreates the original project path.
 
 Fight and rules JSON are shown as collapsible trees. When the run finishes, the agent drafts an
 entire replacement prompt template and the window opens **Next prompt*** on it. The top pane shows

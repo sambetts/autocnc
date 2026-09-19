@@ -134,6 +134,7 @@ namespace AutoCnC.Launcher.Tests
 			var run = Candidate();
 
 			var plan = promotion.PrepareEvaluation(repo, run);
+			run = plan.Run;
 
 			Assert.Multiple(() =>
 			{
@@ -165,6 +166,7 @@ namespace AutoCnC.Launcher.Tests
 		{
 			var run = Candidate();
 			var plan = promotion.PrepareEvaluation(repo, run);
+			run = plan.Run;
 			var candidateBuild = promotion.BuildArm(repo, plan, ContinuousEvaluationArm.Candidate);
 			var controlBuild = promotion.BuildArm(repo, plan, ContinuousEvaluationArm.Control);
 
@@ -265,6 +267,7 @@ namespace AutoCnC.Launcher.Tests
 		{
 			var run = Candidate();
 			var plan = PreparedArms(run);
+			run = plan.Run;
 			WriteArmResults(run, candidateOutcome: "Won", controlOutcome: "Lost",
 				candidateFitness: 0.6, controlFitness: 0.5);
 
@@ -293,6 +296,7 @@ namespace AutoCnC.Launcher.Tests
 		{
 			var run = Candidate();
 			var plan = PreparedArms(run);
+			run = plan.Run;
 			PairedBenchmarkEvaluator.WriteResult(run.CandidateBenchmarkResultPath,
 				SingleArm("candidate-batch-20260919-110459", "Won", 0.7,
 					benchmark, difficulty));
@@ -312,6 +316,7 @@ namespace AutoCnC.Launcher.Tests
 		{
 			var run = Candidate();
 			var plan = PreparedArms(run);
+			run = plan.Run;
 			WriteArmResults(run, candidateOutcome: "Lost", controlOutcome: "Won",
 				candidateFitness: 0.7, controlFitness: 0.4);
 
@@ -328,6 +333,7 @@ namespace AutoCnC.Launcher.Tests
 		{
 			var run = Candidate();
 			var plan = PreparedArms(run);
+			run = plan.Run;
 
 			var completion = promotion.CompleteEvaluation(run, plan, exitCode: 0);
 			var decision = promotion.ApplyDecision(run, plan, completion.Evaluation);
@@ -341,6 +347,7 @@ namespace AutoCnC.Launcher.Tests
 		{
 			var run = Candidate();
 			var plan = PreparedArms(run);
+			run = plan.Run;
 			WriteArmResults(run, candidateOutcome: "Lost", controlOutcome: "Won",
 				candidateFitness: 0.3, controlFitness: 0.7);
 			File.WriteAllText(strategy, "user edit after snapshot");
@@ -364,6 +371,7 @@ namespace AutoCnC.Launcher.Tests
 		{
 			var run = Candidate();
 			var plan = PreparedArms(run);
+			run = plan.Run;
 			WriteArmResults(run, candidateOutcome: "Lost", controlOutcome: "Won",
 				candidateFitness: 0.3, controlFitness: 0.7);
 			var completion = promotion.CompleteEvaluation(run, plan, exitCode: 0);
@@ -381,6 +389,7 @@ namespace AutoCnC.Launcher.Tests
 		{
 			var run = Candidate();
 			var plan = PreparedArms(run);
+			run = plan.Run;
 			WriteArmResults(run, candidateOutcome: "Won", controlOutcome: "Lost",
 				candidateFitness: 0.6, controlFitness: 0.5);
 			var completion = promotion.CompleteEvaluation(run, plan, exitCode: 0);
@@ -402,6 +411,7 @@ namespace AutoCnC.Launcher.Tests
 		{
 			var run = Candidate();
 			var plan = PreparedArms(run);
+			run = plan.Run;
 			WriteArmResults(run, candidateOutcome: "Lost", controlOutcome: "Won",
 				candidateFitness: 0.3, controlFitness: 0.7);
 			var completion = promotion.CompleteEvaluation(run, plan, exitCode: 0);
@@ -422,6 +432,7 @@ namespace AutoCnC.Launcher.Tests
 		{
 			var run = Candidate();
 			var plan = PreparedArms(run);
+			run = plan.Run;
 			WriteArmResults(run, candidateOutcome: "Won", controlOutcome: "Lost",
 				candidateFitness: 0.6, controlFitness: 0.5);
 			var completion = promotion.CompleteEvaluation(run, plan, exitCode: 0);
@@ -440,6 +451,7 @@ namespace AutoCnC.Launcher.Tests
 		{
 			var first = Candidate();
 			var firstPlan = PreparedArms(first);
+			first = firstPlan.Run;
 			WriteArmResults(first, "Won", "Lost", 0.6, 0.5);
 			var firstResult = promotion.CompleteEvaluation(first, firstPlan, 0);
 			promotion.ApplyDecision(first, firstPlan, firstResult.Evaluation);
@@ -452,6 +464,7 @@ namespace AutoCnC.Launcher.Tests
 			second.AgentFinished(0, 1);
 
 			var secondPlan = promotion.PrepareEvaluation(repo, second);
+			second = secondPlan.Run;
 
 			Assert.That(File.ReadAllText(
 				Path.Combine(second.ControlSourceDirectory, "Strategy.cs")),

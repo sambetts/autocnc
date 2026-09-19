@@ -501,6 +501,9 @@ namespace AutoCnC.Launcher
 				return;
 
 			SetShownRun(current);
+			LoadInputs(current);
+			LoadChanges(current);
+			LoadNextPrompt(current);
 		}
 
 		/// <summary>Redraws what has been said and what is still waiting to be said.</summary>

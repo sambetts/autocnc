@@ -1514,6 +1514,9 @@ namespace AutoCnC.Launcher
 			{
 				try
 				{
+					var project = BotWorkspace.ResolveProject(botBox.Text.Trim());
+					if (project != null)
+						EnsureWorkspaceMutation(Path.GetDirectoryName(project));
 					StartWatchingBattle();
 				}
 				catch (IOException ex)
@@ -1633,8 +1636,11 @@ namespace AutoCnC.Launcher
 		}
 
 		void EnsureWorkspaceMutation(TrainingRun run)
+			=> EnsureWorkspaceMutation(run.Manifest.BotDirectory);
+
+		void EnsureWorkspaceMutation(string workspace)
 		{
-			var workspace = Path.GetFullPath(run.Manifest.BotDirectory);
+			workspace = Path.GetFullPath(workspace);
 			if (activeWorkspaceMutation != null)
 			{
 				if (!SamePath(activeWorkspaceMutation.WorkspaceRoot, workspace))
@@ -1643,7 +1649,7 @@ namespace AutoCnC.Launcher
 				return;
 			}
 
-			activeWorkspaceMutation = TrainingRun.AcquireWorkspaceMutation(run);
+			activeWorkspaceMutation = TrainingWorkspaceMutation.Acquire(workspace);
 		}
 
 		void ReleaseWorkspaceMutation()
@@ -1888,6 +1894,9 @@ namespace AutoCnC.Launcher
 				PersistSettings();
 				RefreshResultsHistory();
 			}
+
+			if (!continuousLoop.IsRunning)
+				ReleaseWorkspaceMutation();
 		}
 
 		/// <summary>Reads whatever the running game has written since last time.</summary>

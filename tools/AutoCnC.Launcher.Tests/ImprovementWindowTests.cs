@@ -224,12 +224,14 @@ namespace AutoCnC.Launcher.Tests
 				run.AgentFinished(0, 1, Template("draft"));
 				var stale = TrainingRun.Load(run.RunDirectory);
 				var current = TrainingRun.Load(run.RunDirectory);
+				current.AcceptSuggestedNextPrompt(Template("draft"));
 
 				using var window = new ImprovementWindow();
 				window.ShowAgentRun(stale);
 				window.RebindRun(stale, current);
 
 				Assert.That(window.ShownRun, Is.SameAs(current));
+				Assert.That(window.NextPromptStatusText, Does.Contain("Saved"));
 			}
 			finally
 			{

@@ -67,6 +67,8 @@ namespace AutoCnC.Launcher.Tests
 			Assert.That(TrainingRun.Load(run.RunDirectory), Is.Null);
 			Assert.That(File.ReadAllText(originalReplay), Is.EqualTo("original replay"));
 			Assert.That(File.Exists(survivor.ManifestPath), Is.True);
+			Assert.That(Directory.EnumerateDirectories(
+				Path.GetDirectoryName(survivor.RunDirectory), ".deleting-*"), Is.Empty);
 			Assert.That(File.ReadAllText(Path.Combine(Path.GetDirectoryName(project), "Strategy.cs")), Is.EqualTo("current source"));
 			Assert.That(TrainingHistory.Load(project, runs).Runs.Select(item => item.Manifest.Id),
 				Is.EqualTo(new[] { survivor.Manifest.Id }));

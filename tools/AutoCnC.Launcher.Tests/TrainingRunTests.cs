@@ -163,6 +163,8 @@ namespace AutoCnC.Launcher.Tests
 			Assert.That(loaded.Manifest.Experiment.State,
 				Is.EqualTo(TrainingExperimentStates.Aborted));
 			Assert.That(loaded.CanResumeContinuousEvaluation, Is.False);
+			Assert.That(loaded.Manifest.Experiment.AbortedFromState,
+				Is.EqualTo(TrainingExperimentStates.Restoring));
 			Assert.That(loaded.Manifest.Experiment.AbortReason,
 				Does.Contain("restoration was interrupted"));
 			Assert.That(() => loaded.ResumeContinuousExperiment(),
@@ -1157,7 +1159,7 @@ namespace AutoCnC.Launcher.Tests
 			run.Finish("finished", match, battle);
 
 			var loaded = TrainingRun.Load(run.RunDirectory);
-			Assert.That(loaded.Manifest.SchemaVersion, Is.EqualTo(11));
+			Assert.That(loaded.Manifest.SchemaVersion, Is.EqualTo(12));
 			Assert.That(loaded.Manifest.Result.Outcome, Is.EqualTo("Won"));
 			Assert.That(loaded.Manifest.Performance.SimulationSpeed, Is.EqualTo(100));
 			Assert.That(loaded.Manifest.Performance.TicksPerSecond, Is.EqualTo(2500));

@@ -207,6 +207,7 @@ namespace AutoCnC.Launcher
 		public string Reason { get; set; }
 		public string InvalidationReason { get; set; }
 		public string AbortReason { get; set; }
+		public string AbortedFromState { get; set; }
 		public bool? RequiresReevaluation { get; set; }
 		public bool? CanResumeEvaluation { get; set; }
 
@@ -219,7 +220,7 @@ namespace AutoCnC.Launcher
 
 	public sealed class TrainingRunManifest
 	{
-		public int SchemaVersion { get; set; } = 11;
+		public int SchemaVersion { get; set; } = 12;
 		public string Id { get; set; }
 		public string Status { get; set; }
 
@@ -348,7 +349,10 @@ namespace AutoCnC.Launcher
 				StringComparison.OrdinalIgnoreCase);
 		public bool CanResumeContinuousEvaluation =>
 			HasUnresolvedContinuousExperiment &&
-			Manifest.Experiment?.CanResumeEvaluation == true;
+			Manifest.Experiment?.CanResumeEvaluation == true &&
+			(Manifest.Experiment.AbortedFromState is
+				TrainingExperimentStates.Candidate or
+				TrainingExperimentStates.Evaluating);
 
 		/// <summary>True while the manifest still describes a battle or improvement as under way.</summary>
 		public bool HasUnfinishedWork => Manifest.CompletedUtc == null ||
@@ -1019,7 +1023,9 @@ namespace AutoCnC.Launcher
 				throw new InvalidOperationException(
 					"Another launcher still owns this continuous experiment.");
 
+			var abortedFromState = experiment.State;
 			experiment.State = TrainingExperimentStates.Aborted;
+			experiment.AbortedFromState = abortedFromState;
 			experiment.AbortedUtc = DateTime.UtcNow;
 			experiment.AbortReason = reason;
 			experiment.CanResumeEvaluation = canResumeEvaluation;
@@ -1281,6 +1287,19 @@ namespace AutoCnC.Launcher
 		public void Delete(string runsRoot = null)
 		{
 			var root = Path.GetFullPath(runsRoot ?? DefaultRoot);
+			var suppliedId = Manifest.Id;
+			if (string.IsNullOrWhiteSpace(suppliedId) || suppliedId is "." or ".." ||
+				suppliedId != Path.GetFileName(suppliedId))
+				throw new InvalidDataException(
+					"The recorded session has an invalid directory identifier.");
+			var suppliedExpected = Path.GetFullPath(Path.Combine(
+				RunsDirectoryForBot(Manifest.BotProject ?? Manifest.BotPath, root),
+				suppliedId));
+			if (!string.Equals(Path.TrimEndingDirectorySeparator(RunDirectory),
+				suppliedExpected, StringComparison.OrdinalIgnoreCase))
+				throw new InvalidDataException(
+					"Only this session's directory inside the training archive can be deleted.");
+
 			string tombstone;
 			using (var workspaceMutation = AcquireWorkspaceMutation(this))
 			using (var runMutation = AcquireMutation(this))
@@ -1289,6 +1308,11 @@ namespace AutoCnC.Launcher
 				if (!current.CanDelete)
 					throw new InvalidOperationException(
 						"Finish or stop the session's battle and improvement before deleting it.");
+				if (current.Manifest.Id != suppliedId ||
+					current.Manifest.BotPath != Manifest.BotPath ||
+					current.Manifest.BotProject != Manifest.BotProject)
+					throw new InvalidOperationException(
+						"The recorded session changed. Refresh history before deleting it.");
 
 				var id = current.Manifest.Id;
 				if (string.IsNullOrWhiteSpace(id) || id is "." or ".." ||

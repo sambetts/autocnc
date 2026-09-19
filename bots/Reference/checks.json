@@ -1,7 +1,14 @@
 {
   "schemaVersion": 1,
-  "authoredForRevision": "7fdbc489c04f16b7289acb4d493d2af4d119efaa",
+  "authoredForRevision": "3b8ce6f43bfd6bc00efe6f3451991ad8798aa410",
   "checks": [
+    {
+      "id": "support-power-strike-runs",
+      "description": "A ready faction-provided support power attacks a visible threat or the remembered enemy base.",
+      "query": "reason-id:reference.support-power.strike",
+      "operator": ">=",
+      "value": "1"
+    },
     {
       "id": "cleared-base-assault-launch-runs",
       "description": "The changed Defence exit launches a formed assault only after immediate base pressure has cleared.",

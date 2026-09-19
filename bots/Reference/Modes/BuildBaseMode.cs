@@ -62,6 +62,9 @@ namespace AutoCnC.Reference.Modes
 		/// <summary>Ground-defence tower names for either faction.</summary>
 		static readonly string[] GroundDefenceCandidates = [.. ReferencePlans.GuardTowers];
 
+		const int SupportPowerThreatRadius = 24 * 1024;
+		const string SupportPowerReasonId = "reference.support-power.strike";
+
 		/// <summary>
 		/// Every defensive structure, so the anti-air rung sizes itself from the base rather
 		/// than from the towers already covering it.
@@ -149,6 +152,10 @@ namespace AutoCnC.Reference.Modes
 			//    deploy, pack up, and deploy again forever.
 			if (ctx.CanDeploy && ctx.DeploysIntoBuilding)
 				return UnitDecision.Deploy("deploying to found the base");
+
+			var supportPower = UseReadySupportPower(ctx);
+			if (supportPower.Action != UnitAction.Continue)
+				return supportPower;
 
 			// --- Sense -------------------------------------------------------------
 			for (var i = 0; i < ConstructionQueues.Length; i++)
@@ -303,6 +310,53 @@ namespace AutoCnC.Reference.Modes
 				default:
 					return UnitDecision.Continue;   // plan complete, or nothing affordable yet
 			}
+		}
+
+		static UnitDecision UseReadySupportPower(ModeContext ctx)
+		{
+			SupportPowerState? ready = null;
+			foreach (var power in ctx.SupportPowerStates())
+			{
+				if (!power.Active || !power.Ready || power.Disabled)
+					continue;
+
+				ready = power;
+				break;
+			}
+
+			if (!ready.HasValue)
+				return UnitDecision.Continue;
+
+			ThreatSnapshot? target = null;
+			var threats = ctx.SenseThreats(new WDist(SupportPowerThreatRadius));
+			foreach (var threat in threats)
+			{
+				if (ctx.Doctrine == ReferenceDoctrines.Defence && !threat.CanHitUs)
+					continue;
+
+				if (!target.HasValue
+					|| threat.Value > target.Value.Value
+					|| (threat.Value == target.Value.Value && threat.ActorId < target.Value.ActorId))
+					target = threat;
+			}
+
+			if (target.HasValue)
+				return UnitDecision.ActivateSupportPower(
+					ready.Value.Key,
+					target.Value.CellX,
+					target.Value.CellY,
+					$"support power striking visible {target.Value.ActorType}",
+					SupportPowerReasonId);
+
+			if (!EnemyBaseSightings.TryGetLastKnown(ctx.Owner, out var enemyBase))
+				return UnitDecision.Continue;
+
+			return UnitDecision.ActivateSupportPower(
+				ready.Value.Key,
+				enemyBase.X,
+				enemyBase.Y,
+				"support power striking last known enemy base",
+				SupportPowerReasonId);
 		}
 
 		/// <summary>

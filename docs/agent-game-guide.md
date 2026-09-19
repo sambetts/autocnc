@@ -96,7 +96,9 @@ it as authoritative context alongside the source and the evidence from one compl
   suppressed when their full rules cost would take live cash below the remaining reservation.
   Arbitration is deterministic across controller order. Existing queued items, cancellation and
   completed-building placement are not gated. Modes may inspect `ctx.CurrentProductionBudget`
-  but must not coordinate reservations with `Hold` or evaluation sequence.
+  but must not coordinate reservations with `Hold` or evaluation sequence. Every assessment
+  records the normalized policy and its active/inactive/invalid/unmatched status; its nested
+  `ReasonId` is available to evidence `reason-id:` checks even when no decision is suppressed.
 - Returning the same intent repeatedly is cheap because the host suppresses duplicate orders.
 - Target selection should be stable. Re-picking equivalent targets every evaluation makes units
   dither.

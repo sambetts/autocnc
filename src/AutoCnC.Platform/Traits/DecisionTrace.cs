@@ -43,7 +43,7 @@ namespace AutoCnC.Platform.Traits
 			Write(new
 			{
 				Event = "started",
-				SchemaVersion = 3,
+				SchemaVersion = 4,
 				RecordedAtUtc = DateTime.UtcNow
 			});
 		}
@@ -107,6 +107,22 @@ namespace AutoCnC.Platform.Traits
 				ReasonId = reasonId,
 				Urgent = urgent,
 				DwellBypassed = dwellBypassed
+			});
+
+		public void ProductionBudgetAssessment(
+			int seconds,
+			string doctrine,
+			in ProductionBudget budget,
+			bool active,
+			string status) =>
+			Write(new
+			{
+				Event = "production-budget",
+				Seconds = seconds,
+				Doctrine = doctrine,
+				Active = active,
+				Status = status,
+				ProductionBudget = Budget(budget)
 			});
 
 		public void UnitDecisionIssued(int seconds, string actor, uint actorId, string mode,
@@ -176,13 +192,7 @@ namespace AutoCnC.Platform.Traits
 				decision.Reason,
 				decision.ReasonId,
 				Outcome = "production-budget-suppressed",
-				ProductionBudget = new
-				{
-					budget.ReservedCash,
-					OwnerQueue = budget.Queue,
-					budget.Reason,
-					budget.ReasonId
-				},
+				ProductionBudget = Budget(budget),
 				Production = new
 				{
 					ItemCost = itemCost,
@@ -218,6 +228,14 @@ namespace AutoCnC.Platform.Traits
 			decision.Reason,
 			decision.ReasonId,
 			decision.IsUrgent
+		};
+
+		static object Budget(in ProductionBudget budget) => new
+		{
+			budget.ReservedCash,
+			OwnerQueue = budget.Queue,
+			budget.Reason,
+			budget.ReasonId
 		};
 
 		void Write(object value)

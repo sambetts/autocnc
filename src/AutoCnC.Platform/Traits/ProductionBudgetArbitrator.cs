@@ -38,14 +38,28 @@ namespace AutoCnC.Platform.Traits
 
 		internal static ProductionBudget Normalize(in ProductionBudget proposed)
 		{
-			if (!proposed.IsActive)
-				return ProductionBudget.None;
-
-			return proposed with { Queue = proposed.Queue.Trim() };
+			var sanitized = Sanitize(proposed);
+			return sanitized.IsActive ? sanitized : ProductionBudget.None;
 		}
+
+		internal static ProductionBudget Sanitize(in ProductionBudget proposed) =>
+			proposed with
+			{
+				ReservedCash = Math.Max(0, proposed.ReservedCash),
+				Queue = proposed.Queue?.Trim()
+			};
 	}
 
 	internal readonly record struct ProductionQueueIdentity(string Group, string Type);
+
+	internal enum ProductionBudgetStatus : byte
+	{
+		Inactive,
+		Active,
+		Invalid,
+		Unmatched,
+		Error
+	}
 
 	internal readonly record struct ProductionBudgetScope(
 		ProductionBudget Budget,
@@ -56,6 +70,14 @@ namespace AutoCnC.Platform.Traits
 				Budget.Queue,
 				UsesGroup ? group : type,
 				StringComparison.OrdinalIgnoreCase);
+	}
+
+	internal readonly record struct ProductionBudgetResolution(
+		ProductionBudget Budget,
+		ProductionBudgetStatus Status,
+		ProductionBudgetScope Scope)
+	{
+		public bool IsActive => Status == ProductionBudgetStatus.Active;
 	}
 
 	internal readonly record struct ProductionBudgetCandidate(
@@ -82,6 +104,34 @@ namespace AutoCnC.Platform.Traits
 
 	internal static class ProductionBudgetArbitrator
 	{
+		public static ProductionBudgetResolution Resolve(
+			in ProductionBudget proposed,
+			IEnumerable<ProductionQueueIdentity> queues)
+		{
+			var sanitized = ProductionBudgetLease.Sanitize(proposed);
+			if (proposed.ReservedCash < 0 ||
+				(proposed.ReservedCash > 0 && string.IsNullOrWhiteSpace(proposed.Queue)))
+				return new ProductionBudgetResolution(
+					sanitized, ProductionBudgetStatus.Invalid, default);
+
+			if (!sanitized.IsActive)
+				return new ProductionBudgetResolution(
+					sanitized, ProductionBudgetStatus.Inactive, default);
+
+			return TryResolveScope(sanitized, queues, out var scope)
+				? new ProductionBudgetResolution(sanitized, ProductionBudgetStatus.Active, scope)
+				: new ProductionBudgetResolution(sanitized, ProductionBudgetStatus.Unmatched, default);
+		}
+
+		public static string StatusName(ProductionBudgetStatus status) => status switch
+		{
+			ProductionBudgetStatus.Active => "active",
+			ProductionBudgetStatus.Invalid => "invalid",
+			ProductionBudgetStatus.Unmatched => "unmatched",
+			ProductionBudgetStatus.Error => "error",
+			_ => "inactive"
+		};
+
 		public static bool TryResolveScope(
 			in ProductionBudget proposed,
 			IEnumerable<ProductionQueueIdentity> queues,
@@ -114,66 +164,65 @@ namespace AutoCnC.Platform.Traits
 			in ProductionBudget proposed,
 			int currentCash,
 			IEnumerable<ProductionBudgetCandidate> candidates,
-			int maxOrders)
+			int maxOrders,
+			ulong admissionRound = 0)
 		{
 			var budget = ProductionBudgetLease.Normalize(proposed);
 			var ordered = candidates
-				.OrderBy(candidate => candidate.OwnsReservation ? 0 : 1)
+				.OrderBy(candidate => candidate.ControllerActorId)
 				.ThenBy(candidate => candidate.Queue, StringComparer.OrdinalIgnoreCase)
 				.ThenBy(candidate => candidate.Queue, StringComparer.Ordinal)
 				.ThenBy(candidate => candidate.QueueActorId)
 				.ThenBy(candidate => candidate.Item, StringComparer.OrdinalIgnoreCase)
 				.ThenBy(candidate => candidate.Item, StringComparer.Ordinal)
-				.ThenBy(candidate => candidate.ControllerActorId)
 				.ToArray();
 
 			var cash = Math.Max(0L, currentCash);
 			var reserved = budget.IsActive ? (long)budget.ReservedCash : 0L;
-			var remainingSlots = Math.Max(0, maxOrders);
-			var ownerSpend = 0L;
+			var admissionOrder = Rotate(ordered, admissionRound).ToArray();
+			var admitted = admissionOrder
+				.Take(Math.Max(0, maxOrders))
+				.Select(candidate => candidate.ControllerActorId)
+				.ToHashSet();
+			var ownerSpend = admissionOrder
+				.Where(candidate =>
+					admitted.Contains(candidate.ControllerActorId) &&
+					candidate.OwnsReservation)
+				.Aggregate(
+					0L,
+					(total, candidate) => AddSaturating(total, Math.Max(0L, candidate.Cost)));
+			var ownerSpendSoFar = 0L;
 			var nonOwnerSpend = 0L;
-			var results = new List<ProductionBudgetEvaluation>(ordered.Length);
+			var results = new List<ProductionBudgetEvaluation>(admissionOrder.Length);
 
-			foreach (var candidate in ordered.Where(candidate => candidate.OwnsReservation))
+			foreach (var candidate in admissionOrder)
 			{
 				var cost = Math.Max(0L, candidate.Cost);
-				if (remainingSlots == 0)
+				var reservedRemaining = Math.Max(0L, reserved - ownerSpend);
+				if (!admitted.Contains(candidate.ControllerActorId))
 				{
 					results.Add(new ProductionBudgetEvaluation(
 						candidate,
 						ProductionBudgetOutcome.OrderLimit,
 						cash,
 						cash - ownerSpend - nonOwnerSpend,
-						Math.Max(0L, reserved - ownerSpend)));
-					continue;
-				}
-
-				ownerSpend = AddSaturating(ownerSpend, cost);
-				remainingSlots--;
-				results.Add(new ProductionBudgetEvaluation(
-					candidate,
-					ProductionBudgetOutcome.Allowed,
-					cash,
-					cash - ownerSpend - nonOwnerSpend,
-					Math.Max(0L, reserved - ownerSpend)));
-			}
-
-			foreach (var candidate in ordered.Where(candidate => !candidate.OwnsReservation))
-			{
-				var cost = Math.Max(0L, candidate.Cost);
-				var reservedRemaining = Math.Max(0L, reserved - ownerSpend);
-				var postOrderCash = cash - ownerSpend - nonOwnerSpend - cost;
-
-				if (remainingSlots == 0)
-				{
-					results.Add(new ProductionBudgetEvaluation(
-						candidate,
-						ProductionBudgetOutcome.OrderLimit,
-						cash,
-						postOrderCash,
 						reservedRemaining));
 					continue;
 				}
+
+				if (candidate.OwnsReservation)
+				{
+					ownerSpendSoFar = AddSaturating(ownerSpendSoFar, cost);
+					results.Add(new ProductionBudgetEvaluation(
+						candidate,
+						ProductionBudgetOutcome.Allowed,
+						cash,
+						cash - ownerSpendSoFar - nonOwnerSpend,
+						Math.Max(0L, reserved - ownerSpendSoFar)));
+					continue;
+				}
+
+				var postOrderCash = cash - ownerSpend - nonOwnerSpend - cost;
 
 				if (budget.IsActive && postOrderCash < reservedRemaining)
 				{
@@ -185,9 +234,7 @@ namespace AutoCnC.Platform.Traits
 						reservedRemaining));
 					continue;
 				}
-
 				nonOwnerSpend = AddSaturating(nonOwnerSpend, cost);
-				remainingSlots--;
 				results.Add(new ProductionBudgetEvaluation(
 					candidate,
 					ProductionBudgetOutcome.Allowed,
@@ -197,6 +244,16 @@ namespace AutoCnC.Platform.Traits
 			}
 
 			return results;
+		}
+
+		static IEnumerable<T> Rotate<T>(T[] values, ulong admissionRound)
+		{
+			if (values.Length == 0)
+				yield break;
+
+			var offset = (int)(admissionRound % (ulong)values.Length);
+			for (var index = 0; index < values.Length; index++)
+				yield return values[(offset + index) % values.Length];
 		}
 
 		static long AddSaturating(long value, long addition) =>

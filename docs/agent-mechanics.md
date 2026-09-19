@@ -229,7 +229,9 @@ permitted way to know where anything is.
   suppressed when their full rules cost would take live cash below the remaining reservation.
   Arbitration is deterministic across controller order. Existing queued items, cancellation and
   completed-building placement are not gated. Modes may inspect `ctx.CurrentProductionBudget`
-  but must not coordinate reservations with `Hold` or evaluation sequence.
+  but must not coordinate reservations with `Hold` or evaluation sequence. Every assessment
+  records the normalized policy and its active/inactive/invalid/unmatched status; its nested
+  `ReasonId` is available to evidence `reason-id:` checks even when no decision is suppressed.
 - Give decisions a stable `ReasonId` through the final factory argument. Human `Reason` prose and
   `ReasonId` are both ignored by duplicate-intent suppression.
 - Target selection should be stable. Re-picking equivalent targets every evaluation makes units
@@ -320,7 +322,7 @@ int WeaponRangeUnits { get }
 World World { get }
 int WorldTick { get }
 IReadOnlyCollection<string> BuildableItems(string category)
-Order BuildOrder(UnitDecision decision)
+Order BuildOrder(in UnitDecision decision)
 bool CanAttack(Actor target)
 bool CanHarvest(CPos cell)
 static ThreatKind Classify(Actor actor)
@@ -363,8 +365,8 @@ Existing direct implementations may omit `ReserveProductionBudget`; its default 
 string Description { get }
 string Name { get }
 void Configure(IBattleBotBuilder builder)
-DoctrineDecision Reassess(BattleState state)
-ProductionBudget ReserveProductionBudget(BattleState state)
+DoctrineDecision Reassess(in BattleState state)
+ProductionBudget ReserveProductionBudget(in BattleState state)
 ```
 
 ### BattleBot — convenience base class
@@ -375,8 +377,8 @@ Override only the strategic policies the bot needs.
 string Description { get }
 string Name { get }
 void Configure(IBattleBotBuilder builder)
-DoctrineDecision Reassess(BattleState state)
-ProductionBudget ReserveProductionBudget(BattleState state)
+DoctrineDecision Reassess(in BattleState state)
+ProductionBudget ReserveProductionBudget(in BattleState state)
 ```
 
 ### IModeHost — read-only strategic state behind ModeContext
@@ -444,7 +446,7 @@ static UnitDecision Retreat(string reason)
 static UnitDecision Retreat(string reason, string reasonId)
 static UnitDecision ReturnToAnchor(string reason)
 static UnitDecision ReturnToAnchor(string reason, string reasonId)
-bool SameIntent(UnitDecision other)
+bool SameIntent(in UnitDecision other)
 ```
 
 ### BattleState
@@ -497,7 +499,7 @@ bool IsUrgent { get; init }
 string Reason { get; init }
 string ReasonId { get; init }
 bool WantsChange { get }
-bool CanBypassMinimumDwell(BattleState state)
+bool CanBypassMinimumDwell(in BattleState state)
 static DoctrineDecision SwitchTo(string doctrine, string reason)
 static DoctrineDecision SwitchTo(string doctrine, string reason, string reasonId)
 static DoctrineDecision SwitchUrgentlyTo(string doctrine, string reason)

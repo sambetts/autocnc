@@ -136,26 +136,26 @@ namespace AutoCnC.Platform.Traits
 		}
 	}
 
-	internal sealed class PendingProductionOrder
+	internal sealed class PendingModeOrder
 	{
 		public Actor Actor { get; }
 		public ProgrammableController Controller { get; }
 		public UnitDecision Decision { get; }
 		public Order Order { get; }
-		public ProductionBudgetCandidate Candidate { get; }
+		public ProductionBudgetCandidate? ProductionCandidate { get; }
 
-		public PendingProductionOrder(
+		public PendingModeOrder(
 			Actor actor,
 			ProgrammableController controller,
 			in UnitDecision decision,
 			Order order,
-			in ProductionBudgetCandidate candidate)
+			ProductionBudgetCandidate? productionCandidate)
 		{
 			Actor = actor;
 			Controller = controller;
 			Decision = decision;
 			Order = order;
-			Candidate = candidate;
+			ProductionCandidate = productionCandidate;
 		}
 	}
 
@@ -221,7 +221,7 @@ namespace AutoCnC.Platform.Traits
 		readonly World world;
 		readonly ModeExecutorInfo info;
 		readonly List<Order> pending = [];
-		readonly List<PendingProductionOrder> pendingProduction = [];
+		readonly List<PendingModeOrder> pendingBudgetedOrders = [];
 		readonly PendingPlayerActions pendingPlayerActions = new();
 		readonly ProductionBudgetLease productionBudget = new();
 
@@ -234,6 +234,7 @@ namespace AutoCnC.Platform.Traits
 
 		int nextAssessTick;
 		int doctrineStartedSeconds;
+		ulong productionAdmissionRound;
 
 		/// <summary>The loaded battle bot, or null if none.</summary>
 		public BattleBotDefinition Bot { get; private set; }
@@ -547,7 +548,15 @@ namespace AutoCnC.Platform.Traits
 		void RefreshProductionBudget()
 		{
 			if (brain == null)
+			{
+				decisionTrace?.ProductionBudgetAssessment(
+					GameSeconds,
+					Doctrine?.Name,
+					ProductionBudget.None,
+					active: false,
+					ProductionBudgetArbitrator.StatusName(ProductionBudgetStatus.Inactive));
 				return;
+			}
 
 			var state = LastAssessment with
 			{
@@ -558,7 +567,19 @@ namespace AutoCnC.Platform.Traits
 			try
 			{
 				var proposed = brain.ReserveProductionBudget(state);
-				productionBudget.Refresh(proposed, nextAssessTick);
+				var resolution = ProductionBudgetArbitrator.Resolve(
+					proposed, ProductionQueues(world.LocalPlayer));
+				if (resolution.IsActive)
+					productionBudget.Refresh(resolution.Budget, nextAssessTick);
+				else
+					productionBudget.Clear();
+
+				decisionTrace?.ProductionBudgetAssessment(
+					GameSeconds,
+					Doctrine?.Name,
+					resolution.Budget,
+					resolution.IsActive,
+					ProductionBudgetArbitrator.StatusName(resolution.Status));
 			}
 			catch (Exception ex)
 			{
@@ -567,6 +588,12 @@ namespace AutoCnC.Platform.Traits
 					$"Battle bot '{Bot.Name}' production budget threw: {ex.Message}. No cash reserved.");
 				decisionTrace?.Error(GameSeconds, "production-budget", Bot.Name, ex);
 				productionBudget.Clear();
+				decisionTrace?.ProductionBudgetAssessment(
+					GameSeconds,
+					Doctrine?.Name,
+					ProductionBudget.None,
+					active: false,
+					ProductionBudgetArbitrator.StatusName(ProductionBudgetStatus.Error));
 			}
 		}
 
@@ -633,7 +660,7 @@ namespace AutoCnC.Platform.Traits
 				return;
 
 			pending.Clear();
-			pendingProduction.Clear();
+			pendingBudgetedOrders.Clear();
 			pendingPlayerActions.BeginTick(
 				intent => CancellationIntentIsCurrent(player, intent),
 				intent => RepairIntentIsCurrent(player, intent));
@@ -642,8 +669,13 @@ namespace AutoCnC.Platform.Traits
 				? budgetScope
 				: null;
 			var controllers = world.ActorsWithTrait<ProgrammableController>().AsEnumerable();
+			var admissionRound = 0UL;
 			if (activeBudget.HasValue)
-				controllers = controllers.OrderBy(pair => pair.Actor.ActorID);
+			{
+				admissionRound = productionAdmissionRound++;
+				var ordered = controllers.OrderBy(pair => pair.Actor.ActorID).ToArray();
+				controllers = RotateAdmission(ordered, admissionRound);
+			}
 
 			foreach (var pair in controllers)
 			{
@@ -672,7 +704,7 @@ namespace AutoCnC.Platform.Traits
 			}
 
 			if (activeBudget.HasValue)
-				FlushProductionOrders(player, activeBudget.Value);
+				FlushBudgetedOrders(player, activeBudget.Value, admissionRound);
 
 			foreach (var order in pending)
 				world.IssueOrder(order);
@@ -791,10 +823,10 @@ namespace AutoCnC.Platform.Traits
 				return;
 			}
 
-			if (productionCandidate.HasValue)
+			if (activeBudget.HasValue)
 			{
-				pendingProduction.Add(new PendingProductionOrder(
-					actor, controller, decision, order, productionCandidate.Value));
+				pendingBudgetedOrders.Add(new PendingModeOrder(
+					actor, controller, decision, order, productionCandidate));
 				return;
 			}
 
@@ -872,12 +904,8 @@ namespace AutoCnC.Platform.Traits
 				return false;
 			}
 
-			var queues = world.ActorsWithTrait<ProductionQueue>()
-				.Where(pair => pair.Actor.Owner == player && pair.Trait.Enabled)
-				.Select(pair => new ProductionQueueIdentity(
-					pair.Trait.Info.Group,
-					pair.Trait.Info.Type));
-			if (ProductionBudgetArbitrator.TryResolveScope(budget, queues, out scope))
+			if (ProductionBudgetArbitrator.TryResolveScope(
+				budget, ProductionQueues(player), out scope))
 				return true;
 
 			productionBudget.Clear();
@@ -885,60 +913,84 @@ namespace AutoCnC.Platform.Traits
 			return false;
 		}
 
-		void FlushProductionOrders(Player player, in ProductionBudgetScope budgetScope)
+		IEnumerable<ProductionQueueIdentity> ProductionQueues(Player player) =>
+			world.ActorsWithTrait<ProductionQueue>()
+				.Where(pair => pair.Actor.Owner == player && pair.Trait.Enabled)
+				.Select(pair => new ProductionQueueIdentity(
+					pair.Trait.Info.Group,
+					pair.Trait.Info.Type));
+
+		void FlushBudgetedOrders(
+			Player player,
+			in ProductionBudgetScope budgetScope,
+			ulong admissionRound)
 		{
-			if (pendingProduction.Count == 0)
+			if (pendingBudgetedOrders.Count == 0)
 				return;
 
 			var resources = player.PlayerActor.TraitOrDefault<PlayerResources>();
 			var currentCash = resources?.GetCashAndResources() ?? 0;
-			var availableSlots = info.MaxOrdersPerTick <= pending.Count
-				? 0
-				: info.MaxOrdersPerTick - pending.Count;
-			var byActor = pendingProduction.ToDictionary(
-				item => item.Candidate.ControllerActorId);
-			var evaluations = ProductionBudgetArbitrator.Evaluate(
+			var productionEvaluations = ProductionBudgetArbitrator.Evaluate(
 				budgetScope.Budget,
 				currentCash,
-				pendingProduction.Select(item => item.Candidate),
-				availableSlots);
+				pendingBudgetedOrders
+					.Where(item => item.ProductionCandidate.HasValue)
+					.Select(item => item.ProductionCandidate.Value),
+				int.MaxValue,
+				admissionRound)
+				.ToDictionary(evaluation => evaluation.Candidate.ControllerActorId);
+			var eligible = new List<PendingModeOrder>(pendingBudgetedOrders.Count);
 
-			foreach (var evaluation in evaluations)
+			foreach (var item in pendingBudgetedOrders)
 			{
-				if (!byActor.TryGetValue(evaluation.Candidate.ControllerActorId, out var item))
+				if (!item.ProductionCandidate.HasValue)
+				{
+					eligible.Add(item);
+					continue;
+				}
+
+				var candidate = item.ProductionCandidate.Value;
+				if (!productionEvaluations.TryGetValue(
+					candidate.ControllerActorId, out var evaluation))
 					continue;
 
-				switch (evaluation.Outcome)
+				if (evaluation.Outcome == ProductionBudgetOutcome.BudgetSuppressed)
 				{
-					case ProductionBudgetOutcome.Allowed:
-						QueueIssuedDecision(
-							item.Actor, item.Controller, item.Decision, item.Order, enforceOrderLimit: true);
-						break;
-
-					case ProductionBudgetOutcome.BudgetSuppressed:
-						decisionTrace?.ProductionBudgetSuppressed(
-							GameSeconds,
-							item.Actor.Info.Name,
-							item.Actor.ActorID,
-							item.Controller.ActiveModeName,
-							item.Decision,
-							budgetScope.Budget,
-							evaluation.Candidate.Cost,
-							evaluation.CurrentCash,
-							evaluation.PostOrderCash,
-							evaluation.ReservedCashRemaining);
-						break;
-
-					case ProductionBudgetOutcome.OrderLimit:
-						decisionTrace?.UnitDecisionEvaluated(
-							GameSeconds,
-							item.Actor.Info.Name,
-							item.Actor.ActorID,
-							item.Controller.ActiveModeName,
-							item.Decision,
-							"order-limit");
-						break;
+					decisionTrace?.ProductionBudgetSuppressed(
+						GameSeconds,
+						item.Actor.Info.Name,
+						item.Actor.ActorID,
+						item.Controller.ActiveModeName,
+						item.Decision,
+						budgetScope.Budget,
+						candidate.Cost,
+						evaluation.CurrentCash,
+						evaluation.PostOrderCash,
+						evaluation.ReservedCashRemaining);
+					continue;
 				}
+
+				eligible.Add(item);
+			}
+
+			var ordered = eligible.OrderBy(item => item.Actor.ActorID).ToArray();
+			foreach (var item in RotateAdmission(ordered, admissionRound))
+			{
+				if (pending.Count >= Math.Max(0, info.MaxOrdersPerTick))
+				{
+					RetryNextTick(item.Controller);
+					decisionTrace?.UnitDecisionEvaluated(
+						GameSeconds,
+						item.Actor.Info.Name,
+						item.Actor.ActorID,
+						item.Controller.ActiveModeName,
+						item.Decision,
+						"order-limit");
+					continue;
+				}
+
+				QueueIssuedDecision(
+					item.Actor, item.Controller, item.Decision, item.Order, enforceOrderLimit: true);
 			}
 		}
 
@@ -952,6 +1004,7 @@ namespace AutoCnC.Platform.Traits
 			// Persistent intents are committed only after the order has secured a pending slot.
 			if (enforceOrderLimit && pending.Count >= Math.Max(0, info.MaxOrdersPerTick))
 			{
+				RetryNextTick(controller);
 				decisionTrace?.UnitDecisionEvaluated(GameSeconds, actor.Info.Name, actor.ActorID,
 					controller.ActiveModeName, decision, "order-limit");
 				return;
@@ -986,6 +1039,22 @@ namespace AutoCnC.Platform.Traits
 			decisionTrace?.UnitDecisionIssued(GameSeconds, actor.Info.Name, actor.ActorID,
 				controller.ActiveModeName, decision, order.OrderString);
 			controller.LastIssued = decision;
+		}
+
+		void RetryNextTick(ProgrammableController controller) =>
+			controller.NextEvaluationTick = world.WorldTick == int.MaxValue
+				? int.MaxValue
+				: world.WorldTick + 1;
+
+		internal static IEnumerable<T> RotateAdmission<T>(
+			IReadOnlyList<T> values, ulong admissionRound)
+		{
+			if (values.Count == 0)
+				yield break;
+
+			var offset = (int)(admissionRound % (ulong)values.Count);
+			for (var index = 0; index < values.Count; index++)
+				yield return values[(offset + index) % values.Count];
 		}
 
 		bool CancellationIntentIsCurrent(Player player, ProductionCancellationIntent intent)

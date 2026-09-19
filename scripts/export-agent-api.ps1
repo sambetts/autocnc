@@ -76,7 +76,11 @@ try {
     function Format-Parameter {
         param($Parameter)
 
-        $text = (Format-TypeName $Parameter.ParameterType) + ' ' + $Parameter.Name
+        $modifier = if ($Parameter.IsOut) { 'out ' }
+            elseif ($Parameter.ParameterType.IsByRef -and $Parameter.IsIn) { 'in ' }
+            elseif ($Parameter.ParameterType.IsByRef) { 'ref ' }
+            else { '' }
+        $text = $modifier + (Format-TypeName $Parameter.ParameterType) + ' ' + $Parameter.Name
         if ($Parameter.IsOptional) {
             $default = $Parameter.RawDefaultValue
             $rendered = if ($null -eq $default) { 'null' }
@@ -87,6 +91,27 @@ try {
         }
         return $text
     }
+
+    function Assert-ParameterFormat {
+        param($Parameter, [string]$Expected)
+
+        $actual = Format-Parameter $Parameter
+        if ($actual -ne $Expected) {
+            throw "Format-Parameter regression: expected '$Expected', got '$actual'."
+        }
+    }
+
+    $inParameter = $sdk.GetType('AutoCnC.Sdk.IBattleBot').GetMethod('Reassess').GetParameters()[0]
+    $outParameter = [int].GetMethod(
+        'TryParse',
+        [type[]]@([string], [int].MakeByRefType())).GetParameters()[1]
+    $refParameter = [Threading.Interlocked].GetMethod(
+        'Exchange',
+        [type[]]@([int].MakeByRefType(), [int])).GetParameters()[0]
+
+    Assert-ParameterFormat $inParameter 'in BattleState state'
+    Assert-ParameterFormat $outParameter 'out int result'
+    Assert-ParameterFormat $refParameter 'ref int location1'
 
     # Skip compiler-generated record plumbing and object overrides: they are noise the agent
     # would have to read past on every single round.

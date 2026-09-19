@@ -660,6 +660,11 @@ stable `ReasonId`. A budget-suppressed evaluation also carries structured `produ
 (reserved cash, owner queue, reason and reason ID) and `production` (item cost, live cash,
 post-order cash and remaining reservation) objects.
 
+Every strategic assessment also emits a `production-budget` event after normalization. Its
+`active` flag and `status` (`active`, `inactive`, `invalid`, `unmatched`, or `error`) make the
+policy visible even when no production decision is suppressed. The nested budget reason ID is
+available to evidence `reason-id:` checks.
+
 `/modelog` says what your code *did*. The **battle log** says what it had to go on: the launcher's
 output window records every event your side could react to — an enemy coming into view, a hit
 taken, a unit lost, a kill — each one naming the players on both ends of it, and filtered by the

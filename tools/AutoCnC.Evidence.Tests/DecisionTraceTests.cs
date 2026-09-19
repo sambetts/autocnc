@@ -170,5 +170,44 @@ namespace AutoCnC.Evidence.Tests
 				Assert.That(trace.ReasonIdMentions("production.reserve.tech"), Is.EqualTo(1));
 			});
 		}
+
+		[Test]
+		public void ReadsEveryProductionBudgetRefreshStatusAndRegistersActivationReason()
+		{
+			var path = WriteFile("production-budgets.jsonl",
+				"{\"event\":\"started\",\"schemaVersion\":4}\n" +
+				"{\"event\":\"production-budget\",\"seconds\":5,\"doctrine\":\"Opening\"," +
+				"\"active\":true,\"status\":\"active\",\"productionBudget\":{\"reservedCash\":1200," +
+				"\"ownerQueue\":\"Building\",\"reason\":\"save for tech\"," +
+				"\"reasonId\":\"production.reserve.tech\"}}\n" +
+				"{\"event\":\"production-budget\",\"seconds\":10,\"doctrine\":\"Opening\"," +
+				"\"active\":false,\"status\":\"inactive\",\"productionBudget\":{\"reservedCash\":0}}\n" +
+				"{\"event\":\"production-budget\",\"seconds\":15,\"doctrine\":\"Opening\"," +
+				"\"active\":false,\"status\":\"invalid\",\"productionBudget\":{\"reservedCash\":0," +
+				"\"ownerQueue\":\"Vehicle\",\"reason\":\"bad amount\"," +
+				"\"reasonId\":\"production.reserve.invalid\"}}\n" +
+				"{\"event\":\"production-budget\",\"seconds\":20,\"doctrine\":\"Attack\"," +
+				"\"active\":false,\"status\":\"unmatched\",\"productionBudget\":{\"reservedCash\":900," +
+				"\"ownerQueue\":\"Aircraft\",\"reason\":\"save for air\"," +
+				"\"reasonId\":\"production.reserve.air\"}}\n");
+
+			var trace = DecisionTrace.Read(path);
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(trace.SchemaVersion, Is.EqualTo(4));
+				Assert.That(trace.ProductionBudgets.Select(record => record.Status), Is.EqualTo(new[]
+				{
+					"active", "inactive", "invalid", "unmatched"
+				}));
+				Assert.That(trace.ProductionBudgets[0].Active, Is.True);
+				Assert.That(trace.ProductionBudgets[0].ProductionBudget.ReservedCash, Is.EqualTo(1200));
+				Assert.That(trace.ProductionBudgets[2].ProductionBudget.OwnerQueue, Is.EqualTo("Vehicle"));
+				Assert.That(trace.ProductionBudgets[3].Doctrine, Is.EqualTo("Attack"));
+				Assert.That(trace.ReasonIdMentions("production.reserve.tech"), Is.EqualTo(1));
+				Assert.That(trace.ReasonIdMentions("production.reserve.invalid"), Is.EqualTo(1));
+				Assert.That(trace.ReasonIdMentions("production.reserve.air"), Is.EqualTo(1));
+			});
+		}
 	}
 }

@@ -403,6 +403,41 @@ namespace AutoCnC.Platform.Tests
 		}
 
 		[Test]
+		public void CapSaturationRotatesAdmissionWithoutDependingOnEvaluationOrder()
+		{
+			var budget = ProductionBudget.Reserve(1000, "Building", "save");
+			var candidates = new[]
+			{
+				Candidate(10, 1, "Building", "nuke", 500, ownsReservation: true),
+				Candidate(20, 2, "Vehicle", "mtnk", 500, ownsReservation: false),
+				Candidate(30, 3, "Building", "weap", 500, ownsReservation: true)
+			};
+			var expected = new[] { 10u, 20u, 30u };
+
+			for (ulong round = 0; round < (ulong)candidates.Length; round++)
+			{
+				var forward = ProductionBudgetArbitrator.Evaluate(
+					budget, currentCash: 5000, candidates, maxOrders: 1, admissionRound: round);
+				var reverse = ProductionBudgetArbitrator.Evaluate(
+					budget, currentCash: 5000, candidates.Reverse(), maxOrders: 1, admissionRound: round);
+				var admitted = forward.Single(result =>
+					result.Outcome == ProductionBudgetOutcome.Allowed).Candidate.ControllerActorId;
+				var reverseAdmitted = reverse.Single(result =>
+					result.Outcome == ProductionBudgetOutcome.Allowed).Candidate.ControllerActorId;
+				var controllerFirst = ModeExecutor.RotateAdmission(expected, round).First();
+
+				Assert.Multiple(() =>
+				{
+					Assert.That(admitted, Is.EqualTo(expected[(int)round]));
+					Assert.That(reverseAdmitted, Is.EqualTo(admitted));
+					Assert.That(controllerFirst, Is.EqualTo(expected[(int)round]));
+					Assert.That(forward.Count(result =>
+						result.Outcome == ProductionBudgetOutcome.OrderLimit), Is.EqualTo(2));
+				});
+			}
+		}
+
+		[Test]
 		public void OwningQueueCanSpendReservedCashBeforeOtherQueues()
 		{
 			var budget = ProductionBudget.Reserve(1000, "Building", "save for construction");
@@ -541,6 +576,82 @@ namespace AutoCnC.Platform.Tests
 				Assert.That(typeScope.UsesGroup, Is.False);
 				Assert.That(typeScope.OwnsQueue("Factory", "Vehicle"), Is.True);
 			});
+		}
+
+		[Test]
+		public void ProductionBudgetResolutionReportsNormalizedAssessmentStatus()
+		{
+			var queues = new[]
+			{
+				new ProductionQueueIdentity("Building", "Building.GDI")
+			};
+			var inactive = ProductionBudgetArbitrator.Resolve(ProductionBudget.None, queues);
+			var invalid = ProductionBudgetArbitrator.Resolve(
+				ProductionBudget.Reserve(-5, " Building ", "bad", "budget.bad"), queues);
+			var unmatched = ProductionBudgetArbitrator.Resolve(
+				ProductionBudget.Reserve(900, "Vehicle", "save", "budget.vehicle"), queues);
+			var active = ProductionBudgetArbitrator.Resolve(
+				ProductionBudget.Reserve(1200, " Building ", "save", "budget.building"), queues);
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(inactive.Status, Is.EqualTo(ProductionBudgetStatus.Inactive));
+				Assert.That(inactive.IsActive, Is.False);
+				Assert.That(invalid.Status, Is.EqualTo(ProductionBudgetStatus.Invalid));
+				Assert.That(invalid.Budget.ReservedCash, Is.Zero);
+				Assert.That(invalid.Budget.Queue, Is.EqualTo("Building"));
+				Assert.That(invalid.Budget.ReasonId, Is.EqualTo("budget.bad"));
+				Assert.That(unmatched.Status, Is.EqualTo(ProductionBudgetStatus.Unmatched));
+				Assert.That(unmatched.Budget.ReservedCash, Is.EqualTo(900));
+				Assert.That(active.Status, Is.EqualTo(ProductionBudgetStatus.Active));
+				Assert.That(active.IsActive, Is.True);
+				Assert.That(active.Scope.UsesGroup, Is.True);
+			});
+		}
+
+		[Test]
+		public void ProductionBudgetAssessmentTraceIncludesStatusAndNormalizedPolicy()
+		{
+			var path = Path.Combine(
+				Path.GetTempPath(), $"autocnc-budget-assessment-{Guid.NewGuid():N}.jsonl");
+
+			try
+			{
+				using (var trace = DecisionTrace.Open(path))
+				{
+					trace.ProductionBudgetAssessment(
+						seconds: 12,
+						doctrine: "Opening",
+						ProductionBudget.Reserve(
+							1200,
+							"Building",
+							"save for tech",
+							"production.reserve.tech"),
+						active: true,
+						status: "active");
+				}
+
+				using var document = JsonDocument.Parse(File.ReadLines(path).Skip(1).Single());
+				var root = document.RootElement;
+				var reservation = root.GetProperty("productionBudget");
+
+				Assert.Multiple(() =>
+				{
+					Assert.That(root.GetProperty("event").GetString(), Is.EqualTo("production-budget"));
+					Assert.That(root.GetProperty("doctrine").GetString(), Is.EqualTo("Opening"));
+					Assert.That(root.GetProperty("active").GetBoolean(), Is.True);
+					Assert.That(root.GetProperty("status").GetString(), Is.EqualTo("active"));
+					Assert.That(reservation.GetProperty("reservedCash").GetInt32(), Is.EqualTo(1200));
+					Assert.That(reservation.GetProperty("ownerQueue").GetString(), Is.EqualTo("Building"));
+					Assert.That(reservation.GetProperty("reasonId").GetString(),
+						Is.EqualTo("production.reserve.tech"));
+				});
+			}
+			finally
+			{
+				File.Delete(path);
+				File.Delete(path + ".1");
+			}
 		}
 
 		[Test]

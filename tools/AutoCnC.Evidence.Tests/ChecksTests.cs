@@ -119,13 +119,11 @@ namespace AutoCnC.Evidence.Tests
 		public void ReasonIdQueryCountsProductionBudgetSuppressions()
 		{
 			var tracePath = WriteFile("budget-reason-id.jsonl",
-				"{\"event\":\"started\",\"schemaVersion\":3}\n" +
-				"{\"event\":\"unit-decision-evaluated\",\"action\":\"Produce\"," +
-				"\"outcome\":\"production-budget-suppressed\"," +
+				"{\"event\":\"started\",\"schemaVersion\":4}\n" +
+				"{\"event\":\"production-budget\",\"seconds\":5,\"doctrine\":\"Opening\"," +
+				"\"active\":true,\"status\":\"active\"," +
 				"\"productionBudget\":{\"reservedCash\":1200,\"ownerQueue\":\"Building\"," +
-				"\"reason\":\"save for tech\",\"reasonId\":\"production.reserve.tech\"}," +
-				"\"production\":{\"itemCost\":800,\"currentCash\":1700,\"postOrderCash\":900," +
-				"\"reservedCashRemaining\":1200}}\n");
+				"\"reason\":\"save for tech\",\"reasonId\":\"production.reserve.tech\"}}\n");
 			var trace = DecisionTrace.Read(tracePath);
 			var document = new CheckDocument
 			{

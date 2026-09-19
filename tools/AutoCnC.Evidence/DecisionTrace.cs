@@ -66,6 +66,16 @@ namespace AutoCnC.Evidence
 		public long ReservedCashRemaining { get; init; }
 	}
 
+	/// <summary>One assessment-scoped production-budget refresh.</summary>
+	public sealed class ProductionBudgetAssessmentRecord
+	{
+		public int Seconds { get; init; }
+		public string Doctrine { get; init; }
+		public bool Active { get; init; }
+		public string Status { get; init; }
+		public ProductionBudgetTraceRecord ProductionBudget { get; init; }
+	}
+
 	/// <summary>Visible enemy count and value for one threat kind in an assessment.</summary>
 	public sealed class ThreatValueRecord
 	{
@@ -161,6 +171,7 @@ namespace AutoCnC.Evidence
 		public List<UnitDecisionRecord> UnitDecisions { get; } = [];
 		public List<UnitDecisionEvaluationRecord> UnitDecisionEvaluations { get; } = [];
 		public List<AssessmentRecord> Assessments { get; } = [];
+		public List<ProductionBudgetAssessmentRecord> ProductionBudgets { get; } = [];
 		public List<DoctrineChangeRecord> DoctrineChanges { get; } = [];
 		public List<string> Errors { get; } = [];
 
@@ -290,6 +301,10 @@ namespace AutoCnC.Evidence
 					AcceptAssessment(root);
 					break;
 
+				case "production-budget":
+					AcceptProductionBudget(root);
+					break;
+
 				case "unit-decision":
 					AcceptUnitDecision(root);
 					break;
@@ -383,6 +398,21 @@ namespace AutoCnC.Evidence
 
 			if (!string.IsNullOrEmpty(record.Action))
 				ActionCounts[record.Action] = ActionCounts.GetValueOrDefault(record.Action) + 1;
+		}
+
+		void AcceptProductionBudget(JsonElement root)
+		{
+			var record = new ProductionBudgetAssessmentRecord
+			{
+				Seconds = Integer(root, "seconds"),
+				Doctrine = Text(root, "doctrine"),
+				Active = Flag(root, "active"),
+				Status = Text(root, "status"),
+				ProductionBudget = ProductionBudget(root)
+			};
+
+			ProductionBudgets.Add(record);
+			RegisterReasonId(record.ProductionBudget?.ReasonId);
 		}
 
 		void AcceptUnitDecisionEvaluation(JsonElement root)

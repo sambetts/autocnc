@@ -673,8 +673,7 @@ namespace AutoCnC.Platform.Traits
 			if (activeBudget.HasValue)
 			{
 				admissionRound = productionAdmissionRound++;
-				var ordered = controllers.OrderBy(pair => pair.Actor.ActorID).ToArray();
-				controllers = RotateAdmission(ordered, admissionRound);
+				controllers = controllers.OrderBy(pair => pair.Actor.ActorID);
 			}
 
 			foreach (var pair in controllers)
@@ -930,18 +929,20 @@ namespace AutoCnC.Platform.Traits
 
 			var resources = player.PlayerActor.TraitOrDefault<PlayerResources>();
 			var currentCash = resources?.GetCashAndResources() ?? 0;
-			var productionEvaluations = ProductionBudgetArbitrator.Evaluate(
+			var prioritized = RotateAdmission(
+				pendingBudgetedOrders.OrderBy(item => item.Actor.ActorID).ToArray(),
+				admissionRound).ToArray();
+			var productionEvaluations = ProductionBudgetArbitrator.EvaluatePrioritized(
 				budgetScope.Budget,
 				currentCash,
-				pendingBudgetedOrders
+				prioritized
 					.Where(item => item.ProductionCandidate.HasValue)
 					.Select(item => item.ProductionCandidate.Value),
-				int.MaxValue,
-				admissionRound)
+				int.MaxValue)
 				.ToDictionary(evaluation => evaluation.Candidate.ControllerActorId);
-			var eligible = new List<PendingModeOrder>(pendingBudgetedOrders.Count);
+			var eligible = new List<PendingModeOrder>(prioritized.Length);
 
-			foreach (var item in pendingBudgetedOrders)
+			foreach (var item in prioritized)
 			{
 				if (!item.ProductionCandidate.HasValue)
 				{
@@ -973,8 +974,7 @@ namespace AutoCnC.Platform.Traits
 				eligible.Add(item);
 			}
 
-			var ordered = eligible.OrderBy(item => item.Actor.ActorID).ToArray();
-			foreach (var item in RotateAdmission(ordered, admissionRound))
+			foreach (var item in eligible)
 			{
 				if (pending.Count >= Math.Max(0, info.MaxOrdersPerTick))
 				{

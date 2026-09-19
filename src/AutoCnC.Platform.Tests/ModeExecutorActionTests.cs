@@ -10,6 +10,7 @@
 #endregion
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
@@ -403,38 +404,42 @@ namespace AutoCnC.Platform.Tests
 		}
 
 		[Test]
-		public void CapSaturationRotatesAdmissionWithoutDependingOnEvaluationOrder()
+		public void CapSaturationPreservesOneRotatedPriorityAcrossBudgetFiltering()
 		{
 			var budget = ProductionBudget.Reserve(1000, "Building", "save");
-			var candidates = new[]
+			var stableControllerOrder = new[] { 1u, 2u, 3u, 4u };
+			var production = new[]
 			{
-				Candidate(10, 1, "Building", "nuke", 500, ownsReservation: true),
-				Candidate(20, 2, "Vehicle", "mtnk", 500, ownsReservation: false),
-				Candidate(30, 3, "Building", "weap", 500, ownsReservation: true)
+				Candidate(2, 2, "Vehicle", "mtnk", 600, ownsReservation: false),
+				Candidate(4, 4, "Infantry", "e1", 600, ownsReservation: false)
 			};
-			var expected = new[] { 10u, 20u, 30u };
+			var admitted = new List<uint>();
 
-			for (ulong round = 0; round < (ulong)candidates.Length; round++)
+			for (ulong round = 0; round < (ulong)stableControllerOrder.Length; round++)
 			{
-				var forward = ProductionBudgetArbitrator.Evaluate(
-					budget, currentCash: 5000, candidates, maxOrders: 1, admissionRound: round);
-				var reverse = ProductionBudgetArbitrator.Evaluate(
-					budget, currentCash: 5000, candidates.Reverse(), maxOrders: 1, admissionRound: round);
-				var admitted = forward.Single(result =>
-					result.Outcome == ProductionBudgetOutcome.Allowed).Candidate.ControllerActorId;
-				var reverseAdmitted = reverse.Single(result =>
-					result.Outcome == ProductionBudgetOutcome.Allowed).Candidate.ControllerActorId;
-				var controllerFirst = ModeExecutor.RotateAdmission(expected, round).First();
+				var priority = ModeExecutor.RotateAdmission(stableControllerOrder, round).ToArray();
+				var productionPriority = priority
+					.Where(actorId => actorId is 2 or 4)
+					.Select(actorId => production.Single(candidate =>
+						candidate.ControllerActorId == actorId))
+					.ToArray();
+				var evaluations = ProductionBudgetArbitrator.EvaluatePrioritized(
+					budget,
+					currentCash: 1600,
+					productionPriority,
+					maxOrders: int.MaxValue);
+				var allowedProduction = evaluations
+					.Where(result => result.Outcome == ProductionBudgetOutcome.Allowed)
+					.Select(result => result.Candidate.ControllerActorId)
+					.ToHashSet();
+				var eligible = priority.Where(actorId =>
+					actorId is 1 or 3 || allowedProduction.Contains(actorId));
 
-				Assert.Multiple(() =>
-				{
-					Assert.That(admitted, Is.EqualTo(expected[(int)round]));
-					Assert.That(reverseAdmitted, Is.EqualTo(admitted));
-					Assert.That(controllerFirst, Is.EqualTo(expected[(int)round]));
-					Assert.That(forward.Count(result =>
-						result.Outcome == ProductionBudgetOutcome.OrderLimit), Is.EqualTo(2));
-				});
+				admitted.Add(eligible.Take(1).Single());
 			}
+
+			Assert.That(admitted, Is.EqualTo(stableControllerOrder),
+				"budget filtering must not trigger a second rotation before applying the cap");
 		}
 
 		[Test]

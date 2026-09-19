@@ -167,7 +167,6 @@ namespace AutoCnC.Platform.Traits
 			int maxOrders,
 			ulong admissionRound = 0)
 		{
-			var budget = ProductionBudgetLease.Normalize(proposed);
 			var ordered = candidates
 				.OrderBy(candidate => candidate.ControllerActorId)
 				.ThenBy(candidate => candidate.Queue, StringComparer.OrdinalIgnoreCase)
@@ -176,10 +175,23 @@ namespace AutoCnC.Platform.Traits
 				.ThenBy(candidate => candidate.Item, StringComparer.OrdinalIgnoreCase)
 				.ThenBy(candidate => candidate.Item, StringComparer.Ordinal)
 				.ToArray();
+			return EvaluatePrioritized(
+				proposed,
+				currentCash,
+				Rotate(ordered, admissionRound),
+				maxOrders);
+		}
 
+		public static IReadOnlyList<ProductionBudgetEvaluation> EvaluatePrioritized(
+			in ProductionBudget proposed,
+			int currentCash,
+			IEnumerable<ProductionBudgetCandidate> prioritizedCandidates,
+			int maxOrders)
+		{
+			var budget = ProductionBudgetLease.Normalize(proposed);
 			var cash = Math.Max(0L, currentCash);
 			var reserved = budget.IsActive ? (long)budget.ReservedCash : 0L;
-			var admissionOrder = Rotate(ordered, admissionRound).ToArray();
+			var admissionOrder = prioritizedCandidates.ToArray();
 			var admitted = admissionOrder
 				.Take(Math.Max(0, maxOrders))
 				.Select(candidate => candidate.ControllerActorId)

@@ -16,10 +16,6 @@
     <ProjectReference Include="..\AutoCnC.Core\AutoCnC.Core.csproj" />
   </ItemGroup>
 
-  <ItemGroup>
-    <InternalsVisibleTo Include="AutoCnC.Platform" />
-  </ItemGroup>
-
   <!-- The SDK deliberately does not reference the platform: modules depend on this, not the host. -->
   <ItemGroup>
     <Reference Include="OpenRA.Game">

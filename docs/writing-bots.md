@@ -84,10 +84,15 @@ eyes on.
 There are a few conveniences on top — `BaseUnderAttack`, `BlindToEnemy`, `Winning` — and no
 engine types anywhere, which is the point: the deciding half of a bot is a pure function you can
 read on its own. `CreditsKilled` is deliberately conservative: enemy kills outside the current
-visibility sample are omitted. Visible damage between samples is captured too, including one-shot
-kills after HP reaches zero; the death-tolerant check still applies hostility, targetability, fog,
-and cloak rules. `Winning` requires the base to be safe and a favourable observed value trade;
-legacy hand-built states without value data still fall back to unit counts.
+pre-damage visibility sample are omitted, including visible one-shot kills between samples. The
+platform deliberately ignores post-damage visibility because damage handlers can uncloak an actor
+before the player notification runs; using that state would reveal a cloaked splash victim's value.
+`Winning` requires the base to be safe and a favourable observed value trade; legacy hand-built
+states without value data still fall back to unit counts.
+
+`VisibleEnemyMix` is normalized into a fixed value profile. Two otherwise equal `BattleState`
+values therefore compare and hash equally even when their mix came from different list instances
+or orderings.
 
 ```csharp
 public static Assessment Decide(BattleState s) =>

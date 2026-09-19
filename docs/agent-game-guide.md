@@ -60,8 +60,10 @@ it as authoritative context alongside the source and the evidence from one compl
   visible, except for facts the bot legitimately remembers such as having found an enemy base.
 - `BattleState` exposes rolling income, exact own value lost, observed enemy value killed, visible
   enemy value and mix, and own versus enemy value near the base. Enemy value is conservative and
-  retains the same visibility predicate as `SenseThreats`. Damage callbacks capture visible
-  one-shot kills between periodic samples without admitting hidden splash kills.
+  comes only from the latest pre-damage visibility sample. Kills between samples may be omitted;
+  post-damage visibility is never trusted because damage handlers can reveal cloaked units.
+- `VisibleEnemyMix` is normalized into a fixed profile, so `BattleState` equality and hashing use
+  threat values rather than list identity.
 - A damage callback can identify an unseen attacker because the attacked unit receives that same
   notification. Do not generalize that exception into map-wide enemy knowledge.
 - Improvement happens between matches. Edited assemblies require a rebuild and a fresh game; do

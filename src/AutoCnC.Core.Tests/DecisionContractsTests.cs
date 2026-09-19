@@ -164,6 +164,42 @@ namespace AutoCnC.Core.Tests
 		}
 
 		[Test]
+		public void BattleStateEqualityUsesVisibleEnemyMixValuesInsteadOfListIdentity()
+		{
+			var first = State() with
+			{
+				VisibleEnemyMix =
+				[
+					new ThreatValueSummary(ThreatKind.Infantry, 2, 200),
+					new ThreatValueSummary(ThreatKind.Vehicle, 1, 500)
+				]
+			};
+			var second = State() with
+			{
+				VisibleEnemyMix =
+				[
+					new ThreatValueSummary(ThreatKind.Vehicle, 1, 500),
+					new ThreatValueSummary(ThreatKind.Infantry, 2, 200)
+				]
+			};
+			var different = second with
+			{
+				VisibleEnemyMix =
+				[
+					new ThreatValueSummary(ThreatKind.Infantry, 2, 200),
+					new ThreatValueSummary(ThreatKind.Vehicle, 1, 600)
+				]
+			};
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(first, Is.EqualTo(second));
+				Assert.That(first.GetHashCode(), Is.EqualTo(second.GetHashCode()));
+				Assert.That(first, Is.Not.EqualTo(different));
+			});
+		}
+
+		[Test]
 		public void ThreatSnapshotKeepsItsHistoricalConstructorAndAddsMetadata()
 		{
 			var legacy = new ThreatSnapshot(7, 1024, 75, ThreatKind.Vehicle, true, false);
@@ -285,31 +321,46 @@ namespace AutoCnC.Core.Tests
 		}
 
 		[Test]
-		public void VisibleOneShotKillBetweenScansUsesCapturedDamageVisibility()
+		public void VisibleOneShotKillBetweenScansIsConservativelyOmitted()
 		{
 			var ledger = new ObservedKillValueLedger();
 			ledger.BeginVisibilitySample();
-
-			// The victim was not present in the last periodic sample. A lethal damage callback
-			// captures that it was visible before the immediately following kill callback.
-			ledger.ObserveDamage(9, wasVisible: true);
+			var valueRead = false;
 			var counted = ledger.ObserveKill(
-				9, killedBySelf: true, valueFactory: () => 450);
-			var hiddenValueRead = false;
-			ledger.ObserveDamage(10, wasVisible: false);
-			var hiddenCounted = ledger.ObserveKill(10, killedBySelf: true, valueFactory: () =>
+				9, killedBySelf: true, valueFactory: () =>
 			{
-				hiddenValueRead = true;
+				valueRead = true;
+				return 450;
+			});
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(counted, Is.False);
+				Assert.That(valueRead, Is.False);
+				Assert.That(ledger.TotalValue, Is.Zero);
+			});
+		}
+
+		[Test]
+		public void StealthedLethalHitCannotUsePostDamageUncloakState()
+		{
+			var ledger = new ObservedKillValueLedger();
+			ledger.BeginVisibilitySample();
+			var cloakedValueRead = false;
+
+			// The actor was absent from the pre-damage sample. Even if damage handlers uncloak it
+			// before the kill notification, the ledger never accepts that post-damage state.
+			var counted = ledger.ObserveKill(10, killedBySelf: true, valueFactory: () =>
+			{
+				cloakedValueRead = true;
 				return 900;
 			});
 
 			Assert.Multiple(() =>
 			{
-				Assert.That(counted, Is.True);
-				Assert.That(ledger.TotalValue, Is.EqualTo(450));
-				Assert.That(hiddenCounted, Is.False);
-				Assert.That(hiddenValueRead, Is.False,
-					"death-tolerant capture must retain the normal visibility gate");
+				Assert.That(counted, Is.False);
+				Assert.That(cloakedValueRead, Is.False);
+				Assert.That(ledger.TotalValue, Is.Zero);
 			});
 		}
 	}

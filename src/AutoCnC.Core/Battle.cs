@@ -89,12 +89,20 @@ namespace AutoCnC.Core
 		/// <summary>Build value of your army within the configured base radius.</summary>
 		public int OwnArmyValueNearBase { get; init; }
 
+		readonly ThreatValueProfile visibleEnemyMix;
+
 		/// <summary>Visible enemy count and value grouped by <see cref="ThreatKind"/>.</summary>
 		/// <remarks>
-		/// Entries with no visible actors are omitted. Historical positional construction remains
+		/// Entries with no visible actors are omitted. Values are normalized into a fixed profile
+		/// so two otherwise equal states compare and hash equally even when callers provide
+		/// different list instances or orderings. Historical positional construction remains
 		/// valid because this is an additive non-positional property.
 		/// </remarks>
-		public IReadOnlyList<ThreatValueSummary> VisibleEnemyMix { get; init; } = [];
+		public IReadOnlyList<ThreatValueSummary> VisibleEnemyMix
+		{
+			get => visibleEnemyMix;
+			init => visibleEnemyMix = ThreatValueProfile.From(value);
+		}
 
 		/// <summary>Nothing known yet: no doctrine, no contact, nothing built.</summary>
 		public static BattleState Empty { get; } = new()

@@ -72,9 +72,9 @@ namespace AutoCnC.Platform.Traits
 	/// </para>
 	/// <para>
 	/// The same one-second visibility sample also feeds BattleState's observed enemy kill value,
-	/// even when CSV output is disabled. Damage notifications capture visible enemies between
-	/// samples too, including lethal hits whose HP has already reached zero. Hidden deaths still
-	/// contribute no value.
+	/// even when CSV output is disabled. Damage-time visibility is deliberately not trusted:
+	/// damage handlers may reveal cloaked actors before the player notification runs. Kills not
+	/// already present in the pre-damage sample conservatively contribute no value.
 	/// </para>
 	/// <para>
 	/// The file opens with a <c>player</c> row per side — name, faction, colour, whether it is a
@@ -324,10 +324,6 @@ namespace AutoCnC.Platform.Traits
 				return;
 
 			var attacker = attack.Attacker;
-			if (actor.Owner != self && attacker != null && attacker.Owner == self)
-				observedKillValues.ObserveDamage(
-					actor.ActorID, ModeContext.IsVisibleEnemyAtDamage(self, actor));
-
 			if (writer == null)
 				return;
 
@@ -777,7 +773,7 @@ namespace AutoCnC.Platform.Traits
 		void INotifyDamage.Damaged(Actor self, AttackInfo e)
 		{
 			var battleLog = Log;
-			if (battleLog != null)
+			if (battleLog != null && battleLog.IsRecording)
 				battleLog.Damaged(self, e);
 		}
 

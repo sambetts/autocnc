@@ -15,7 +15,7 @@ using System.Collections.Generic;
 namespace AutoCnC.Core
 {
 	/// <summary>
-	/// Tracks kill value only for enemies seen in the latest sample or visible damage callback.
+	/// Tracks kill value only for enemies present in the latest pre-damage visibility sample.
 	/// </summary>
 	internal sealed class ObservedKillValueLedger
 	{
@@ -26,12 +26,6 @@ namespace AutoCnC.Core
 		public void BeginVisibilitySample() => visibleEnemies.Clear();
 
 		public void ObserveVisibleEnemy(uint actorId) => visibleEnemies.Add(actorId);
-
-		public void ObserveDamage(uint actorId, bool wasVisible)
-		{
-			if (wasVisible)
-				visibleEnemies.Add(actorId);
-		}
 
 		public bool ObserveKill(uint actorId, bool killedBySelf, Func<int> valueFactory)
 		{

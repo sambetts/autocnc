@@ -251,26 +251,7 @@ namespace AutoCnC.Sdk
 		/// </remarks>
 		public static bool IsVisibleEnemy(Player viewer, Actor actor)
 		{
-			return IsVisibleEnemy(viewer, actor, allowDead: false);
-		}
-
-		/// <summary>
-		/// Visibility check for the synchronous damage notification where lethal damage has
-		/// already set HP to zero but the actor has not left the world.
-		/// </summary>
-		/// <remarks>
-		/// Internal to the platform: it keeps every hostility, targetability, fog and cloak check
-		/// from <see cref="IsVisibleEnemy"/>, relaxing only the dead-actor guard for this narrow
-		/// pre-disposal callback.
-		/// </remarks>
-		internal static bool IsVisibleEnemyAtDamage(Player viewer, Actor actor)
-		{
-			return IsVisibleEnemy(viewer, actor, allowDead: true);
-		}
-
-		static bool IsVisibleEnemy(Player viewer, Actor actor, bool allowDead)
-		{
-			if (viewer == null || actor == null || !actor.IsInWorld || (actor.IsDead && !allowDead))
+			if (viewer == null || actor == null || actor.IsDead || !actor.IsInWorld)
 				return false;
 
 			if (viewer.RelationshipWith(actor.Owner) != PlayerRelationship.Enemy)

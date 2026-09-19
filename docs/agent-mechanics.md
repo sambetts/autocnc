@@ -195,8 +195,10 @@ permitted way to know where anything is.
   visible, except for facts the bot legitimately remembers such as having found an enemy base.
 - `BattleState` includes rolling income, exact own value lost, observed enemy value killed,
   visible enemy value and mix, and own versus enemy value near the base. Enemy totals use the
-  same visibility predicate as `SenseThreats`; damage-time capture includes visible one-shot kills
-  between samples, while unseen kills add no value.
+  latest pre-damage visibility sample. Kills between samples are conservatively omitted, because
+  post-damage state may have uncloaked a previously hidden splash victim.
+- `VisibleEnemyMix` is normalized into a fixed profile, so `BattleState` equality and hashing
+  compare threat values rather than list references.
 - `ThreatSnapshot` includes actor type, cell coordinates, value, and maximum enabled weapon range.
 - **Reading the resource layer through `ModeContext` is fair play, not cheating.** Those reads are
   shroud-filtered for you: a cell the side has never explored reads as empty, exactly as it does

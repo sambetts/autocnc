@@ -246,7 +246,8 @@ $botPath = $source.Path
 if ($source.Kind -eq 'Project') {
     Write-Host "==> Building $($source.Project.BaseName)" -ForegroundColor Cyan
     dotnet build $source.Project.FullName -c $Configuration -v quiet --nologo `
-        /p:AutoCnCPath="$repoRoot" /p:BattleBotInstallDirectory="$botDir"
+        /p:AutoCnCPath="$repoRoot" /p:BattleBotInstallDirectory="$botDir" `
+        /p:RestoreSources="$(Join-Path $repoRoot 'packages')"
     if ($LASTEXITCODE -ne 0) { throw 'Battle bot build failed.' }
 
     # AssemblyName need not match the project file name, so ask MSBuild where the build landed.

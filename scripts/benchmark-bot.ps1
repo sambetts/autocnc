@@ -43,6 +43,10 @@
 .PARAMETER OutputDirectory
     Where run directories are written. Defaults to the usual TrainingRuns location for the bot.
 
+.PARAMETER ResultPath
+    Optional path for the machine-readable benchmark summary. Defaults to benchmark-result.json
+    under OutputDirectory.
+
 .EXAMPLE
     ./scripts/benchmark-bot.ps1 -BattleBot Reference
     Play the default set once and report the win rate.
@@ -63,6 +67,7 @@ param(
     [int]$Parallel = 1,
     [string]$Difficulty,
     [string]$OutputDirectory,
+    [string]$ResultPath,
     [ValidateSet('Debug', 'Release')]
     [string]$Configuration = 'Release'
 )
@@ -83,6 +88,9 @@ if (-not $OutputDirectory) {
     $OutputDirectory = Join-Path $env:LOCALAPPDATA "AutoCnC\TrainingRuns\$botName"
 }
 New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
+if (-not $ResultPath) {
+    $ResultPath = Join-Path $OutputDirectory 'benchmark-result.json'
+}
 $historyPath = Join-Path $OutputDirectory 'history.json'
 
 $evidenceTool = Join-Path $repoRoot 'tools\AutoCnC.Evidence\AutoCnC.Evidence.csproj'
@@ -212,8 +220,10 @@ function New-MatchPlan($arm, $root, $revision, $bot) {
     bodies to the same two lines and leaves nothing worth sharing.
 #>
 function Invoke-Arm($plan) {
-    if ($Parallel -le 1) {
-        foreach ($job in $plan) {
+    $runSequentially = {
+        param($jobs)
+
+        foreach ($job in $jobs) {
             Write-Host "    [$($job.Arm)] $($job.Map) $($job.Faction) vs $($job.BotFaction) seed $($job.Seed)" -ForegroundColor DarkGray
             New-Item -ItemType Directory -Path $job.Evidence -Force | Out-Null
 
@@ -222,17 +232,36 @@ function Invoke-Arm($plan) {
             $arguments = $job.Arguments
             & $job.Script @arguments 2>&1 | Out-String -Width 200 | Write-Verbose
         }
+    }
+
+    if ($Parallel -le 1) {
+        & $runSequentially $plan
         return
     }
 
     # One process per match with its own evidence paths, so matches are independent. Throttled
     # rather than unbounded: each runs the simulation at CPU maximum.
-    $plan | ForEach-Object -ThrottleLimit $Parallel -Parallel {
-        $job = $_
-        Write-Host "    [$($job.Arm)] $($job.Map) $($job.Faction) vs $($job.BotFaction) seed $($job.Seed)"
-        New-Item -ItemType Directory -Path $job.Evidence -Force | Out-Null
-        $arguments = $job.Arguments
-        & $job.Script @arguments 2>&1 | Out-String -Width 200 | Out-Null
+    try {
+        $plan | ForEach-Object -ThrottleLimit $Parallel -Parallel {
+            $job = $_
+            Write-Host "    [$($job.Arm)] $($job.Map) $($job.Faction) vs $($job.BotFaction) seed $($job.Seed)"
+            New-Item -ItemType Directory -Path $job.Evidence -Force | Out-Null
+            $arguments = $job.Arguments
+            & $job.Script @arguments 2>&1 | Out-String -Width 200 | Out-Null
+        }
+    }
+    catch {
+        $unfinished = @($plan | Where-Object {
+            -not (Test-Path -LiteralPath (Join-Path $_.Evidence 'battle.csv'))
+        })
+
+        if ($unfinished.Count -eq 0) {
+            throw
+        }
+
+        Write-Warning ("Parallel execution failed; retrying {0} unfinished match(es) sequentially. {1}" -f `
+                $unfinished.Count, $_.Exception.Message)
+        & $runSequentially $unfinished
     }
 }
 
@@ -260,6 +289,8 @@ function Write-FightManifest($job, $outcome, $durationSeconds) {
             Benchmark = $set.name
             Batch = $batch
             Arm = $job.Arm
+            Repeat = $job.Repeat
+            Scenario = $job.Index
         }
         Result = [ordered]@{
             DurationSeconds = $durationSeconds
@@ -289,16 +320,21 @@ function Complete-Match($job) {
 
     $rulesPath = Join-Path $job.Evidence 'game-rules.json'
     if (-not (Test-Path -LiteralPath $rulesPath)) {
-        & (Join-Path $PSScriptRoot 'export-agent-rules.ps1') -Output $rulesPath
+        & (Join-Path $PSScriptRoot 'export-agent-rules.ps1') -Output $rulesPath | Out-Null
     }
 
     dotnet $evidenceDll summarise $job.Evidence --history $historyPath --bot $botName | Out-Null
 
     $summary = Get-Content -LiteralPath (Join-Path $job.Evidence 'summary.json') -Raw | ConvertFrom-Json
     return [pscustomobject]@{
+        RunId = $job.Id
+        Evidence = $job.Evidence
         Arm = $job.Arm
+        Repeat = $job.Repeat
+        Scenario = $job.Index
         Map = $job.Map
         Faction = $job.Faction
+        BotFaction = $job.BotFaction
         Seed = $job.Seed
         Outcome = $summary.fight.outcome
         Fitness = $summary.fitness.total
@@ -331,6 +367,7 @@ function Show-Arm($name, $results) {
         Wins = $wins
         Played = $results.Count
         MedianFitness = [math]::Round((Get-Median ($results | ForEach-Object { $_.Fitness })), 4)
+        MedianEarnedPerSecond = [math]::Round((Get-Median ($results | ForEach-Object { $_.EarnedPerSecond })), 2)
         MedianSpentPerSecond = [math]::Round((Get-Median ($results | ForEach-Object { $_.SpentPerSecond })), 2)
         MedianExchange = [math]::Round((Get-Median ($results | ForEach-Object { $_.Exchange })), 3)
         MedianBuildingsKilled = Get-Median ($results | ForEach-Object { $_.BuildingsKilled })
@@ -340,6 +377,48 @@ function Show-Arm($name, $results) {
             $name, $wins, $results.Count, $summary.MedianFitness, $summary.MedianSpentPerSecond,
         $summary.MedianExchange, $summary.MedianBuildingsKilled) -ForegroundColor Green
     return $summary
+}
+
+function Compare-PairedResults($candidateResults, $controlResults) {
+    $candidateResults = @($candidateResults)
+    $controlResults = @($controlResults)
+    if ($candidateResults.Count -eq 0 -or $controlResults.Count -eq 0) {
+        return @()
+    }
+
+    $controlByScenario = @{}
+    foreach ($result in $controlResults) {
+        $controlByScenario["$($result.Repeat):$($result.Scenario)"] = $result
+    }
+
+    $pairs = @()
+    foreach ($candidateResult in $candidateResults) {
+        $key = "$($candidateResult.Repeat):$($candidateResult.Scenario)"
+        if (-not $controlByScenario.ContainsKey($key)) {
+            continue
+        }
+
+        $controlResult = $controlByScenario[$key]
+        $pairs += [pscustomobject]@{
+            Repeat = $candidateResult.Repeat
+            Scenario = $candidateResult.Scenario
+            Map = $candidateResult.Map
+            Faction = $candidateResult.Faction
+            BotFaction = $candidateResult.BotFaction
+            Seed = $candidateResult.Seed
+            CandidateOutcome = $candidateResult.Outcome
+            ControlOutcome = $controlResult.Outcome
+            FitnessDelta = [math]::Round($candidateResult.Fitness - $controlResult.Fitness, 4)
+            EarnedPerSecondDelta = [math]::Round(
+                $candidateResult.EarnedPerSecond - $controlResult.EarnedPerSecond, 3)
+            SpentPerSecondDelta = [math]::Round(
+                $candidateResult.SpentPerSecond - $controlResult.SpentPerSecond, 3)
+            ExchangeDelta = [math]::Round($candidateResult.Exchange - $controlResult.Exchange, 4)
+            BuildingsKilledDelta = $candidateResult.BuildingsKilled - $controlResult.BuildingsKilled
+        }
+    }
+
+    return $pairs
 }
 
 <#
@@ -429,7 +508,32 @@ try {
 
     dotnet $evidenceDll trend $historyPath --out (Join-Path $OutputDirectory 'trend.json')
 
-    $results | Format-Table Arm, Map, Faction, Seed, Outcome, Fitness, SpentPerSecond, Exchange, BuildingsKilled -AutoSize
+    $candidateResults = @($results | Where-Object { $_.Arm -eq 'candidate' })
+    $controlResults = @($results | Where-Object { $_.Arm -eq 'control' })
+    $pairs = @(Compare-PairedResults $candidateResults $controlResults)
+
+    $machineResult = [ordered]@{
+        SchemaVersion = 1
+        GeneratedUtc = (Get-Date).ToUniversalTime().ToString('o')
+        Benchmark = $set.name
+        Batch = $batch
+        Difficulty = if ($Difficulty) { $Difficulty } else { $set.difficulty }
+        Candidate = $candidate
+        Control = $control
+        Paired = @($pairs)
+        Matches = @($results)
+    }
+
+    $resultDirectory = Split-Path -Parent $ResultPath
+    if ($resultDirectory) {
+        New-Item -ItemType Directory -Path $resultDirectory -Force | Out-Null
+    }
+
+    $machineResult | ConvertTo-Json -Depth 12 |
+        Set-Content -LiteralPath $ResultPath -Encoding utf8
+
+    Write-Host "  Machine-readable result: $ResultPath" -ForegroundColor DarkGray
+    $results | Format-Table Arm, Repeat, Scenario, Map, Faction, BotFaction, Seed, Outcome, Fitness, SpentPerSecond, Exchange, BuildingsKilled -AutoSize
 }
 finally {
     Remove-ControlWorktree $controlWorktree

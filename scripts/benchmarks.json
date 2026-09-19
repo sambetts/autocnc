@@ -44,6 +44,22 @@
         { "map": "badland-ridges.oramap", "faction": "nod", "botFaction": "gdi", "seed": 200011 },
         { "map": "badland-ridges.oramap", "faction": "nod", "botFaction": "gdi", "seed": 200012 }
       ]
+    },
+    {
+      "name": "hard-16-9",
+      "summary": "Eight pinned Hard matches on the training map, with two seeds for every faction matchup.",
+      "difficulty": "Hard",
+      "maxGameSeconds": 5400,
+      "matches": [
+        { "map": "16-9.oramap", "faction": "gdi", "botFaction": "nod", "seed": 300001 },
+        { "map": "16-9.oramap", "faction": "gdi", "botFaction": "nod", "seed": 300002 },
+        { "map": "16-9.oramap", "faction": "nod", "botFaction": "gdi", "seed": 300003 },
+        { "map": "16-9.oramap", "faction": "nod", "botFaction": "gdi", "seed": 300004 },
+        { "map": "16-9.oramap", "faction": "gdi", "botFaction": "gdi", "seed": 300005 },
+        { "map": "16-9.oramap", "faction": "gdi", "botFaction": "gdi", "seed": 300006 },
+        { "map": "16-9.oramap", "faction": "nod", "botFaction": "nod", "seed": 300007 },
+        { "map": "16-9.oramap", "faction": "nod", "botFaction": "nod", "seed": 300008 }
+      ]
     }
   ]
 }

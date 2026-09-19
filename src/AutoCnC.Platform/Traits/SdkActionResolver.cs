@@ -66,8 +66,8 @@ namespace AutoCnC.Platform.Traits
 		{
 			if (order.Target.Type != TargetType.Actor ||
 				order.ExtraData == 0 ||
-				order.ExtraData > int.MaxValue ||
-				string.IsNullOrWhiteSpace(order.TargetString))
+				!ActionOrderBuilder.TryDecodeCancellationPayload(
+					order.TargetString, out var requestedItem, out var count))
 				return;
 
 			var queueActor = order.Target.Actor;
@@ -84,20 +84,19 @@ namespace AutoCnC.Platform.Traits
 				return;
 
 			var queued = queue.AllQueued().ToArray();
-			var expectedVersion = unchecked((uint)order.ExtraLocation.Y);
+			var expectedVersion = order.ExtraData;
 			var currentVersion = ActionOrderBuilder.ProductionQueueVersion(
 				queued.Select(item => new ProductionQueueEntry(item.Item, item.Infinite)));
-			if (expectedVersion == 0 || currentVersion != expectedVersion)
+			if (currentVersion != expectedVersion)
 				return;
 
 			var item = FindExactCancellationItem(
 				queued.Select(queuedItem => queuedItem.Item),
-				order.TargetString,
-				order.ExtraData);
+				requestedItem,
+				(uint)count);
 			if (item == null)
 				return;
 
-			var count = (int)order.ExtraData;
 			queue.ResolveOrder(
 				queueActor,
 				ActionOrderBuilder.CancelProduction(queueActor, item, count));

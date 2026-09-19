@@ -9,6 +9,7 @@
  */
 #endregion
 
+using System.IO;
 using AutoCnC.Core;
 using NUnit.Framework;
 using OpenRA;
@@ -65,12 +66,45 @@ namespace AutoCnC.Sdk.Tests
 				Assert.That(order.Subject, Is.Null);
 				Assert.That(order.Target.Type, Is.EqualTo(TargetType.Terrain));
 				Assert.That(order.Target.CenterPosition, Is.EqualTo(target.CenterPosition));
-				Assert.That(order.TargetString, Is.EqualTo("mtnk"));
+				Assert.That(order.TargetString, Is.EqualTo("2:mtnk"));
 				Assert.That(order.ExtraLocation.X, Is.EqualTo(3));
-				Assert.That(unchecked((uint)order.ExtraLocation.Y), Is.EqualTo(123u));
-				Assert.That(order.ExtraData, Is.EqualTo(2u));
+				Assert.That(order.ExtraLocation.Y, Is.Zero);
+				Assert.That(order.ExtraData, Is.EqualTo(123u));
 				Assert.That(order.Queued, Is.False);
 				Assert.That(order.SuppressVisualFeedback, Is.True);
+			});
+		}
+
+		[Test]
+		public void CancellationRequestRoundTripsFullVersionAndCount()
+		{
+			const uint Version = 0xFEDCBA98;
+			const int Count = 4097;
+			var request = ActionOrderBuilder.RequestCancelProduction(
+				null,
+				Target.FromPos(new WPos(3072, 4096, 0)),
+				queueIndex: 3,
+				item: "mtnk:elite",
+				count: Count,
+				expectedQueueVersion: Version);
+
+			var serialized = request.Serialize();
+			var roundTripped = Order.Deserialize(
+				null, new BinaryReader(new MemoryStream(serialized)));
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(roundTripped, Is.Not.Null);
+				Assert.That(roundTripped.ExtraData, Is.EqualTo(Version));
+				Assert.That(roundTripped.ExtraLocation.X, Is.EqualTo(3));
+				Assert.That(roundTripped.ExtraLocation.Y, Is.Zero);
+				Assert.That(
+					ActionOrderBuilder.TryDecodeCancellationPayload(
+						roundTripped.TargetString, out var item, out var count),
+					Is.True);
+				Assert.That(item, Is.EqualTo("mtnk:elite"));
+				Assert.That(count, Is.EqualTo(Count));
+				Assert.That(roundTripped.Serialize(), Is.EqualTo(serialized));
 			});
 		}
 

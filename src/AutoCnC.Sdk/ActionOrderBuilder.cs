@@ -11,6 +11,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using AutoCnC.Core;
 using OpenRA;
 using OpenRA.Traits;
@@ -39,14 +40,39 @@ namespace AutoCnC.Sdk
 			uint expectedQueueVersion) =>
 			new(ExactCancelProductionOrder, playerActor, queueTarget, false)
 			{
-				TargetString = item,
-				ExtraLocation = new CPos(queueIndex, unchecked((int)expectedQueueVersion)),
-				ExtraData = (uint)count,
+				TargetString = EncodeCancellationPayload(item, count),
+				ExtraLocation = new CPos(queueIndex, 0),
+				ExtraData = expectedQueueVersion,
 				SuppressVisualFeedback = true
 			};
 
 		public static Order CancelProduction(Actor queueActor, string item, int count) =>
 			Order.CancelProduction(queueActor, item, count);
+
+		public static string EncodeCancellationPayload(string item, int count) =>
+			count.ToString(CultureInfo.InvariantCulture) + ":" + item;
+
+		public static bool TryDecodeCancellationPayload(
+			string payload, out string item, out int count)
+		{
+			item = null;
+			count = 0;
+			if (string.IsNullOrEmpty(payload))
+				return false;
+
+			var separator = payload.IndexOf(':');
+			if (separator <= 0 || separator == payload.Length - 1 ||
+				!int.TryParse(
+					payload.AsSpan(0, separator),
+					NumberStyles.None,
+					CultureInfo.InvariantCulture,
+					out count) ||
+				count <= 0)
+				return false;
+
+			item = payload[(separator + 1)..];
+			return !string.IsNullOrWhiteSpace(item);
+		}
 
 		public static Order ActivateSupportPower(Actor playerActor, string key, in Target target) =>
 			new(key, playerActor, target, false)

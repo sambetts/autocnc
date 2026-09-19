@@ -148,6 +148,8 @@ Repair and exact production cancellation use synchronized player-actor requests 
 Cancellation requests also enter a persistent client-local in-flight registry keyed by player,
 concrete queue, item, count, and queue-composition version. Staggered controllers therefore share
 one pending intent until synchronized resolution or any queue-composition change invalidates it.
+The full 32-bit version travels in `Order.ExtraData`; item and count use a delimiter-safe string
+payload so neither value is truncated by OpenRA's packed cell encoding.
 
 ### Assignment precedence
 

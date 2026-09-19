@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>12</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <RestoreSources>$(MSBuildThisFileDirectory)..\..\packages</RestoreSources>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="AutoCnC.Core" Version="0.1.0" />
+    <PackageReference Include="AutoCnC.Sdk" Version="0.1.0" />
+  </ItemGroup>
+
+</Project>

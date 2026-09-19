@@ -46,17 +46,17 @@ namespace AutoCnC.Platform.Traits
 		string Queue,
 		string ItemName,
 		int Count,
-		uint ExpectedQueueVersion)
+		string ExpectedQueueSnapshot)
 	{
 		public static ProductionCancellationIntent From(
-			uint playerActorId, in UnitDecision decision) =>
+			uint playerActorId, in UnitDecision decision, string expectedQueueSnapshot) =>
 			new(
 				playerActorId,
 				decision.TargetActorId,
 				decision.Queue,
 				decision.ItemName,
 				decision.Count,
-				ActionOrderBuilder.CancellationQueueVersion(decision));
+				expectedQueueSnapshot);
 	}
 
 	internal sealed class PendingPlayerActions
@@ -70,10 +70,12 @@ namespace AutoCnC.Platform.Traits
 			cancellations.RemoveWhere(intent => !cancellationIsCurrent(intent));
 		}
 
-		public bool TryReserve(uint playerActorId, in UnitDecision decision)
+		public bool TryReserve(
+			uint playerActorId, in UnitDecision decision, string cancellationPayload)
 		{
 			if (decision.Action == UnitAction.CancelProduction)
-				return cancellations.Add(ProductionCancellationIntent.From(playerActorId, decision));
+				return cancellations.Add(ProductionCancellationIntent.From(
+					playerActorId, decision, cancellationPayload));
 
 			var action = PlayerScopedActionKey.From(decision);
 			return !action.HasValue || currentTick.Add(action.Value);
@@ -605,7 +607,9 @@ namespace AutoCnC.Platform.Traits
 			// something done. Otherwise a steady decision would emit an order every evaluation.
 			var repeat = decision.SameIntent(controller.LastIssued);
 			var singleShot = IsSingleShotAction(decision.Action);
-			if (!singleShot && ShouldSuppressRepeatedIntent(decision.Action, repeat, actor.IsIdle))
+			var persistentIntent = UsesPersistentIntent(decision.Action);
+			if (!singleShot && !persistentIntent &&
+				ShouldSuppressRepeatedIntent(decision.Action, repeat, actor.IsIdle))
 			{
 				decisionTrace?.UnitDecisionEvaluated(GameSeconds, actor.Info.Name, actor.ActorID,
 					controller.ActiveModeName, decision, "duplicate-intent");
@@ -615,7 +619,7 @@ namespace AutoCnC.Platform.Traits
 			var order = controller.Context.BuildOrder(decision);
 			if (order == null)
 			{
-				if (singleShot)
+				if (singleShot || persistentIntent)
 					controller.LastIssued = UnitDecision.Continue;
 
 				decisionTrace?.UnitDecisionEvaluated(GameSeconds, actor.Info.Name, actor.ActorID,
@@ -630,7 +634,8 @@ namespace AutoCnC.Platform.Traits
 				return;
 			}
 
-			if (!pendingPlayerActions.TryReserve(actor.Owner.PlayerActor.ActorID, decision))
+			if (!pendingPlayerActions.TryReserve(
+				actor.Owner.PlayerActor.ActorID, decision, order.TargetString))
 			{
 				controller.LastIssued = decision;
 				decisionTrace?.UnitDecisionEvaluated(GameSeconds, actor.Info.Name, actor.ActorID,
@@ -672,9 +677,12 @@ namespace AutoCnC.Platform.Traits
 				return false;
 
 			var queued = queue.AllQueued().ToArray();
-			var currentVersion = ActionOrderBuilder.ProductionQueueVersion(
-				queued.Select(item => new ProductionQueueEntry(item.Item, item.Infinite)));
-			if (currentVersion != intent.ExpectedQueueVersion)
+			if (!ActionOrderBuilder.TryDecodeCancellationPayload(
+				intent.ExpectedQueueSnapshot, out var requestedItem, out var expectedQueue) ||
+				!string.Equals(requestedItem, intent.ItemName, StringComparison.Ordinal) ||
+				!ActionOrderBuilder.QueueMatches(
+					expectedQueue,
+					queued.Select(item => new ProductionQueueEntry(item.Item, item.Infinite)).ToArray()))
 				return false;
 
 			return ActionOrderBuilder.FindQueuedItem(
@@ -693,8 +701,10 @@ namespace AutoCnC.Platform.Traits
 
 		internal static bool IsSingleShotAction(UnitAction action) =>
 			action is UnitAction.RepairBuilding or
-				UnitAction.CancelProduction or
 				UnitAction.ActivateSupportPower;
+
+		internal static bool UsesPersistentIntent(UnitAction action) =>
+			action == UnitAction.CancelProduction;
 
 		void IGameOver.GameOver(World w)
 		{

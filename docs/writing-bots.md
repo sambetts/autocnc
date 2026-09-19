@@ -440,9 +440,9 @@ atomically checks the selected queue again before applying the engine cancellati
 request therefore cancels the exact count or nothing, never a partial count. `QueueStates()`
 includes the current item, completion percentage, cost, matching item count, and total queue
 length. The host keeps the request pending across local ticks using the player, concrete queue,
-item, count, and expected queue-composition version, so staggered controllers cannot enqueue the
-same cancellation while its synchronized order is still in flight. The intent is released only
-after that queue changes or the cancellation resolves and changes it.
+item, count, and exact ordered queue snapshot, so staggered controllers cannot enqueue the same
+cancellation while its synchronized order is still in flight. The intent is released only after
+that queue changes or the cancellation resolves and changes it.
 
 `ActivateSupportPower` accepts either a key from `SupportPowerState.Key` or its configured
 `OrderName`. The power must be active and ready. The SDK sends the same player-scoped, cell-targeted

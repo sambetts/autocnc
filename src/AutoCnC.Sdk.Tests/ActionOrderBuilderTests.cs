@@ -57,8 +57,13 @@ namespace AutoCnC.Sdk.Tests
 		public void CancellationRequestIdentifiesQueueItemAndCount()
 		{
 			var target = Target.FromPos(new WPos(3072, 4096, 0));
+			var expectedQueue = new[]
+			{
+				new ProductionQueueEntry("mtnk", false),
+				new ProductionQueueEntry("e1", true)
+			};
 			var order = ActionOrderBuilder.RequestCancelProduction(
-				null, target, queueIndex: 3, item: "mtnk", count: 2, expectedQueueVersion: 123);
+				null, target, queueIndex: 3, item: "mtnk", count: 2, expectedQueue);
 
 			Assert.Multiple(() =>
 			{
@@ -66,27 +71,36 @@ namespace AutoCnC.Sdk.Tests
 				Assert.That(order.Subject, Is.Null);
 				Assert.That(order.Target.Type, Is.EqualTo(TargetType.Terrain));
 				Assert.That(order.Target.CenterPosition, Is.EqualTo(target.CenterPosition));
-				Assert.That(order.TargetString, Is.EqualTo("2:mtnk"));
 				Assert.That(order.ExtraLocation.X, Is.EqualTo(3));
 				Assert.That(order.ExtraLocation.Y, Is.Zero);
-				Assert.That(order.ExtraData, Is.EqualTo(123u));
+				Assert.That(order.ExtraData, Is.EqualTo(2u));
 				Assert.That(order.Queued, Is.False);
 				Assert.That(order.SuppressVisualFeedback, Is.True);
+				Assert.That(
+					ActionOrderBuilder.TryDecodeCancellationPayload(
+						order.TargetString, out var item, out var decodedQueue),
+					Is.True);
+				Assert.That(item, Is.EqualTo("mtnk"));
+				Assert.That(decodedQueue, Is.EqualTo(expectedQueue));
 			});
 		}
 
 		[Test]
-		public void CancellationRequestRoundTripsFullVersionAndCount()
+		public void CancellationRequestRoundTripsExactSnapshotAndCount()
 		{
-			const uint Version = 0xFEDCBA98;
 			const int Count = 4097;
+			var expectedQueue = new[]
+			{
+				new ProductionQueueEntry("mtnk:elite", false),
+				new ProductionQueueEntry("e1", true)
+			};
 			var request = ActionOrderBuilder.RequestCancelProduction(
 				null,
 				Target.FromPos(new WPos(3072, 4096, 0)),
 				queueIndex: 3,
 				item: "mtnk:elite",
 				count: Count,
-				expectedQueueVersion: Version);
+				expectedQueue);
 
 			var serialized = request.Serialize();
 			var roundTripped = Order.Deserialize(
@@ -95,15 +109,15 @@ namespace AutoCnC.Sdk.Tests
 			Assert.Multiple(() =>
 			{
 				Assert.That(roundTripped, Is.Not.Null);
-				Assert.That(roundTripped.ExtraData, Is.EqualTo(Version));
+				Assert.That(roundTripped.ExtraData, Is.EqualTo((uint)Count));
 				Assert.That(roundTripped.ExtraLocation.X, Is.EqualTo(3));
 				Assert.That(roundTripped.ExtraLocation.Y, Is.Zero);
 				Assert.That(
 					ActionOrderBuilder.TryDecodeCancellationPayload(
-						roundTripped.TargetString, out var item, out var count),
+						roundTripped.TargetString, out var item, out var decodedQueue),
 					Is.True);
 				Assert.That(item, Is.EqualTo("mtnk:elite"));
-				Assert.That(count, Is.EqualTo(Count));
+				Assert.That(decodedQueue, Is.EqualTo(expectedQueue));
 				Assert.That(roundTripped.Serialize(), Is.EqualTo(serialized));
 			});
 		}
@@ -142,7 +156,7 @@ namespace AutoCnC.Sdk.Tests
 		{
 			var requested = UnitDecision.CancelProduction("Vehicle.GDI", "MTNK", 2, "cancel");
 			var resolved = ActionOrderBuilder.ResolveCancellation(
-				requested, 41, "Vehicle", new[] { "mtnk", "mtnk" }, 0xFEDCBA98).Value;
+				requested, 41, "Vehicle", new[] { "mtnk", "mtnk" }).Value;
 
 			Assert.Multiple(() =>
 			{
@@ -150,47 +164,37 @@ namespace AutoCnC.Sdk.Tests
 				Assert.That(resolved.Queue, Is.EqualTo("Vehicle"));
 				Assert.That(resolved.ItemName, Is.EqualTo("mtnk"));
 				Assert.That(resolved.Count, Is.EqualTo(2));
-				Assert.That(
-					ActionOrderBuilder.CancellationQueueVersion(resolved),
-					Is.EqualTo(0xFEDCBA98u));
 			});
 		}
 
 		[Test]
-		public void ProductionQueueVersionTracksCompositionButNotProgress()
+		public void ExactSnapshotRejectsQueuesThatCollidedUnderTheLegacyFingerprint()
 		{
 			var first = new[]
 			{
-				new ProductionQueueEntry("e1", false),
+				new ProductionQueueEntry("iws", false),
+				new ProductionQueueEntry("9975g", false),
+				new ProductionQueueEntry("uu", false),
+				new ProductionQueueEntry("h6edr", false),
 				new ProductionQueueEntry("mtnk", false)
 			};
-			var sameComposition = new[]
+			var collision = new[]
 			{
-				new ProductionQueueEntry("e1", false),
+				new ProductionQueueEntry("gmvq", false),
 				new ProductionQueueEntry("mtnk", false)
 			};
-			var reordered = new[]
-			{
-				new ProductionQueueEntry("mtnk", false),
-				new ProductionQueueEntry("e1", false)
-			};
-			var infinite = new[]
-			{
-				new ProductionQueueEntry("e1", true),
-				new ProductionQueueEntry("mtnk", false)
-			};
+			var payload = ActionOrderBuilder.EncodeCancellationPayload("mtnk", first);
+			var decoded = ActionOrderBuilder.TryDecodeCancellationPayload(
+				payload, out var item, out var expectedQueue);
 
 			Assert.Multiple(() =>
 			{
-				Assert.That(
-					ActionOrderBuilder.ProductionQueueVersion(first),
-					Is.EqualTo(ActionOrderBuilder.ProductionQueueVersion(sameComposition)));
-				Assert.That(
-					ActionOrderBuilder.ProductionQueueVersion(first),
-					Is.Not.EqualTo(ActionOrderBuilder.ProductionQueueVersion(reordered)));
-				Assert.That(
-					ActionOrderBuilder.ProductionQueueVersion(first),
-					Is.Not.EqualTo(ActionOrderBuilder.ProductionQueueVersion(infinite)));
+				Assert.That(LegacyQueueFingerprint(first), Is.EqualTo(0x8D6B64F6u));
+				Assert.That(LegacyQueueFingerprint(collision), Is.EqualTo(0x8D6B64F6u));
+				Assert.That(decoded, Is.True);
+				Assert.That(item, Is.EqualTo("mtnk"));
+				Assert.That(ActionOrderBuilder.QueueMatches(expectedQueue, first), Is.True);
+				Assert.That(ActionOrderBuilder.QueueMatches(expectedQueue, collision), Is.False);
 			});
 		}
 
@@ -296,5 +300,26 @@ namespace AutoCnC.Sdk.Tests
 
 		static SupportPowerState Power(string key, string orderName, bool active, bool ready) =>
 			new(key, orderName, active, ready, false, ready ? 0 : 10, 100);
+
+		static uint LegacyQueueFingerprint(ProductionQueueEntry[] entries)
+		{
+			const uint Offset = 2166136261;
+			const uint Prime = 16777619;
+
+			var hash = Offset;
+			var count = 0u;
+			foreach (var entry in entries)
+			{
+				hash = (hash ^ 0xFFu) * Prime;
+				foreach (var character in entry.Item)
+					hash = (hash ^ character) * Prime;
+
+				hash = (hash ^ (entry.Infinite ? 1u : 0u)) * Prime;
+				count++;
+			}
+
+			hash = (hash ^ count) * Prime;
+			return hash == 0 ? 1u : hash;
+		}
 	}
 }

@@ -146,10 +146,10 @@ Two throttles keep the order stream sane: duplicate-intent suppression, and `Max
 Repair and exact production cancellation use synchronized player-actor requests handled by
 `SdkActionResolver`; it revalidates live simulation state before applying the native OpenRA order.
 Cancellation requests also enter a persistent client-local in-flight registry keyed by player,
-concrete queue, item, count, and queue-composition version. Staggered controllers therefore share
-one pending intent until synchronized resolution or any queue-composition change invalidates it.
-The full 32-bit version travels in `Order.ExtraData`; item and count use a delimiter-safe string
-payload so neither value is truncated by OpenRA's packed cell encoding.
+concrete queue, item, count, and the exact ordered queue snapshot. Staggered controllers therefore
+share one pending intent until synchronized resolution or any queue-composition change invalidates
+it. The snapshot and item use a base64-encoded length-prefixed payload, while the full count travels
+in `Order.ExtraData`; no packed-cell field participates in the identity.
 
 ### Assignment precedence
 

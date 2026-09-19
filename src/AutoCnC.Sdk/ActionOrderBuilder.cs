@@ -11,7 +11,9 @@
 
 using System;
 using System.Collections.Generic;
-using System.Globalization;
+using System.IO;
+using System.Linq;
+using System.Text;
 using AutoCnC.Core;
 using OpenRA;
 using OpenRA.Traits;
@@ -22,6 +24,10 @@ namespace AutoCnC.Sdk
 
 	internal static class ActionOrderBuilder
 	{
+		const byte CancellationPayloadVersion = 1;
+		const int MaximumCancellationEntries = 4096;
+		const int MaximumCancellationPayloadLength = 1024 * 1024;
+
 		public const string EnsureRepairOrder = "AutoCnCEnsureRepair";
 		public const string ExactCancelProductionOrder = "AutoCnCExactCancelProduction";
 
@@ -37,41 +43,78 @@ namespace AutoCnC.Sdk
 			int queueIndex,
 			string item,
 			int count,
-			uint expectedQueueVersion) =>
+			IReadOnlyList<ProductionQueueEntry> expectedQueue) =>
 			new(ExactCancelProductionOrder, playerActor, queueTarget, false)
 			{
-				TargetString = EncodeCancellationPayload(item, count),
+				TargetString = EncodeCancellationPayload(item, expectedQueue),
 				ExtraLocation = new CPos(queueIndex, 0),
-				ExtraData = expectedQueueVersion,
+				ExtraData = (uint)count,
 				SuppressVisualFeedback = true
 			};
 
 		public static Order CancelProduction(Actor queueActor, string item, int count) =>
 			Order.CancelProduction(queueActor, item, count);
 
-		public static string EncodeCancellationPayload(string item, int count) =>
-			count.ToString(CultureInfo.InvariantCulture) + ":" + item;
+		public static string EncodeCancellationPayload(
+			string item, IReadOnlyList<ProductionQueueEntry> expectedQueue)
+		{
+			using var stream = new MemoryStream();
+			using (var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true))
+			{
+				writer.Write(CancellationPayloadVersion);
+				writer.Write(item ?? "");
+				writer.Write(expectedQueue?.Count ?? 0);
+				if (expectedQueue != null)
+					foreach (var entry in expectedQueue)
+					{
+						writer.Write(entry.Item ?? "");
+						writer.Write(entry.Infinite);
+					}
+			}
+
+			return Convert.ToBase64String(stream.ToArray());
+		}
 
 		public static bool TryDecodeCancellationPayload(
-			string payload, out string item, out int count)
+			string payload, out string item, out ProductionQueueEntry[] expectedQueue)
 		{
 			item = null;
-			count = 0;
-			if (string.IsNullOrEmpty(payload))
+			expectedQueue = null;
+			if (string.IsNullOrEmpty(payload) || payload.Length > MaximumCancellationPayloadLength)
 				return false;
 
-			var separator = payload.IndexOf(':');
-			if (separator <= 0 || separator == payload.Length - 1 ||
-				!int.TryParse(
-					payload.AsSpan(0, separator),
-					NumberStyles.None,
-					CultureInfo.InvariantCulture,
-					out count) ||
-				count <= 0)
-				return false;
+			try
+			{
+				using var stream = new MemoryStream(Convert.FromBase64String(payload), writable: false);
+				using var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: true);
+				if (reader.ReadByte() != CancellationPayloadVersion)
+					return false;
 
-			item = payload[(separator + 1)..];
-			return !string.IsNullOrWhiteSpace(item);
+				item = reader.ReadString();
+				var entryCount = reader.ReadInt32();
+				if (string.IsNullOrWhiteSpace(item) ||
+					entryCount < 0 ||
+					entryCount > MaximumCancellationEntries)
+					return false;
+
+				expectedQueue = new ProductionQueueEntry[entryCount];
+				for (var i = 0; i < entryCount; i++)
+					expectedQueue[i] = new ProductionQueueEntry(reader.ReadString(), reader.ReadBoolean());
+
+				return stream.Position == stream.Length;
+			}
+			catch (FormatException)
+			{
+				return false;
+			}
+			catch (EndOfStreamException)
+			{
+				return false;
+			}
+			catch (IOException)
+			{
+				return false;
+			}
 		}
 
 		public static Order ActivateSupportPower(Actor playerActor, string key, in Target target) =>
@@ -112,8 +155,7 @@ namespace AutoCnC.Sdk
 			in UnitDecision decision,
 			uint queueActorId,
 			string queueName,
-			IEnumerable<string> queuedItems,
-			uint queueVersion)
+			IEnumerable<string> queuedItems)
 		{
 			var item = FindQueuedItem(queuedItems, decision.ItemName, decision.Count);
 			return item == null
@@ -121,37 +163,19 @@ namespace AutoCnC.Sdk
 				: decision with
 				{
 					TargetActorId = queueActorId,
-					TargetY = unchecked((int)queueVersion),
 					Queue = queueName,
 					ItemName = item
 				};
 		}
 
-		public static uint CancellationQueueVersion(in UnitDecision decision) =>
-			decision.Action == UnitAction.CancelProduction
-				? unchecked((uint)decision.TargetY)
-				: 0;
-
-		public static uint ProductionQueueVersion(IEnumerable<ProductionQueueEntry> entries)
+		public static bool QueueMatches(
+			IReadOnlyList<ProductionQueueEntry> expected,
+			IReadOnlyList<ProductionQueueEntry> actual)
 		{
-			const uint Offset = 2166136261;
-			const uint Prime = 16777619;
+			if (expected == null || actual == null || expected.Count != actual.Count)
+				return false;
 
-			var hash = Offset;
-			var count = 0u;
-			foreach (var entry in entries)
-			{
-				hash = (hash ^ 0xFFu) * Prime;
-				if (entry.Item != null)
-					foreach (var character in entry.Item)
-						hash = (hash ^ character) * Prime;
-
-				hash = (hash ^ (entry.Infinite ? 1u : 0u)) * Prime;
-				count++;
-			}
-
-			hash = (hash ^ count) * Prime;
-			return hash == 0 ? 1u : hash;
+			return expected.SequenceEqual(actual);
 		}
 
 		public static string FindReadySupportPower(

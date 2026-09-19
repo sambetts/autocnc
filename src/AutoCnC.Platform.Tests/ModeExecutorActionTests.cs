@@ -19,7 +19,6 @@ namespace AutoCnC.Platform.Tests
 	public sealed class ModeExecutorActionTests
 	{
 		[TestCase(UnitAction.RepairBuilding)]
-		[TestCase(UnitAction.CancelProduction)]
 		[TestCase(UnitAction.ActivateSupportPower)]
 		public void PlayerScopedActionsAreNotRepeatedWhenTheControllerActorIsIdle(UnitAction action)
 		{
@@ -29,6 +28,16 @@ namespace AutoCnC.Platform.Tests
 					ModeExecutor.ShouldSuppressRepeatedIntent(action, repeat: true, actorIsIdle: true),
 					Is.True);
 				Assert.That(ModeExecutor.IsSingleShotAction(action), Is.True);
+			});
+		}
+
+		[Test]
+		public void CancellationUsesPersistentIntentInsteadOfControllerIdleState()
+		{
+			Assert.Multiple(() =>
+			{
+				Assert.That(ModeExecutor.IsSingleShotAction(UnitAction.CancelProduction), Is.False);
+				Assert.That(ModeExecutor.UsesPersistentIntent(UnitAction.CancelProduction), Is.True);
 			});
 		}
 
@@ -80,24 +89,17 @@ namespace AutoCnC.Platform.Tests
 		[Test]
 		public void CancellationIntentPersistsAcrossStaggeredEvaluationLatency()
 		{
-			const uint FirstVersion = 0x12345678;
-			const uint SecondVersion = 0x87654321;
 			var pending = new PendingPlayerActions();
-			var first = UnitDecision.CancelProduction("Vehicle", "mtnk", 2, "cancel") with
-			{
-				TargetActorId = 20,
-				TargetY = unchecked((int)FirstVersion)
-			};
+			var first = Cancellation(queueActorId: 20, item: "mtnk", count: 2);
 
 			pending.BeginTick(_ => true);
-			var firstControllerReserved = pending.TryReserve(7, first);
+			var firstControllerReserved = pending.TryReserve(7, first, "snapshot-a");
 
 			pending.BeginTick(_ => true);
-			var staggeredControllerReserved = pending.TryReserve(7, first);
+			var staggeredControllerReserved = pending.TryReserve(7, first, "snapshot-a");
 
 			pending.BeginTick(_ => false);
-			var second = first with { TargetY = unchecked((int)SecondVersion) };
-			var changedQueueReserved = pending.TryReserve(7, second);
+			var changedQueueReserved = pending.TryReserve(7, first, "snapshot-b");
 
 			Assert.Multiple(() =>
 			{
@@ -110,28 +112,26 @@ namespace AutoCnC.Platform.Tests
 		}
 
 		[Test]
-		public void CancellationIntentKeyIncludesPlayerQueueItemCountAndVersion()
+		public void CancellationIntentKeyIncludesPlayerQueueItemCountAndSnapshot()
 		{
-			const uint Version = 0x12345678;
 			var pending = new PendingPlayerActions();
-			var baseline = Cancellation(
-				queueActorId: 20, item: "mtnk", count: 2, queueVersion: Version);
+			var baseline = Cancellation(queueActorId: 20, item: "mtnk", count: 2);
 
 			pending.BeginTick(_ => true);
 
 			Assert.Multiple(() =>
 			{
-				Assert.That(pending.TryReserve(7, baseline), Is.True);
-				Assert.That(pending.TryReserve(7, baseline), Is.False);
-				Assert.That(pending.TryReserve(8, baseline), Is.True);
+				Assert.That(pending.TryReserve(7, baseline, "snapshot-a"), Is.True);
+				Assert.That(pending.TryReserve(7, baseline, "snapshot-a"), Is.False);
+				Assert.That(pending.TryReserve(8, baseline, "snapshot-a"), Is.True);
 				Assert.That(pending.TryReserve(
-					7, Cancellation(21, "mtnk", 2, Version)), Is.True);
+					7, Cancellation(21, "mtnk", 2), "snapshot-a"), Is.True);
 				Assert.That(pending.TryReserve(
-					7, Cancellation(20, "e1", 2, Version)), Is.True);
+					7, Cancellation(20, "e1", 2), "snapshot-a"), Is.True);
 				Assert.That(pending.TryReserve(
-					7, Cancellation(20, "mtnk", 1, Version)), Is.True);
+					7, Cancellation(20, "mtnk", 1), "snapshot-a"), Is.True);
 				Assert.That(pending.TryReserve(
-					7, Cancellation(20, "mtnk", 2, Version + 1)), Is.True);
+					7, Cancellation(20, "mtnk", 2), "snapshot-b"), Is.True);
 			});
 		}
 
@@ -157,12 +157,10 @@ namespace AutoCnC.Platform.Tests
 			});
 		}
 
-		static UnitDecision Cancellation(
-			uint queueActorId, string item, int count, uint queueVersion) =>
+		static UnitDecision Cancellation(uint queueActorId, string item, int count) =>
 			UnitDecision.CancelProduction("Vehicle", item, count, "cancel") with
 			{
-				TargetActorId = queueActorId,
-				TargetY = unchecked((int)queueVersion)
+				TargetActorId = queueActorId
 			};
 	}
 }

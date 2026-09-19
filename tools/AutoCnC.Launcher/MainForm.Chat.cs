@@ -119,14 +119,13 @@ namespace AutoCnC.Launcher
 			try
 			{
 				chatWorkspaceMutation = TrainingRun.AcquireWorkspaceMutation(run);
+				var session = TrainingRun.EnsureLatestAgentSessionId(run);
+				ReplaceRunReference(run, session.Run);
+				run = session.Run;
 				if (continuousLoop.IsRunning &&
 					SamePath(continuousCandidateRun?.RunDirectory, run.RunDirectory))
 					continuousFingerprint =
 						continuousPromotion.CaptureAgentChatFingerprint(run);
-
-				var session = TrainingRun.EnsureLatestAgentSessionId(run);
-				ReplaceRunReference(run, session.Run);
-				run = session.Run;
 
 				// The improvement round is what normally records which agent this fight uses, and
 				// talking can come first. Written here too so an early question reaches the agent

@@ -3001,6 +3001,9 @@ namespace AutoCnC.Launcher
 		void JobFinished(int exitCode)
 		{
 			var completed = activeJob;
+			if (completed == null)
+				return;
+
 			activeJob = null;
 
 			if (stopRequested)
@@ -3099,7 +3102,7 @@ namespace AutoCnC.Launcher
 			// next JobFinished, so setting it with nothing in flight hands it to whatever starts
 			// afterwards: that job would be reported as stopped, and a failed improvement would be
 			// recorded as one the player cancelled.
-			stopRequested = runner.IsRunning;
+			stopRequested = runner.IsRunning || activeJob != null;
 			if (!stopRequested)
 			{
 				AbortUnresolvedContinuousExperiment(
@@ -3243,7 +3246,7 @@ namespace AutoCnC.Launcher
 			Save();
 
 			// Leaving the game running with no window to stop it from would be worse than asking.
-			if (runner.IsRunning)
+			if (runner.IsRunning || activeJob != null)
 			{
 				var answer = MessageBox.Show(this, "Stop what is running and close?", "AutoC&C",
 					MessageBoxButtons.YesNo, MessageBoxIcon.Question);

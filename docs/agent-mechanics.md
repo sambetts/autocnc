@@ -295,8 +295,8 @@ Order BuildOrder(UnitDecision decision)
 bool CanAttack(Actor target)
 bool CanHarvest(CPos cell)
 static ThreatKind Classify(Actor actor)
-int DistanceTo(Actor other)
 int DistanceTo(CPos cell)
+int DistanceTo(Actor other)
 CPos? FindBuildLocation(string actorType, int minRange = 2, int maxRange = 14)
 Actor FindNearestAllied()
 CPos? FindNearestResource(int radiusCells = 24, CPos? origin = null)
@@ -321,6 +321,7 @@ IReadOnlyList<ThreatSnapshot> SenseStructures(WDist radius)
 IReadOnlyList<ThreatSnapshot> SenseThreats(WDist radius)
 ThreatSnapshot Snapshot(Actor actor)
 void SwitchDoctrine(string doctrine, string reason)
+void SwitchDoctrine(string doctrine, string reason, string reasonId)
 ```
 
 ### UnitAction
@@ -340,21 +341,98 @@ UnitAction Action { get; init }
 string ItemName { get; init }
 string Queue { get; init }
 string Reason { get; init }
+string ReasonId { get; init }
 uint TargetActorId { get; init }
 int TargetX { get; init }
 int TargetY { get; init }
+static UnitDecision AdvanceToObjective(uint objectiveActorId, string reason, string reasonId)
 static UnitDecision AdvanceToObjective(uint objectiveActorId, string reason)
+static UnitDecision Attack(uint targetActorId, string reason, string reasonId)
 static UnitDecision Attack(uint targetActorId, string reason)
+static UnitDecision AttackMoveTo(int x, int y, string reason, string reasonId)
 static UnitDecision AttackMoveTo(int x, int y, string reason)
+static UnitDecision Deploy(string reason, string reasonId)
 static UnitDecision Deploy(string reason)
+static UnitDecision Harvest(int x, int y, string reason, string reasonId)
 static UnitDecision Harvest(int x, int y, string reason)
+static UnitDecision Hold(string reason, string reasonId)
 static UnitDecision Hold(string reason)
 static UnitDecision MoveTo(int x, int y, string reason)
+static UnitDecision MoveTo(int x, int y, string reason, string reasonId)
+static UnitDecision PlaceBuilding(string queue, string itemName, int x, int y, string reason, string reasonId)
 static UnitDecision PlaceBuilding(string queue, string itemName, int x, int y, string reason)
 static UnitDecision Produce(string queue, string itemName, string reason)
+static UnitDecision Produce(string queue, string itemName, string reason, string reasonId)
 static UnitDecision Retreat(string reason)
+static UnitDecision Retreat(string reason, string reasonId)
+static UnitDecision ReturnToAnchor(string reason, string reasonId)
 static UnitDecision ReturnToAnchor(string reason)
 bool SameIntent(UnitDecision other)
+```
+
+### BattleState
+
+Visibility-filtered strategic state passed to `IBattleBot.Reassess`.
+
+```
+int ArmyValue { get; init }
+bool BaseUnderAttack { get }
+int BaseValue { get; init }
+bool BlindToEnemy { get }
+int Buildings { get; init }
+int BuildingsLost { get; init }
+int Cash { get; init }
+int CreditsKilled { get; init }
+int CreditsLost { get; init }
+string Doctrine { get; init }
+int DoctrineSeconds { get; init }
+static BattleState Empty { get }
+int EnemiesInSight { get; init }
+int EnemiesNearBase { get; init }
+bool EnemyBaseFound { get; init }
+int EnemyValueNearBase { get; init }
+int Harvesters { get; init }
+bool HasValueTradeData { get; init }
+int IncomeEarned { get; init }
+int NearestEnemyCells { get; init }
+int OwnArmyValueNearBase { get; init }
+int PowerBalance { get; init }
+int Refineries { get; init }
+int Seconds { get; init }
+int SecondsSinceContact { get; init }
+int Units { get; init }
+int UnitsKilled { get; init }
+int UnitsLost { get; init }
+IReadOnlyList<ThreatValueSummary> VisibleEnemyMix { get; init }
+int VisibleEnemyValue { get; init }
+int WindowSeconds { get; init }
+bool Winning { get }
+```
+
+### DoctrineDecision
+
+Returned from `IBattleBot.Reassess` to continue or request a doctrine transition.
+
+```
+static DoctrineDecision Continue { get }
+string Doctrine { get; init }
+bool IsUrgent { get; init }
+string Reason { get; init }
+string ReasonId { get; init }
+bool WantsChange { get }
+bool CanBypassMinimumDwell(BattleState state)
+static DoctrineDecision SwitchTo(string doctrine, string reason)
+static DoctrineDecision SwitchTo(string doctrine, string reason, string reasonId)
+static DoctrineDecision SwitchUrgentlyTo(string doctrine, string reason)
+static DoctrineDecision SwitchUrgentlyTo(string doctrine, string reason, string reasonId)
+```
+
+### ThreatValueSummary
+
+```
+int Count { get; init }
+ThreatKind Kind { get; init }
+int Value { get; init }
 ```
 
 ### ResourceCell
@@ -385,11 +463,16 @@ int TotalDensity { get; init }
 
 ```
 uint ActorId { get; init }
+string ActorType { get; init }
 bool CanHitUs { get; init }
+int CellX { get; init }
+int CellY { get; init }
 int DistanceUnits { get; init }
 int HealthPercent { get; init }
 bool IsAttackable { get; init }
 ThreatKind Kind { get; init }
+int Value { get; init }
+int WeaponRangeUnits { get; init }
 ```
 
 ### ThreatKind
@@ -401,7 +484,7 @@ enum ThreatKind: Unknown, Infantry, Vehicle, Aircraft, Structure, Defence, Econo
 ### Every public AutoCnC.Core type
 
 ```
-ArmyPlanState, AssaultState, AssignmentScope, BaseBuildLogic, BasePlanState, BattleState, BuildStep, DefensiveState, DoctrineDecision, ModeAssignments, ProductionChoice, ProductionQueueState, ProductionStep, ResourceCell, ResourceField, ThreatKind, ThreatSnapshot, UnitAction, UnitDecision, UnitProductionLogic
+ArmyPlanState, AssaultState, AssignmentScope, BaseBuildLogic, BasePlanState, BattleState, BuildStep, DefensiveState, DoctrineDecision, ModeAssignments, ProductionChoice, ProductionQueueState, ProductionStep, ResourceCell, ResourceField, ThreatKind, ThreatSnapshot, ThreatValueSummary, UnitAction, UnitDecision, UnitProductionLogic
 ```
 
 <!-- END GENERATED SDK SURFACE -->

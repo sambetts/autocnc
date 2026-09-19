@@ -157,12 +157,15 @@ namespace AutoCnC.Platform.Tests
 		[Test]
 		public void RepairIntentClearsAfterFastCompletionAndRedamage()
 		{
-			var revision = new RepairStateRevision(new RepairStateSnapshot(
-				HitPoints: 50,
-				MaxHitPoints: 100,
-				IsRepairable: true,
-				RepairRequested: false,
-				RepairActive: false));
+			var revision = new RepairStateRevision(
+				SdkActionResolver.CreateRepairStateSnapshot(
+					isOwned: true,
+					isLive: true,
+					isRepairable: true,
+					hitPoints: 50,
+					maxHitPoints: 100,
+					repairRequested: false,
+					repairActive: false));
 			var pending = new PendingPlayerActions();
 			var decision = UnitDecision.RepairBuilding(20, "repair");
 			var firstPayload = ActionOrderBuilder.EncodeRepairPayload(revision.Revision);
@@ -173,9 +176,12 @@ namespace AutoCnC.Platform.Tests
 			var firstReserved = pending.TryReserve(7, decision, firstPayload);
 			var duplicateReserved = pending.TryReserve(7, decision, firstPayload);
 
-			revision.Advance(new RepairStateSnapshot(60, 100, true, true, false));
-			revision.Observe(new RepairStateSnapshot(100, 100, true, false, false));
-			revision.Observe(new RepairStateSnapshot(50, 100, true, false, false));
+			revision.Advance(SdkActionResolver.CreateRepairStateSnapshot(
+				true, true, true, 60, 100, true, false));
+			revision.Observe(SdkActionResolver.CreateRepairStateSnapshot(
+				true, true, true, 100, 100, false, false));
+			revision.Observe(SdkActionResolver.CreateRepairStateSnapshot(
+				true, true, true, 50, 100, false, false));
 
 			var redamagedPayload = ActionOrderBuilder.EncodeRepairPayload(revision.Revision);
 			pending.BeginTick(
@@ -189,6 +195,38 @@ namespace AutoCnC.Platform.Tests
 				Assert.That(duplicateReserved, Is.False);
 				Assert.That(revision.Revision, Is.EqualTo(4));
 				Assert.That(redamagedReserved, Is.True);
+			});
+		}
+
+		[Test]
+		public void SustainedDamageDoesNotInvalidateInFlightRepair()
+		{
+			var initiallyDamaged = SdkActionResolver.CreateRepairStateSnapshot(
+				true, true, true, 80, 100, false, false);
+			var damagedAgain = SdkActionResolver.CreateRepairStateSnapshot(
+				true, true, true, 35, 100, false, false);
+			var revision = new RepairStateRevision(initiallyDamaged);
+			var pending = new PendingPlayerActions();
+			var decision = UnitDecision.RepairBuilding(20, "repair");
+			var payload = ActionOrderBuilder.EncodeRepairPayload(revision.Revision);
+
+			pending.BeginTick(
+				_ => true,
+				intent => intent.ExpectedRepairRevision == revision.Revision);
+			var firstReserved = pending.TryReserve(7, decision, payload);
+
+			var revisionAfterDamage = revision.Observe(damagedAgain);
+			pending.BeginTick(
+				_ => true,
+				intent => intent.ExpectedRepairRevision == revision.Revision);
+			var duplicateReserved = pending.TryReserve(7, decision, payload);
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(initiallyDamaged, Is.EqualTo(damagedAgain));
+				Assert.That(revisionAfterDamage, Is.EqualTo(1));
+				Assert.That(firstReserved, Is.True);
+				Assert.That(duplicateReserved, Is.False);
 			});
 		}
 

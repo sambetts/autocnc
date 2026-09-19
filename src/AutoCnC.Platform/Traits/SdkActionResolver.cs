@@ -68,9 +68,10 @@ namespace AutoCnC.Platform.Traits
 	}
 
 	internal readonly record struct RepairStateSnapshot(
-		int HitPoints,
-		int MaxHitPoints,
+		bool IsOwned,
+		bool IsLive,
 		bool IsRepairable,
+		bool IsDamaged,
 		bool RepairRequested,
 		bool RepairActive);
 
@@ -269,13 +270,31 @@ namespace AutoCnC.Platform.Traits
 			var health = building.TraitOrDefault<IHealth>();
 			var repairable = building.TraitOrDefault<RepairableBuilding>();
 			var isRepairable = repairable != null && !repairable.IsTraitDisabled;
-			return new RepairStateSnapshot(
-				HitPoints: health?.HP ?? 0,
-				MaxHitPoints: health?.MaxHP ?? 0,
-				IsRepairable: isRepairable,
-				RepairRequested: isRepairable && repairable.Repairers.Contains(self.Owner),
-				RepairActive: isRepairable && repairable.RepairActive);
+			return CreateRepairStateSnapshot(
+				isOwned: building.Owner == self.Owner,
+				isLive: !building.IsDead && building.IsInWorld,
+				isRepairable,
+				hitPoints: health?.HP ?? 0,
+				maxHitPoints: health?.MaxHP ?? 0,
+				repairRequested: isRepairable && repairable.Repairers.Contains(self.Owner),
+				repairActive: isRepairable && repairable.RepairActive);
 		}
+
+		internal static RepairStateSnapshot CreateRepairStateSnapshot(
+			bool isOwned,
+			bool isLive,
+			bool isRepairable,
+			int hitPoints,
+			int maxHitPoints,
+			bool repairRequested,
+			bool repairActive) =>
+			new(
+				isOwned,
+				isLive,
+				isRepairable,
+				maxHitPoints > 0 && hitPoints < maxHitPoints,
+				repairRequested,
+				repairActive);
 
 		bool IProductionQueueRevisionProvider.TryGetRevision(
 			ProductionQueue queue, out ulong revision)

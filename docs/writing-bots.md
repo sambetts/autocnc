@@ -435,6 +435,9 @@ that validation immediately before applying the engine order. The host keeps onl
 repair intent and retires it when the synchronized repair revision changes, so a building that
 finishes repairing and is damaged again can issue the identical ensure-repair decision. Read
 `OwnedBuildingStates()` for health, `IsRepairable`, `RepairRequested`, and `RepairActive`.
+The revision tracks eligibility, damaged-versus-full, requested, and active states rather than
+exact HP, so sustained incoming fire does not invalidate an order while the building remains
+damaged.
 
 `CancelProduction` names one queue, one item, and an exact positive count. It emits no order when
 the queue does not contain that many matching entries, and the synchronized platform resolver

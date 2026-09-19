@@ -239,7 +239,8 @@ permitted way to know where anything is.
   existing repair request or active repair. The synchronized resolver repeats that check before
   applying OpenRA's player-scoped repair order. Its in-flight intent retires on synchronized
   health/request/active-state revision changes, so full repair followed by new damage can issue
-  the same intent again.
+  the same intent again. Exact HP is deliberately excluded: damage while the building remains in
+  the damaged state does not invalidate the request.
 - Resolve support powers from `SupportPowerStates()` rather than faction names. Activation accepts
   either the manager key or configured order name, requires an active ready power, and targets the
   supplied cell without revealing anything about it. Order names resolve to concrete ready keys

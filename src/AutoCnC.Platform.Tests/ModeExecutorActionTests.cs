@@ -11,6 +11,7 @@
 
 using AutoCnC.Core;
 using AutoCnC.Platform.Traits;
+using AutoCnC.Sdk;
 using NUnit.Framework;
 
 namespace AutoCnC.Platform.Tests
@@ -89,17 +90,28 @@ namespace AutoCnC.Platform.Tests
 		[Test]
 		public void CancellationIntentPersistsAcrossStaggeredEvaluationLatency()
 		{
+			var queueItem = new object();
+			var revision = new ProductionQueueRevisionState<object>(
+				[new ProductionQueueEntry("mtnk", false)],
+				[queueItem]);
 			var pending = new PendingPlayerActions();
 			var first = Cancellation(queueActorId: 20, item: "mtnk", count: 2);
+			var firstPayload = ActionOrderBuilder.EncodeCancellationPayload(
+				"mtnk", revision.Revision);
 
-			pending.BeginTick(_ => true);
-			var firstControllerReserved = pending.TryReserve(7, first, "snapshot-a");
+			pending.BeginTick(intent => intent.ExpectedQueueRevision == revision.Revision);
+			var firstControllerReserved = pending.TryReserve(7, first, firstPayload);
 
-			pending.BeginTick(_ => true);
-			var staggeredControllerReserved = pending.TryReserve(7, first, "snapshot-a");
+			pending.BeginTick(intent => intent.ExpectedQueueRevision == revision.Revision);
+			var staggeredControllerReserved = pending.TryReserve(7, first, firstPayload);
 
-			pending.BeginTick(_ => false);
-			var changedQueueReserved = pending.TryReserve(7, first, "snapshot-b");
+			revision.Advance(
+				[new ProductionQueueEntry("mtnk", false)],
+				[queueItem]);
+			var secondPayload = ActionOrderBuilder.EncodeCancellationPayload(
+				"mtnk", revision.Revision);
+			pending.BeginTick(intent => intent.ExpectedQueueRevision == revision.Revision);
+			var changedQueueReserved = pending.TryReserve(7, first, secondPayload);
 
 			Assert.Multiple(() =>
 			{
@@ -112,26 +124,82 @@ namespace AutoCnC.Platform.Tests
 		}
 
 		[Test]
-		public void CancellationIntentKeyIncludesPlayerQueueItemCountAndSnapshot()
+		public void CancellationIntentKeyIncludesPlayerQueueItemCountAndRevision()
 		{
 			var pending = new PendingPlayerActions();
 			var baseline = Cancellation(queueActorId: 20, item: "mtnk", count: 2);
+			var revisionOne = ActionOrderBuilder.EncodeCancellationPayload("mtnk", 1);
+			var revisionTwo = ActionOrderBuilder.EncodeCancellationPayload("mtnk", 2);
+			var otherItem = ActionOrderBuilder.EncodeCancellationPayload("e1", 1);
 
 			pending.BeginTick(_ => true);
 
 			Assert.Multiple(() =>
 			{
-				Assert.That(pending.TryReserve(7, baseline, "snapshot-a"), Is.True);
-				Assert.That(pending.TryReserve(7, baseline, "snapshot-a"), Is.False);
-				Assert.That(pending.TryReserve(8, baseline, "snapshot-a"), Is.True);
+				Assert.That(pending.TryReserve(7, baseline, revisionOne), Is.True);
+				Assert.That(pending.TryReserve(7, baseline, revisionOne), Is.False);
+				Assert.That(pending.TryReserve(8, baseline, revisionOne), Is.True);
 				Assert.That(pending.TryReserve(
-					7, Cancellation(21, "mtnk", 2), "snapshot-a"), Is.True);
+					7, Cancellation(21, "mtnk", 2), revisionOne), Is.True);
 				Assert.That(pending.TryReserve(
-					7, Cancellation(20, "e1", 2), "snapshot-a"), Is.True);
+					7, Cancellation(20, "e1", 2), otherItem), Is.True);
 				Assert.That(pending.TryReserve(
-					7, Cancellation(20, "mtnk", 1), "snapshot-a"), Is.True);
+					7, Cancellation(20, "mtnk", 1), revisionOne), Is.True);
 				Assert.That(pending.TryReserve(
-					7, Cancellation(20, "mtnk", 2), "snapshot-b"), Is.True);
+					7, Cancellation(20, "mtnk", 2), revisionTwo), Is.True);
+			});
+		}
+
+		[Test]
+		public void QueueRevisionAdvancesAcrossAbaMutation()
+		{
+			var originalItem = new object();
+			var replacementItem = new object();
+			var state = new ProductionQueueRevisionState<object>(
+				[new ProductionQueueEntry("mtnk", false)],
+				[originalItem]);
+			var initialRevision = state.Revision;
+
+			state.Advance([new ProductionQueueEntry("mtnk", false)], [originalItem]);
+			state.Observe([new ProductionQueueEntry("e1", false)], [replacementItem]);
+			state.Advance([new ProductionQueueEntry("e1", false)], [replacementItem]);
+			var restoredRevision = state.Observe(
+				[new ProductionQueueEntry("mtnk", false)],
+				[originalItem]);
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(initialRevision, Is.EqualTo(1));
+				Assert.That(restoredRevision, Is.EqualTo(5));
+			});
+		}
+
+		[Test]
+		public void QueueRevisionDoesNotDependOnTheLegacyFingerprint()
+		{
+			var first = new[]
+			{
+				new ProductionQueueEntry("iws", false),
+				new ProductionQueueEntry("9975g", false),
+				new ProductionQueueEntry("uu", false),
+				new ProductionQueueEntry("h6edr", false),
+				new ProductionQueueEntry("mtnk", false)
+			};
+			var collision = new[]
+			{
+				new ProductionQueueEntry("gmvq", false),
+				new ProductionQueueEntry("mtnk", false)
+			};
+			var state = new ProductionQueueRevisionState<object>(
+				first, [new object(), new object(), new object(), new object(), new object()]);
+
+			var revision = state.Observe(collision, [new object(), new object()]);
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(LegacyQueueFingerprint(first), Is.EqualTo(0x8D6B64F6u));
+				Assert.That(LegacyQueueFingerprint(collision), Is.EqualTo(0x8D6B64F6u));
+				Assert.That(revision, Is.EqualTo(2));
 			});
 		}
 
@@ -162,5 +230,26 @@ namespace AutoCnC.Platform.Tests
 			{
 				TargetActorId = queueActorId
 			};
+
+		static uint LegacyQueueFingerprint(ProductionQueueEntry[] entries)
+		{
+			const uint Offset = 2166136261;
+			const uint Prime = 16777619;
+
+			var hash = Offset;
+			var count = 0u;
+			foreach (var entry in entries)
+			{
+				hash = (hash ^ 0xFFu) * Prime;
+				foreach (var character in entry.Item)
+					hash = (hash ^ character) * Prime;
+
+				hash = (hash ^ (entry.Infinite ? 1u : 0u)) * Prime;
+				count++;
+			}
+
+			hash = (hash ^ count) * Prime;
+			return hash == 0 ? 1u : hash;
+		}
 	}
 }

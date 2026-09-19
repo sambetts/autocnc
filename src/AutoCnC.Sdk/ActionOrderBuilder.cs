@@ -12,7 +12,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Text;
 using AutoCnC.Core;
 using OpenRA;
@@ -25,7 +24,6 @@ namespace AutoCnC.Sdk
 	internal static class ActionOrderBuilder
 	{
 		const byte CancellationPayloadVersion = 1;
-		const int MaximumCancellationEntries = 4096;
 		const int MaximumCancellationPayloadLength = 1024 * 1024;
 
 		public const string EnsureRepairOrder = "AutoCnCEnsureRepair";
@@ -43,10 +41,10 @@ namespace AutoCnC.Sdk
 			int queueIndex,
 			string item,
 			int count,
-			IReadOnlyList<ProductionQueueEntry> expectedQueue) =>
+			ulong expectedQueueRevision) =>
 			new(ExactCancelProductionOrder, playerActor, queueTarget, false)
 			{
-				TargetString = EncodeCancellationPayload(item, expectedQueue),
+				TargetString = EncodeCancellationPayload(item, expectedQueueRevision),
 				ExtraLocation = new CPos(queueIndex, 0),
 				ExtraData = (uint)count,
 				SuppressVisualFeedback = true
@@ -56,30 +54,24 @@ namespace AutoCnC.Sdk
 			Order.CancelProduction(queueActor, item, count);
 
 		public static string EncodeCancellationPayload(
-			string item, IReadOnlyList<ProductionQueueEntry> expectedQueue)
+			string item, ulong expectedQueueRevision)
 		{
 			using var stream = new MemoryStream();
 			using (var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true))
 			{
 				writer.Write(CancellationPayloadVersion);
 				writer.Write(item ?? "");
-				writer.Write(expectedQueue?.Count ?? 0);
-				if (expectedQueue != null)
-					foreach (var entry in expectedQueue)
-					{
-						writer.Write(entry.Item ?? "");
-						writer.Write(entry.Infinite);
-					}
+				writer.Write(expectedQueueRevision);
 			}
 
 			return Convert.ToBase64String(stream.ToArray());
 		}
 
 		public static bool TryDecodeCancellationPayload(
-			string payload, out string item, out ProductionQueueEntry[] expectedQueue)
+			string payload, out string item, out ulong expectedQueueRevision)
 		{
 			item = null;
-			expectedQueue = null;
+			expectedQueueRevision = 0;
 			if (string.IsNullOrEmpty(payload) || payload.Length > MaximumCancellationPayloadLength)
 				return false;
 
@@ -91,15 +83,9 @@ namespace AutoCnC.Sdk
 					return false;
 
 				item = reader.ReadString();
-				var entryCount = reader.ReadInt32();
-				if (string.IsNullOrWhiteSpace(item) ||
-					entryCount < 0 ||
-					entryCount > MaximumCancellationEntries)
+				expectedQueueRevision = reader.ReadUInt64();
+				if (string.IsNullOrWhiteSpace(item) || expectedQueueRevision == 0)
 					return false;
-
-				expectedQueue = new ProductionQueueEntry[entryCount];
-				for (var i = 0; i < entryCount; i++)
-					expectedQueue[i] = new ProductionQueueEntry(reader.ReadString(), reader.ReadBoolean());
 
 				return stream.Position == stream.Length;
 			}
@@ -166,16 +152,6 @@ namespace AutoCnC.Sdk
 					Queue = queueName,
 					ItemName = item
 				};
-		}
-
-		public static bool QueueMatches(
-			IReadOnlyList<ProductionQueueEntry> expected,
-			IReadOnlyList<ProductionQueueEntry> actual)
-		{
-			if (expected == null || actual == null || expected.Count != actual.Count)
-				return false;
-
-			return expected.SequenceEqual(actual);
 		}
 
 		public static string FindReadySupportPower(

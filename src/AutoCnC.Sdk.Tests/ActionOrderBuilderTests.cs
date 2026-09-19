@@ -56,14 +56,10 @@ namespace AutoCnC.Sdk.Tests
 		[Test]
 		public void CancellationRequestIdentifiesQueueItemAndCount()
 		{
+			const ulong Revision = 123;
 			var target = Target.FromPos(new WPos(3072, 4096, 0));
-			var expectedQueue = new[]
-			{
-				new ProductionQueueEntry("mtnk", false),
-				new ProductionQueueEntry("e1", true)
-			};
 			var order = ActionOrderBuilder.RequestCancelProduction(
-				null, target, queueIndex: 3, item: "mtnk", count: 2, expectedQueue);
+				null, target, queueIndex: 3, item: "mtnk", count: 2, Revision);
 
 			Assert.Multiple(() =>
 			{
@@ -78,29 +74,25 @@ namespace AutoCnC.Sdk.Tests
 				Assert.That(order.SuppressVisualFeedback, Is.True);
 				Assert.That(
 					ActionOrderBuilder.TryDecodeCancellationPayload(
-						order.TargetString, out var item, out var decodedQueue),
+						order.TargetString, out var item, out var decodedRevision),
 					Is.True);
 				Assert.That(item, Is.EqualTo("mtnk"));
-				Assert.That(decodedQueue, Is.EqualTo(expectedQueue));
+				Assert.That(decodedRevision, Is.EqualTo(Revision));
 			});
 		}
 
 		[Test]
-		public void CancellationRequestRoundTripsExactSnapshotAndCount()
+		public void CancellationRequestRoundTripsFullRevisionAndCount()
 		{
+			const ulong Revision = 0xFEDCBA9876543210;
 			const int Count = 4097;
-			var expectedQueue = new[]
-			{
-				new ProductionQueueEntry("mtnk:elite", false),
-				new ProductionQueueEntry("e1", true)
-			};
 			var request = ActionOrderBuilder.RequestCancelProduction(
 				null,
 				Target.FromPos(new WPos(3072, 4096, 0)),
 				queueIndex: 3,
 				item: "mtnk:elite",
 				count: Count,
-				expectedQueue);
+				expectedQueueRevision: Revision);
 
 			var serialized = request.Serialize();
 			var roundTripped = Order.Deserialize(
@@ -114,10 +106,10 @@ namespace AutoCnC.Sdk.Tests
 				Assert.That(roundTripped.ExtraLocation.Y, Is.Zero);
 				Assert.That(
 					ActionOrderBuilder.TryDecodeCancellationPayload(
-						roundTripped.TargetString, out var item, out var decodedQueue),
+						roundTripped.TargetString, out var item, out var decodedRevision),
 					Is.True);
 				Assert.That(item, Is.EqualTo("mtnk:elite"));
-				Assert.That(decodedQueue, Is.EqualTo(expectedQueue));
+				Assert.That(decodedRevision, Is.EqualTo(Revision));
 				Assert.That(roundTripped.Serialize(), Is.EqualTo(serialized));
 			});
 		}
@@ -164,37 +156,6 @@ namespace AutoCnC.Sdk.Tests
 				Assert.That(resolved.Queue, Is.EqualTo("Vehicle"));
 				Assert.That(resolved.ItemName, Is.EqualTo("mtnk"));
 				Assert.That(resolved.Count, Is.EqualTo(2));
-			});
-		}
-
-		[Test]
-		public void ExactSnapshotRejectsQueuesThatCollidedUnderTheLegacyFingerprint()
-		{
-			var first = new[]
-			{
-				new ProductionQueueEntry("iws", false),
-				new ProductionQueueEntry("9975g", false),
-				new ProductionQueueEntry("uu", false),
-				new ProductionQueueEntry("h6edr", false),
-				new ProductionQueueEntry("mtnk", false)
-			};
-			var collision = new[]
-			{
-				new ProductionQueueEntry("gmvq", false),
-				new ProductionQueueEntry("mtnk", false)
-			};
-			var payload = ActionOrderBuilder.EncodeCancellationPayload("mtnk", first);
-			var decoded = ActionOrderBuilder.TryDecodeCancellationPayload(
-				payload, out var item, out var expectedQueue);
-
-			Assert.Multiple(() =>
-			{
-				Assert.That(LegacyQueueFingerprint(first), Is.EqualTo(0x8D6B64F6u));
-				Assert.That(LegacyQueueFingerprint(collision), Is.EqualTo(0x8D6B64F6u));
-				Assert.That(decoded, Is.True);
-				Assert.That(item, Is.EqualTo("mtnk"));
-				Assert.That(ActionOrderBuilder.QueueMatches(expectedQueue, first), Is.True);
-				Assert.That(ActionOrderBuilder.QueueMatches(expectedQueue, collision), Is.False);
 			});
 		}
 
@@ -301,25 +262,5 @@ namespace AutoCnC.Sdk.Tests
 		static SupportPowerState Power(string key, string orderName, bool active, bool ready) =>
 			new(key, orderName, active, ready, false, ready ? 0 : 10, 100);
 
-		static uint LegacyQueueFingerprint(ProductionQueueEntry[] entries)
-		{
-			const uint Offset = 2166136261;
-			const uint Prime = 16777619;
-
-			var hash = Offset;
-			var count = 0u;
-			foreach (var entry in entries)
-			{
-				hash = (hash ^ 0xFFu) * Prime;
-				foreach (var character in entry.Item)
-					hash = (hash ^ character) * Prime;
-
-				hash = (hash ^ (entry.Infinite ? 1u : 0u)) * Prime;
-				count++;
-			}
-
-			hash = (hash ^ count) * Prime;
-			return hash == 0 ? 1u : hash;
-		}
 	}
 }

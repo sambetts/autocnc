@@ -806,6 +806,9 @@ namespace AutoCnC.Sdk
 		SupportPowerManager GetSupportPowerManager() =>
 			self.Owner.PlayerActor.TraitOrDefault<SupportPowerManager>();
 
+		IProductionQueueRevisionProvider GetProductionQueueRevisionProvider() =>
+			self.Owner.PlayerActor.TraitOrDefault<IProductionQueueRevisionProvider>();
+
 		/// <summary>How many of each owned building type this player has, including queued.</summary>
 		public IReadOnlyDictionary<string, int> OwnedBuildingCounts() => CountOwned<Building>("Building");
 
@@ -1017,6 +1020,10 @@ namespace AutoCnC.Sdk
 						(decision.TargetActorId != 0 && queue.Actor.ActorID != decision.TargetActorId))
 						return null;
 
+					var revisions = GetProductionQueueRevisionProvider();
+					if (revisions == null || !revisions.TryGetRevision(queue, out var queueRevision))
+						return null;
+
 					var queued = queue.AllQueued().ToArray();
 					var item = ActionOrderBuilder.FindQueuedItem(
 						queued.Select(queuedItem => queuedItem.Item),
@@ -1031,10 +1038,7 @@ namespace AutoCnC.Sdk
 							queueIndex,
 							item,
 							decision.Count,
-							queued
-								.Select(queuedItem =>
-									new ProductionQueueEntry(queuedItem.Item, queuedItem.Infinite))
-								.ToArray());
+							queueRevision);
 				}
 
 				case UnitAction.PlaceBuilding:

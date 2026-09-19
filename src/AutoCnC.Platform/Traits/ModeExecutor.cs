@@ -46,17 +46,24 @@ namespace AutoCnC.Platform.Traits
 		string Queue,
 		string ItemName,
 		int Count,
-		string ExpectedQueueSnapshot)
+		ulong ExpectedQueueRevision)
 	{
-		public static ProductionCancellationIntent From(
-			uint playerActorId, in UnitDecision decision, string expectedQueueSnapshot) =>
-			new(
+		public static ProductionCancellationIntent? From(
+			uint playerActorId, in UnitDecision decision, string cancellationPayload)
+		{
+			if (!ActionOrderBuilder.TryDecodeCancellationPayload(
+				cancellationPayload, out var item, out var revision) ||
+				!string.Equals(item, decision.ItemName, StringComparison.Ordinal))
+				return null;
+
+			return new ProductionCancellationIntent(
 				playerActorId,
 				decision.TargetActorId,
 				decision.Queue,
 				decision.ItemName,
 				decision.Count,
-				expectedQueueSnapshot);
+				revision);
+		}
 	}
 
 	internal sealed class PendingPlayerActions
@@ -74,8 +81,11 @@ namespace AutoCnC.Platform.Traits
 			uint playerActorId, in UnitDecision decision, string cancellationPayload)
 		{
 			if (decision.Action == UnitAction.CancelProduction)
-				return cancellations.Add(ProductionCancellationIntent.From(
-					playerActorId, decision, cancellationPayload));
+			{
+				var intent = ProductionCancellationIntent.From(
+					playerActorId, decision, cancellationPayload);
+				return intent.HasValue && cancellations.Add(intent.Value);
+			}
 
 			var action = PlayerScopedActionKey.From(decision);
 			return !action.HasValue || currentTick.Add(action.Value);
@@ -676,17 +686,14 @@ namespace AutoCnC.Platform.Traits
 			if (queue == null)
 				return false;
 
-			var queued = queue.AllQueued().ToArray();
-			if (!ActionOrderBuilder.TryDecodeCancellationPayload(
-				intent.ExpectedQueueSnapshot, out var requestedItem, out var expectedQueue) ||
-				!string.Equals(requestedItem, intent.ItemName, StringComparison.Ordinal) ||
-				!ActionOrderBuilder.QueueMatches(
-					expectedQueue,
-					queued.Select(item => new ProductionQueueEntry(item.Item, item.Infinite)).ToArray()))
+			var revisions = player.PlayerActor.TraitOrDefault<IProductionQueueRevisionProvider>();
+			if (revisions == null ||
+				!revisions.TryGetRevision(queue, out var currentRevision) ||
+				currentRevision != intent.ExpectedQueueRevision)
 				return false;
 
 			return ActionOrderBuilder.FindQueuedItem(
-				queued.Select(item => item.Item),
+				queue.AllQueued().Select(item => item.Item),
 				intent.ItemName,
 				intent.Count) != null;
 		}

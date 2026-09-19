@@ -53,13 +53,15 @@
 # issued-decision event for orders. It is diagnostic output for after the match and is never
 # exposed back to bot code.
 #
-# SdkActionResolver handles the synchronized player-actor requests that must revalidate live
-# simulation state atomically before applying native repair or production-queue orders.
+# SdkActionResolver handles synchronized player-actor requests and owns monotonic production-queue
+# revisions. SdkQueueOrderObserver advances those revisions before native production mutation
+# orders, while synced ticks detect automatic queue changes.
 #
 # HeadlessSimulation takes over the normal client world loop only when Launch.Headless is present.
 # It keeps the order/world/TickRender sequence intact, but removes wall-clock pacing and drawing.
 
 World:
+	SdkQueueOrderObserver:
 	ModeExecutor:
 		GroupCount: 9
 	ModeCommands:

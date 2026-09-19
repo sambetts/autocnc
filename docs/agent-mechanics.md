@@ -232,9 +232,9 @@ permitted way to know where anything is.
 - `CancelProduction` requires an exact queue, item, and positive count. It emits no partial or
   broad cancellation when the queue no longer matches: a synchronized player-order resolver
   atomically revalidates the selected queue at order resolution and cancels the exact count or
-  nothing. Its player/queue/item/count/exact-snapshot intent remains pending across local ticks
-  until synchronized resolution or another queue-composition change, preventing staggered
-  controllers from duplicating an in-flight request.
+  nothing. Its player/queue/item/count/revision intent remains pending across local ticks until
+  synchronized resolution or another monotonic queue-revision change, preventing staggered
+  controllers and A→B→A queue transitions from duplicating an in-flight request.
 - `RepairBuilding` starts repair only for a live owned damaged `RepairableBuilding` without an
   existing repair request or active repair. The synchronized resolver repeats that check before
   applying OpenRA's player-scoped repair order.

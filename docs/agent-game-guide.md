@@ -83,8 +83,8 @@ it as authoritative context alongside the source and the evidence from one compl
 - Production cancellation is exact: queue, item, and positive count must still match the live
   queue when the synchronized order resolves, or nothing is cancelled. `ctx.QueueStates()` exposes
   current item/progress/cost and counts. The request remains globally pending across local ticks
-  until the synchronized resolution or a queue-composition change, so staggered producers cannot
-  duplicate it during order latency.
+  until synchronized resolution or a monotonic queue-revision change, so staggered producers and
+  A→B→A queue transitions cannot duplicate it during order latency.
 - Support powers come from `ctx.SupportPowerStates()`, not faction-specific constants. Activate a
   ready active key or configured order name at a cell with `UnitDecision.ActivateSupportPower`;
   configured names resolve to concrete ready keys before duplicate suppression.

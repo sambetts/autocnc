@@ -10,23 +10,205 @@
 #endregion
 
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using AutoCnC.Sdk;
 using OpenRA;
 using OpenRA.Mods.Common.Traits;
+using OpenRA.Network;
 using OpenRA.Traits;
 
 namespace AutoCnC.Platform.Traits
 {
+	internal sealed class ProductionQueueRevisionState<TItem>
+		where TItem : class
+	{
+		ProductionQueueEntry[] entries;
+		TItem[] items;
+
+		public ulong Revision { get; private set; } = 1;
+
+		public ProductionQueueRevisionState(
+			ProductionQueueEntry[] entries, TItem[] items)
+		{
+			this.entries = entries;
+			this.items = items;
+		}
+
+		public ulong Observe(ProductionQueueEntry[] currentEntries, TItem[] currentItems)
+		{
+			if (!Matches(currentEntries, currentItems))
+				Advance(currentEntries, currentItems);
+
+			return Revision;
+		}
+
+		public void Advance(ProductionQueueEntry[] currentEntries, TItem[] currentItems)
+		{
+			Revision++;
+			if (Revision == 0)
+				Revision = 1;
+
+			entries = currentEntries;
+			items = currentItems;
+		}
+
+		bool Matches(ProductionQueueEntry[] currentEntries, TItem[] currentItems)
+		{
+			if (items.Length != currentItems.Length)
+				return false;
+
+			for (var i = 0; i < items.Length; i++)
+				if (!ReferenceEquals(items[i], currentItems[i]) ||
+					entries[i] != currentEntries[i])
+					return false;
+
+			return true;
+		}
+	}
+
 	[TraitLocation(SystemActors.Player)]
 	[Desc("Resolves synchronized player-scoped orders emitted by the AutoC&C SDK.")]
 	public sealed class SdkActionResolverInfo : TraitInfo
 	{
-		public override object Create(ActorInitializer init) { return new SdkActionResolver(); }
+		public override object Create(ActorInitializer init) { return new SdkActionResolver(init); }
 	}
 
-	public sealed class SdkActionResolver : IResolveOrder
+	sealed class SdkActionResolver : IResolveOrder, ITick, INotifyCreated, ISync,
+		IProductionQueueRevisionProvider
 	{
+		readonly Actor self;
+		readonly World world;
+		readonly Dictionary<ProductionQueue, ProductionQueueRevisionState<ProductionItem>> queues = [];
+
+		[VerifySync]
+		public int RevisionsHash
+		{
+			get
+			{
+				unchecked
+				{
+					var hash = 17;
+					foreach (var actor in queues.Keys
+						.Select(queue => queue.Actor)
+						.Distinct()
+						.OrderBy(actor => actor.ActorID))
+					{
+						hash = hash * 31 + (int)actor.ActorID;
+						foreach (var queue in actor.TraitsImplementing<ProductionQueue>())
+							if (queues.TryGetValue(queue, out var state))
+							{
+								hash = hash * 31 + (int)state.Revision;
+								hash = hash * 31 + (int)(state.Revision >> 32);
+							}
+					}
+
+					return hash;
+				}
+			}
+		}
+
+		public SdkActionResolver(ActorInitializer init)
+		{
+			self = init.Self;
+			world = self.World;
+			world.ActorAdded += ActorAdded;
+			world.ActorRemoved += ActorRemoved;
+		}
+
+		void INotifyCreated.Created(Actor actor) => RefreshQueues();
+
+		void ITick.Tick(Actor actor) => RefreshQueues();
+
+		void ActorAdded(Actor actor)
+		{
+			if (actor.Owner != self.Owner)
+				return;
+
+			foreach (var queue in actor.TraitsImplementing<ProductionQueue>())
+				EnsureQueue(queue);
+		}
+
+		void ActorRemoved(Actor actor)
+		{
+			foreach (var queue in actor.TraitsImplementing<ProductionQueue>())
+				queues.Remove(queue);
+		}
+
+		internal void RefreshQueues()
+		{
+			foreach (var queue in queues.Keys
+				.Where(queue => queue.Actor.Owner != self.Owner ||
+					queue.Actor.IsDead || !queue.Actor.IsInWorld)
+				.ToArray())
+				queues.Remove(queue);
+
+			foreach (var pair in world.ActorsWithTrait<ProductionQueue>())
+				if (pair.Actor.Owner == self.Owner && !pair.Actor.IsDead && pair.Actor.IsInWorld)
+					RefreshQueue(pair.Trait);
+		}
+
+		ProductionQueueRevisionState<ProductionItem> EnsureQueue(ProductionQueue queue)
+		{
+			if (queues.TryGetValue(queue, out var state))
+				return state;
+
+			var snapshot = Snapshot(queue);
+			state = new ProductionQueueRevisionState<ProductionItem>(
+				snapshot.Entries, snapshot.Items);
+			queues.Add(queue, state);
+			return state;
+		}
+
+		ulong RefreshQueue(ProductionQueue queue)
+		{
+			var state = EnsureQueue(queue);
+			var snapshot = Snapshot(queue);
+			return state.Observe(snapshot.Entries, snapshot.Items);
+		}
+
+		void AdvanceQueue(ProductionQueue queue)
+		{
+			var state = EnsureQueue(queue);
+			var snapshot = Snapshot(queue);
+			state.Advance(snapshot.Entries, snapshot.Items);
+		}
+
+		static (ProductionQueueEntry[] Entries, ProductionItem[] Items) Snapshot(
+			ProductionQueue queue)
+		{
+			var items = queue.AllQueued().ToArray();
+			var entries = items
+				.Select(item => new ProductionQueueEntry(item.Item, item.Infinite))
+				.ToArray();
+			return (entries, items);
+		}
+
+		bool IProductionQueueRevisionProvider.TryGetRevision(
+			ProductionQueue queue, out ulong revision)
+		{
+			if (queue != null && queues.TryGetValue(queue, out var state))
+			{
+				revision = state.Revision;
+				return true;
+			}
+
+			revision = 0;
+			return false;
+		}
+
+		internal void ObservePotentialMutation(Actor queueActor)
+		{
+			if (queueActor == null || queueActor.Owner != self.Owner)
+				return;
+
+			foreach (var queue in queueActor.TraitsImplementing<ProductionQueue>())
+			{
+				RefreshQueue(queue);
+				AdvanceQueue(queue);
+			}
+		}
+
 		public void ResolveOrder(Actor self, Order order)
 		{
 			switch (order.OrderString)
@@ -68,7 +250,7 @@ namespace AutoCnC.Platform.Traits
 				order.ExtraData == 0 ||
 				order.ExtraData > int.MaxValue ||
 				!ActionOrderBuilder.TryDecodeCancellationPayload(
-					order.TargetString, out var requestedItem, out var expectedQueue))
+					order.TargetString, out var requestedItem, out var expectedRevision))
 				return;
 
 			var queueActor = order.Target.Actor;
@@ -84,24 +266,22 @@ namespace AutoCnC.Platform.Traits
 			if (!queue.Enabled)
 				return;
 
-			var queued = queue.AllQueued().ToArray();
-			var currentQueue = queued
-				.Select(item => new ProductionQueueEntry(item.Item, item.Infinite))
-				.ToArray();
-			if (!ActionOrderBuilder.QueueMatches(expectedQueue, currentQueue))
+			var resolver = playerActor.Trait<SdkActionResolver>();
+			if (resolver.RefreshQueue(queue) != expectedRevision)
 				return;
 
+			var queued = queue.AllQueued().ToArray();
 			var count = (int)order.ExtraData;
 			var item = FindExactCancellationItem(
 				queued.Select(queuedItem => queuedItem.Item),
 				requestedItem,
 				order.ExtraData);
-			if (item == null)
-				return;
+			if (item != null)
+				queue.ResolveOrder(
+					queueActor,
+					ActionOrderBuilder.CancelProduction(queueActor, item, count));
 
-			queue.ResolveOrder(
-				queueActor,
-				ActionOrderBuilder.CancelProduction(queueActor, item, count));
+			resolver.AdvanceQueue(queue);
 		}
 
 		internal static string FindExactCancellationItem(
@@ -114,6 +294,49 @@ namespace AutoCnC.Platform.Traits
 
 			return ActionOrderBuilder.FindQueuedItem(
 				queuedItems, requestedItem, (int)requestedCount);
+		}
+	}
+
+	[TraitLocation(SystemActors.World)]
+	[Desc("Advances AutoC&C queue revisions before synchronized orders can mutate production.")]
+	public sealed class SdkQueueOrderObserverInfo : TraitInfo
+	{
+		public override object Create(ActorInitializer init) { return new SdkQueueOrderObserver(); }
+	}
+
+	public sealed class SdkQueueOrderObserver : IValidateOrder, ITick
+	{
+		void ITick.Tick(Actor self)
+		{
+			foreach (var pair in self.World.ActorsWithTrait<SdkActionResolver>())
+				pair.Trait.RefreshQueues();
+		}
+
+		public bool OrderValidation(
+			OrderManager orderManager, World world, int clientId, Order order)
+		{
+			switch (order.OrderString)
+			{
+				case "StartProduction":
+				case "CancelProduction":
+				case "ReturnOrder":
+				case "PurchaseOrder":
+					Observe(order.Subject);
+					break;
+
+				case "PlaceBuilding":
+					Observe(world.GetActorById(order.ExtraData));
+					break;
+			}
+
+			return true;
+		}
+
+		static void Observe(Actor queueActor)
+		{
+			queueActor?.Owner.PlayerActor
+				.TraitOrDefault<SdkActionResolver>()
+				?.ObservePotentialMutation(queueActor);
 		}
 	}
 }

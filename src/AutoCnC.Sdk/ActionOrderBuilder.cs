@@ -17,6 +17,8 @@ using OpenRA.Traits;
 
 namespace AutoCnC.Sdk
 {
+	internal readonly record struct ProductionQueueEntry(string Item, bool Infinite);
+
 	internal static class ActionOrderBuilder
 	{
 		public const string EnsureRepairOrder = "AutoCnCEnsureRepair";
@@ -29,11 +31,16 @@ namespace AutoCnC.Sdk
 			new("RepairBuilding", playerActor, target, false);
 
 		public static Order RequestCancelProduction(
-			Actor playerActor, in Target queueTarget, int queueIndex, string item, int count) =>
+			Actor playerActor,
+			in Target queueTarget,
+			int queueIndex,
+			string item,
+			int count,
+			uint expectedQueueVersion) =>
 			new(ExactCancelProductionOrder, playerActor, queueTarget, false)
 			{
 				TargetString = item,
-				ExtraLocation = new CPos(queueIndex, 0),
+				ExtraLocation = new CPos(queueIndex, unchecked((int)expectedQueueVersion)),
 				ExtraData = (uint)count,
 				SuppressVisualFeedback = true
 			};
@@ -79,7 +86,8 @@ namespace AutoCnC.Sdk
 			in UnitDecision decision,
 			uint queueActorId,
 			string queueName,
-			IEnumerable<string> queuedItems)
+			IEnumerable<string> queuedItems,
+			uint queueVersion)
 		{
 			var item = FindQueuedItem(queuedItems, decision.ItemName, decision.Count);
 			return item == null
@@ -87,9 +95,37 @@ namespace AutoCnC.Sdk
 				: decision with
 				{
 					TargetActorId = queueActorId,
+					TargetY = unchecked((int)queueVersion),
 					Queue = queueName,
 					ItemName = item
 				};
+		}
+
+		public static uint CancellationQueueVersion(in UnitDecision decision) =>
+			decision.Action == UnitAction.CancelProduction
+				? unchecked((uint)decision.TargetY)
+				: 0;
+
+		public static uint ProductionQueueVersion(IEnumerable<ProductionQueueEntry> entries)
+		{
+			const uint Offset = 2166136261;
+			const uint Prime = 16777619;
+
+			var hash = Offset;
+			var count = 0u;
+			foreach (var entry in entries)
+			{
+				hash = (hash ^ 0xFFu) * Prime;
+				if (entry.Item != null)
+					foreach (var character in entry.Item)
+						hash = (hash ^ character) * Prime;
+
+				hash = (hash ^ (entry.Infinite ? 1u : 0u)) * Prime;
+				count++;
+			}
+
+			hash = (hash ^ count) * Prime;
+			return hash == 0 ? 1u : hash;
 		}
 
 		public static string FindReadySupportPower(

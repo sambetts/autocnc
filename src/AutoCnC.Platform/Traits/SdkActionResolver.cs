@@ -83,8 +83,15 @@ namespace AutoCnC.Platform.Traits
 			if (!queue.Enabled)
 				return;
 
+			var queued = queue.AllQueued().ToArray();
+			var expectedVersion = unchecked((uint)order.ExtraLocation.Y);
+			var currentVersion = ActionOrderBuilder.ProductionQueueVersion(
+				queued.Select(item => new ProductionQueueEntry(item.Item, item.Infinite)));
+			if (expectedVersion == 0 || currentVersion != expectedVersion)
+				return;
+
 			var item = FindExactCancellationItem(
-				queue.AllQueued().Select(queued => queued.Item),
+				queued.Select(queuedItem => queuedItem.Item),
 				order.TargetString,
 				order.ExtraData);
 			if (item == null)

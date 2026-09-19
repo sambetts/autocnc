@@ -439,7 +439,10 @@ the queue does not contain that many matching entries, and the synchronized plat
 atomically checks the selected queue again before applying the engine cancellation. A stale
 request therefore cancels the exact count or nothing, never a partial count. `QueueStates()`
 includes the current item, completion percentage, cost, matching item count, and total queue
-length.
+length. The host keeps the request pending across local ticks using the player, concrete queue,
+item, count, and expected queue-composition version, so staggered controllers cannot enqueue the
+same cancellation while its synchronized order is still in flight. The intent is released only
+after that queue changes or the cancellation resolves and changes it.
 
 `ActivateSupportPower` accepts either a key from `SupportPowerState.Key` or its configured
 `OrderName`. The power must be active and ready. The SDK sends the same player-scoped, cell-targeted
@@ -447,9 +450,10 @@ order as the engine UI; it does not pick targets or reveal anything about the ta
 order name is resolved to a concrete ready key before duplicate comparison, so multiple charged
 instances can fire on successive evaluations.
 
-Repair, cancellation, and support-power requests are coalesced across every controller before
-orders are issued. Two modes cannot toggle the same repair off, multiply a cancellation count, or
-activate the same concrete power twice in one tick.
+Repair and support-power requests are coalesced across every controller before orders are issued.
+Cancellation coalescing additionally spans in-flight order latency. Two modes cannot toggle the
+same repair off, multiply a cancellation count, or activate the same concrete power twice in one
+tick.
 
 ### Sense → decide → act
 

@@ -82,12 +82,15 @@ it as authoritative context alongside the source and the evidence from one compl
   before applying the engine repair order.
 - Production cancellation is exact: queue, item, and positive count must still match the live
   queue when the synchronized order resolves, or nothing is cancelled. `ctx.QueueStates()` exposes
-  current item/progress/cost and counts.
+  current item/progress/cost and counts. The request remains globally pending across local ticks
+  until the synchronized resolution or a queue-composition change, so staggered producers cannot
+  duplicate it during order latency.
 - Support powers come from `ctx.SupportPowerStates()`, not faction-specific constants. Activate a
   ready active key or configured order name at a cell with `UnitDecision.ActivateSupportPower`;
   configured names resolve to concrete ready keys before duplicate suppression.
-- Player-scoped repair, cancellation, and support-power requests are coalesced across all
-  controllers before the tick's orders are issued.
+- Player-scoped repair and support-power requests are coalesced across all controllers before the
+  tick's orders are issued; cancellation coalescing additionally persists while the order is in
+  flight.
 - Returning the same intent repeatedly is cheap because the host suppresses duplicate orders.
 - Target selection should be stable. Re-picking equivalent targets every evaluation makes units
   dither.

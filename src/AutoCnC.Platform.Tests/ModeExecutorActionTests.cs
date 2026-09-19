@@ -59,15 +59,6 @@ namespace AutoCnC.Platform.Tests
 				UnitDecision.RepairBuilding(12, "repair")).Value;
 			var sameRepair = PlayerScopedActionKey.From(
 				UnitDecision.RepairBuilding(12, "other reason")).Value;
-			var cancelOne = PlayerScopedActionKey.From(
-				UnitDecision.CancelProduction("Vehicle", "mtnk", 1, "cancel") with
-				{ TargetActorId = 20 }).Value;
-			var cancelTwo = PlayerScopedActionKey.From(
-				UnitDecision.CancelProduction("Vehicle", "mtnk", 2, "cancel more") with
-				{ TargetActorId = 20 }).Value;
-			var otherQueue = PlayerScopedActionKey.From(
-				UnitDecision.CancelProduction("Vehicle", "mtnk", 1, "cancel") with
-				{ TargetActorId = 21 }).Value;
 			var firstPower = PlayerScopedActionKey.From(
 				UnitDecision.ActivateSupportPower("AirstrikeOrder_3", 4, 5, "fire")).Value;
 			var samePowerElsewhere = PlayerScopedActionKey.From(
@@ -78,14 +69,69 @@ namespace AutoCnC.Platform.Tests
 			Assert.Multiple(() =>
 			{
 				Assert.That(repair, Is.EqualTo(sameRepair));
-				Assert.That(cancelOne, Is.EqualTo(cancelTwo),
-					"counts must not accumulate through multiple controllers in one tick");
-				Assert.That(cancelOne, Is.Not.EqualTo(otherQueue));
 				Assert.That(firstPower, Is.EqualTo(samePowerElsewhere),
 					"one concrete power key can only be activated once per tick");
 				Assert.That(firstPower, Is.Not.EqualTo(otherPower),
 					"different concrete instances remain independently actionable");
 				Assert.That(PlayerScopedActionKey.From(UnitDecision.MoveTo(1, 2, "move")), Is.Null);
+			});
+		}
+
+		[Test]
+		public void CancellationIntentPersistsAcrossStaggeredEvaluationLatency()
+		{
+			const uint FirstVersion = 0x12345678;
+			const uint SecondVersion = 0x87654321;
+			var pending = new PendingPlayerActions();
+			var first = UnitDecision.CancelProduction("Vehicle", "mtnk", 2, "cancel") with
+			{
+				TargetActorId = 20,
+				TargetY = unchecked((int)FirstVersion)
+			};
+
+			pending.BeginTick(_ => true);
+			var firstControllerReserved = pending.TryReserve(7, first);
+
+			pending.BeginTick(_ => true);
+			var staggeredControllerReserved = pending.TryReserve(7, first);
+
+			pending.BeginTick(_ => false);
+			var second = first with { TargetY = unchecked((int)SecondVersion) };
+			var changedQueueReserved = pending.TryReserve(7, second);
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(firstControllerReserved, Is.True);
+				Assert.That(staggeredControllerReserved, Is.False,
+					"the in-flight intent must survive local tick boundaries");
+				Assert.That(changedQueueReserved, Is.True,
+					"a synchronized resolution or queue change releases the pending intent");
+			});
+		}
+
+		[Test]
+		public void CancellationIntentKeyIncludesPlayerQueueItemCountAndVersion()
+		{
+			const uint Version = 0x12345678;
+			var pending = new PendingPlayerActions();
+			var baseline = Cancellation(
+				queueActorId: 20, item: "mtnk", count: 2, queueVersion: Version);
+
+			pending.BeginTick(_ => true);
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(pending.TryReserve(7, baseline), Is.True);
+				Assert.That(pending.TryReserve(7, baseline), Is.False);
+				Assert.That(pending.TryReserve(8, baseline), Is.True);
+				Assert.That(pending.TryReserve(
+					7, Cancellation(21, "mtnk", 2, Version)), Is.True);
+				Assert.That(pending.TryReserve(
+					7, Cancellation(20, "e1", 2, Version)), Is.True);
+				Assert.That(pending.TryReserve(
+					7, Cancellation(20, "mtnk", 1, Version)), Is.True);
+				Assert.That(pending.TryReserve(
+					7, Cancellation(20, "mtnk", 2, Version + 1)), Is.True);
 			});
 		}
 
@@ -110,5 +156,13 @@ namespace AutoCnC.Platform.Tests
 					Is.Null);
 			});
 		}
+
+		static UnitDecision Cancellation(
+			uint queueActorId, string item, int count, uint queueVersion) =>
+			UnitDecision.CancelProduction("Vehicle", item, count, "cancel") with
+			{
+				TargetActorId = queueActorId,
+				TargetY = unchecked((int)queueVersion)
+			};
 	}
 }

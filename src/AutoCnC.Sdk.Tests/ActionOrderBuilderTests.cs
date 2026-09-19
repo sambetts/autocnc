@@ -57,7 +57,7 @@ namespace AutoCnC.Sdk.Tests
 		{
 			var target = Target.FromPos(new WPos(3072, 4096, 0));
 			var order = ActionOrderBuilder.RequestCancelProduction(
-				null, target, queueIndex: 3, item: "mtnk", count: 2);
+				null, target, queueIndex: 3, item: "mtnk", count: 2, expectedQueueVersion: 123);
 
 			Assert.Multiple(() =>
 			{
@@ -67,6 +67,7 @@ namespace AutoCnC.Sdk.Tests
 				Assert.That(order.Target.CenterPosition, Is.EqualTo(target.CenterPosition));
 				Assert.That(order.TargetString, Is.EqualTo("mtnk"));
 				Assert.That(order.ExtraLocation.X, Is.EqualTo(3));
+				Assert.That(unchecked((uint)order.ExtraLocation.Y), Is.EqualTo(123u));
 				Assert.That(order.ExtraData, Is.EqualTo(2u));
 				Assert.That(order.Queued, Is.False);
 				Assert.That(order.SuppressVisualFeedback, Is.True);
@@ -107,7 +108,7 @@ namespace AutoCnC.Sdk.Tests
 		{
 			var requested = UnitDecision.CancelProduction("Vehicle.GDI", "MTNK", 2, "cancel");
 			var resolved = ActionOrderBuilder.ResolveCancellation(
-				requested, 41, "Vehicle", new[] { "mtnk", "mtnk" }).Value;
+				requested, 41, "Vehicle", new[] { "mtnk", "mtnk" }, 0xFEDCBA98).Value;
 
 			Assert.Multiple(() =>
 			{
@@ -115,6 +116,47 @@ namespace AutoCnC.Sdk.Tests
 				Assert.That(resolved.Queue, Is.EqualTo("Vehicle"));
 				Assert.That(resolved.ItemName, Is.EqualTo("mtnk"));
 				Assert.That(resolved.Count, Is.EqualTo(2));
+				Assert.That(
+					ActionOrderBuilder.CancellationQueueVersion(resolved),
+					Is.EqualTo(0xFEDCBA98u));
+			});
+		}
+
+		[Test]
+		public void ProductionQueueVersionTracksCompositionButNotProgress()
+		{
+			var first = new[]
+			{
+				new ProductionQueueEntry("e1", false),
+				new ProductionQueueEntry("mtnk", false)
+			};
+			var sameComposition = new[]
+			{
+				new ProductionQueueEntry("e1", false),
+				new ProductionQueueEntry("mtnk", false)
+			};
+			var reordered = new[]
+			{
+				new ProductionQueueEntry("mtnk", false),
+				new ProductionQueueEntry("e1", false)
+			};
+			var infinite = new[]
+			{
+				new ProductionQueueEntry("e1", true),
+				new ProductionQueueEntry("mtnk", false)
+			};
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(
+					ActionOrderBuilder.ProductionQueueVersion(first),
+					Is.EqualTo(ActionOrderBuilder.ProductionQueueVersion(sameComposition)));
+				Assert.That(
+					ActionOrderBuilder.ProductionQueueVersion(first),
+					Is.Not.EqualTo(ActionOrderBuilder.ProductionQueueVersion(reordered)));
+				Assert.That(
+					ActionOrderBuilder.ProductionQueueVersion(first),
+					Is.Not.EqualTo(ActionOrderBuilder.ProductionQueueVersion(infinite)));
 			});
 		}
 

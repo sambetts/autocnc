@@ -16,6 +16,7 @@ using AutoCnC.Core;
 using AutoCnC.Sdk;
 using OpenRA;
 using OpenRA.Graphics;
+using OpenRA.Mods.Common.Traits;
 using OpenRA.Traits;
 
 namespace AutoCnC.Platform.Traits
@@ -32,13 +33,50 @@ namespace AutoCnC.Platform.Traits
 			{
 				UnitAction.RepairBuilding =>
 					new PlayerScopedActionKey(decision.Action, decision.TargetActorId, null, null),
-				UnitAction.CancelProduction =>
-					new PlayerScopedActionKey(
-						decision.Action, decision.TargetActorId, decision.Queue, decision.ItemName),
 				UnitAction.ActivateSupportPower =>
 					new PlayerScopedActionKey(decision.Action, 0, null, decision.Power),
 				_ => null
 			};
+		}
+	}
+
+	internal readonly record struct ProductionCancellationIntent(
+		uint PlayerActorId,
+		uint QueueActorId,
+		string Queue,
+		string ItemName,
+		int Count,
+		uint ExpectedQueueVersion)
+	{
+		public static ProductionCancellationIntent From(
+			uint playerActorId, in UnitDecision decision) =>
+			new(
+				playerActorId,
+				decision.TargetActorId,
+				decision.Queue,
+				decision.ItemName,
+				decision.Count,
+				ActionOrderBuilder.CancellationQueueVersion(decision));
+	}
+
+	internal sealed class PendingPlayerActions
+	{
+		readonly HashSet<PlayerScopedActionKey> currentTick = [];
+		readonly HashSet<ProductionCancellationIntent> cancellations = [];
+
+		public void BeginTick(Func<ProductionCancellationIntent, bool> cancellationIsCurrent)
+		{
+			currentTick.Clear();
+			cancellations.RemoveWhere(intent => !cancellationIsCurrent(intent));
+		}
+
+		public bool TryReserve(uint playerActorId, in UnitDecision decision)
+		{
+			if (decision.Action == UnitAction.CancelProduction)
+				return cancellations.Add(ProductionCancellationIntent.From(playerActorId, decision));
+
+			var action = PlayerScopedActionKey.From(decision);
+			return !action.HasValue || currentTick.Add(action.Value);
 		}
 	}
 
@@ -104,7 +142,7 @@ namespace AutoCnC.Platform.Traits
 		readonly World world;
 		readonly ModeExecutorInfo info;
 		readonly List<Order> pending = [];
-		readonly HashSet<PlayerScopedActionKey> pendingPlayerActions = [];
+		readonly PendingPlayerActions pendingPlayerActions = new();
 
 		BattleAssessor assessor;
 		BattleLog battleLog;
@@ -478,7 +516,7 @@ namespace AutoCnC.Platform.Traits
 				return;
 
 			pending.Clear();
-			pendingPlayerActions.Clear();
+			pendingPlayerActions.BeginTick(intent => CancellationIntentIsCurrent(player, intent));
 
 			foreach (var pair in world.ActorsWithTrait<ProgrammableController>())
 			{
@@ -592,8 +630,7 @@ namespace AutoCnC.Platform.Traits
 				return;
 			}
 
-			var playerAction = PlayerScopedActionKey.From(decision);
-			if (playerAction.HasValue && !pendingPlayerActions.Add(playerAction.Value))
+			if (!pendingPlayerActions.TryReserve(actor.Owner.PlayerActor.ActorID, decision))
 			{
 				controller.LastIssued = decision;
 				decisionTrace?.UnitDecisionEvaluated(GameSeconds, actor.Info.Name, actor.ActorID,
@@ -612,6 +649,38 @@ namespace AutoCnC.Platform.Traits
 				controller.ActiveModeName, decision, order.OrderString);
 			controller.LastIssued = decision;
 			pending.Add(order);
+		}
+
+		bool CancellationIntentIsCurrent(Player player, ProductionCancellationIntent intent)
+		{
+			if (player?.PlayerActor == null || player.PlayerActor.ActorID != intent.PlayerActorId)
+				return false;
+
+			var queueActor = world.GetActorById(intent.QueueActorId);
+			if (queueActor == null || queueActor.IsDead || !queueActor.IsInWorld ||
+				queueActor.Owner != player)
+				return false;
+
+			var queue = queueActor.TraitsImplementing<ProductionQueue>()
+				.FirstOrDefault(candidate =>
+					candidate.Enabled &&
+					string.Equals(
+						candidate.Info.Group ?? candidate.Info.Type,
+						intent.Queue,
+						StringComparison.OrdinalIgnoreCase));
+			if (queue == null)
+				return false;
+
+			var queued = queue.AllQueued().ToArray();
+			var currentVersion = ActionOrderBuilder.ProductionQueueVersion(
+				queued.Select(item => new ProductionQueueEntry(item.Item, item.Infinite)));
+			if (currentVersion != intent.ExpectedQueueVersion)
+				return false;
+
+			return ActionOrderBuilder.FindQueuedItem(
+				queued.Select(item => item.Item),
+				intent.ItemName,
+				intent.Count) != null;
 		}
 
 		internal static bool ShouldSuppressRepeatedIntent(UnitAction action, bool repeat, bool actorIsIdle)

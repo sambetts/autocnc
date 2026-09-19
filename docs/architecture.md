@@ -145,6 +145,9 @@ ModeExecutor.Tick                          (client-local, local player only)
 Two throttles keep the order stream sane: duplicate-intent suppression, and `MaxOrdersPerTick`.
 Repair and exact production cancellation use synchronized player-actor requests handled by
 `SdkActionResolver`; it revalidates live simulation state before applying the native OpenRA order.
+Cancellation requests also enter a persistent client-local in-flight registry keyed by player,
+concrete queue, item, count, and queue-composition version. Staggered controllers therefore share
+one pending intent until synchronized resolution or any queue-composition change invalidates it.
 
 ### Assignment precedence
 

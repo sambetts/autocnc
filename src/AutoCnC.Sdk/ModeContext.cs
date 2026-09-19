@@ -917,11 +917,13 @@ namespace AutoCnC.Sdk
 						if (queue == null)
 							return null;
 
+						var queued = queue.AllQueued().ToArray();
 						return ActionOrderBuilder.ResolveCancellation(
 							decision,
 							queue.Actor.ActorID,
 							queue.Info.Group ?? queue.Info.Type,
-							queue.AllQueued().Select(queued => queued.Item));
+							queued.Select(item => item.Item),
+							QueueVersion(queued));
 					}
 
 				case UnitAction.ActivateSupportPower:
@@ -1016,8 +1018,14 @@ namespace AutoCnC.Sdk
 						(decision.TargetActorId != 0 && queue.Actor.ActorID != decision.TargetActorId))
 						return null;
 
+					var queued = queue.AllQueued().ToArray();
+					var currentVersion = QueueVersion(queued);
+					var expectedVersion = ActionOrderBuilder.CancellationQueueVersion(decision);
+					if (expectedVersion != 0 && expectedVersion != currentVersion)
+						return null;
+
 					var item = ActionOrderBuilder.FindQueuedItem(
-						queue.AllQueued().Select(queued => queued.Item),
+						queued.Select(queuedItem => queuedItem.Item),
 						decision.ItemName,
 						decision.Count);
 					var queueIndex = item == null ? -1 : QueueIndex(queue);
@@ -1028,7 +1036,8 @@ namespace AutoCnC.Sdk
 							Target.FromActor(queue.Actor),
 							queueIndex,
 							item,
-							decision.Count);
+							decision.Count,
+							expectedVersion == 0 ? currentVersion : expectedVersion);
 				}
 
 				case UnitAction.PlaceBuilding:
@@ -1093,6 +1102,10 @@ namespace AutoCnC.Sdk
 
 			return -1;
 		}
+
+		static uint QueueVersion(IEnumerable<ProductionItem> queued) =>
+			ActionOrderBuilder.ProductionQueueVersion(
+				queued.Select(item => new ProductionQueueEntry(item.Item, item.Infinite)));
 
 		#endregion
 	}

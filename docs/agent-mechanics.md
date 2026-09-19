@@ -232,7 +232,9 @@ permitted way to know where anything is.
 - `CancelProduction` requires an exact queue, item, and positive count. It emits no partial or
   broad cancellation when the queue no longer matches: a synchronized player-order resolver
   atomically revalidates the selected queue at order resolution and cancels the exact count or
-  nothing.
+  nothing. Its player/queue/item/count/composition-version intent remains pending across local
+  ticks until synchronized resolution or another queue-composition change, preventing staggered
+  controllers from duplicating an in-flight request.
 - `RepairBuilding` starts repair only for a live owned damaged `RepairableBuilding` without an
   existing repair request or active repair. The synchronized resolver repeats that check before
   applying OpenRA's player-scoped repair order.
@@ -240,8 +242,9 @@ permitted way to know where anything is.
   either the manager key or configured order name, requires an active ready power, and targets the
   supplied cell without revealing anything about it. Order names resolve to concrete ready keys
   before duplicate comparison, allowing multiple charged instances to fire successively.
-- The host coalesces repair, cancellation, and support-power requests globally for the local
-  player before issuing orders, rather than relying on each controller's duplicate history.
+- The host coalesces repair and support-power requests globally for the local player before
+  issuing orders, and keeps cancellation intents globally pending across order latency, rather
+  than relying on each controller's duplicate history.
 - For deployment, check both `ctx.CanDeploy` and `ctx.DeploysIntoBuilding`; otherwise a
   construction yard can repeatedly pack and unpack.
 - Do not retain lists returned by sensing methods; their buffers are reused.

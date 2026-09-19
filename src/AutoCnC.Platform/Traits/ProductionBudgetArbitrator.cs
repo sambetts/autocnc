@@ -16,21 +16,46 @@ using AutoCnC.Core;
 
 namespace AutoCnC.Platform.Traits
 {
+	internal readonly record struct ProductionAdmissionIdentity(
+		uint ControllerActorId,
+		uint QueueActorId,
+		int QueueIndex) : IComparable<ProductionAdmissionIdentity>
+	{
+		public int CompareTo(ProductionAdmissionIdentity other)
+		{
+			var actor = ControllerActorId.CompareTo(other.ControllerActorId);
+			if (actor != 0)
+				return actor;
+
+			var queueActor = QueueActorId.CompareTo(other.QueueActorId);
+			return queueActor != 0 ? queueActor : QueueIndex.CompareTo(other.QueueIndex);
+		}
+	}
+
 	internal sealed class ProductionAdmissionCursor
 	{
-		ulong nextRound;
+		ProductionAdmissionIdentity? lastAdmitted;
 
-		public ulong NextRound => nextRound;
+		public ProductionAdmissionIdentity? LastAdmitted => lastAdmitted;
 
-		public bool TryBeginBatch(int pendingOrderCount, out ulong round)
+		public IReadOnlyList<T> Prioritize<T>(
+			IEnumerable<T> pending,
+			Func<T, ProductionAdmissionIdentity> identity)
 		{
-			round = nextRound;
-			if (pendingOrderCount <= 0)
-				return false;
+			var ordered = pending.OrderBy(identity).ToArray();
+			if (ordered.Length == 0 || !lastAdmitted.HasValue)
+				return ordered;
 
-			nextRound++;
-			return true;
+			var start = Array.FindIndex(
+				ordered,
+				item => identity(item).CompareTo(lastAdmitted.Value) > 0);
+			if (start <= 0)
+				return ordered;
+
+			return ordered.Skip(start).Concat(ordered.Take(start)).ToArray();
 		}
+
+		public void Admit(in ProductionAdmissionIdentity identity) => lastAdmitted = identity;
 	}
 
 	internal sealed class ProductionBudgetLease
@@ -111,7 +136,11 @@ namespace AutoCnC.Platform.Traits
 		bool HasQueueRevision,
 		ulong OrderRevision,
 		bool HasOrderRevision,
-		int QueuedItemCount = 0);
+		int QueuedItemCount = 0)
+	{
+		public ProductionAdmissionIdentity AdmissionIdentity =>
+			new(ControllerActorId, QueueActorId, QueueIndex);
+	}
 
 	internal readonly record struct ProductionCommitmentKey(
 		ulong OrderId,
@@ -395,7 +424,6 @@ namespace AutoCnC.Platform.Traits
 			int currentCash,
 			IEnumerable<ProductionBudgetCandidate> candidates,
 			int maxOrders,
-			ulong admissionRound = 0,
 			long committedOwnerCost = 0,
 			long committedNonOwnerCost = 0)
 		{
@@ -410,7 +438,7 @@ namespace AutoCnC.Platform.Traits
 			return EvaluatePrioritized(
 				proposed,
 				currentCash,
-				Rotate(ordered, admissionRound),
+				ordered,
 				maxOrders,
 				committedOwnerCost,
 				committedNonOwnerCost);
@@ -492,16 +520,6 @@ namespace AutoCnC.Platform.Traits
 			}
 
 			return results;
-		}
-
-		static IEnumerable<T> Rotate<T>(T[] values, ulong admissionRound)
-		{
-			if (values.Length == 0)
-				yield break;
-
-			var offset = (int)(admissionRound % (ulong)values.Length);
-			for (var index = 0; index < values.Length; index++)
-				yield return values[(offset + index) % values.Length];
 		}
 
 		static long AddSaturating(long value, long addition) =>

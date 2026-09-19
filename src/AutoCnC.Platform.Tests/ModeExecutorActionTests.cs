@@ -414,10 +414,13 @@ namespace AutoCnC.Platform.Tests
 				Candidate(4, 4, "Infantry", "e1", 600, ownsReservation: false)
 			};
 			var admitted = new List<uint>();
+			var cursor = new ProductionAdmissionCursor();
 
 			for (ulong round = 0; round < (ulong)stableControllerOrder.Length; round++)
 			{
-				var priority = ModeExecutor.RotateAdmission(stableControllerOrder, round).ToArray();
+				var priority = cursor.Prioritize(
+					stableControllerOrder,
+					actorId => new ProductionAdmissionIdentity(actorId, 0, -1));
 				var productionPriority = priority
 					.Where(actorId => actorId is 2 or 4)
 					.Select(actorId => production.Single(candidate =>
@@ -435,7 +438,9 @@ namespace AutoCnC.Platform.Tests
 				var eligible = priority.Where(actorId =>
 					actorId is 1 or 3 || allowedProduction.Contains(actorId));
 
-				admitted.Add(eligible.Take(1).Single());
+				var winner = eligible.Take(1).Single();
+				admitted.Add(winner);
+				cursor.Admit(new ProductionAdmissionIdentity(winner, 0, -1));
 			}
 
 			Assert.That(admitted, Is.EqualTo(stableControllerOrder),
@@ -443,25 +448,45 @@ namespace AutoCnC.Platform.Tests
 		}
 
 		[Test]
-		public void AdmissionRoundAdvancesOnlyWhenEightTickControllersProduceABatch()
+		public void IdentityCursorPreventsStarvationAcrossMixedControllerCadences()
 		{
 			var cursor = new ProductionAdmissionCursor();
-			var controllers = new[] { 10u, 20u };
+			var controllers = new[] { 1u, 2u, 3u };
+			var intervals = new Dictionary<uint, int>
+			{
+				[1] = 2,
+				[2] = 6,
+				[3] = 2
+			};
+			var nextDue = controllers.ToDictionary(actorId => actorId, _ => 0);
 			var admitted = new List<uint>();
 
-			for (var worldTick = 0; worldTick <= 24; worldTick++)
+			for (var worldTick = 0; worldTick <= 16; worldTick++)
 			{
-				var pendingCount = worldTick % 8 == 0 ? controllers.Length : 0;
-				if (!cursor.TryBeginBatch(pendingCount, out var round))
+				var due = controllers.Where(actorId => worldTick >= nextDue[actorId]).ToArray();
+				if (due.Length == 0)
 					continue;
 
-				admitted.Add(ModeExecutor.RotateAdmission(controllers, round).First());
+				foreach (var actorId in due)
+					nextDue[actorId] = worldTick + intervals[actorId];
+
+				var priority = cursor.Prioritize(
+					due,
+					actorId => new ProductionAdmissionIdentity(actorId, 0, -1));
+				var winner = priority.Take(1).Single();
+				admitted.Add(winner);
+				cursor.Admit(new ProductionAdmissionIdentity(winner, 0, -1));
+
+				foreach (var rejected in priority.Skip(1))
+					nextDue[rejected] = worldTick + 1;
 			}
 
 			Assert.Multiple(() =>
 			{
-				Assert.That(admitted, Is.EqualTo(new[] { 10u, 20u, 10u, 20u }));
-				Assert.That(cursor.NextRound, Is.EqualTo(4));
+				Assert.That(admitted.Take(3), Is.EqualTo(new[] { 1u, 2u, 3u }));
+				Assert.That(admitted.Count(actorId => actorId == 2), Is.GreaterThanOrEqualTo(2),
+					"the slower six-tick controller must not be frozen out by the two-tick pair");
+				Assert.That(cursor.LastAdmitted?.ControllerActorId, Is.EqualTo(admitted.Last()));
 			});
 		}
 

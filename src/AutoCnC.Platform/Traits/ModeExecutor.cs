@@ -143,6 +143,10 @@ namespace AutoCnC.Platform.Traits
 		public UnitDecision Decision { get; }
 		public Order Order { get; }
 		public ProductionBudgetCandidate? ProductionCandidate { get; }
+		public ProductionAdmissionIdentity AdmissionIdentity =>
+			ProductionCandidate.HasValue
+				? ProductionCandidate.Value.AdmissionIdentity
+				: new ProductionAdmissionIdentity(Actor.ActorID, 0, -1);
 
 		public PendingModeOrder(
 			Actor actor,
@@ -977,8 +981,7 @@ namespace AutoCnC.Platform.Traits
 			Player player,
 			in ProductionBudgetScope budgetScope)
 		{
-			if (!productionAdmission.TryBeginBatch(
-				pendingBudgetedOrders.Count, out var admissionRound))
+			if (pendingBudgetedOrders.Count == 0)
 				return;
 
 			var resources = player.PlayerActor.TraitOrDefault<PlayerResources>();
@@ -987,9 +990,9 @@ namespace AutoCnC.Platform.Traits
 				budgetScope,
 				productionCommitments.ProjectedSpend(budgetScope),
 				QueuedProductionCosts(player));
-			var prioritized = RotateAdmission(
-				pendingBudgetedOrders.OrderBy(item => item.Actor.ActorID).ToArray(),
-				admissionRound).ToArray();
+			var prioritized = productionAdmission.Prioritize(
+				pendingBudgetedOrders,
+				item => item.AdmissionIdentity);
 			var productionEvaluations = ProductionBudgetArbitrator.EvaluatePrioritized(
 				budgetScope.Budget,
 				currentCash,
@@ -1000,7 +1003,7 @@ namespace AutoCnC.Platform.Traits
 				committed.OwnerCost,
 				committed.NonOwnerCost)
 				.ToDictionary(evaluation => evaluation.Candidate.ControllerActorId);
-			var eligible = new List<PendingModeOrder>(prioritized.Length);
+			var eligible = new List<PendingModeOrder>(prioritized.Count);
 
 			foreach (var item in prioritized)
 			{
@@ -1050,12 +1053,15 @@ namespace AutoCnC.Platform.Traits
 				}
 
 				if (QueueIssuedDecision(
-					item.Actor, item.Controller, item.Decision, item.Order, enforceOrderLimit: true) &&
-					item.ProductionCandidate.HasValue)
-					productionCommitments.Commit(
-						item.ProductionCandidate.Value,
-						world.WorldTick,
-						ProductionCommitmentTimeoutTicks);
+					item.Actor, item.Controller, item.Decision, item.Order, enforceOrderLimit: true))
+				{
+					productionAdmission.Admit(item.AdmissionIdentity);
+					if (item.ProductionCandidate.HasValue)
+						productionCommitments.Commit(
+							item.ProductionCandidate.Value,
+							world.WorldTick,
+							ProductionCommitmentTimeoutTicks);
+				}
 			}
 		}
 
@@ -1173,17 +1179,6 @@ namespace AutoCnC.Platform.Traits
 			controller.NextEvaluationTick = world.WorldTick == int.MaxValue
 				? int.MaxValue
 				: world.WorldTick + 1;
-
-		internal static IEnumerable<T> RotateAdmission<T>(
-			IReadOnlyList<T> values, ulong admissionRound)
-		{
-			if (values.Count == 0)
-				yield break;
-
-			var offset = (int)(admissionRound % (ulong)values.Count);
-			for (var index = 0; index < values.Count; index++)
-				yield return values[(offset + index) % values.Count];
-		}
 
 		bool CancellationIntentIsCurrent(Player player, ProductionCancellationIntent intent)
 		{

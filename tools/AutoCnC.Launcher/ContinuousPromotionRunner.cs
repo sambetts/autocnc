@@ -49,6 +49,7 @@ namespace AutoCnC.Launcher
 		public IReadOnlyList<ContinuousBenchmarkScenario> Scenarios { get; init; } = [];
 		public string CandidateAssemblySha256 { get; set; }
 		public string ControlAssemblySha256 { get; set; }
+		public bool NoChanges { get; init; }
 	}
 
 	public sealed class ContinuousBenchmarkScenario
@@ -139,8 +140,40 @@ namespace AutoCnC.Launcher
 			var candidateFingerprint = WorkspaceSnapshot.CaptureImmutableCurrent(run,
 				run.CandidateSourceDirectory, run.CandidateSourceManifestPath);
 			if (string.Equals(candidateFingerprint, championFingerprint, StringComparison.Ordinal))
-				throw new InvalidDataException(
-					"The candidate source is identical to the pre-agent champion.");
+			{
+				PrepareDirectory(run.CandidateArtifactDirectory);
+				PrepareDirectory(run.ControlArtifactDirectory);
+				PrepareDirectory(run.CandidateBenchmarkRunsDirectory);
+				PrepareDirectory(run.ControlBenchmarkRunsDirectory);
+				DeleteIfExists(run.CandidateBenchmarkResultPath);
+				DeleteIfExists(run.ControlBenchmarkResultPath);
+				DeleteIfExists(run.BenchmarkResultPath);
+				DeleteIfExists(run.PromotionEvaluationPath);
+				run.BeginContinuousEvaluation(candidateFingerprint, championFingerprint,
+					benchmark, difficulty);
+				var noChangeExperiment = run.Manifest.Experiment;
+				Record(run, new PairedBenchmarkEvaluation
+				{
+					GeneratedUtc = DateTime.UtcNow,
+					Benchmark = benchmark,
+					Batch = $"promotion-{noChangeExperiment.Id}-{noChangeExperiment.EvaluationAttempt:D2}-no-change",
+					Verdict = PromotionVerdicts.Promote,
+					Basis = "No source changes",
+					Reason = "The agent made no source changes; the existing champion remains active.",
+					ExpectedMatchesPerArm = selection.Scenarios.Count
+				});
+				run.MarkContinuousPromoted();
+				return new ContinuousEvaluationPlan
+				{
+					Run = run,
+					Benchmark = benchmark,
+					Difficulty = difficulty,
+					CandidateFingerprint = candidateFingerprint,
+					ChampionFingerprint = championFingerprint,
+					Scenarios = selection.Scenarios,
+					NoChanges = true
+				};
+			}
 			var candidateProject = Under(run.CandidateSourceDirectory, relativeProject);
 			var controlProject = Under(run.ControlSourceDirectory, relativeProject);
 			if (!File.Exists(candidateProject) || !File.Exists(controlProject))

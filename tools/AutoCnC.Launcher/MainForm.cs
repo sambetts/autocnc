@@ -2232,6 +2232,20 @@ namespace AutoCnC.Launcher
 				run = continuousEvaluationPlan.Run;
 				continuousCandidateRun = run;
 				activeTrainingRun = run;
+				if (continuousEvaluationPlan.NoChanges)
+				{
+					pendingContinuousAction = continuousLoop.EvaluationCompleted(
+						ContinuousEvaluationDecision.Promote);
+					if (SamePath(activeTrainingRun?.RunDirectory, run.RunDirectory))
+						activeTrainingRun = null;
+					continuousEvaluationPlan = null;
+					AppendImprovementOutput(
+						"The agent made no source changes; keeping the existing champion.");
+					RefreshFeedbackRun(run);
+					RunNext();
+					return;
+				}
+
 				queue.Clear();
 				EnqueueContinuousStep(run,
 					continuousPromotion.BuildArm(repo, continuousEvaluationPlan,

@@ -70,6 +70,7 @@ namespace AutoCnC.Launcher
 			"$workerPath = $env:AUTOCNC_WORKER_OWNERSHIP\n" +
 			"$workerGate = $env:AUTOCNC_WORKER_GATE\n" +
 			"if ($workerGate) { while (-not (Test-Path -LiteralPath $workerGate)) { Start-Sleep -Milliseconds 10 } }\n" +
+			"$exitCode = 0\n" +
 			"try {\n" +
 			"    $job = @((ConvertFrom-Json -InputObject $env:AUTOCNC_SCRIPT_JOB))\n" +
 			"    $script = [string]$job[0]\n" +
@@ -82,28 +83,37 @@ namespace AutoCnC.Launcher
 			"        if ($parseErrors -and $parseErrors.Count -gt 0) {\n" +
 			"            throw \"$script is not valid PowerShell $($PSVersionTable.PSVersion): $($parseErrors[0].Message) (line $($parseErrors[0].Extent.StartLineNumber))\"\n" +
 			"        }\n" +
-			"        throw \"$script exposes no parameter metadata.\"\n" +
-			"    }\n" +
-			"    $parameters = @{}\n" +
-			"    for ($i = 1; $i -lt $job.Count; $i++) {\n" +
-			"        $name = ([string]$job[$i]).TrimStart('-')\n" +
-			"        $metadata = $declared[$name]\n" +
-			"        if ($null -eq $metadata) {\n" +
-			"            $metadata = @($declared.Values | Where-Object { $_.Aliases -contains $name })[0]\n" +
+			"        if ($job.Count -gt 1) { throw \"$script exposes no parameter metadata.\"\n" +
 			"        }\n" +
-			"        if ($null -eq $metadata) { throw \"Unknown parameter '-$name' for $script.\" }\n" +
-			"        if ($metadata.ParameterType -eq [System.Management.Automation.SwitchParameter]) {\n" +
-			"            $parameters[$metadata.Name] = $true\n" +
-			"        } else {\n" +
-			"            if (++$i -ge $job.Count) { throw \"Parameter '-$name' needs a value.\" }\n" +
-			"            $parameters[$metadata.Name] = [string]$job[$i]\n" +
+			"        & $script\n" +
+			"    } else {\n" +
+			"        $parameters = @{}\n" +
+			"        for ($i = 1; $i -lt $job.Count; $i++) {\n" +
+			"            $name = ([string]$job[$i]).TrimStart('-')\n" +
+			"            $metadata = $declared[$name]\n" +
+			"            if ($null -eq $metadata) {\n" +
+			"                $metadata = @($declared.Values | Where-Object { $_.Aliases -contains $name })[0]\n" +
+			"            }\n" +
+			"            if ($null -eq $metadata) { throw \"Unknown parameter '-$name' for $script.\" }\n" +
+			"            if ($metadata.ParameterType -eq [System.Management.Automation.SwitchParameter]) {\n" +
+			"                $parameters[$metadata.Name] = $true\n" +
+			"            } else {\n" +
+			"                if (++$i -ge $job.Count) { throw \"Parameter '-$name' needs a value.\" }\n" +
+			"                $parameters[$metadata.Name] = [string]$job[$i]\n" +
+			"            }\n" +
 			"        }\n" +
+			"        & $command @parameters\n" +
 			"    }\n" +
-			"    & $command @parameters\n" +
+			"    if ($LASTEXITCODE -is [int]) { $exitCode = $LASTEXITCODE }\n" +
+			"} catch {\n" +
+			"    [Console]::Error.WriteLine(($_ | Out-String))\n" +
+			"    $exitCode = 1\n" +
 			"} finally {\n" +
+			"    if ($LASTEXITCODE -is [int] -and $LASTEXITCODE -ne 0) { $exitCode = $LASTEXITCODE }\n" +
 			"    if ($workerPath) { Remove-Item -LiteralPath $workerPath -Force -ErrorAction SilentlyContinue }\n" +
 			"    if ($workerGate) { Remove-Item -LiteralPath $workerGate -Force -ErrorAction SilentlyContinue }\n" +
-			"}\n";
+			"}\n" +
+			"exit $exitCode\n";
 
 		readonly object outputLock = new();
 		readonly List<string> currentOutput = [];
@@ -177,7 +187,7 @@ namespace AutoCnC.Launcher
 				// parameterless wait is what flushes them, so nothing is lost off the end.
 				started.WaitForExit();
 
-				var code = started.ExitCode;
+				var code = started.ExitCode == 0 ? 0 : 1;
 				lock (outputLock)
 					LastOutput = currentOutput.ToArray();
 
@@ -419,6 +429,7 @@ namespace AutoCnC.Launcher
 					return;
 
 				running.Kill(entireProcessTree: true);
+				running.WaitForExit();
 			}
 			catch (InvalidOperationException)
 			{
@@ -476,9 +487,24 @@ namespace AutoCnC.Launcher
 		/// </summary>
 		static string PowerShellPath()
 		{
+			var installed = Path.Combine(
+				Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+				"PowerShell", "7", "pwsh.exe");
+			if (File.Exists(installed))
+				return installed;
+
+			var searchPath = Environment.GetEnvironmentVariable("PATH");
+			if (!string.IsNullOrWhiteSpace(searchPath))
+				foreach (var directory in searchPath.Split(Path.PathSeparator,
+					StringSplitOptions.RemoveEmptyEntries))
+				{
+					var candidate = Path.Combine(directory.Trim(), "pwsh.exe");
+					if (File.Exists(candidate))
+						return candidate;
+				}
+
 			foreach (var candidate in new[]
 			{
-				Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "PowerShell", "7", "pwsh.exe"),
 				Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "powershell.exe")
 			})
 			{

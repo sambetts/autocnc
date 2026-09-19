@@ -97,6 +97,35 @@ namespace AutoCnC.Launcher.Tests
 		}
 
 		[Test]
+		public void NoSourceChangeKeepsChampionAndWritesPromotionEvidence()
+		{
+			var run = TrainingRun.Create(project, new TrainingBattleConfiguration(),
+				Path.Combine(root, "no-change-runs"));
+			promotion.CaptureChampion(run);
+			run.ContinuousAgentStarted("agent");
+			run.AgentFinished(0, 0);
+
+			var plan = promotion.PrepareEvaluation(repo, run);
+			run = plan.Run;
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(plan.NoChanges, Is.True);
+				Assert.That(run.Manifest.Experiment.State,
+					Is.EqualTo(TrainingExperimentStates.Promoted));
+				Assert.That(run.Manifest.Experiment.Decision,
+					Is.EqualTo(PromotionVerdicts.Promote));
+				Assert.That(File.Exists(run.PromotionEvaluationPath), Is.True);
+			});
+
+			var evaluation = JsonSerializer.Deserialize<PairedBenchmarkEvaluation>(
+				File.ReadAllText(run.PromotionEvaluationPath),
+				new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+			Assert.That(evaluation.Verdict, Is.EqualTo(PromotionVerdicts.Promote));
+			Assert.That(evaluation.Basis, Is.EqualTo("No source changes"));
+		}
+
+		[Test]
 		public void ContinuousEvaluationDefaultsToHardTrainingBenchmark()
 		{
 			var settings = new LauncherSettings();

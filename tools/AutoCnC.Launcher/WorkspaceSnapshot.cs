@@ -67,6 +67,7 @@ namespace AutoCnC.Launcher
 				WorkspaceRoot = Path.GetFullPath(run.Manifest.BotDirectory),
 				CreatedUtc = DateTime.UtcNow
 			};
+			var before = BotWorkspace.Fingerprint(manifest.WorkspaceRoot);
 
 			foreach (var file in BotWorkspace.SourceFiles(manifest.WorkspaceRoot))
 			{
@@ -79,6 +80,16 @@ namespace AutoCnC.Launcher
 					RelativePath = relative,
 					Sha256 = BotWorkspace.Sha256(destination)
 				});
+			}
+
+			var after = BotWorkspace.Fingerprint(manifest.WorkspaceRoot);
+			var captured = BotWorkspace.Fingerprint(run.SnapshotDirectory);
+			if (!string.Equals(before, after, StringComparison.Ordinal) ||
+				!string.Equals(before, captured, StringComparison.Ordinal))
+			{
+				DeleteTree(run.SnapshotDirectory);
+				throw new InvalidOperationException(
+					"The bot workspace changed while its champion snapshot was being captured.");
 			}
 
 			WriteAtomic(run.SnapshotManifestPath, JsonSerializer.Serialize(manifest, JsonOptions));

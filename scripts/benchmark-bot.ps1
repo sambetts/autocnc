@@ -337,7 +337,7 @@ function Complete-Match($job) {
             Status = 'Undefined'
             Succeeded = $false
             Attempts = $job.Attempts
-            Error = $job.Error ?? 'No battle log was recorded.'
+            Error = if ($job.Error) { $job.Error } else { 'No battle log was recorded.' }
             Outcome = 'Undefined'
             Fitness = $null
             EarnedPerSecond = $null
@@ -379,7 +379,13 @@ function Complete-Match($job) {
         Status = if ($valid) { 'Completed' } else { 'Undefined' }
         Succeeded = $valid
         Attempts = [math]::Max(1, $job.Attempts)
-        Error = if ($valid) { $null } else { $job.Error ?? "Outcome was $($summary.fight.outcome)." }
+        Error = if ($valid) {
+            $null
+        } elseif ($job.Error) {
+            $job.Error
+        } else {
+            "Outcome was $($summary.fight.outcome)."
+        }
         Outcome = $summary.fight.outcome
         Fitness = $summary.fitness.total
         EarnedPerSecond = $summary.headline.creditsEarnedPerSecond

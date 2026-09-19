@@ -112,6 +112,9 @@ namespace AutoCnC.Evidence
 		{
 			if (candidate == null || control == null)
 				throw new InvalidDataException("Both immutable arm results are required.");
+			if (candidate.SchemaVersion != 1 || control.SchemaVersion != 1)
+				throw new InvalidDataException(
+					"Candidate and control must both use benchmark result schema version 1.");
 			if (string.IsNullOrWhiteSpace(batch))
 				throw new InvalidDataException("The combined paired batch needs an identifier.");
 			if (string.IsNullOrWhiteSpace(candidate.Batch) ||
@@ -135,7 +138,7 @@ namespace AutoCnC.Evidence
 			var controlRows = SingleArm(control, "control");
 			var combined = new BenchmarkResultDocument
 			{
-				SchemaVersion = Math.Max(candidate.SchemaVersion, control.SchemaVersion),
+				SchemaVersion = 1,
 				GeneratedUtc = DateTime.UtcNow,
 				Benchmark = candidate.Benchmark,
 				Batch = batch,

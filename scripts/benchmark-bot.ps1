@@ -34,8 +34,9 @@
     alone: the revision is checked out into a temporary worktree and built there.
 
 .PARAMETER Parallel
-    How many matches to run at once. Defaults to 1. Each match is a separate process with its own
-    evidence directory, so they do not interfere; the ceiling is CPU and memory.
+    Reserved concurrency ceiling. Multiple OpenRA processes currently share local-random/profile
+    state on supported desktop platforms, so matches run sequentially for reliable retries and
+    evidence even when a larger value is supplied.
 
 .PARAMETER MatchRetries
     How many times to retry a match whose game process fails before recording it as Undefined.
@@ -170,7 +171,7 @@ function New-MatchPlan($arm, $root, $revision, $bot) {
     $difficulty = if ($Difficulty) { $Difficulty } else { $set.difficulty }
     $maxSeconds = if ($MaxGameSeconds -ge 0) {
         $MaxGameSeconds
-    } elseif ($set.maxGameSeconds) {
+    } elseif ($null -ne $set.maxGameSeconds) {
         $set.maxGameSeconds
     } else {
         5400
@@ -274,35 +275,12 @@ function Invoke-Arm($plan) {
         }
     }
 
-    if ($Parallel -le 1) {
-        & $runSequentially $plan
-        return
+    if ($Parallel -gt 1) {
+        Write-Warning ('Parallel game processes share OpenRA local-random/profile state on this ' +
+            'platform. Running sequentially so retries and evidence status remain reliable.')
     }
 
-    # One process per match with its own evidence paths, so matches are independent. Throttled
-    # rather than unbounded: each runs the simulation at CPU maximum.
-    try {
-        $plan | ForEach-Object -ThrottleLimit $Parallel -Parallel {
-            $job = $_
-            Write-Host "    [$($job.Arm)] $($job.Map) $($job.Faction) vs $($job.BotFaction) seed $($job.Seed)"
-            New-Item -ItemType Directory -Path $job.Evidence -Force | Out-Null
-            $arguments = $job.Arguments
-            & $job.Script @arguments 2>&1 | Out-String -Width 200 | Out-Null
-        }
-    }
-    catch {
-        $unfinished = @($plan | Where-Object {
-            -not (Test-Path -LiteralPath (Join-Path $_.Evidence 'battle.csv'))
-        })
-
-        if ($unfinished.Count -eq 0) {
-            throw
-        }
-
-        Write-Warning ("Parallel execution failed; retrying {0} unfinished match(es) sequentially. {1}" -f `
-                $unfinished.Count, $_.Exception.Message)
-        & $runSequentially $unfinished
-    }
+    & $runSequentially $plan
 }
 
 <#
@@ -468,6 +446,26 @@ function Compare-PairedResults($candidateResults, $controlResults) {
         }
 
         $controlResult = $controlByScenario[$key]
+        if (-not $candidateResult.Succeeded -or -not $controlResult.Succeeded) {
+            $pairs += [pscustomobject]@{
+                Repeat = $candidateResult.Repeat
+                Scenario = $candidateResult.Scenario
+                Map = $candidateResult.Map
+                Faction = $candidateResult.Faction
+                BotFaction = $candidateResult.BotFaction
+                Seed = $candidateResult.Seed
+                Status = 'Undefined'
+                CandidateOutcome = $candidateResult.Outcome
+                ControlOutcome = $controlResult.Outcome
+                FitnessDelta = $null
+                EarnedPerSecondDelta = $null
+                SpentPerSecondDelta = $null
+                ExchangeDelta = $null
+                BuildingsKilledDelta = $null
+            }
+            continue
+        }
+
         $pairs += [pscustomobject]@{
             Repeat = $candidateResult.Repeat
             Scenario = $candidateResult.Scenario
@@ -475,6 +473,7 @@ function Compare-PairedResults($candidateResults, $controlResults) {
             Faction = $candidateResult.Faction
             BotFaction = $candidateResult.BotFaction
             Seed = $candidateResult.Seed
+            Status = 'Completed'
             CandidateOutcome = $candidateResult.Outcome
             ControlOutcome = $controlResult.Outcome
             FitnessDelta = [math]::Round($candidateResult.Fitness - $controlResult.Fitness, 4)
@@ -499,23 +498,31 @@ function Compare-PairedResults($candidateResults, $controlResults) {
     sits, so building once up front removes the race and the redundant work together.
 #>
 function Build-ArmBot([string]$bot, [string]$arm, [string]$revision) {
-    Write-Host "==> Building $bot" -ForegroundColor Cyan
+    $resolvedBot = $bot
+    if (-not (Test-Path -LiteralPath $resolvedBot)) {
+        $repositoryBot = Join-Path $repoRoot "bots\$bot"
+        if (Test-Path -LiteralPath $repositoryBot) {
+            $resolvedBot = $repositoryBot
+        }
+    }
+
+    Write-Host "==> Building $resolvedBot" -ForegroundColor Cyan
     $safeRevision = ($revision -replace '[^A-Za-z0-9_.-]', '-')
     $installDirectory = Join-Path $OutputDirectory "artifacts\$arm-$safeRevision"
 
-    & (Join-Path $repoRoot 'scripts\run-bot.ps1') -BattleBot $bot -Configuration $Configuration `
+    & (Join-Path $repoRoot 'scripts\run-bot.ps1') -BattleBot $resolvedBot -Configuration $Configuration `
         -InstallDirectory $installDirectory -NoLaunch |
         Write-Verbose
-    if ($LASTEXITCODE -ne 0) { throw "Could not build the bot at '$bot'." }
+    if ($LASTEXITCODE -ne 0) { throw "Could not build the bot at '$resolvedBot'." }
 
-    $project = if ([IO.Path]::GetExtension($bot) -eq '.csproj') {
-        $bot
+    $project = if ([IO.Path]::GetExtension($resolvedBot) -eq '.csproj') {
+        $resolvedBot
     } else {
-        (Get-ChildItem -LiteralPath $bot -Filter *.csproj -ErrorAction SilentlyContinue |
+        (Get-ChildItem -LiteralPath $resolvedBot -Filter *.csproj -ErrorAction SilentlyContinue |
             Select-Object -First 1).FullName
     }
 
-    if (-not $project) { return $bot }
+    if (-not $project) { return $resolvedBot }
 
     $target = (dotnet msbuild $project -getProperty:TargetPath -nologo `
             -p:Configuration=$Configuration -p:AutoCnCPath="$repoRoot" `
@@ -598,7 +605,7 @@ try {
         Benchmark = $set.name
         Batch = $batch
         Difficulty = if ($Difficulty) { $Difficulty } else { $set.difficulty }
-        MaxGameSeconds = if ($MaxGameSeconds -ge 0) { $MaxGameSeconds } elseif ($set.maxGameSeconds) { $set.maxGameSeconds } else { 5400 }
+        MaxGameSeconds = if ($MaxGameSeconds -ge 0) { $MaxGameSeconds } elseif ($null -ne $set.maxGameSeconds) { $set.maxGameSeconds } else { 5400 }
         ExpectedMatchesPerArm = $matchCount
         Candidate = $candidate
         Control = $control

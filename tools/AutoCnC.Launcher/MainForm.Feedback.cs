@@ -98,14 +98,15 @@ namespace AutoCnC.Launcher
 			if (runner.IsRunning || continuousLoop.IsRunning)
 				throw new InvalidOperationException("Wait for the current operation to finish before saving feedback.");
 
-			run.SetPlayerFeedback(feedback);
-			RefreshFeedbackRun(run);
+			var current = TrainingRun.SetLatestPlayerFeedback(run, feedback);
+			ReplaceRunReference(run, current);
+			RefreshFeedbackRun(current);
 			try
 			{
-				if (repo != null && run.IsEditable &&
-					File.Exists(run.BattleLogPath) && File.Exists(run.TelemetryPath) &&
-					File.Exists(run.DecisionTracePath))
-					EnsureAgentContext(run);
+				if (repo != null && current.IsEditable &&
+					File.Exists(current.BattleLogPath) && File.Exists(current.TelemetryPath) &&
+					File.Exists(current.DecisionTracePath))
+					current = EnsureAgentContext(current);
 			}
 			catch (IOException ex)
 			{
@@ -165,9 +166,13 @@ namespace AutoCnC.Launcher
 
 		void FinishReplayReview(TrainingRun run, int exitCode, bool improveAfterWatching)
 		{
-			if (!run.RecordReplayPlayback(exitCode, stopRequested || closing))
+			var current = TrainingRun.RecordLatestReplayPlayback(
+				run, exitCode, stopRequested || closing);
+			if (current == null)
 				return;
 
+			ReplaceRunReference(run, current);
+			run = current;
 			RefreshFeedbackRun(run);
 			if (run.HasPlayerFeedback && !improveAfterWatching)
 				return;

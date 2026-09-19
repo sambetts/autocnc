@@ -315,7 +315,7 @@ namespace AutoCnC.Launcher
 		public string SnapshotDirectory => Path.Combine(RunDirectory, "source-before-agent");
 		public string SnapshotManifestPath => Path.Combine(RunDirectory, "source-before-agent.json");
 		public string ChangesPath => Path.Combine(RunDirectory, "agent-changes.json");
-		public string MutationLockPath => Path.Combine(RunDirectory, "experiment.lock");
+		public string MutationLockPath => TrainingRunMutation.LockPathFor(RunDirectory);
 		public string ExperimentDirectory => Path.Combine(RunDirectory, "experiment");
 		public string CandidateSourceDirectory => Path.Combine(ExperimentDirectory, "candidate-source");
 		public string ControlSourceDirectory => Path.Combine(ExperimentDirectory, "control-source");
@@ -496,7 +496,10 @@ namespace AutoCnC.Launcher
 			if (run == null)
 				throw new ArgumentNullException(nameof(run));
 
-			Directory.CreateDirectory(run.RunDirectory);
+			if (!Directory.Exists(run.RunDirectory))
+				throw new InvalidOperationException(
+					"The training run no longer exists on disk.");
+			Directory.CreateDirectory(Path.GetDirectoryName(run.MutationLockPath));
 			var handle = new FileStream(run.MutationLockPath, FileMode.OpenOrCreate,
 				FileAccess.ReadWrite, FileShare.None, bufferSize: 1, FileOptions.WriteThrough);
 			try
@@ -516,6 +519,22 @@ namespace AutoCnC.Launcher
 		public static TrainingWorkspaceMutation AcquireWorkspaceMutation(
 			TrainingRun run) =>
 			TrainingWorkspaceMutation.Acquire(run?.Manifest.BotDirectory);
+
+		static TrainingRun MutateLatest(TrainingRun staleRun,
+			bool rejectAnyBusyOwner, Action<TrainingRun> mutation)
+		{
+			using var workspaceMutation = AcquireWorkspaceMutation(staleRun);
+			using var runMutation = AcquireMutation(staleRun);
+			var current = runMutation.Run;
+			if (current.IsBusy &&
+				(rejectAnyBusyOwner ||
+					!ProcessOwnership.IsCurrent(current.Manifest.Owner)))
+				throw new InvalidOperationException(
+					"Another active operation owns this training run.");
+
+			mutation(current);
+			return current;
+		}
 
 		public void Finish(string status, MatchLog matchLog, BattleEventLog battleLog)
 		{
@@ -670,6 +689,11 @@ namespace AutoCnC.Launcher
 			ExportFightManifest();
 		}
 
+		public static TrainingRun SetLatestPlayerFeedback(TrainingRun staleRun,
+			string feedback) =>
+			MutateLatest(staleRun, rejectAnyBusyOwner: true,
+				current => current.SetPlayerFeedback(feedback));
+
 		public bool RecordReplayPlayback(int exitCode, bool cancelled)
 		{
 			if (exitCode != 0 || cancelled)
@@ -697,6 +721,21 @@ namespace AutoCnC.Launcher
 
 			ExportFightManifest();
 			return true;
+		}
+
+		public static TrainingRun RecordLatestReplayPlayback(TrainingRun staleRun,
+			int exitCode, bool cancelled)
+		{
+			if (exitCode != 0 || cancelled)
+				return null;
+
+			return MutateLatest(staleRun, rejectAnyBusyOwner: true,
+				current =>
+				{
+					if (!current.RecordReplayPlayback(exitCode, cancelled))
+						throw new InvalidOperationException(
+							"The replay review could not be recorded.");
+				});
 		}
 
 		public void CaptureReplay(string source)
@@ -782,6 +821,14 @@ namespace AutoCnC.Launcher
 
 			ExportFightManifest();
 			return Manifest.AgentSessionId;
+		}
+
+		public static (TrainingRun Run, string SessionId) EnsureLatestAgentSessionId(
+			TrainingRun staleRun)
+		{
+			var current = MutateLatest(staleRun, rejectAnyBusyOwner: false,
+				run => run.EnsureAgentSessionId());
+			return (current, current.Manifest.AgentSessionId);
 		}
 
 		TrainingExperiment NewContinuousExperiment()
@@ -944,13 +991,21 @@ namespace AutoCnC.Launcher
 				ProcessOwnership.IsLive(Manifest.Owner))
 				return false;
 
-			var resumable = Manifest.Agent is
+			var resumableState =
+				string.Equals(experiment.State, TrainingExperimentStates.Candidate,
+					StringComparison.OrdinalIgnoreCase) ||
+				string.Equals(experiment.State, TrainingExperimentStates.Evaluating,
+					StringComparison.OrdinalIgnoreCase);
+			var resumable = resumableState && Manifest.Agent is
 			{
 				CompletedUtc: not null,
 				ExitCode: 0
 			} && File.Exists(SnapshotManifestPath) && IsEditable;
 			AbortContinuousExperiment(
-				"The launcher stopped before this continuous candidate reached a durable promotion decision.",
+				string.Equals(experiment.State, TrainingExperimentStates.Restoring,
+					StringComparison.OrdinalIgnoreCase)
+					? "Snapshot restoration was interrupted and must be completed explicitly."
+					: "The launcher stopped before this continuous candidate reached a durable promotion decision.",
 				resumable);
 			return true;
 		}
@@ -970,7 +1025,8 @@ namespace AutoCnC.Launcher
 			experiment.CanResumeEvaluation = canResumeEvaluation;
 			experiment.RequiresReevaluation = canResumeEvaluation;
 			experiment.ExpectedLiveFingerprint = null;
-			if (string.IsNullOrWhiteSpace(experiment.CandidateFingerprint) && IsEditable)
+			if (canResumeEvaluation &&
+				string.IsNullOrWhiteSpace(experiment.CandidateFingerprint) && IsEditable)
 				experiment.CandidateFingerprint = BotWorkspace.Fingerprint(Manifest.BotDirectory);
 			Manifest.Status = "experiment-aborted";
 			Manifest.Owner = null;
@@ -979,7 +1035,14 @@ namespace AutoCnC.Launcher
 
 		public void AbortContinuousExperiment(string reason)
 		{
-			var resumable = Manifest.Agent is
+			var resumableState =
+				string.Equals(Manifest.Experiment?.State,
+					TrainingExperimentStates.Candidate,
+					StringComparison.OrdinalIgnoreCase) ||
+				string.Equals(Manifest.Experiment?.State,
+					TrainingExperimentStates.Evaluating,
+					StringComparison.OrdinalIgnoreCase);
+			var resumable = resumableState && Manifest.Agent is
 			{
 				CompletedUtc: not null,
 				ExitCode: 0
@@ -1116,6 +1179,10 @@ namespace AutoCnC.Launcher
 			Save();
 		}
 
+		public static TrainingRun StartLatestVerification(TrainingRun staleRun) =>
+			MutateLatest(staleRun, rejectAnyBusyOwner: true,
+				current => current.VerificationStarted());
+
 		public void ExportFightManifest()
 		{
 			Directory.CreateDirectory(EvidenceDirectory);
@@ -1150,6 +1217,14 @@ namespace AutoCnC.Launcher
 			Save();
 		}
 
+		public static TrainingRun FinishLatestAgent(TrainingRun staleRun,
+			int exitCode, int changeCount, string suggestedNextPrompt = null,
+			string failurePhase = null, string failureMessage = null,
+			bool cancelled = false) =>
+			MutateLatest(staleRun, rejectAnyBusyOwner: false,
+				current => current.AgentFinished(exitCode, changeCount,
+					suggestedNextPrompt, failurePhase, failureMessage, cancelled));
+
 		public void AcceptSuggestedNextPrompt(string approvedPrompt)
 		{
 			if (Manifest.Agent == null)
@@ -1164,13 +1239,8 @@ namespace AutoCnC.Launcher
 		public static TrainingRun AcceptLatestSuggestedNextPrompt(
 			TrainingRun staleRun, string approvedPrompt)
 		{
-			using var mutation = AcquireMutation(staleRun);
-			if (mutation.Run.IsBusy)
-				throw new InvalidOperationException(
-					"Finish the active operation before accepting its prompt.");
-
-			mutation.Run.AcceptSuggestedNextPrompt(approvedPrompt);
-			return mutation.Run;
+			return MutateLatest(staleRun, rejectAnyBusyOwner: true,
+				current => current.AcceptSuggestedNextPrompt(approvedPrompt));
 		}
 
 		/// <summary>Records that the player turned this round's proposed prompt down.</summary>
@@ -1186,13 +1256,8 @@ namespace AutoCnC.Launcher
 
 		public static TrainingRun RejectLatestSuggestedNextPrompt(TrainingRun staleRun)
 		{
-			using var mutation = AcquireMutation(staleRun);
-			if (mutation.Run.IsBusy)
-				throw new InvalidOperationException(
-					"Finish the active operation before rejecting its prompt.");
-
-			mutation.Run.RejectSuggestedNextPrompt();
-			return mutation.Run;
+			return MutateLatest(staleRun, rejectAnyBusyOwner: true,
+				current => current.RejectSuggestedNextPrompt());
 		}
 
 		public void MarkRestored()
@@ -1215,68 +1280,83 @@ namespace AutoCnC.Launcher
 
 		public void Delete(string runsRoot = null)
 		{
-			if (!CanDelete)
-				throw new InvalidOperationException("Finish or stop the session's battle and improvement before deleting it.");
-
 			var root = Path.GetFullPath(runsRoot ?? DefaultRoot);
-			var id = Manifest.Id;
-			if (string.IsNullOrWhiteSpace(id) || id is "." or ".." || id != Path.GetFileName(id))
-				throw new InvalidDataException("The recorded session has an invalid directory identifier.");
-			var expected = Path.GetFullPath(Path.Combine(
-				RunsDirectoryForBot(Manifest.BotProject ?? Manifest.BotPath, root), id));
-			if (!string.Equals(Path.TrimEndingDirectorySeparator(RunDirectory), expected, StringComparison.OrdinalIgnoreCase))
-				throw new InvalidDataException("Only this session's directory inside the training archive can be deleted.");
-
-			for (var directory = new DirectoryInfo(RunDirectory); directory != null; directory = directory.Parent)
+			string tombstone;
+			using (var workspaceMutation = AcquireWorkspaceMutation(this))
+			using (var runMutation = AcquireMutation(this))
 			{
-				if ((directory.Attributes & FileAttributes.ReparsePoint) != 0)
-					throw new InvalidDataException("The recorded session's directory is a link or junction.");
-				if (string.Equals(directory.FullName, Path.TrimEndingDirectorySeparator(root), StringComparison.OrdinalIgnoreCase))
-					break;
-			}
+				var current = runMutation.Run;
+				if (!current.CanDelete)
+					throw new InvalidOperationException(
+						"Finish or stop the session's battle and improvement before deleting it.");
 
-			var pending = new Stack<string>();
-			pending.Push(RunDirectory);
-			while (pending.Count > 0)
-			{
-				foreach (var entry in new DirectoryInfo(pending.Pop()).EnumerateFileSystemInfos())
+				var id = current.Manifest.Id;
+				if (string.IsNullOrWhiteSpace(id) || id is "." or ".." ||
+					id != Path.GetFileName(id))
+					throw new InvalidDataException(
+						"The recorded session has an invalid directory identifier.");
+				var expected = Path.GetFullPath(Path.Combine(
+					RunsDirectoryForBot(
+						current.Manifest.BotProject ?? current.Manifest.BotPath, root), id));
+				if (!string.Equals(
+					Path.TrimEndingDirectorySeparator(current.RunDirectory), expected,
+					StringComparison.OrdinalIgnoreCase))
+					throw new InvalidDataException(
+						"Only this session's directory inside the training archive can be deleted.");
+
+				for (var directory = new DirectoryInfo(current.RunDirectory);
+					directory != null; directory = directory.Parent)
 				{
-					if ((entry.Attributes & FileAttributes.ReparsePoint) != 0)
-						throw new InvalidDataException("The recorded session contains a link or junction: " + entry.Name);
-					if (entry is DirectoryInfo)
-						pending.Push(entry.FullName);
+					if ((directory.Attributes & FileAttributes.ReparsePoint) != 0)
+						throw new InvalidDataException(
+							"The recorded session's directory is a link or junction.");
+					if (string.Equals(directory.FullName,
+						Path.TrimEndingDirectorySeparator(root),
+						StringComparison.OrdinalIgnoreCase))
+						break;
 				}
-			}
 
-			var current = Load(RunDirectory) ??
-				throw new InvalidDataException("The recorded session's manifest is missing.");
-			if (!current.CanDelete || current.Manifest.Id != id ||
-				current.Manifest.BotPath != Manifest.BotPath || current.Manifest.BotProject != Manifest.BotProject)
-				throw new InvalidOperationException("The recorded session changed. Refresh history before deleting it.");
-			foreach (var source in new[] { current.Manifest.BotPath, current.Manifest.BotProject, current.Manifest.BotDirectory })
-			{
-				if (string.IsNullOrWhiteSpace(source))
-					continue;
-				var relative = Path.GetRelativePath(RunDirectory, source);
-				if (!Path.IsPathRooted(relative) && relative != ".." &&
-					!relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal))
-					throw new InvalidDataException("A recorded session containing the bot's source cannot be deleted.");
-			}
-
-			// Keep the manifest until the evidence is removed so a failed deletion remains visible and retryable.
-			foreach (var directory in Directory.EnumerateDirectories(RunDirectory))
-			{
-				ClearReadOnlyFiles(directory);
-				Directory.Delete(directory, recursive: true);
-			}
-			foreach (var file in Directory.EnumerateFiles(RunDirectory))
-				if (!string.Equals(file, ManifestPath, StringComparison.OrdinalIgnoreCase))
+				var pending = new Stack<string>();
+				pending.Push(current.RunDirectory);
+				while (pending.Count > 0)
 				{
-					File.SetAttributes(file, File.GetAttributes(file) & ~FileAttributes.ReadOnly);
-					File.Delete(file);
+					foreach (var entry in new DirectoryInfo(
+						pending.Pop()).EnumerateFileSystemInfos())
+					{
+						if ((entry.Attributes & FileAttributes.ReparsePoint) != 0)
+							throw new InvalidDataException(
+								"The recorded session contains a link or junction: " +
+								entry.Name);
+						if (entry is DirectoryInfo)
+							pending.Push(entry.FullName);
+					}
 				}
-			File.Delete(ManifestPath);
-			Directory.Delete(RunDirectory);
+
+				foreach (var source in new[]
+				{
+					current.Manifest.BotPath,
+					current.Manifest.BotProject,
+					current.Manifest.BotDirectory
+				})
+				{
+					if (string.IsNullOrWhiteSpace(source))
+						continue;
+					var relative = Path.GetRelativePath(current.RunDirectory, source);
+					if (!Path.IsPathRooted(relative) && relative != ".." &&
+						!relative.StartsWith(".." + Path.DirectorySeparatorChar,
+							StringComparison.Ordinal))
+						throw new InvalidDataException(
+							"A recorded session containing the bot's source cannot be deleted.");
+				}
+
+				tombstone = Path.Combine(
+					Path.GetDirectoryName(current.RunDirectory),
+					$".deleting-{id}-{Guid.NewGuid():N}");
+				Directory.Move(current.RunDirectory, tombstone);
+			}
+
+			ClearReadOnlyFiles(tombstone);
+			Directory.Delete(tombstone, recursive: true);
 		}
 
 		public void Save()

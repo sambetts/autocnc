@@ -142,6 +142,46 @@ namespace AutoCnC.Launcher.Tests
 		}
 
 		[Test]
+		public void InterruptedPartialRestoreCannotResumeAsACandidate()
+		{
+			var run = NewRun();
+			WorkspaceSnapshot.Capture(run);
+			run.ContinuousAgentStarted("agent");
+			File.WriteAllText(Path.Combine(workspace, "Strategy.cs"), "candidate");
+			File.Delete(Path.Combine(workspace, "Notes.md"));
+			File.WriteAllText(Path.Combine(workspace, "Added.cs"), "candidate addition");
+			run.AgentFinished(0, 3);
+			run.MarkContinuousRestoring();
+
+			// Simulate a process dying after restoring one file but before the snapshot completed.
+			File.WriteAllText(Path.Combine(workspace, "Strategy.cs"), "before");
+			run.Manifest.Owner = new ProcessOwnership { ProcessId = -1 };
+			run.Save();
+
+			var loaded = TrainingRun.Load(run.RunDirectory);
+
+			Assert.That(loaded.Manifest.Experiment.State,
+				Is.EqualTo(TrainingExperimentStates.Aborted));
+			Assert.That(loaded.CanResumeContinuousEvaluation, Is.False);
+			Assert.That(loaded.Manifest.Experiment.AbortReason,
+				Does.Contain("restoration was interrupted"));
+			Assert.That(() => loaded.ResumeContinuousExperiment(),
+				Throws.InvalidOperationException);
+			Assert.That(File.Exists(Path.Combine(workspace, "Notes.md")), Is.False);
+			Assert.That(File.Exists(Path.Combine(workspace, "Added.cs")), Is.True);
+
+			WorkspaceSnapshot.Restore(loaded);
+
+			Assert.That(File.ReadAllText(Path.Combine(workspace, "Strategy.cs")),
+				Is.EqualTo("before"));
+			Assert.That(File.ReadAllText(Path.Combine(workspace, "Notes.md")),
+				Is.EqualTo("keep me"));
+			Assert.That(File.Exists(Path.Combine(workspace, "Added.cs")), Is.False);
+			Assert.That(loaded.Manifest.Experiment.State,
+				Is.EqualTo(TrainingExperimentStates.Restored));
+		}
+
+		[Test]
 		public void LegacyPreparedExperimentAbortsWithoutPretendingItCanResume()
 		{
 			var run = NewRun();
@@ -602,6 +642,12 @@ namespace AutoCnC.Launcher.Tests
 			var newer = TrainingRun.Load(run.RunDirectory);
 			newer.Manifest.Status = "newer-state";
 			newer.Manifest.Warnings.Add("newer warning");
+			newer.Manifest.Experiment = new TrainingExperiment
+			{
+				Id = "newer-experiment",
+				Continuous = true,
+				State = TrainingExperimentStates.Promoted
+			};
 			newer.Save();
 
 			var current = TrainingRun.AcceptLatestSuggestedNextPrompt(
@@ -609,6 +655,9 @@ namespace AutoCnC.Launcher.Tests
 
 			Assert.That(current.Manifest.Status, Is.EqualTo("newer-state"));
 			Assert.That(current.Manifest.Warnings, Does.Contain("newer warning"));
+			Assert.That(current.Manifest.Experiment.Id, Is.EqualTo("newer-experiment"));
+			Assert.That(current.Manifest.Experiment.State,
+				Is.EqualTo(TrainingExperimentStates.Promoted));
 			Assert.That(current.Manifest.Agent.SuggestedNextPrompt,
 				Is.EqualTo("approved prompt"));
 			Assert.That(current.Manifest.Agent.SuggestedNextPromptAccepted, Is.True);
@@ -624,12 +673,19 @@ namespace AutoCnC.Launcher.Tests
 			var newer = TrainingRun.Load(run.RunDirectory);
 			newer.Manifest.Status = "newer-state";
 			newer.Manifest.Warnings.Add("newer warning");
+			newer.Manifest.Experiment = new TrainingExperiment
+			{
+				Id = "newer-experiment",
+				Continuous = true,
+				State = TrainingExperimentStates.Promoted
+			};
 			newer.Save();
 
 			var current = TrainingRun.RejectLatestSuggestedNextPrompt(stale);
 
 			Assert.That(current.Manifest.Status, Is.EqualTo("newer-state"));
 			Assert.That(current.Manifest.Warnings, Does.Contain("newer warning"));
+			Assert.That(current.Manifest.Experiment.Id, Is.EqualTo("newer-experiment"));
 			Assert.That(current.Manifest.Agent.SuggestedNextPromptRejected, Is.True);
 		}
 
@@ -724,6 +780,71 @@ namespace AutoCnC.Launcher.Tests
 			Assert.That(File.ReadAllText(run.PromptPath), Does.Contain("I expanded too late"));
 			Assert.That(() => run.SetPlayerFeedback(new string('x', TrainingRun.MaxPlayerFeedbackLength + 1)),
 				Throws.ArgumentException);
+		}
+
+		[Test]
+		public void StaleFeedbackAndReplayUpdatesPreserveNewerManifestFields()
+		{
+			var run = NewRun();
+			Complete(run, "Lost", 185, army: 1200, opponentArmy: 4100);
+			var stale = TrainingRun.Load(run.RunDirectory);
+			var newer = TrainingRun.Load(run.RunDirectory);
+			newer.Manifest.Status = "newer-state";
+			newer.Manifest.Warnings.Add("newer warning");
+			newer.Save();
+
+			var current = TrainingRun.SetLatestPlayerFeedback(stale, "fresh feedback");
+
+			Assert.That(current.Manifest.Status, Is.EqualTo("newer-state"));
+			Assert.That(current.Manifest.Warnings, Does.Contain("newer warning"));
+			Assert.That(current.Manifest.Result.PlayerFeedback, Is.EqualTo("fresh feedback"));
+
+			current.Manifest.Battle.ExecutionMode = BattleExecutionModes.Headless;
+			current.Manifest.ReplayWatchedUtc = null;
+			current.Save();
+			File.WriteAllText(current.ReplayPath, "replay");
+			stale = TrainingRun.Load(run.RunDirectory);
+			newer = TrainingRun.Load(run.RunDirectory);
+			newer.Manifest.Warnings.Add("replay warning");
+			newer.Save();
+
+			current = TrainingRun.RecordLatestReplayPlayback(stale, 0, cancelled: false);
+
+			Assert.That(current.Manifest.Status, Is.EqualTo("newer-state"));
+			Assert.That(current.Manifest.Warnings, Does.Contain("replay warning"));
+			Assert.That(current.Manifest.ReplayWatchedUtc, Is.Not.Null);
+		}
+
+		[Test]
+		public void StaleVerificationAndSessionUpdatesReloadLatestManifest()
+		{
+			var run = NewRun();
+			run.AgentStarted("agent");
+			run.AgentFinished(1, 1, failurePhase: "verification",
+				failureMessage: "failed");
+			var stale = TrainingRun.Load(run.RunDirectory);
+			var newer = TrainingRun.Load(run.RunDirectory);
+			newer.Manifest.Warnings.Add("newer warning");
+			newer.Save();
+
+			var current = TrainingRun.StartLatestVerification(stale);
+
+			Assert.That(current.Manifest.Status, Is.EqualTo("verifying"));
+			Assert.That(current.Manifest.Warnings, Does.Contain("newer warning"));
+
+			current.Manifest.Owner = null;
+			current.Manifest.Status = "improvement-failed";
+			current.Save();
+			stale = TrainingRun.Load(run.RunDirectory);
+			newer = TrainingRun.Load(run.RunDirectory);
+			newer.Manifest.Warnings.Add("session warning");
+			newer.Save();
+
+			var session = TrainingRun.EnsureLatestAgentSessionId(stale);
+
+			Assert.That(session.Run.Manifest.Status, Is.EqualTo("improvement-failed"));
+			Assert.That(session.Run.Manifest.Warnings, Does.Contain("session warning"));
+			Assert.That(session.SessionId, Is.Not.Empty);
 		}
 
 		[Test]

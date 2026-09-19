@@ -1843,19 +1843,32 @@ namespace AutoCnC.Launcher
 			{
 				try
 				{
-					finishedRun.Finish(status, matchLog, battleLog);
+					using (var workspaceMutation =
+						TrainingRun.AcquireWorkspaceMutation(finishedRun))
+					using (var runMutation = TrainingRun.AcquireMutation(finishedRun))
+					{
+						var current = runMutation.Run;
+						if (current.IsBusy &&
+							!ProcessOwnership.IsCurrent(current.Manifest.Owner))
+							throw new InvalidOperationException(
+								"Another launcher owns this training run.");
 
-					var replay = NewestReplay();
-					var isNew = replay != null &&
-						(!string.Equals(replay.FullName, replayBeforeBattle, StringComparison.OrdinalIgnoreCase) ||
-							replay.LastWriteTimeUtc >= battleStartedUtc.AddSeconds(-2));
-					finishedRun.CaptureReplay(isNew ? replay.FullName : null);
+						current.Finish(status, matchLog, battleLog);
+						var replay = NewestReplay();
+						var isNew = replay != null &&
+							(!string.Equals(replay.FullName, replayBeforeBattle,
+									StringComparison.OrdinalIgnoreCase) ||
+								replay.LastWriteTimeUtc >= battleStartedUtc.AddSeconds(-2));
+						current.CaptureReplay(isNew ? replay.FullName : null);
+						ReplaceRunReference(finishedRun, current);
+						finishedRun = current;
+					}
 
 					if (finishedRun.IsEditable &&
 						File.Exists(finishedRun.BattleLogPath) &&
 						File.Exists(finishedRun.TelemetryPath) &&
 						File.Exists(finishedRun.DecisionTracePath))
-						EnsureAgentContext(finishedRun);
+						finishedRun = EnsureAgentContext(finishedRun);
 				}
 				catch (IOException ex)
 				{
@@ -1911,18 +1924,18 @@ namespace AutoCnC.Launcher
 				!run.HasPlayerFeedback && !ReviewBattleFeedback(run, beforeImprovement: true))
 				return false;
 
-			TrainingRunMutation continuousMutation = null;
+			TrainingRunMutation agentMutation = null;
 			var hadWorkspaceMutation = activeWorkspaceMutation != null;
 			try
 			{
 				EnsureWorkspaceMutation(run);
-				if (automatic)
-				{
-					continuousMutation = LockForContinuousMutation(
-						run, allowCurrentOwner: false);
-					run = continuousMutation.Run;
-					previousAgent = run.Manifest.Agent;
-				}
+				agentMutation = LockForContinuousMutation(
+					run, allowCurrentOwner: false);
+				run = agentMutation.Run;
+				previousAgent = run.Manifest.Agent;
+				if (!RunMatchesSelectedBot(run) || !run.CanImprove)
+					throw new InvalidOperationException(
+						"The selected battle changed and is no longer eligible for improvement.");
 				if (automatic && !File.Exists(run.SnapshotManifestPath))
 					throw new InvalidOperationException(
 						"The continuous champion snapshot was not captured before the battle.");
@@ -1979,7 +1992,7 @@ namespace AutoCnC.Launcher
 			}
 			finally
 			{
-				continuousMutation?.Dispose();
+				agentMutation?.Dispose();
 			}
 
 			trainingRun = run;
@@ -2064,26 +2077,38 @@ namespace AutoCnC.Launcher
 			try
 			{
 				var changes = WorkspaceSnapshot.Compare(run);
-				run.AgentFinished(exitCode, changes.Count, suggestedNextPrompt,
-					failurePhase, failureMessage, cancelled);
+				var current = TrainingRun.FinishLatestAgent(run, exitCode,
+					changes.Count, suggestedNextPrompt, failurePhase,
+					failureMessage, cancelled);
+				ReplaceRunReference(run, current);
+				run = current;
 			}
 			catch (InvalidDataException ex)
 			{
 				AppendImprovementOutput($"Could not record the agent's changes: {ex.Message}");
-				run.AgentFinished(exitCode, TrainingAgentResult.UnknownChangeCount, suggestedNextPrompt,
+				var current = TrainingRun.FinishLatestAgent(run, exitCode,
+					TrainingAgentResult.UnknownChangeCount, suggestedNextPrompt,
 					failurePhase, failureMessage, cancelled);
+				ReplaceRunReference(run, current);
+				run = current;
 			}
 			catch (IOException ex)
 			{
 				AppendImprovementOutput($"Could not record the agent's changes: {ex.Message}");
-				run.AgentFinished(exitCode, TrainingAgentResult.UnknownChangeCount, suggestedNextPrompt,
+				var current = TrainingRun.FinishLatestAgent(run, exitCode,
+					TrainingAgentResult.UnknownChangeCount, suggestedNextPrompt,
 					failurePhase, failureMessage, cancelled);
+				ReplaceRunReference(run, current);
+				run = current;
 			}
 			catch (System.Text.Json.JsonException ex)
 			{
 				AppendImprovementOutput($"Could not record the agent's changes: {ex.Message}");
-				run.AgentFinished(exitCode, TrainingAgentResult.UnknownChangeCount, suggestedNextPrompt,
+				var current = TrainingRun.FinishLatestAgent(run, exitCode,
+					TrainingAgentResult.UnknownChangeCount, suggestedNextPrompt,
 					failurePhase, failureMessage, cancelled);
+				ReplaceRunReference(run, current);
+				run = current;
 			}
 
 			// Deliberately outside the block above: this only draws what was just recorded, and a
@@ -2434,7 +2459,22 @@ namespace AutoCnC.Launcher
 					StringComparison.OrdinalIgnoreCase))
 				return;
 
-			run.VerificationStarted();
+			try
+			{
+				EnsureWorkspaceMutation(run);
+				var current = TrainingRun.StartLatestVerification(run);
+				ReplaceRunReference(run, current);
+				run = current;
+			}
+			catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
+				InvalidOperationException)
+			{
+				ReleaseWorkspaceMutation();
+				MessageBox.Show(this,
+					"Could not start verification: " + ex.Message,
+					"AutoC&C", MessageBoxButtons.OK, MessageBoxIcon.Error);
+				return;
+			}
 			activeTrainingRun = run;
 			ShowImprovementWindow().StartVerificationRun(run);
 			queue.Clear();
@@ -2468,7 +2508,7 @@ namespace AutoCnC.Launcher
 					!File.Exists(run.GameGuidePath) ||
 					!File.Exists(run.GameRulesPath) ||
 					!File.Exists(run.FightManifestPath))
-					EnsureAgentContext(run);
+					run = EnsureAgentContext(run);
 
 				ShowImprovementWindow().ShowAgentRun(run,
 					promptFirst: run.Manifest.Agent == null);
@@ -2490,13 +2530,23 @@ namespace AutoCnC.Launcher
 			}
 		}
 
-		void EnsureAgentContext(TrainingRun run)
+		TrainingRun EnsureAgentContext(TrainingRun run)
 		{
-			if (!File.Exists(run.GameRulesPath))
-				AgentRulesExporter.Export(repo, run.GameRulesPath);
+			using var workspaceMutation = TrainingRun.AcquireWorkspaceMutation(run);
+			using var runMutation = TrainingRun.AcquireMutation(run);
+			var current = runMutation.Run;
+			if (current.IsBusy &&
+				!ProcessOwnership.IsCurrent(current.Manifest.Owner))
+				throw new InvalidOperationException(
+					"Another launcher still owns this training run.");
 
-			TrainingAgent.PrepareContext(run, repo.AgentGameGuide, repo.AgentMechanics,
-				run.GameRulesPath, CurrentPromptTemplate());
+			if (!File.Exists(current.GameRulesPath))
+				AgentRulesExporter.Export(repo, current.GameRulesPath);
+
+			TrainingAgent.PrepareContext(current, repo.AgentGameGuide, repo.AgentMechanics,
+				current.GameRulesPath, CurrentPromptTemplate());
+			ReplaceRunReference(run, current);
+			return current;
 		}
 
 		string CurrentPromptTemplate()
@@ -2601,7 +2651,7 @@ namespace AutoCnC.Launcher
 		/// </remarks>
 		void RejectNextPrompt(TrainingRun run)
 		{
-			if (run?.Manifest.Agent == null)
+			if (run == null)
 				return;
 
 			try

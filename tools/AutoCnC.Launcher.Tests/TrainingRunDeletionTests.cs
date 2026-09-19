@@ -99,6 +99,43 @@ namespace AutoCnC.Launcher.Tests
 			Assert.That(Directory.Exists(run.RunDirectory), Is.False);
 		}
 
+		[Test]
+		public void DeletionDoesNotTouchEvidenceWhileRunMutationLockIsHeld()
+		{
+			var run = NewRun();
+			var evidence = Path.Combine(run.EvidenceDirectory, "keep.txt");
+			File.WriteAllText(evidence, "keep");
+
+			using var mutation = TrainingRun.AcquireMutation(run);
+			Assert.That(() => run.Delete(runs), Throws.TypeOf<IOException>());
+
+			Assert.That(File.Exists(run.ManifestPath), Is.True);
+			Assert.That(File.ReadAllText(evidence), Is.EqualTo("keep"));
+			Assert.That(Directory.Exists(run.RunDirectory), Is.True);
+			Assert.That(Directory.EnumerateDirectories(
+				Path.GetDirectoryName(run.RunDirectory), ".deleting-*"), Is.Empty);
+		}
+
+		[Test]
+		public void DeletionDoesNotTouchEvidenceWhileWorkspaceLockIsHeld()
+		{
+			var run = NewRun();
+			var evidence = Path.Combine(run.EvidenceDirectory, "keep.txt");
+			File.WriteAllText(evidence, "keep");
+			var lockPath = TrainingWorkspaceMutation.LockPathFor(
+				run.Manifest.BotDirectory);
+			Directory.CreateDirectory(Path.GetDirectoryName(lockPath));
+
+			using (var foreign = new FileStream(lockPath, FileMode.OpenOrCreate,
+				FileAccess.ReadWrite, FileShare.None))
+				Assert.That(() => run.Delete(runs), Throws.TypeOf<IOException>());
+
+			Assert.That(File.Exists(run.ManifestPath), Is.True);
+			Assert.That(File.ReadAllText(evidence), Is.EqualTo("keep"));
+			Assert.That(Directory.Exists(run.RunDirectory), Is.True);
+			File.Delete(lockPath);
+		}
+
 		[TestCase("running")]
 		[TestCase("improving")]
 		[TestCase("verifying")]

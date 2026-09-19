@@ -74,6 +74,9 @@ namespace AutoCnC.Launcher
 			var warnings = new List<string>();
 			foreach (var runDirectory in Directory.EnumerateDirectories(directory))
 			{
+				if (Path.GetFileName(runDirectory).StartsWith(
+					".deleting-", StringComparison.OrdinalIgnoreCase))
+					continue;
 				try
 				{
 					var run = TrainingRun.Load(runDirectory);
@@ -133,6 +136,10 @@ namespace AutoCnC.Launcher
 			var runs = new List<TrainingRun>();
 			foreach (var botDirectory in Directory.EnumerateDirectories(root))
 				foreach (var runDirectory in Directory.EnumerateDirectories(botDirectory))
+				{
+					if (Path.GetFileName(runDirectory).StartsWith(
+						".deleting-", StringComparison.OrdinalIgnoreCase))
+						continue;
 					try
 					{
 						var run = TrainingRun.Load(runDirectory);
@@ -146,6 +153,7 @@ namespace AutoCnC.Launcher
 						JsonException or ArgumentException or NotSupportedException)
 					{
 					}
+				}
 
 			return runs
 				.OrderBy(run => run.Manifest.CreatedUtc)

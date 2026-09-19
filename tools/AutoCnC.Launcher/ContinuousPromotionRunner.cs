@@ -92,6 +92,7 @@ namespace AutoCnC.Launcher
 				throw new ArgumentNullException(nameof(repo));
 			if (run == null)
 				throw new ArgumentNullException(nameof(run));
+			using var workspaceMutation = TrainingRun.AcquireWorkspaceMutation(run);
 			using var mutation = TrainingRun.AcquireMutation(run);
 			run = mutation.Run;
 			if (run.IsBusy && !ProcessOwnership.IsCurrent(run.Manifest.Owner))

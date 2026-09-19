@@ -456,9 +456,9 @@ Abort, resume and restore reload the run and honor `ProcessOwnership`. A live cl
 launcher blocks mutation. Agent chat records the workspace fingerprint before the turn and only
 invalidates when the post-turn source fingerprint differs, so a no-edit answer after restoration
 continues with the restored champion.
-The reload, ownership check, claim and manifest mutation are serialized by an exclusive per-run
-`experiment.lock`, closing the gap where two launchers could both observe an unowned manifest and
-claim it.
+The reload, ownership check, claim and manifest mutation are serialized by an external canonical
+per-run `experiment.lock`, closing the gap where two launchers could both observe an unowned
+manifest and claim it without leaving an open handle inside a deletable run directory.
 Source-changing work also holds a canonical workspace lock shared by every run for that bot, so an
 older session cannot restore while a newer fight, agent, chat or evaluation owns the same source.
 Unresolved-run discovery compares the stored workspace and manifest paths rather than requiring
@@ -466,6 +466,12 @@ the selected project to still exist. A snapshot restore can therefore recreate a
 file or remove a renamed replacement.
 Prompt accept/reject reloads under the run lock and changes only the latest agent prompt fields;
 modeless windows and cached conversations are rebound to that fresh run object.
+Deletion takes the workspace and external per-run locks, atomically renames the session to a
+`.deleting-*` tombstone, releases the locks, then removes the tombstone. Active operations retain
+all original evidence instead of observing a partially deleted run.
+
+An interrupted `restoring` state is reconciled as non-resumable. The mixed workspace is never
+benchmarked as a candidate; the player must complete the idempotent snapshot restore.
 
 The loop stops on user request or any non-zero game, agent, or build exit. Headless also treats 90
 nominal game minutes without a result as a failed stalemate (configurable with

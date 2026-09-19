@@ -124,7 +124,9 @@ namespace AutoCnC.Launcher
 					continuousFingerprint =
 						continuousPromotion.CaptureAgentChatFingerprint(run);
 
-				run.EnsureAgentSessionId();
+				var session = TrainingRun.EnsureLatestAgentSessionId(run);
+				ReplaceRunReference(run, session.Run);
+				run = session.Run;
 
 				// The improvement round is what normally records which agent this fight uses, and
 				// talking can come first. Written here too so an early question reaches the agent

@@ -303,8 +303,12 @@ and removes files added by that agent run; build output and git metadata are nev
 snapshot.
 Recovery uses the stored workspace identity, not the continued existence of the project file, so
 an interrupted deletion or rename of the `.csproj` cannot hide the restore action.
-An exclusive lock in the run directory covers recovery reload, ownership checks and claims, so a
+An external canonical per-run lock covers recovery reload, ownership checks and claims, so a
 second launcher cannot race the first one into aborting, resuming or restoring live work.
+Manifest-only actions such as feedback, replay review, verification retry and prompt decisions
+also reload under the workspace/run locks and merge only their own fields. Deletion first renames
+the run to a tombstone under those locks. A restore interrupted halfway is never resumable as a
+candidate; explicit restore safely finishes it.
 
 **Train from battle** in AI training chooses which recording supplies the evidence. The selection
 is independent of the latest fight and survives launcher restarts. Its replay, feedback, prompt,

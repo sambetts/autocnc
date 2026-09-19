@@ -10,6 +10,8 @@
 
 using System;
 using System.IO;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace AutoCnC.Launcher
 {
@@ -27,6 +29,17 @@ namespace AutoCnC.Launcher
 		{
 			Run = run;
 			this.handle = handle;
+		}
+
+		public static string LockPathFor(string runDirectory)
+		{
+			var canonical = Path.TrimEndingDirectorySeparator(
+				Path.GetFullPath(runDirectory)).ToUpperInvariant();
+			var hash = Convert.ToHexString(
+				SHA256.HashData(Encoding.UTF8.GetBytes(canonical))).ToLowerInvariant();
+			return Path.Combine(
+				Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+				"AutoCnC", "RunLocks", hash + ".experiment.lock");
 		}
 
 		public void Dispose() => handle.Dispose();

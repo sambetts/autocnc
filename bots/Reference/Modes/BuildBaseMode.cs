@@ -62,6 +62,26 @@ namespace AutoCnC.Reference.Modes
 		/// <summary>Ground-defence tower names for either faction.</summary>
 		static readonly string[] GroundDefenceCandidates = [.. ReferencePlans.GuardTowers];
 
+		static readonly string[] CriticalRepairCandidates =
+		[
+			"fact",
+			"proc",
+			"weap",
+			"afld",
+			"powr",
+			"nuke",
+			"nuk2",
+			"pyle",
+			"hand",
+			"hq",
+			"eye",
+			"tmpl"
+		];
+
+		const int RepairCashFloor = 1600;
+		const int RepairHealthPercent = 45;
+		const string CriticalRepairReasonId = "reference.building.repair-critical";
+
 		/// <summary>
 		/// Every defensive structure, so the anti-air rung sizes itself from the base rather
 		/// than from the towers already covering it.
@@ -149,6 +169,10 @@ namespace AutoCnC.Reference.Modes
 			//    deploy, pack up, and deploy again forever.
 			if (ctx.CanDeploy && ctx.DeploysIntoBuilding)
 				return UnitDecision.Deploy("deploying to found the base");
+
+			var repair = RepairCriticalBuilding(ctx);
+			if (repair.Action != UnitAction.Continue)
+				return repair;
 
 			// --- Sense -------------------------------------------------------------
 			for (var i = 0; i < ConstructionQueues.Length; i++)
@@ -303,6 +327,39 @@ namespace AutoCnC.Reference.Modes
 				default:
 					return UnitDecision.Continue;   // plan complete, or nothing affordable yet
 			}
+		}
+
+		static UnitDecision RepairCriticalBuilding(ModeContext ctx)
+		{
+			if (ctx.Cash < RepairCashFloor)
+				return UnitDecision.Continue;
+
+			OwnedBuildingState? best = null;
+			var buildings = ctx.OwnedBuildingStates();
+
+			foreach (var building in buildings)
+			{
+				if (building.RepairRequested || building.RepairActive)
+					return UnitDecision.Continue;
+
+				if (!building.IsRepairable
+					|| building.HealthPercent > RepairHealthPercent
+					|| !Named(CriticalRepairCandidates, building.ActorType))
+					continue;
+
+				if (!best.HasValue
+					|| building.HealthPercent < best.Value.HealthPercent
+					|| (building.HealthPercent == best.Value.HealthPercent
+						&& building.ActorId < best.Value.ActorId))
+					best = building;
+			}
+
+			return best.HasValue
+				? UnitDecision.RepairBuilding(
+					best.Value.ActorId,
+					$"repairing critical {best.Value.ActorType} at {best.Value.HealthPercent}% health",
+					CriticalRepairReasonId)
+				: UnitDecision.Continue;
 		}
 
 		/// <summary>

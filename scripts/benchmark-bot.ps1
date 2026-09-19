@@ -573,20 +573,26 @@ try {
 
     Write-Host ''
     Write-Host "==> Benchmark '$($set.name)' result" -ForegroundColor Cyan
-    $candidate = Show-Arm 'candidate' ($results | Where-Object { $_.Arm -eq 'candidate' })
-    $control = if ($Control) { Show-Arm 'control' ($results | Where-Object { $_.Arm -eq 'control' }) } else { $null }
+    $candidateSummary = Show-Arm 'candidate' ($results | Where-Object { $_.Arm -eq 'candidate' })
+    $controlSummary = if ($Control) {
+        Show-Arm 'control' ($results | Where-Object { $_.Arm -eq 'control' })
+    } else {
+        $null
+    }
 
-    if ($control -and $candidate) {
-        $verdict = if ($candidate.Wins -gt $control.Wins) { 'candidate ahead on wins' }
-        elseif ($candidate.Wins -lt $control.Wins) { 'control ahead on wins' }
-        elseif ($candidate.MedianFitness -gt $control.MedianFitness) { 'level on wins, candidate ahead on fitness' }
-        elseif ($candidate.MedianFitness -lt $control.MedianFitness) { 'level on wins, control ahead on fitness' }
+    if ($controlSummary -and $candidateSummary) {
+        $verdict = if ($candidateSummary.Undefined -gt 0 -or $controlSummary.Undefined -gt 0) { 'undefined because one or more matches failed' }
+        elseif ($candidateSummary.Wins -gt $controlSummary.Wins) { 'candidate ahead on wins' }
+        elseif ($candidateSummary.Wins -lt $controlSummary.Wins) { 'control ahead on wins' }
+        elseif ($candidateSummary.MedianFitness -gt $controlSummary.MedianFitness) { 'level on wins, candidate ahead on fitness' }
+        elseif ($candidateSummary.MedianFitness -lt $controlSummary.MedianFitness) { 'level on wins, control ahead on fitness' }
         else { 'indistinguishable' }
 
         Write-Host ''
         Write-Host "  Verdict: $verdict." -ForegroundColor Cyan
         Write-Host ("  This change won {0} of {1} against the control's {2} of {3}." -f `
-                $candidate.Wins, $candidate.Played, $control.Wins, $control.Played) -ForegroundColor Cyan
+                $candidateSummary.Wins, $candidateSummary.Played,
+                $controlSummary.Wins, $controlSummary.Played) -ForegroundColor Cyan
     }
     elseif (-not $Control) {
         Write-Host '  No control arm was run, so this win rate is not attributable to the change.' -ForegroundColor Yellow
@@ -607,8 +613,8 @@ try {
         Difficulty = if ($Difficulty) { $Difficulty } else { $set.difficulty }
         MaxGameSeconds = if ($MaxGameSeconds -ge 0) { $MaxGameSeconds } elseif ($null -ne $set.maxGameSeconds) { $set.maxGameSeconds } else { 5400 }
         ExpectedMatchesPerArm = $matchCount
-        Candidate = $candidate
-        Control = $control
+        Candidate = $candidateSummary
+        Control = $controlSummary
         Paired = @($pairs)
         Matches = @($results)
     }

@@ -32,7 +32,7 @@ namespace AutoCnC.Reference
 	public static class ReferencePlans
 	{
 		/// <summary>
-		/// How many riflemen to keep standing before anything is spent on rockets.
+		/// How many riflemen to keep standing before most plans spend further on rockets.
 		/// </summary>
 		/// <remarks>
 		/// A floor rather than a ratio, and deliberately small. <c>e1</c> is the cheapest body in
@@ -85,6 +85,14 @@ namespace AutoCnC.Reference
 		/// </para>
 		/// </remarks>
 		const int RifleCore = 12;
+
+		/// <summary>
+		/// The anti-air pair Defence targets while allowing rifle rebuilding behind one survivor.
+		/// </summary>
+		public const int DefenceAntiAirCore = 2;
+
+		// The Scout doctrine already establishes this pair; Defence now keeps it standing.
+		const int ScreenVehicleCore = 2;
 
 		/// <summary>
 		/// How many harvesters to keep working before anything is spent on the next tank.
@@ -338,6 +346,9 @@ namespace AutoCnC.Reference
 		/// </remarks>
 		public static string[] RocketBodies { get; } = ["e3"];
 
+		/// <summary>The cheap faction-portable vehicles that scout and screen the economy.</summary>
+		public static string[] ScreenVehicles { get; } = ["jeep", "bggy"];
+
 		/// <summary>
 		/// The economy every doctrine wants, whichever one is running.
 		/// </summary>
@@ -478,7 +489,7 @@ namespace AutoCnC.Reference
 		public static IReadOnlyList<ProductionStep> OpeningTrain { get; } =
 		[
 			new("Infantry", ["e1"], 4),        // bodies now; a first barracks has nothing else
-			new("Vehicle", ["jeep", "bggy"], 1),
+			new("Vehicle", ScreenVehicles, 1),
 			new("Infantry", ["e3"], 4),        // ...and rockets, which that same barracks can build
 			new("Vehicle", ["harv"], HarvesterCore),   // then income, before anything that shoots
 			new("Infantry", ["e1"], RifleCore),
@@ -504,7 +515,7 @@ namespace AutoCnC.Reference
 
 		public static IReadOnlyList<ProductionStep> ScoutTrain { get; } =
 		[
-			new("Vehicle", ["jeep", "bggy"], 2),
+			new("Vehicle", ScreenVehicles, ScreenVehicleCore),
 			.. OpeningTrain,
 		];
 
@@ -599,8 +610,10 @@ namespace AutoCnC.Reference
 
 		public static IReadOnlyList<ProductionStep> DefenceTrain { get; } =
 		[
-			new("Infantry", ["e1"], RifleCore),
-			new("Infantry", ["e3"], 8),        // rockets, for whatever is chewing the base
+			new(InfantryQueue, RocketBodies, DefenceAntiAirCore), // restore AA from zero; one survivor releases rifles
+			new(InfantryQueue, RifleBodies, RifleCore),
+			new(InfantryQueue, RocketBodies, 8), // then anti-armour and anti-air depth
+			new("Vehicle", ScreenVehicles, ScreenVehicleCore), // keep buildable escorts ahead of replacements
 			new("Vehicle", ["harv"], HarvesterCore),   // a siege that kills the economy wins by itself
 			new("Infantry", ["e2"], 4),
 			new("Vehicle", SiegeVehicles, SiegeCore),  // 11 cells of reach, sited at home

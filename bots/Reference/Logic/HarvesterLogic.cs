@@ -176,7 +176,8 @@ namespace AutoCnC.Reference.Logic
 		int AssignedX,
 		int AssignedY,
 		int ContestedX,
-		int ContestedY)
+		int ContestedY,
+		bool RetreatingToRefinery)
 	{
 		/// <summary>
 		/// A harvester we have never seen. The impossible cell counts as "moved", and the scan
@@ -184,7 +185,7 @@ namespace AutoCnC.Reference.Logic
 		/// review window to do it.
 		/// </summary>
 		public static HarvesterWatchdog Start { get; } =
-			new(int.MinValue, int.MinValue, 0, 0, 0, int.MaxValue, int.MinValue, int.MinValue, int.MinValue, int.MinValue);
+			new(int.MinValue, int.MinValue, 0, 0, 0, int.MaxValue, int.MinValue, int.MinValue, int.MinValue, int.MinValue, false);
 
 		/// <summary>Whether this harvester has been told which field to work.</summary>
 		public bool HasAssignment => AssignedX != int.MinValue;
@@ -319,15 +320,41 @@ namespace AutoCnC.Reference.Logic
 			//    scan instead of waiting out a review window. Rule 2 then reassigns away from it.
 			//    While the harvester is still being shot this branch simply fires again, which is
 			//    correct — escape first, choose new ground once clear.
-			if (state.DangerNearby && state.HealthPercent < tuning.FleeBelowHealthPercent && awayFromRefinery)
+			if (state.DangerNearby && state.HealthPercent < tuning.FleeBelowHealthPercent && state.HasRefinery)
 			{
 				var drivenOff = seen.HasAssignment
 					? seen with { ContestedX = seen.AssignedX, ContestedY = seen.AssignedY }
 					: seen;
+				var retreating = drivenOff with
+				{
+					StillEvaluations = 0,
+					EvaluationsSinceScan = tuning.ReviewEvaluations,
+					RetreatingToRefinery = true
+				};
 
+				if (awayFromRefinery)
+					return new HarvesterOutcome(
+						UnitDecision.MoveTo(state.RefineryX, state.RefineryY, $"hurt at {state.HealthPercent}%, running to the refinery"),
+						retreating);
+
+				// Do not fall through to the due field scan while the same raid is still in
+				// range. That immediately replaces the flee order with Harvest and sends a
+				// critically damaged harvester back out before its escorts clear the threat.
 				return new HarvesterOutcome(
-					UnitDecision.MoveTo(state.RefineryX, state.RefineryY, $"hurt at {state.HealthPercent}%, running to the refinery"),
-					drivenOff with { StillEvaluations = 0, EvaluationsSinceScan = tuning.ReviewEvaluations });
+					UnitDecision.MoveTo(state.RefineryX, state.RefineryY, "damaged harvester sheltering at refinery"),
+					retreating);
+			}
+
+			// A momentary gap in fire does not make the route safe. Once a damaged harvester
+			// starts retreating, finish that retreat before field selection can replace it.
+			if (seen.RetreatingToRefinery)
+			{
+				if (state.HasRefinery && awayFromRefinery)
+					return new HarvesterOutcome(
+						UnitDecision.MoveTo(state.RefineryX, state.RefineryY, "damaged harvester retreat persisted to refinery"),
+						seen with { StillEvaluations = 0, EvaluationsSinceScan = tuning.ReviewEvaluations });
+
+				seen = seen with { RetreatingToRefinery = false };
 			}
 
 			var stalled = seen.StillEvaluations >= tuning.StallEvaluations;

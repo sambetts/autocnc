@@ -105,8 +105,22 @@ namespace AutoCnC.Reference.Modes
 
 		public override void OnDamaged(Actor self, ModeContext ctx, AttackInfo e)
 		{
+			var attacker = e.Attacker;
+			if (attacker != null
+				&& attacker.IsInWorld
+				&& !attacker.IsDead
+				&& self.Owner.RelationshipWith(attacker.Owner) == PlayerRelationship.Enemy)
+				HarvesterThreats.Record(
+					self.Owner,
+					self.ActorID,
+					attacker.ActorID,
+					attacker.Location.X,
+					attacker.Location.Y,
+					ModeContext.Classify(attacker),
+					ctx.WorldTick);
+
 			// Being shot is the one thing worth reacting to sooner than the next scheduled
-			// evaluation, because the flee rule is the only decision here that is time-critical.
+			// evaluation, both for this harvester's flee rule and for its escorts.
 			ctx.RequestReevaluation();
 		}
 	}

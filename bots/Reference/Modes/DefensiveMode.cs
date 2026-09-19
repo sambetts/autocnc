@@ -51,8 +51,10 @@ namespace AutoCnC.Reference.Modes
 
 			recovering = false;
 
-			// Guard wherever we were standing when the mode was assigned.
-			ctx.Anchor = self.Location;
+			// A doctrine switch can assign this mode while a unit is far from home. Anchor the
+			// whole screen to the current base instead of turning that forward position into a
+			// permanent guard post.
+			ctx.Anchor = ctx.BaseCenter;
 		}
 
 		public override UnitDecision OnTick(Actor self, ModeContext ctx)
@@ -83,6 +85,9 @@ namespace AutoCnC.Reference.Modes
 				decision = UnitDecision.Retreat("still recovering");
 			else
 				recovering = false;
+
+			if (decision.Action == UnitAction.ReturnToAnchor)
+				return UnitDecision.ReturnToAnchor("defensive base-center regroup");
 
 			return decision;
 		}

@@ -35,35 +35,18 @@ namespace AutoCnC.Reference.Logic
 		int LostContactSeconds)   // seeing nothing this long means we have lost them, not that we are marching
 	{
 		public static ReferenceBotTuning Default { get; } = new(
-			// What an opening push costs, not what a decisive one does.
-			//
-			// This was 6,000, and 6,000 is a stockpile. On badland-ridges army value reached
-			// 2,000 at 140s, 3,000 at 190s and 6,000 only at 360s — while the opponent's first
-			// attack was already killing harvesters in our base at 271s, which on a 97-cell
-			// diagonal means they set out at roughly 170s with whatever they had. A bot that
-			// waits for six thousand credits of army is not choosing to attack later, it is
-			// conceding the first four minutes.
-			//
-			// It is also half of what made the Attack doctrine unreachable. The push needed
-			// 6,000 *and* a confirmed enemy base; army value cleared 6,000 only between 360s and
-			// 570s, enemyBaseFound first read true at 900s, so the two were never true at the
-			// same instant and the doctrine ran for zero seconds of a 1,187-second match. See
-			// Modes.AttackBaseMode.Probe for the other half.
-			//
-			// 2,000 is roughly twenty rifles or six rockets: a raiding party rather than an
-			// army, which is the point. It buys contact, it explores the corridor it walks, and
-			// the units that come out of the barracks behind it join the same push — so the
-			// group expands while it is in the field instead of being assembled before it
-			// leaves.
-			AttackArmyValue: 2000,
+			// Commit a formed assault rather than repeatedly spending replacement-sized waves.
+			// Four thousand is still reachable early with the probe no longer gated on a known
+			// base, while leaving enough mass for the staging logic to deliver a mixed force.
+			AttackArmyValue: 4000,
 
 			// A push is over when it is genuinely spent, not when it has taken casualties.
 			//
 			// This has to sit well below AttackArmyValue or the two thresholds straddle a
 			// handful of riflemen and the bot commutes: push at the bar, lose three units, go
 			// home, rebuild three units, push again. It was 1,500 against a bar of 6,000, a
-			// four-to-one separation; 600 against 2,000 keeps better than three-to-one while
-			// meaning what it says — six rifles or two rockets left is a spent push.
+			// four-to-one separation; 600 against 4,000 is wider still while meaning what it
+			// says — six rifles or two rockets left is a spent push.
 			RetreatArmyValue: 600,
 
 			ScoutRefineries: 2,
@@ -240,9 +223,9 @@ namespace AutoCnC.Reference.Logic
 			//    exactly what falling through to the bottom would do, minus the gag.
 			//
 			//    Rule 8 sitting below this one no longer starves the search, because the two
-			//    thresholds are reached in the right order: two refineries stand at around 117s
-			//    and 2,000 credits of army at around 140s, so the scout doctrine is entered
-			//    first and rule 5 holds it for its full 90 seconds. What has changed is that a
+			//    thresholds are reached in the right order: the refinery gate precedes the
+			//    formed-assault bar, so the scout doctrine is entered first and rule 5 holds it
+			//    for its full 90 seconds. What has changed is that a
 			//    search which comes back empty no longer parks the army at home for the rest of
 			//    the match — it falls through to here and the push goes out anyway, looking with
 			//    its whole body instead of with one jeep.
@@ -251,8 +234,8 @@ namespace AutoCnC.Reference.Logic
 					? DoctrineDecision.Continue
 					: DoctrineDecision.SwitchTo(ReferenceDoctrines.Attack,
 						s.EnemyBaseFound
-							? $"army worth {s.ArmyValue} and their base is known"
-							: $"army worth {s.ArmyValue}, probing for their base");
+							? $"assault mass committed: army worth {s.ArmyValue} and their base is known"
+							: $"assault mass committed: army worth {s.ArmyValue}, probing for their base");
 
 			// 7. A push that has run out of army. Going home and rebuilding beats feeding the
 			//    rest of it in one unit at a time.

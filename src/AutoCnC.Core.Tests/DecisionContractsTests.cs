@@ -51,6 +51,114 @@ namespace AutoCnC.Core.Tests
 		}
 
 		[Test]
+		public void SdkActionsAppendEnumValuesAndReuseTheHistoricalDecisionShape()
+		{
+			var repair = UnitDecision.RepairBuilding(
+				17, "repair damaged refinery", "economy.repair.refinery");
+			var cancel = UnitDecision.CancelProduction(
+				"Vehicle", "mtnk", 2, "change the queue", "production.cancel-armour");
+			var support = UnitDecision.ActivateSupportPower(
+				"IonCannonPowerInfoOrder", 12, 34, "fire ion cannon", "support.ion-cannon");
+
+			Assert.Multiple(() =>
+			{
+				Assert.That((byte)UnitAction.Harvest, Is.EqualTo(11));
+				Assert.That((byte)UnitAction.RepairBuilding, Is.EqualTo(12));
+				Assert.That((byte)UnitAction.CancelProduction, Is.EqualTo(13));
+				Assert.That((byte)UnitAction.ActivateSupportPower, Is.EqualTo(14));
+
+				Assert.That(repair.TargetActorId, Is.EqualTo(17u));
+				Assert.That(repair.ReasonId, Is.EqualTo("economy.repair.refinery"));
+
+				Assert.That(cancel.Queue, Is.EqualTo("Vehicle"));
+				Assert.That(cancel.ItemName, Is.EqualTo("mtnk"));
+				Assert.That(cancel.Count, Is.EqualTo(2));
+				Assert.That(cancel.TargetX, Is.EqualTo(2),
+					"the additive factory reuses the historical positional payload");
+				Assert.That(cancel.ReasonId, Is.EqualTo("production.cancel-armour"));
+
+				Assert.That(support.Power, Is.EqualTo("IonCannonPowerInfoOrder"));
+				Assert.That(support.ItemName, Is.EqualTo("IonCannonPowerInfoOrder"));
+				Assert.That(support.TargetX, Is.EqualTo(12));
+				Assert.That(support.TargetY, Is.EqualTo(34));
+				Assert.That(support.ReasonId, Is.EqualTo("support.ion-cannon"));
+			});
+		}
+
+		[Test]
+		public void NewActionIntentIncludesExactCountPowerAndTarget()
+		{
+			var cancelOne = UnitDecision.CancelProduction("Vehicle", "mtnk", 1, "cancel");
+			var cancelTwo = UnitDecision.CancelProduction("Vehicle", "mtnk", 2, "cancel");
+			var firstPower = UnitDecision.ActivateSupportPower("power-a", 4, 5, "fire");
+			var otherPower = UnitDecision.ActivateSupportPower("power-b", 4, 5, "fire");
+			var otherCell = UnitDecision.ActivateSupportPower("power-a", 5, 5, "fire");
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(cancelOne.SameIntent(cancelTwo), Is.False);
+				Assert.That(firstPower.SameIntent(otherPower), Is.False);
+				Assert.That(firstPower.SameIntent(otherCell), Is.False);
+			});
+		}
+
+		[Test]
+		public void ProductionQueueStateKeepsItsHistoricalPositionalShape()
+		{
+			var legacy = new ProductionQueueState("Vehicle", false, new[] { "mtnk" });
+			var (queue, isIdle, buildable) = legacy;
+			var enriched = legacy with
+			{
+				CurrentItem = "mtnk",
+				CurrentProgressPercent = 40,
+				CurrentCost = 800,
+				CurrentRemainingCost = 480,
+				CurrentItemCount = 2,
+				QueuedCount = 3
+			};
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(queue, Is.EqualTo("Vehicle"));
+				Assert.That(isIdle, Is.False);
+				Assert.That(buildable, Is.EqualTo(new[] { "mtnk" }));
+				Assert.That(legacy.CurrentItem, Is.Null);
+				Assert.That(legacy.QueuedCount, Is.Zero);
+				Assert.That(enriched.CurrentItem, Is.EqualTo("mtnk"));
+				Assert.That(enriched.CurrentProgressPercent, Is.EqualTo(40));
+				Assert.That(enriched.CurrentCost, Is.EqualTo(800));
+				Assert.That(enriched.CurrentRemainingCost, Is.EqualTo(480));
+				Assert.That(enriched.CurrentItemCount, Is.EqualTo(2));
+				Assert.That(enriched.QueuedCount, Is.EqualTo(3));
+			});
+		}
+
+		[Test]
+		public void OwnedBuildingAndSupportPowerStatesAreEngineFreeSnapshots()
+		{
+			var building = new OwnedBuildingState(
+				21, "proc", 7, 8, 65, true, true, false);
+			var power = new SupportPowerState(
+				"IonCannonPowerInfoOrder", "IonCannonPowerInfoOrder",
+				true, true, false, 0, 4500);
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(building.ActorId, Is.EqualTo(21u));
+				Assert.That(building.HealthPercent, Is.EqualTo(65));
+				Assert.That(building.IsRepairable, Is.True);
+				Assert.That(building.RepairRequested, Is.True);
+				Assert.That(building.RepairActive, Is.False);
+				Assert.That(power.Key, Is.EqualTo("IonCannonPowerInfoOrder"));
+				Assert.That(power.OrderName, Is.EqualTo("IonCannonPowerInfoOrder"));
+				Assert.That(power.Active, Is.True);
+				Assert.That(power.Ready, Is.True);
+				Assert.That(power.Disabled, Is.False);
+				Assert.That(power.RemainingTicks, Is.Zero);
+			});
+		}
+
+		[Test]
 		public void DoctrineDecisionKeepsItsHistoricalPositionalShape()
 		{
 			var decision = new DoctrineDecision("Defence", "legacy reason");

@@ -193,6 +193,8 @@ permitted way to know where anything is.
   encode facts that the side could not know during the match.
 - Own economy, forces, queues, and buildings are known exactly. Enemy actors are known only when
   visible, except for facts the bot legitimately remembers such as having found an enemy base.
+- `OwnedBuildingStates()` exposes only your live buildings. `SupportPowerStates()` exposes only
+  powers registered to your player; neither adds enemy or map knowledge.
 - `BattleState` includes rolling income, exact own value lost, observed enemy value killed,
   visible enemy value and mix, and own versus enemy value near the base. Enemy totals use the
   latest pre-damage visibility sample. Kills between samples are conservatively omitted, because
@@ -218,14 +220,22 @@ permitted way to know where anything is.
 - `UnitDecision.Continue` means leave the unit's current activity alone.
 - `UnitDecision.Hold` stops an idle combat unit; using it on a working harvester can prevent useful
   default behavior.
-- Attack, movement, retreat, deploy, production, and placement decisions become normal player
-  orders a few ticks later. Do not assume an order applies immediately.
+- Attack, movement, retreat, deploy, production, cancellation, building repair, support-power
+  activation, and placement decisions become normal player orders a few ticks later. Do not
+  assume an order applies immediately.
 - Returning the same intent repeatedly is cheap because the host suppresses duplicate orders.
 - Give decisions a stable `ReasonId` through the final factory argument. Human `Reason` prose and
   `ReasonId` are both ignored by duplicate-intent suppression.
 - Target selection should be stable. Re-picking equivalent targets every evaluation makes units
   dither.
 - Drive a production queue only when `ctx.OwnsQueue(category)` is true.
+- `CancelProduction` requires an exact queue, item, and positive count. It emits no partial or
+  broad cancellation when the queue no longer matches.
+- `RepairBuilding` starts repair only for a live owned damaged `RepairableBuilding` without an
+  existing repair request. Inspect `OwnedBuildingStates()` before deciding.
+- Resolve support powers from `SupportPowerStates()` rather than faction names. Activation accepts
+  either the manager key or configured order name, requires an active ready power, and targets the
+  supplied cell without revealing anything about it.
 - For deployment, check both `ctx.CanDeploy` and `ctx.DeploysIntoBuilding`; otherwise a
   construction yard can repeatedly pack and unpack.
 - Do not retain lists returned by sensing methods; their buffers are reused.
@@ -308,6 +318,7 @@ bool HasResource(CPos cell)
 static bool IsVisibleEnemy(Player viewer, Actor actor)
 string ItemReadyToPlace(string category)
 IReadOnlyDictionary<string, int> OwnedBuildingCounts()
+IReadOnlyCollection<OwnedBuildingState> OwnedBuildingStates()
 IReadOnlyDictionary<string, int> OwnedUnitCounts()
 bool OwnsQueue(string category)
 string ProducingItem(string category)
@@ -320,6 +331,7 @@ IEnumerable<Actor> SenseAllies(WDist radius, string actorType = null)
 IReadOnlyList<ThreatSnapshot> SenseStructures(WDist radius)
 IReadOnlyList<ThreatSnapshot> SenseThreats(WDist radius)
 ThreatSnapshot Snapshot(Actor actor)
+IReadOnlyCollection<SupportPowerState> SupportPowerStates()
 void SwitchDoctrine(string doctrine, string reason)
 void SwitchDoctrine(string doctrine, string reason, string reasonId)
 ```
@@ -329,7 +341,7 @@ void SwitchDoctrine(string doctrine, string reason, string reasonId)
 The complete set of actions a decision can carry.
 
 ```
-enum UnitAction: Continue, Hold, Attack, ReturnToAnchor, Retreat, AdvanceToObjective, MoveTo, AttackMoveTo, Deploy, Produce, PlaceBuilding, Harvest
+enum UnitAction: Continue, Hold, Attack, ReturnToAnchor, Retreat, AdvanceToObjective, MoveTo, AttackMoveTo, Deploy, Produce, PlaceBuilding, Harvest, RepairBuilding, CancelProduction, ActivateSupportPower
 ```
 
 ### UnitDecision
@@ -338,21 +350,27 @@ Returned from `OnTick`. The static factories are the intended way to build one.
 
 ```
 UnitAction Action { get; init }
+int Count { get }
 string ItemName { get; init }
+string Power { get }
 string Queue { get; init }
 string Reason { get; init }
 string ReasonId { get; init }
 uint TargetActorId { get; init }
 int TargetX { get; init }
 int TargetY { get; init }
-static UnitDecision AdvanceToObjective(uint objectiveActorId, string reason, string reasonId)
+static UnitDecision ActivateSupportPower(string power, int x, int y, string reason, string reasonId)
+static UnitDecision ActivateSupportPower(string power, int x, int y, string reason)
 static UnitDecision AdvanceToObjective(uint objectiveActorId, string reason)
+static UnitDecision AdvanceToObjective(uint objectiveActorId, string reason, string reasonId)
 static UnitDecision Attack(uint targetActorId, string reason, string reasonId)
 static UnitDecision Attack(uint targetActorId, string reason)
 static UnitDecision AttackMoveTo(int x, int y, string reason, string reasonId)
 static UnitDecision AttackMoveTo(int x, int y, string reason)
-static UnitDecision Deploy(string reason, string reasonId)
+static UnitDecision CancelProduction(string queue, string itemName, int count, string reason, string reasonId)
+static UnitDecision CancelProduction(string queue, string itemName, int count, string reason)
 static UnitDecision Deploy(string reason)
+static UnitDecision Deploy(string reason, string reasonId)
 static UnitDecision Harvest(int x, int y, string reason, string reasonId)
 static UnitDecision Harvest(int x, int y, string reason)
 static UnitDecision Hold(string reason, string reasonId)
@@ -363,10 +381,12 @@ static UnitDecision PlaceBuilding(string queue, string itemName, int x, int y, s
 static UnitDecision PlaceBuilding(string queue, string itemName, int x, int y, string reason)
 static UnitDecision Produce(string queue, string itemName, string reason)
 static UnitDecision Produce(string queue, string itemName, string reason, string reasonId)
+static UnitDecision RepairBuilding(uint targetActorId, string reason)
+static UnitDecision RepairBuilding(uint targetActorId, string reason, string reasonId)
 static UnitDecision Retreat(string reason)
 static UnitDecision Retreat(string reason, string reasonId)
-static UnitDecision ReturnToAnchor(string reason, string reasonId)
 static UnitDecision ReturnToAnchor(string reason)
+static UnitDecision ReturnToAnchor(string reason, string reasonId)
 bool SameIntent(UnitDecision other)
 ```
 
@@ -475,6 +495,45 @@ int Value { get; init }
 int WeaponRangeUnits { get; init }
 ```
 
+### OwnedBuildingState
+
+```
+uint ActorId { get; init }
+string ActorType { get; init }
+int CellX { get; init }
+int CellY { get; init }
+int HealthPercent { get; init }
+bool IsRepairable { get; init }
+bool RepairActive { get; init }
+bool RepairRequested { get; init }
+```
+
+### ProductionQueueState
+
+```
+IReadOnlyCollection<string> Buildable { get; init }
+int CurrentCost { get; init }
+string CurrentItem { get; init }
+int CurrentItemCount { get; init }
+int CurrentProgressPercent { get; init }
+int CurrentRemainingCost { get; init }
+bool IsIdle { get; init }
+string Queue { get; init }
+int QueuedCount { get; init }
+```
+
+### SupportPowerState
+
+```
+bool Active { get; init }
+bool Disabled { get; init }
+string Key { get; init }
+string OrderName { get; init }
+bool Ready { get; init }
+int RemainingTicks { get; init }
+int TotalTicks { get; init }
+```
+
 ### ThreatKind
 
 ```
@@ -484,7 +543,7 @@ enum ThreatKind: Unknown, Infantry, Vehicle, Aircraft, Structure, Defence, Econo
 ### Every public AutoCnC.Core type
 
 ```
-ArmyPlanState, AssaultState, AssignmentScope, BaseBuildLogic, BasePlanState, BattleState, BuildStep, DefensiveState, DoctrineDecision, ModeAssignments, ProductionChoice, ProductionQueueState, ProductionStep, ResourceCell, ResourceField, ThreatKind, ThreatSnapshot, ThreatValueSummary, UnitAction, UnitDecision, UnitProductionLogic
+ArmyPlanState, AssaultState, AssignmentScope, BaseBuildLogic, BasePlanState, BattleState, BuildStep, DefensiveState, DoctrineDecision, ModeAssignments, OwnedBuildingState, ProductionChoice, ProductionQueueState, ProductionStep, ResourceCell, ResourceField, SupportPowerState, ThreatKind, ThreatSnapshot, ThreatValueSummary, UnitAction, UnitDecision, UnitProductionLogic
 ```
 
 <!-- END GENERATED SDK SURFACE -->

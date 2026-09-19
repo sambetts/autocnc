@@ -405,6 +405,9 @@ UnitDecision.Deploy(reason)                    // e.g. MCV -> construction yard
 UnitDecision.Produce(queue, item, reason)
 UnitDecision.PlaceBuilding(queue, item, x, y, reason)
 UnitDecision.Harvest(x, y, reason)              // send a harvester to a tiberium field
+UnitDecision.RepairBuilding(actorId, reason)     // start repairing an owned damaged building
+UnitDecision.CancelProduction(queue, item, count, reason)
+UnitDecision.ActivateSupportPower(power, x, y, reason)
 ```
 
 Every factory also has an overload with `reasonId` as its final argument. Keep `Reason` concise
@@ -424,6 +427,20 @@ Two things to internalise:
 stopping it harvesting. Only return an action when you want to override what the unit is doing.
 
 **Returning the same decision every tick is free.** Don't hand-roll rate limiting.
+
+`RepairBuilding` is an ensure-start action, not a repair toggle: it only emits the engine's
+player-scoped repair order for a live owned `RepairableBuilding` that is damaged and does not
+already have this player's repair request. Read `OwnedBuildingStates()` for health,
+`IsRepairable`, `RepairRequested`, and `RepairActive`.
+
+`CancelProduction` names one queue, one item, and an exact positive count. It emits no order when
+the queue does not contain that many matching entries, so a stale decision never becomes a broad
+or partial cancellation. `QueueStates()` includes the current item, completion percentage, cost,
+matching item count, and total queue length.
+
+`ActivateSupportPower` accepts either a key from `SupportPowerState.Key` or its configured
+`OrderName`. The power must be active and ready. The SDK sends the same player-scoped, cell-targeted
+order as the engine UI; it does not pick targets or reveal anything about the target cell.
 
 ### Sense → decide → act
 
@@ -465,6 +482,8 @@ declare, so the rule and the shipped strategy cannot drift apart.
 | `SenseAllies(radius, type)` | Friendly actors |
 | `CanAttack(actor)` | Do our weapons work against it? |
 | `FindRepairBay()`, `FindRefinery()`, `FindNearestAllied<T>()` | Nearest allied |
+| `OwnedBuildingStates()` | Exact health and building-repair state for live owned buildings |
+| `SupportPowerStates()` | Own configured support-power keys, order names, readiness, and charge |
 | `ResolveActor(id)` | ActorID back to a live actor |
 
 ### Resources
@@ -505,7 +524,7 @@ genuine reason to scout.
 | `Cash`, `PowerBalance` | Economy |
 | `QueueFor(category)` / `OwnsQueue(category)` | Production queues. Only the owning actor should drive one |
 | `BuildableItems(category)`, `ProducingItem`, `ItemReadyToPlace` | Queue state |
-| `QueueStates()` | All queues, for the production planner |
+| `QueueStates()` | All queues, including current item/progress/cost and exact queue counts |
 | `OwnedBuildingCounts()`, `OwnedUnitCounts()` | Counts, including queued |
 | `FindBuildLocation(actorType)` | A valid placement cell near the base |
 | `BuildPlan`, `ProductionPlan` | **The running doctrine's plans** — read these rather than hardcoding |

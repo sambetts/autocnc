@@ -347,6 +347,44 @@ namespace AutoCnC.Sdk
 
 		public Actor FindRefinery() => FindNearestAllied<Refinery>();
 
+		/// <summary>
+		/// Every live building this player owns, including its health and building-repair state.
+		/// </summary>
+		public IReadOnlyCollection<OwnedBuildingState> OwnedBuildingStates()
+		{
+			var results = new List<OwnedBuildingState>();
+			foreach (var actor in World.ActorsHavingTrait<Building>())
+				if (TryGetOwnedBuildingState(actor, out var building))
+					results.Add(building);
+
+			results.Sort(static (a, b) => a.ActorId.CompareTo(b.ActorId));
+			return results;
+		}
+
+		bool TryGetOwnedBuildingState(Actor actor, out OwnedBuildingState state)
+		{
+			if (actor == null || actor.Owner != self.Owner || actor.IsDead || !actor.IsInWorld ||
+				!actor.Info.HasTraitInfo<BuildingInfo>())
+			{
+				state = default;
+				return false;
+			}
+
+			var actorHealth = actor.TraitOrDefault<IHealth>();
+			var repairable = actor.TraitOrDefault<RepairableBuilding>();
+			var isRepairable = repairable != null && !repairable.IsTraitDisabled;
+			state = new OwnedBuildingState(
+				ActorId: actor.ActorID,
+				ActorType: actor.Info.Name,
+				CellX: actor.Location.X,
+				CellY: actor.Location.Y,
+				HealthPercent: PercentHealth(actorHealth),
+				IsRepairable: isRepairable,
+				RepairRequested: isRepairable && repairable.Repairers.Contains(self.Owner),
+				RepairActive: isRepairable && repairable.RepairActive);
+			return true;
+		}
+
 		/// <summary>Nearest allied actor with trait <typeparamref name="T"/>, or null.</summary>
 		public Actor FindNearestAllied<T>()
 		{
@@ -367,6 +405,14 @@ namespace AutoCnC.Sdk
 			}
 
 			return best;
+		}
+
+		static int PercentHealth(IHealth actorHealth)
+		{
+			if (actorHealth == null || actorHealth.MaxHP <= 0)
+				return 100;
+
+			return Math.Clamp((int)((long)actorHealth.HP * 100 / actorHealth.MaxHP), 0, 100);
 		}
 
 		#endregion
@@ -699,14 +745,66 @@ namespace AutoCnC.Sdk
 				if (name == null || !seen.Add(name))
 					continue;
 
+				var queued = pair.Trait.AllQueued().ToArray();
+				var current = queued.FirstOrDefault();
 				results.Add(new ProductionQueueState(
 					Queue: name,
-					IsIdle: pair.Trait.CurrentItem() == null,
-					Buildable: pair.Trait.BuildableItems().Select(a => a.Name).ToArray()));
+					IsIdle: current == null,
+					Buildable: pair.Trait.BuildableItems().Select(a => a.Name).ToArray())
+				{
+					CurrentItem = current?.Item,
+					CurrentProgressPercent = current == null
+						? 0
+						: ActionOrderBuilder.ProgressPercent(current.TotalTime, current.RemainingTime, current.Done),
+					CurrentCost = current?.TotalCost ?? 0,
+					CurrentRemainingCost = current?.RemainingCost ?? 0,
+					CurrentItemCount = current == null
+						? 0
+						: queued.Count(item => string.Equals(
+							item.Item, current.Item, StringComparison.OrdinalIgnoreCase)),
+					QueuedCount = queued.Length
+				});
 			}
 
 			return results;
 		}
+
+		/// <summary>
+		/// Every support power currently registered for this player.
+		/// </summary>
+		/// <remarks>
+		/// Both the manager key and configured order name are exposed. Use either with
+		/// <see cref="UnitDecision.ActivateSupportPower"/>.
+		/// </remarks>
+		public IReadOnlyCollection<SupportPowerState> SupportPowerStates()
+		{
+			var manager = GetSupportPowerManager();
+			if (manager == null)
+				return [];
+
+			var results = new List<SupportPowerState>();
+			foreach (var pair in manager.Powers.OrderBy(p => p.Key, StringComparer.OrdinalIgnoreCase))
+			{
+				var power = pair.Value;
+				var info = power.Info;
+				if (info == null)
+					continue;
+
+				results.Add(new SupportPowerState(
+					Key: pair.Key,
+					OrderName: info.OrderName,
+					Active: power.Active,
+					Ready: power.Ready,
+					Disabled: power.Disabled,
+					RemainingTicks: power.RemainingTicks,
+					TotalTicks: power.TotalTicks));
+			}
+
+			return results;
+		}
+
+		SupportPowerManager GetSupportPowerManager() =>
+			self.Owner.PlayerActor.TraitOrDefault<SupportPowerManager>();
 
 		/// <summary>How many of each owned building type this player has, including queued.</summary>
 		public IReadOnlyDictionary<string, int> OwnedBuildingCounts() => CountOwned<Building>("Building");
@@ -862,6 +960,17 @@ namespace AutoCnC.Sdk
 						Target.FromCell(World, new CPos(decision.TargetX, decision.TargetY)), false);
 				}
 
+				case UnitAction.RepairBuilding:
+				{
+					var target = ResolveActor(decision.TargetActorId);
+					if (!TryGetOwnedBuildingState(target, out var building) ||
+						!ActionOrderBuilder.CanStartRepair(building))
+						return null;
+
+					return ActionOrderBuilder.RepairBuilding(
+						self.Owner.PlayerActor, Target.FromActor(target));
+				}
+
 				case UnitAction.Deploy:
 					return new Order("DeployTransform", self, false);
 
@@ -872,6 +981,21 @@ namespace AutoCnC.Sdk
 						return null;
 
 					return Order.StartProduction(queue.Actor, decision.ItemName, 1);
+				}
+
+				case UnitAction.CancelProduction:
+				{
+					var queue = QueueFor(decision.Queue);
+					if (queue == null)
+						return null;
+
+					var item = ActionOrderBuilder.FindQueuedItem(
+						queue.AllQueued().Select(queued => queued.Item),
+						decision.ItemName,
+						decision.Count);
+					return item == null
+						? null
+						: ActionOrderBuilder.CancelProduction(queue.Actor, item, decision.Count);
 				}
 
 				case UnitAction.PlaceBuilding:
@@ -890,6 +1014,26 @@ namespace AutoCnC.Sdk
 						ExtraData = queue.Actor.ActorID,
 						SuppressVisualFeedback = true
 					};
+				}
+
+				case UnitAction.ActivateSupportPower:
+				{
+					var cell = new CPos(decision.TargetX, decision.TargetY);
+					if (!World.Map.Contains(cell))
+						return null;
+
+					var manager = GetSupportPowerManager();
+					if (manager == null)
+						return null;
+
+					var key = ActionOrderBuilder.FindReadySupportPower(
+						SupportPowerStates(), decision.Power);
+					if (key == null || !manager.Powers.TryGetValue(key, out var power) ||
+						!power.Active || !power.Ready || power.Disabled)
+						return null;
+
+					return ActionOrderBuilder.ActivateSupportPower(
+						manager.Self, key, Target.FromCell(World, cell));
 				}
 
 				default:

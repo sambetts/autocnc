@@ -76,6 +76,13 @@ it as authoritative context alongside the source and the evidence from one compl
   default behavior.
 - Attack, movement, retreat, deploy, production, and placement decisions become normal player
   orders a few ticks later. Do not assume an order applies immediately.
+- Building repair is player-scoped: choose a damaged entry from `ctx.OwnedBuildingStates()` and
+  return `UnitDecision.RepairBuilding(id, reason)`. The SDK rejects enemy, dead, non-repairable,
+  full-health, and already-requested targets.
+- Production cancellation is exact: queue, item, and positive count must still match the live
+  queue. `ctx.QueueStates()` exposes current item/progress/cost and counts.
+- Support powers come from `ctx.SupportPowerStates()`, not faction-specific constants. Activate a
+  ready active key or configured order name at a cell with `UnitDecision.ActivateSupportPower`.
 - Returning the same intent repeatedly is cheap because the host suppresses duplicate orders.
 - Target selection should be stable. Re-picking equivalent targets every evaluation makes units
   dither.

@@ -99,6 +99,27 @@ namespace AutoCnC.Core
 		int TotalDensity,
 		string ResourceType);
 
+	/// <summary>An owned live building, flattened into engine-free repair state.</summary>
+	public readonly record struct OwnedBuildingState(
+		uint ActorId,
+		string ActorType,
+		int CellX,
+		int CellY,
+		int HealthPercent,
+		bool IsRepairable,
+		bool RepairRequested,
+		bool RepairActive);
+
+	/// <summary>An owned support power registered with the player's support-power manager.</summary>
+	public readonly record struct SupportPowerState(
+		string Key,
+		string OrderName,
+		bool Active,
+		bool Ready,
+		bool Disabled,
+		int RemainingTicks,
+		int TotalTicks);
+
 	/// <summary>
 	/// Everything <see cref="DefensiveLogic"/> is allowed to know about the world.
 	/// </summary>

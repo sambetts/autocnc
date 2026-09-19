@@ -507,6 +507,9 @@ namespace AutoCnC.Platform.Traits
 
 			if (decision.Action == UnitAction.Continue)
 			{
+				if (IsSingleShotAction(controller.LastIssued.Action))
+					controller.LastIssued = UnitDecision.Continue;
+
 				decisionTrace?.UnitDecisionEvaluated(GameSeconds, actor.Info.Name, actor.ActorID,
 					controller.ActiveModeName, decision, "continue");
 				return;
@@ -526,7 +529,7 @@ namespace AutoCnC.Platform.Traits
 			// Re-issue only when the intent changed, or the unit has gone idle and still wants
 			// something done. Otherwise a steady decision would emit an order every evaluation.
 			var repeat = decision.SameIntent(controller.LastIssued);
-			if (repeat && !actor.IsIdle)
+			if (ShouldSuppressRepeatedIntent(decision.Action, repeat, actor.IsIdle))
 			{
 				decisionTrace?.UnitDecisionEvaluated(GameSeconds, actor.Info.Name, actor.ActorID,
 					controller.ActiveModeName, decision, "duplicate-intent");
@@ -553,6 +556,19 @@ namespace AutoCnC.Platform.Traits
 			controller.LastIssued = decision;
 			pending.Add(order);
 		}
+
+		internal static bool ShouldSuppressRepeatedIntent(UnitAction action, bool repeat, bool actorIsIdle)
+		{
+			if (!repeat)
+				return false;
+
+			return !actorIsIdle || IsSingleShotAction(action);
+		}
+
+		internal static bool IsSingleShotAction(UnitAction action) =>
+			action is UnitAction.RepairBuilding or
+				UnitAction.CancelProduction or
+				UnitAction.ActivateSupportPower;
 
 		void IGameOver.GameOver(World w)
 		{

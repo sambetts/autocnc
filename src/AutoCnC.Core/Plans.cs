@@ -46,7 +46,26 @@ namespace AutoCnC.Core
 	public readonly record struct ProductionQueueState(
 		string Queue,
 		bool IsIdle,
-		IReadOnlyCollection<string> Buildable);
+		IReadOnlyCollection<string> Buildable)
+	{
+		/// <summary>The item currently being produced, or null when idle.</summary>
+		public string CurrentItem { get; init; }
+
+		/// <summary>Current item completion as an integer percentage (0-100).</summary>
+		public int CurrentProgressPercent { get; init; }
+
+		/// <summary>Total cost of the current item, or zero when idle.</summary>
+		public int CurrentCost { get; init; }
+
+		/// <summary>Unpaid cost remaining on the current item, or zero when idle.</summary>
+		public int CurrentRemainingCost { get; init; }
+
+		/// <summary>Number of queued entries matching <see cref="CurrentItem"/>.</summary>
+		public int CurrentItemCount { get; init; }
+
+		/// <summary>Total number of entries in this queue.</summary>
+		public int QueuedCount { get; init; }
+	}
 
 	/// <summary>What the unit planner is allowed to know overall.</summary>
 	public readonly record struct ArmyPlanState(

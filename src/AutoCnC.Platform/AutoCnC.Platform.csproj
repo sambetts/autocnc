@@ -16,6 +16,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="AutoCnC.Platform.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Reference Include="OpenRA.Game">
       <HintPath>$(EngineBinDirectory)\OpenRA.Game.dll</HintPath>
       <Private>false</Private>

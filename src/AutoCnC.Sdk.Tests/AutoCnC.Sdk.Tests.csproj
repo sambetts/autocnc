@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>AutoCnC.Sdk.Tests</RootNamespace>
+    <AssemblyName>AutoCnC.Sdk.Tests</AssemblyName>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AutoCnC.Core\AutoCnC.Core.csproj" />
+    <ProjectReference Include="..\AutoCnC.Sdk\AutoCnC.Sdk.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="OpenRA.Game">
+      <HintPath>$(EngineBinDirectory)\OpenRA.Game.dll</HintPath>
+    </Reference>
+    <Reference Include="OpenRA.Mods.Common">
+      <HintPath>$(EngineBinDirectory)\OpenRA.Mods.Common.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="NUnit" Version="4.2.2" />
+    <PackageReference Include="NUnit3TestAdapter" Version="4.6.0" />
+  </ItemGroup>
+
+</Project>

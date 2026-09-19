@@ -60,6 +60,23 @@ namespace AutoCnC.Core
 		/// work ground further out than its search radius reaches.
 		/// </remarks>
 		Harvest = 11,
+
+		/// <summary>
+		/// Start repairing the owned building in <see cref="UnitDecision.TargetActorId"/>.
+		/// </summary>
+		RepairBuilding = 12,
+
+		/// <summary>
+		/// Cancel an exact number of <see cref="UnitDecision.ItemName"/> entries from
+		/// <see cref="UnitDecision.Queue"/>.
+		/// </summary>
+		CancelProduction = 13,
+
+		/// <summary>
+		/// Activate the configured support power in <see cref="UnitDecision.ItemName"/> at
+		/// <see cref="UnitDecision.TargetX"/>/<see cref="UnitDecision.TargetY"/>.
+		/// </summary>
+		ActivateSupportPower = 14,
 	}
 
 	/// <summary>
@@ -92,6 +109,18 @@ namespace AutoCnC.Core
 		/// deconstruction shape remain source-compatible.
 		/// </remarks>
 		public string ReasonId { get; init; }
+
+		/// <summary>
+		/// Number of matching queue entries requested by <see cref="CancelProduction"/>.
+		/// Zero for every other action.
+		/// </summary>
+		public int Count => Action == UnitAction.CancelProduction ? TargetX : 0;
+
+		/// <summary>
+		/// Configured support-power key or order name requested by <see cref="ActivateSupportPower"/>.
+		/// Null for every other action.
+		/// </summary>
+		public string Power => Action == UnitAction.ActivateSupportPower ? ItemName : null;
 
 		public static UnitDecision Hold(string reason) => Hold(reason, null);
 		public static UnitDecision Hold(string reason, string reasonId) =>
@@ -143,6 +172,26 @@ namespace AutoCnC.Core
 		public static UnitDecision Harvest(int x, int y, string reason) => Harvest(x, y, reason, null);
 		public static UnitDecision Harvest(int x, int y, string reason, string reasonId) =>
 			new(UnitAction.Harvest, 0, x, y, null, null, reason) { ReasonId = reasonId };
+
+		public static UnitDecision RepairBuilding(uint targetActorId, string reason) =>
+			RepairBuilding(targetActorId, reason, null);
+
+		public static UnitDecision RepairBuilding(uint targetActorId, string reason, string reasonId) =>
+			new(UnitAction.RepairBuilding, targetActorId, 0, 0, null, null, reason) { ReasonId = reasonId };
+
+		public static UnitDecision CancelProduction(string queue, string itemName, int count, string reason) =>
+			CancelProduction(queue, itemName, count, reason, null);
+
+		public static UnitDecision CancelProduction(
+			string queue, string itemName, int count, string reason, string reasonId) =>
+			new(UnitAction.CancelProduction, 0, count, 0, itemName, queue, reason) { ReasonId = reasonId };
+
+		public static UnitDecision ActivateSupportPower(string power, int x, int y, string reason) =>
+			ActivateSupportPower(power, x, y, reason, null);
+
+		public static UnitDecision ActivateSupportPower(
+			string power, int x, int y, string reason, string reasonId) =>
+			new(UnitAction.ActivateSupportPower, 0, x, y, power, null, reason) { ReasonId = reasonId };
 
 		/// <summary>
 		/// True if this decision commands the same thing as <paramref name="other"/>, ignoring the

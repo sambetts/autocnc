@@ -167,7 +167,8 @@ try {
     Add-Section 'DoctrineDecision' $core.GetType('AutoCnC.Core.DoctrineDecision') `
         'Returned from `IBattleBot.Reassess` to continue or request a doctrine transition.'
 
-    foreach ($typeName in 'ThreatValueSummary', 'ResourceCell', 'ResourceField', 'ThreatSnapshot', 'ThreatKind') {
+    foreach ($typeName in 'ThreatValueSummary', 'ResourceCell', 'ResourceField', 'ThreatSnapshot',
+        'OwnedBuildingState', 'ProductionQueueState', 'SupportPowerState', 'ThreatKind') {
         $type = $core.GetType("AutoCnC.Core.$typeName")
         if ($type) { Add-Section $typeName $type $null }
     }

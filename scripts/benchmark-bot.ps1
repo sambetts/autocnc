@@ -43,6 +43,9 @@
 .PARAMETER Difficulty
     Overrides the difficulty named by the benchmark set.
 
+.PARAMETER MaxGameSeconds
+    Overrides the benchmark set's match time limit. Use 0 for no limit.
+
 .PARAMETER OutputDirectory
     Where run directories are written. Defaults to the usual TrainingRuns location for the bot.
 
@@ -71,6 +74,8 @@ param(
     [ValidateRange(0, 5)]
     [int]$MatchRetries = 1,
     [string]$Difficulty,
+    [ValidateRange(-1, 86400)]
+    [int]$MaxGameSeconds = -1,
     [string]$OutputDirectory,
     [string]$ResultPath,
     [ValidateSet('Debug', 'Release')]
@@ -163,7 +168,13 @@ function Resolve-ControlBot([string]$worktree) {
 #>
 function New-MatchPlan($arm, $root, $revision, $bot) {
     $difficulty = if ($Difficulty) { $Difficulty } else { $set.difficulty }
-    $maxSeconds = if ($set.maxGameSeconds) { $set.maxGameSeconds } else { 5400 }
+    $maxSeconds = if ($MaxGameSeconds -ge 0) {
+        $MaxGameSeconds
+    } elseif ($set.maxGameSeconds) {
+        $set.maxGameSeconds
+    } else {
+        5400
+    }
 
     $plan = @()
     for ($repeat = 1; $repeat -le $Repeats; $repeat++) {
@@ -487,9 +498,13 @@ function Compare-PairedResults($candidateResults, $controlResults) {
     that is a build failure, not a slow build. run-bot.ps1 plays a prebuilt .dll exactly where it
     sits, so building once up front removes the race and the redundant work together.
 #>
-function Build-ArmBot([string]$bot) {
+function Build-ArmBot([string]$bot, [string]$arm, [string]$revision) {
     Write-Host "==> Building $bot" -ForegroundColor Cyan
-    & (Join-Path $repoRoot 'scripts\run-bot.ps1') -BattleBot $bot -Configuration $Configuration -NoLaunch |
+    $safeRevision = ($revision -replace '[^A-Za-z0-9_.-]', '-')
+    $installDirectory = Join-Path $OutputDirectory "artifacts\$arm-$safeRevision"
+
+    & (Join-Path $repoRoot 'scripts\run-bot.ps1') -BattleBot $bot -Configuration $Configuration `
+        -InstallDirectory $installDirectory -NoLaunch |
         Write-Verbose
     if ($LASTEXITCODE -ne 0) { throw "Could not build the bot at '$bot'." }
 
@@ -504,7 +519,7 @@ function Build-ArmBot([string]$bot) {
 
     $target = (dotnet msbuild $project -getProperty:TargetPath -nologo `
             -p:Configuration=$Configuration -p:AutoCnCPath="$repoRoot" `
-            -p:BattleBotInstallDirectory="$(Join-Path $repoRoot 'engine\bin\bots')").Trim()
+            -p:BattleBotInstallDirectory="$installDirectory").Trim()
 
     if (-not (Test-Path -LiteralPath $target)) { throw "The build reported '$target', which does not exist." }
     return $target
@@ -526,12 +541,19 @@ Write-Host "    Batch: $batch" -ForegroundColor DarkGray
 
 $controlWorktree = $null
 try {
-    $plan = New-MatchPlan 'candidate' $repoRoot (Resolve-Revision $repoRoot) (Build-ArmBot $BattleBot)
+    $candidateRevision = Resolve-Revision $repoRoot
+    $candidateBot = Build-ArmBot $BattleBot 'candidate' $candidateRevision
+    $plan = New-MatchPlan 'candidate' $repoRoot $candidateRevision $candidateBot
 
     if ($Control) {
         $controlWorktree = New-ControlWorktree $Control
-        $plan += New-MatchPlan 'control' $repoRoot (Resolve-Revision $controlWorktree) `
-            (Build-ArmBot (Resolve-ControlBot $controlWorktree))
+        $controlRevision = Resolve-Revision $controlWorktree
+        $controlBot = Build-ArmBot (Resolve-ControlBot $controlWorktree) 'control' $controlRevision
+        $plan += New-MatchPlan 'control' $repoRoot $controlRevision $controlBot
+
+        if ([IO.Path]::GetFullPath($candidateBot) -eq [IO.Path]::GetFullPath($controlBot)) {
+            throw 'Candidate and control resolved to the same bot assembly path.'
+        }
     }
 
     Invoke-Arm $plan
@@ -576,6 +598,7 @@ try {
         Benchmark = $set.name
         Batch = $batch
         Difficulty = if ($Difficulty) { $Difficulty } else { $set.difficulty }
+        MaxGameSeconds = if ($MaxGameSeconds -ge 0) { $MaxGameSeconds } elseif ($set.maxGameSeconds) { $set.maxGameSeconds } else { 5400 }
         ExpectedMatchesPerArm = $matchCount
         Candidate = $candidate
         Control = $control

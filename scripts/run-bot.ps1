@@ -99,6 +99,10 @@
 .PARAMETER NoLaunch
     Build and install only; don't start the game.
 
+.PARAMETER InstallDirectory
+    Optional directory for the built bot assembly. Defaults to engine\bin\bots. Benchmark arms use
+    distinct directories so one build cannot overwrite another before their matches run.
+
 .EXAMPLE
     ./scripts/run-bot.ps1
     Build the reference bot and play it from the menu.
@@ -143,6 +147,7 @@ param(
     [ValidateRange(0, [int]::MaxValue)]
     [int]$MaxGameSeconds = 5400,
     [switch]$NoLaunch,
+    [string]$InstallDirectory,
     [ValidateSet('Debug', 'Release')]
     [string]$Configuration = 'Release'
 )
@@ -151,7 +156,11 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $engineDir = Join-Path $repoRoot 'engine'
 $binDir = Join-Path $engineDir 'bin'
-$botDir = Join-Path $binDir 'bots'
+$botDir = if ($InstallDirectory) {
+    [IO.Path]::GetFullPath($InstallDirectory)
+} else {
+    Join-Path $binDir 'bots'
+}
 
 if ($ExecutionMode -eq 'Headless' -and -not $NoLaunch) {
     . (Join-Path $PSScriptRoot 'game-content.ps1')

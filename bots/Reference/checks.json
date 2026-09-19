@@ -1,7 +1,14 @@
 {
   "schemaVersion": 1,
-  "authoredForRevision": "7fdbc489c04f16b7289acb4d493d2af4d119efaa",
+  "authoredForRevision": "5d454106118670f513f9059fb907abac9b1c73ea",
   "checks": [
+    {
+      "id": "urgent-defence-transition-runs",
+      "description": "Immediate base pressure can bypass doctrine dwell and enter Defence without waiting for the global timer.",
+      "query": "reason-id:reference.doctrine.urgent-defence",
+      "operator": ">=",
+      "value": "1"
+    },
     {
       "id": "cleared-base-assault-launch-runs",
       "description": "The changed Defence exit launches a formed assault only after immediate base pressure has cleared.",

@@ -74,6 +74,8 @@ namespace AutoCnC.Reference.Logic
 
 	public static class ReferenceBotLogic
 	{
+		const string UrgentDefenceReasonId = "reference.doctrine.urgent-defence";
+
 		public static DoctrineDecision Decide(in BattleState s) => Decide(s, ReferenceBotTuning.Default);
 
 		public static DoctrineDecision Decide(in BattleState s, ReferenceBotTuning t)
@@ -105,8 +107,10 @@ namespace AutoCnC.Reference.Logic
 			if (s.BuildingsLost > 0
 				&& (s.BuildingsLost >= t.RecallBuildings
 					|| (!Is(s.Doctrine, ReferenceDoctrines.Attack) && !readyToPush)))
-				return DoctrineDecision.SwitchTo(ReferenceDoctrines.Defence,
-					$"lost {s.BuildingsLost} building(s) in {s.WindowSeconds}s");
+				return DoctrineDecision.SwitchUrgentlyTo(
+					ReferenceDoctrines.Defence,
+					$"lost {s.BuildingsLost} building(s) in {s.WindowSeconds}s",
+					UrgentDefenceReasonId);
 
 			// 2. A raid at the base — but not for a side that has an army and a target. Their army
 			//    is at your base because yours is at theirs, and a bot that trades its push for
@@ -130,14 +134,18 @@ namespace AutoCnC.Reference.Logic
 				&& !readyToPush
 				&& s.BaseUnderAttack
 				&& s.EnemiesNearBase >= t.RaidEnemies)
-				return DoctrineDecision.SwitchTo(ReferenceDoctrines.Defence,
-					$"spent assault recalled to threatened base: army worth {s.ArmyValue}, {s.EnemiesNearBase} enemy nearby");
+				return DoctrineDecision.SwitchUrgentlyTo(
+					ReferenceDoctrines.Defence,
+					$"spent assault recalled to threatened base: army worth {s.ArmyValue}, {s.EnemiesNearBase} enemy nearby",
+					UrgentDefenceReasonId);
 
 			if (s.EnemiesNearBase >= t.RaidEnemies
 				&& ((!Is(s.Doctrine, ReferenceDoctrines.Attack) && !readyToPush)
 					|| s.EnemiesNearBase >= AssaultSize(s, t)))
-				return DoctrineDecision.SwitchTo(ReferenceDoctrines.Defence,
-					$"{s.EnemiesNearBase} enemy at the base");
+				return DoctrineDecision.SwitchUrgentlyTo(
+					ReferenceDoctrines.Defence,
+					$"{s.EnemiesNearBase} enemy at the base",
+					UrgentDefenceReasonId);
 
 			// 3. Turtling with the pressure gone. The minimum doctrine dwell filters the first
 			//    wave; leaving also needs enough rebuilt army not to send an empty base straight

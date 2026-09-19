@@ -271,5 +271,18 @@ namespace AutoCnC.Launcher.Tests
 			Assert.That(run.CanImprove, Is.False);
 			Assert.That(run.CanChat, Is.True);
 		}
+
+		[Test]
+		public void ConversationCanRebindToFreshStateForTheSameRun()
+		{
+			var run = NewRun();
+			var stale = TrainingRun.Load(run.RunDirectory);
+			var current = TrainingRun.Load(run.RunDirectory);
+			var conversation = new AgentConversation(stale);
+
+			conversation.Rebind(current);
+
+			Assert.That(conversation.Run, Is.SameAs(current));
+		}
 	}
 }

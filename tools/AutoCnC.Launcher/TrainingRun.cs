@@ -513,6 +513,10 @@ namespace AutoCnC.Launcher
 			}
 		}
 
+		public static TrainingWorkspaceMutation AcquireWorkspaceMutation(
+			TrainingRun run) =>
+			TrainingWorkspaceMutation.Acquire(run?.Manifest.BotDirectory);
+
 		public void Finish(string status, MatchLog matchLog, BattleEventLog battleLog)
 		{
 			var localName = battleLog.Sides.FirstOrDefault(s => s.IsYou)?.Name;
@@ -1157,6 +1161,18 @@ namespace AutoCnC.Launcher
 			Save();
 		}
 
+		public static TrainingRun AcceptLatestSuggestedNextPrompt(
+			TrainingRun staleRun, string approvedPrompt)
+		{
+			using var mutation = AcquireMutation(staleRun);
+			if (mutation.Run.IsBusy)
+				throw new InvalidOperationException(
+					"Finish the active operation before accepting its prompt.");
+
+			mutation.Run.AcceptSuggestedNextPrompt(approvedPrompt);
+			return mutation.Run;
+		}
+
 		/// <summary>Records that the player turned this round's proposed prompt down.</summary>
 		public void RejectSuggestedNextPrompt()
 		{
@@ -1166,6 +1182,17 @@ namespace AutoCnC.Launcher
 			Manifest.Agent.SuggestedNextPromptRejected = true;
 			Manifest.Agent.SuggestedNextPromptAccepted = false;
 			Save();
+		}
+
+		public static TrainingRun RejectLatestSuggestedNextPrompt(TrainingRun staleRun)
+		{
+			using var mutation = AcquireMutation(staleRun);
+			if (mutation.Run.IsBusy)
+				throw new InvalidOperationException(
+					"Finish the active operation before rejecting its prompt.");
+
+			mutation.Run.RejectSuggestedNextPrompt();
+			return mutation.Run;
 		}
 
 		public void MarkRestored()

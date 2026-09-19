@@ -80,11 +80,23 @@ namespace AutoCnC.Launcher
 			Load();
 		}
 
-		public TrainingRun Run { get; }
+		public TrainingRun Run { get; private set; }
 
 		public IReadOnlyList<AgentChatEntry> History => history;
 		public int PendingCount => pending.Count;
 		public IReadOnlyList<string> Pending => [.. pending];
+
+		public void Rebind(TrainingRun run)
+		{
+			if (run == null || !string.Equals(
+				Path.GetFullPath(run.RunDirectory),
+				Path.GetFullPath(Run.RunDirectory),
+				StringComparison.OrdinalIgnoreCase))
+				throw new InvalidOperationException(
+					"A conversation can only be rebound to the same training run.");
+
+			Run = run;
+		}
 
 		/// <summary>The message currently being answered, if any.</summary>
 		public string InFlight { get; private set; }

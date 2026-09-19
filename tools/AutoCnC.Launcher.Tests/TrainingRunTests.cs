@@ -263,6 +263,52 @@ namespace AutoCnC.Launcher.Tests
 				Has.Some.Contains("locked by another launcher"));
 		}
 
+		[Test]
+		public void WorkspaceLockIsCanonicalAcrossRunsAndBlocksOlderRestore()
+		{
+			var older = NewRun();
+			Complete(older, "Lost", 180, army: 1000, opponentArmy: 2000);
+			WorkspaceSnapshot.Capture(older);
+			var newer = NewRun();
+			File.WriteAllText(Path.Combine(workspace, "Strategy.cs"), "newer workspace");
+			var olderLock = TrainingWorkspaceMutation.LockPathFor(
+				older.Manifest.BotDirectory);
+			var newerLock = TrainingWorkspaceMutation.LockPathFor(
+				newer.Manifest.BotDirectory);
+			Assert.That(newerLock, Is.EqualTo(olderLock));
+
+			Directory.CreateDirectory(Path.GetDirectoryName(olderLock));
+			using (var foreign = new FileStream(olderLock, FileMode.OpenOrCreate,
+				FileAccess.ReadWrite, FileShare.None))
+			{
+				Assert.That(() => TrainingRun.AcquireWorkspaceMutation(newer),
+					Throws.TypeOf<IOException>());
+				Assert.That(() => WorkspaceSnapshot.Restore(older),
+					Throws.TypeOf<IOException>());
+				Assert.That(File.ReadAllText(Path.Combine(workspace, "Strategy.cs")),
+					Is.EqualTo("newer workspace"));
+			}
+
+			File.Delete(olderLock);
+		}
+
+		[Test]
+		public void FailedRunReloadReleasesItsMutationLock()
+		{
+			var run = NewRun();
+			var validManifest = File.ReadAllText(run.ManifestPath);
+			File.WriteAllText(run.ManifestPath, "{");
+
+			Assert.That(() => TrainingRun.AcquireMutation(run),
+				Throws.TypeOf<JsonException>());
+
+			File.WriteAllText(run.ManifestPath, validManifest);
+			Assert.That(() =>
+			{
+				using var mutation = TrainingRun.AcquireMutation(run);
+			}, Throws.Nothing);
+		}
+
 		[TestCase(false)]
 		[TestCase(true)]
 		public void UnresolvedRunCanRestoreADeletedOrRenamedProject(bool renamed)
@@ -544,6 +590,47 @@ namespace AutoCnC.Launcher.Tests
 			Assert.That(run.Manifest.Agent.SuggestedNextPrompt, Is.EqualTo(nextPrompt));
 			Assert.That(TrainingAgent.FindSuggestedNextPrompt(
 				[TrainingAgent.NextPromptBegin, TrainingAgent.NextPromptEnd]), Is.Null);
+		}
+
+		[Test]
+		public void StalePromptAcceptancePreservesNewerManifestState()
+		{
+			var run = NewRun();
+			run.AgentStarted("agent");
+			run.AgentFinished(0, 1, "draft");
+			var stale = TrainingRun.Load(run.RunDirectory);
+			var newer = TrainingRun.Load(run.RunDirectory);
+			newer.Manifest.Status = "newer-state";
+			newer.Manifest.Warnings.Add("newer warning");
+			newer.Save();
+
+			var current = TrainingRun.AcceptLatestSuggestedNextPrompt(
+				stale, "approved prompt");
+
+			Assert.That(current.Manifest.Status, Is.EqualTo("newer-state"));
+			Assert.That(current.Manifest.Warnings, Does.Contain("newer warning"));
+			Assert.That(current.Manifest.Agent.SuggestedNextPrompt,
+				Is.EqualTo("approved prompt"));
+			Assert.That(current.Manifest.Agent.SuggestedNextPromptAccepted, Is.True);
+		}
+
+		[Test]
+		public void StalePromptRejectionPreservesNewerManifestState()
+		{
+			var run = NewRun();
+			run.AgentStarted("agent");
+			run.AgentFinished(0, 1, "draft");
+			var stale = TrainingRun.Load(run.RunDirectory);
+			var newer = TrainingRun.Load(run.RunDirectory);
+			newer.Manifest.Status = "newer-state";
+			newer.Manifest.Warnings.Add("newer warning");
+			newer.Save();
+
+			var current = TrainingRun.RejectLatestSuggestedNextPrompt(stale);
+
+			Assert.That(current.Manifest.Status, Is.EqualTo("newer-state"));
+			Assert.That(current.Manifest.Warnings, Does.Contain("newer warning"));
+			Assert.That(current.Manifest.Agent.SuggestedNextPromptRejected, Is.True);
 		}
 
 		[Test]

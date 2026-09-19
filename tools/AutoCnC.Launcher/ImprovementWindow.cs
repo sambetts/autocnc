@@ -492,6 +492,17 @@ namespace AutoCnC.Launcher
 				ShownRunChanged?.Invoke(run);
 		}
 
+		public void RebindRun(TrainingRun previous, TrainingRun current)
+		{
+			if (shownRun == null || previous == null || current == null ||
+				!string.Equals(Path.GetFullPath(shownRun.RunDirectory),
+					Path.GetFullPath(previous.RunDirectory),
+					StringComparison.OrdinalIgnoreCase))
+				return;
+
+			SetShownRun(current);
+		}
+
 		/// <summary>Redraws what has been said and what is still waiting to be said.</summary>
 		public void RefreshChat()
 		{

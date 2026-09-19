@@ -87,6 +87,7 @@ namespace AutoCnC.Launcher
 		TrainingRun lastRun;
 		TrainingRun continuousCandidateRun;
 		ContinuousEvaluationPlan continuousEvaluationPlan;
+		TrainingWorkspaceMutation activeWorkspaceMutation;
 		TrainingHistory loadedHistory = TrainingHistory.Empty;
 		string loadedHistoryBot;
 		DateTime battleStartedUtc;
@@ -1518,6 +1519,7 @@ namespace AutoCnC.Launcher
 				catch (IOException ex)
 				{
 					continuousLoop.Stop();
+					ReleaseWorkspaceMutation();
 					ReportAutomationFailure($"Could not create the training run: {ex.Message}",
 						MessageBoxIcon.Error, continuousContinuation);
 					return false;
@@ -1525,6 +1527,7 @@ namespace AutoCnC.Launcher
 				catch (UnauthorizedAccessException ex)
 				{
 					continuousLoop.Stop();
+					ReleaseWorkspaceMutation();
 					ReportAutomationFailure($"Could not create the training run: {ex.Message}",
 						MessageBoxIcon.Error, continuousContinuation);
 					return false;
@@ -1532,6 +1535,7 @@ namespace AutoCnC.Launcher
 				catch (InvalidOperationException ex)
 				{
 					continuousLoop.Stop();
+					ReleaseWorkspaceMutation();
 					ReportAutomationFailure($"Could not capture the continuous champion: {ex.Message}",
 						MessageBoxIcon.Error, continuousContinuation);
 					return false;
@@ -1606,21 +1610,46 @@ namespace AutoCnC.Launcher
 			bool allowCurrentOwner)
 		{
 			var mutation = TrainingRun.AcquireMutation(run);
-			var current = mutation.Run;
-			if (current.IsBusy &&
-				!(allowCurrentOwner && ProcessOwnership.IsCurrent(current.Manifest.Owner)))
+			try
+			{
+				var current = mutation.Run;
+				if (current.IsBusy &&
+					!(allowCurrentOwner && ProcessOwnership.IsCurrent(current.Manifest.Owner)))
+					throw new InvalidOperationException(
+						"Another launcher still owns this continuous experiment.");
+				if (!current.IsBusy && current.HasUnresolvedContinuousExperiment &&
+					!string.Equals(current.Manifest.Experiment.State,
+						TrainingExperimentStates.Aborted, StringComparison.OrdinalIgnoreCase))
+					current.ReconcileInterruptedContinuousExperiment();
+
+				ReplaceRunReference(run, current);
+				return mutation;
+			}
+			catch
 			{
 				mutation.Dispose();
-				throw new InvalidOperationException(
-					"Another launcher still owns this continuous experiment.");
+				throw;
 			}
-			if (!current.IsBusy && current.HasUnresolvedContinuousExperiment &&
-				!string.Equals(current.Manifest.Experiment.State,
-					TrainingExperimentStates.Aborted, StringComparison.OrdinalIgnoreCase))
-				current.ReconcileInterruptedContinuousExperiment();
+		}
 
-			ReplaceRunReference(run, current);
-			return mutation;
+		void EnsureWorkspaceMutation(TrainingRun run)
+		{
+			var workspace = Path.GetFullPath(run.Manifest.BotDirectory);
+			if (activeWorkspaceMutation != null)
+			{
+				if (!SamePath(activeWorkspaceMutation.WorkspaceRoot, workspace))
+					throw new InvalidOperationException(
+						"Another bot workspace is already locked by this launcher.");
+				return;
+			}
+
+			activeWorkspaceMutation = TrainingRun.AcquireWorkspaceMutation(run);
+		}
+
+		void ReleaseWorkspaceMutation()
+		{
+			activeWorkspaceMutation?.Dispose();
+			activeWorkspaceMutation = null;
 		}
 
 		void ReplaceRunReference(TrainingRun previous, TrainingRun current)
@@ -1633,6 +1662,10 @@ namespace AutoCnC.Launcher
 				activeTrainingRun = current;
 			if (SamePath(continuousCandidateRun?.RunDirectory, previous?.RunDirectory))
 				continuousCandidateRun = current;
+			var key = Path.GetFullPath(current.RunDirectory);
+			if (conversations.TryGetValue(key, out var thread))
+				thread.Rebind(current);
+			improvementWindow?.RebindRun(previous, current);
 			loadedHistory = loadedHistory.WithRun(current);
 		}
 
@@ -1671,6 +1704,7 @@ namespace AutoCnC.Launcher
 				AbortUnresolvedContinuousExperiment(
 					"Recovery failed before the interrupted candidate could be reevaluated.");
 				continuousLoop.Stop();
+				ReleaseWorkspaceMutation();
 				ReportAutomationFailure(
 					"Could not resume the unresolved continuous candidate: " + ex.Message,
 					MessageBoxIcon.Error, automatic: false);
@@ -1768,7 +1802,10 @@ namespace AutoCnC.Launcher
 					: BattleExecutionModes.Rendered
 			}, trainingRunsRoot);
 			if (continuousLoop.IsRunning)
+			{
+				EnsureWorkspaceMutation(activeRun);
 				continuousPromotion.CaptureChampion(activeRun);
+			}
 			lastRun = activeRun;
 			trainingRun = activeRun;
 			settings.LastTrainingRunDirectory = activeRun.RunDirectory;
@@ -1875,8 +1912,10 @@ namespace AutoCnC.Launcher
 				return false;
 
 			TrainingRunMutation continuousMutation = null;
+			var hadWorkspaceMutation = activeWorkspaceMutation != null;
 			try
 			{
+				EnsureWorkspaceMutation(run);
 				if (automatic)
 				{
 					continuousMutation = LockForContinuousMutation(
@@ -1917,17 +1956,23 @@ namespace AutoCnC.Launcher
 			}
 			catch (InvalidOperationException ex)
 			{
+				if (!hadWorkspaceMutation)
+					ReleaseWorkspaceMutation();
 				ReportAutomationFailure(ex.Message, MessageBoxIcon.Warning, automatic);
 				return false;
 			}
 			catch (IOException ex)
 			{
+				if (!hadWorkspaceMutation)
+					ReleaseWorkspaceMutation();
 				ReportAutomationFailure($"Could not prepare the improvement: {ex.Message}",
 					MessageBoxIcon.Error, automatic);
 				return false;
 			}
 			catch (UnauthorizedAccessException ex)
 			{
+				if (!hadWorkspaceMutation)
+					ReleaseWorkspaceMutation();
 				ReportAutomationFailure($"Could not prepare the improvement: {ex.Message}",
 					MessageBoxIcon.Error, automatic);
 				return false;
@@ -1976,6 +2021,8 @@ namespace AutoCnC.Launcher
 
 		void FinishImprovement(TrainingRun run, int exitCode)
 		{
+			var continuousAttempt =
+				continuousLoop.Stage == ContinuousTrainingStage.Improving;
 			if (SamePath(activeTrainingRun?.RunDirectory, run.RunDirectory))
 				activeTrainingRun = null;
 
@@ -2085,6 +2132,7 @@ namespace AutoCnC.Launcher
 						AbortUnresolvedContinuousExperiment(
 							"The failed continuous candidate could not be restored.");
 						continuousLoop.Stop();
+						ReleaseWorkspaceMutation();
 						AppendImprovementOutput(
 							"Could not restore the failed continuous candidate: " + ex.Message);
 					}
@@ -2092,6 +2140,8 @@ namespace AutoCnC.Launcher
 			}
 
 			RefreshFeedbackRun(run);
+			if (!continuousAttempt || exitCode != 0)
+				ReleaseWorkspaceMutation();
 		}
 
 		void StartContinuousEvaluation()
@@ -2102,6 +2152,7 @@ namespace AutoCnC.Launcher
 				AbortUnresolvedContinuousExperiment(
 					"Continuous evaluation could not resume its in-memory state.");
 				continuousLoop.Stop();
+				ReleaseWorkspaceMutation();
 				pendingContinuousAction = ContinuousTrainingAction.None;
 				Status("Continuous improvement stopped before paired evaluation could start.");
 				UpdateEnabledState();
@@ -2110,6 +2161,7 @@ namespace AutoCnC.Launcher
 
 			try
 			{
+				EnsureWorkspaceMutation(run);
 				continuousEvaluationPlan = continuousPromotion.PrepareEvaluation(repo, run,
 					settings.ContinuousBenchmark,
 					settings.ContinuousBenchmarkDifficulty);
@@ -2144,6 +2196,7 @@ namespace AutoCnC.Launcher
 				AbortUnresolvedContinuousExperiment(
 					"Paired evaluation setup failed before a durable decision.");
 				continuousLoop.Stop();
+				ReleaseWorkspaceMutation();
 				pendingContinuousAction = ContinuousTrainingAction.None;
 				AppendImprovementOutput("Could not prepare paired evaluation: " + ex.Message);
 				Status("Continuous improvement stopped before paired evaluation could start.");
@@ -2238,6 +2291,7 @@ namespace AutoCnC.Launcher
 				AbortUnresolvedContinuousExperiment(
 					"The failed paired evaluation could not be settled.");
 				continuousLoop.Stop();
+				ReleaseWorkspaceMutation();
 				pendingContinuousAction = ContinuousTrainingAction.None;
 				continuousEvaluationPlan = null;
 				AppendImprovementOutput("Could not settle the failed paired evaluation: " + ex.Message);
@@ -2287,6 +2341,8 @@ namespace AutoCnC.Launcher
 					: "Paired evaluation did not promote the candidate; the pre-agent champion was restored. " +
 						completion.Evaluation.Reason);
 				RefreshFeedbackRun(run);
+				if (!continuousLoop.IsRunning)
+					ReleaseWorkspaceMutation();
 			}
 			catch (Exception ex) when (ex is InvalidDataException or IOException or
 				UnauthorizedAccessException or InvalidOperationException)
@@ -2294,6 +2350,7 @@ namespace AutoCnC.Launcher
 				AbortUnresolvedContinuousExperiment(
 					"The paired evaluation decision could not be applied.");
 				continuousLoop.Stop();
+				ReleaseWorkspaceMutation();
 				pendingContinuousAction = ContinuousTrainingAction.None;
 				continuousEvaluationPlan = null;
 				AppendImprovementOutput("Could not apply the paired evaluation decision: " + ex.Message);
@@ -2335,6 +2392,7 @@ namespace AutoCnC.Launcher
 					AbortUnresolvedContinuousExperiment(
 						"The changed workspace could not return to continuous evaluation.");
 					continuousLoop.Stop();
+					ReleaseWorkspaceMutation();
 					Status("Continuous improvement stopped because the changed workspace could not be reevaluated.");
 					UpdateEnabledState();
 					return;
@@ -2346,6 +2404,7 @@ namespace AutoCnC.Launcher
 				AbortUnresolvedContinuousExperiment(
 					"The live workspace could not be reconciled before the next fight.");
 				continuousLoop.Stop();
+				ReleaseWorkspaceMutation();
 				Status("Continuous improvement stopped before the next fight: " + ex.Message);
 				UpdateEnabledState();
 				return;
@@ -2355,6 +2414,7 @@ namespace AutoCnC.Launcher
 			if (!Launch(play: true, continuousContinuation: true))
 			{
 				continuousLoop.Stop();
+				ReleaseWorkspaceMutation();
 				Status("Continuous improvement stopped before the next fight could start.");
 				UpdateEnabledState();
 			}
@@ -2504,11 +2564,24 @@ namespace AutoCnC.Launcher
 			}
 
 			var approved = promptTemplate.Trim();
-			RecordPromptRevision(approved, PromptOrigin.Manual, run);
+			TrainingRun current;
+			try
+			{
+				current = TrainingRun.AcceptLatestSuggestedNextPrompt(run, approved);
+				ReplaceRunReference(run, current);
+			}
+			catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
+				InvalidOperationException or System.Text.Json.JsonException)
+			{
+				MessageBox.Show(improvementWindow,
+					"The prompt decision could not be saved against the latest run state. " +
+					ex.Message, "AutoC&C", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+				return;
+			}
+
+			RecordPromptRevision(approved, PromptOrigin.Manual, current);
 			settings.AgentPromptTemplate = approved;
 			settings.AgentPromptGuidance = null;
-			if (run.Manifest.Agent != null)
-				run.AcceptSuggestedNextPrompt(approved);
 			PersistSettings();
 			if (improvementWindow != null)
 			{
@@ -2531,7 +2604,20 @@ namespace AutoCnC.Launcher
 			if (run?.Manifest.Agent == null)
 				return;
 
-			run.RejectSuggestedNextPrompt();
+			try
+			{
+				var current = TrainingRun.RejectLatestSuggestedNextPrompt(run);
+				ReplaceRunReference(run, current);
+			}
+			catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
+				InvalidOperationException or System.Text.Json.JsonException)
+			{
+				MessageBox.Show(improvementWindow,
+					"The prompt decision could not be saved against the latest run state. " +
+					ex.Message, "AutoC&C", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+				return;
+			}
+
 			improvementWindow?.MarkNextPromptRejected();
 		}
 
@@ -2676,6 +2762,7 @@ namespace AutoCnC.Launcher
 					if (!ImproveBot(automatic: true))
 					{
 						continuousLoop.Stop();
+						ReleaseWorkspaceMutation();
 						Status("Continuous improvement stopped before the agent could start.");
 						UpdateEnabledState();
 					}
@@ -2726,6 +2813,7 @@ namespace AutoCnC.Launcher
 				AbortUnresolvedContinuousExperiment(
 					"A continuous operation could not start.");
 				continuousLoop.Stop();
+				ReleaseWorkspaceMutation();
 				pendingContinuousAction = ContinuousTrainingAction.None;
 				continuousCandidateRun = null;
 				continuousEvaluationPlan = null;
@@ -2741,6 +2829,7 @@ namespace AutoCnC.Launcher
 				AbortUnresolvedContinuousExperiment(
 					"A continuous operation could not start.");
 				continuousLoop.Stop();
+				ReleaseWorkspaceMutation();
 				pendingContinuousAction = ContinuousTrainingAction.None;
 				continuousCandidateRun = null;
 				continuousEvaluationPlan = null;
@@ -2764,6 +2853,7 @@ namespace AutoCnC.Launcher
 				AbortUnresolvedContinuousExperiment(
 					"The continuous operation was stopped before a promotion decision.");
 				continuousLoop.Stop();
+				ReleaseWorkspaceMutation();
 				pendingContinuousAction = ContinuousTrainingAction.None;
 				continuousCandidateRun = null;
 				continuousEvaluationPlan = null;
@@ -2794,6 +2884,7 @@ namespace AutoCnC.Launcher
 				AbortUnresolvedContinuousExperiment(
 					"The continuous operation failed before a promotion decision.");
 				continuousLoop.Stop();
+				ReleaseWorkspaceMutation();
 				pendingContinuousAction = ContinuousTrainingAction.None;
 				continuousCandidateRun = null;
 				continuousEvaluationPlan = null;
@@ -2853,6 +2944,7 @@ namespace AutoCnC.Launcher
 				AbortUnresolvedContinuousExperiment(
 					"The continuous operation was stopped before a promotion decision.");
 				continuousLoop.Stop();
+				ReleaseWorkspaceMutation();
 				continuousCandidateRun = null;
 				continuousEvaluationPlan = null;
 			}
@@ -3013,6 +3105,7 @@ namespace AutoCnC.Launcher
 				AbortUnresolvedContinuousExperiment(
 					"The launcher closed before a continuous promotion decision.");
 				continuousLoop.Stop();
+				ReleaseWorkspaceMutation();
 				continuousCandidateRun = null;
 				continuousEvaluationPlan = null;
 			}

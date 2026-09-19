@@ -115,8 +115,10 @@ namespace AutoCnC.Launcher
 				return false;
 
 			string continuousFingerprint = null;
+			TrainingWorkspaceMutation chatWorkspaceMutation = null;
 			try
 			{
+				chatWorkspaceMutation = TrainingRun.AcquireWorkspaceMutation(run);
 				if (continuousLoop.IsRunning &&
 					SamePath(continuousCandidateRun?.RunDirectory, run.RunDirectory))
 					continuousFingerprint =
@@ -138,14 +140,17 @@ namespace AutoCnC.Launcher
 			}
 			catch (InvalidOperationException ex)
 			{
+				chatWorkspaceMutation?.Dispose();
 				return AbandonTurn(thread, ex.Message);
 			}
 			catch (IOException ex)
 			{
+				chatWorkspaceMutation?.Dispose();
 				return AbandonTurn(thread, ex.Message);
 			}
 			catch (UnauthorizedAccessException ex)
 			{
+				chatWorkspaceMutation?.Dispose();
 				return AbandonTurn(thread, ex.Message);
 			}
 
@@ -172,7 +177,17 @@ namespace AutoCnC.Launcher
 				// The conversation is captured rather than looked up again, so a turn started
 				// against one fight still completes against that fight even if the window has
 				// been pointed at another one in the meantime.
-				Completed = code => FinishChatTurn(thread, code, continuousFingerprint)
+				Completed = code =>
+				{
+					try
+					{
+						FinishChatTurn(thread, code, continuousFingerprint);
+					}
+					finally
+					{
+						chatWorkspaceMutation.Dispose();
+					}
+				}
 			});
 
 			RunNext();

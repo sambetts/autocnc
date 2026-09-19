@@ -206,6 +206,37 @@ namespace AutoCnC.Launcher.Tests
 			}
 		}
 
+		[Test]
+		public void RebindRunReplacesAStaleModelessWindowReference()
+		{
+			var root = Path.Combine(Path.GetTempPath(), "AutoCnC Rebind Window",
+				Guid.NewGuid().ToString("N"));
+			var workspace = Path.Combine(root, "Bot");
+			Directory.CreateDirectory(workspace);
+			var project = Path.Combine(workspace, "Bot.csproj");
+			File.WriteAllText(project, "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+
+			try
+			{
+				var run = TrainingRun.Create(project, new TrainingBattleConfiguration(),
+					Path.Combine(root, "runs"));
+				run.AgentStarted("agent");
+				run.AgentFinished(0, 1, Template("draft"));
+				var stale = TrainingRun.Load(run.RunDirectory);
+				var current = TrainingRun.Load(run.RunDirectory);
+
+				using var window = new ImprovementWindow();
+				window.ShowAgentRun(stale);
+				window.RebindRun(stale, current);
+
+				Assert.That(window.ShownRun, Is.SameAs(current));
+			}
+			finally
+			{
+				Directory.Delete(root, true);
+			}
+		}
+
 		/// <summary>A prompt that satisfies the template contract, with one line to vary.</summary>
 		static string Template(string tail) => string.Join(Environment.NewLine,
 		[

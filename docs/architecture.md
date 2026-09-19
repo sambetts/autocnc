@@ -459,9 +459,13 @@ continues with the restored champion.
 The reload, ownership check, claim and manifest mutation are serialized by an exclusive per-run
 `experiment.lock`, closing the gap where two launchers could both observe an unowned manifest and
 claim it.
+Source-changing work also holds a canonical workspace lock shared by every run for that bot, so an
+older session cannot restore while a newer fight, agent, chat or evaluation owns the same source.
 Unresolved-run discovery compares the stored workspace and manifest paths rather than requiring
 the selected project to still exist. A snapshot restore can therefore recreate a deleted project
 file or remove a renamed replacement.
+Prompt accept/reject reloads under the run lock and changes only the latest agent prompt fields;
+modeless windows and cached conversations are rebound to that fresh run object.
 
 The loop stops on user request or any non-zero game, agent, or build exit. Headless also treats 90
 nominal game minutes without a result as a failed stalemate (configurable with

@@ -44,6 +44,7 @@ namespace AutoCnC.Launcher
 
 		public static void Capture(TrainingRun run)
 		{
+			using var workspaceMutation = TrainingRun.AcquireWorkspaceMutation(run);
 			if (!run.IsEditable)
 				throw new InvalidOperationException("Only a battle bot project can be snapshotted.");
 
@@ -140,6 +141,7 @@ namespace AutoCnC.Launcher
 		public static string CaptureImmutableCurrent(TrainingRun run, string destination,
 			string manifestPath)
 		{
+			using var workspaceMutation = TrainingRun.AcquireWorkspaceMutation(run);
 			if (!run.IsEditable)
 				throw new InvalidOperationException("Only a battle bot project can be snapshotted.");
 
@@ -166,6 +168,7 @@ namespace AutoCnC.Launcher
 		public static string MaterializeImmutableChampion(TrainingRun run, string destination,
 			string manifestPath)
 		{
+			using var workspaceMutation = TrainingRun.AcquireWorkspaceMutation(run);
 			EnsureExperimentDestination(run, destination);
 			var snapshot = Read(run);
 			EnsureSameWorkspace(run, snapshot);
@@ -204,6 +207,7 @@ namespace AutoCnC.Launcher
 
 		public static void Restore(TrainingRun run)
 		{
+			using var workspaceMutation = TrainingRun.AcquireWorkspaceMutation(run);
 			if (run.IsBusy && !ProcessOwnership.IsCurrent(run.Manifest.Owner))
 				throw new InvalidOperationException(
 					"Another launcher still owns this source snapshot.");

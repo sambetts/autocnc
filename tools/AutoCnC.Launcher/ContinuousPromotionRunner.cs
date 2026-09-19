@@ -220,7 +220,10 @@ namespace AutoCnC.Launcher
 
 			var result = JsonSerializer.Deserialize<ContinuousArmBuildResult>(
 				File.ReadAllText(resultPath), BuildJsonOptions);
-			if (result?.SchemaVersion < 1 ||
+			if (result == null)
+				throw new InvalidDataException(
+					$"The {arm.ToString().ToLowerInvariant()} build result is null.");
+			if (result.SchemaVersion < 1 ||
 				string.IsNullOrWhiteSpace(result.TargetPath))
 				throw new InvalidDataException(
 					$"The {arm.ToString().ToLowerInvariant()} build reported no evaluated TargetPath.");

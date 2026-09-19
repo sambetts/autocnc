@@ -205,6 +205,48 @@ namespace AutoCnC.Launcher.Tests
 		}
 
 		[Test]
+		public void DiscardingUnrecoverableExperimentRequiresConfirmationAndUnblocksRun()
+		{
+			var run = NewRun();
+			Complete(run, "Lost", 180, army: 1000, opponentArmy: 2000);
+			WorkspaceSnapshot.Capture(run);
+			run.ContinuousAgentStarted("agent");
+			File.WriteAllText(Path.Combine(workspace, "Strategy.cs"), "accepted current");
+			run.AgentFinished(0, 1);
+			run.Manifest.Owner = new ProcessOwnership { ProcessId = -1 };
+			Directory.Delete(run.SnapshotDirectory, recursive: true);
+			File.Delete(run.SnapshotManifestPath);
+			run.Save();
+			var aborted = TrainingRun.Load(run.RunDirectory);
+			var confirmations = 0;
+
+			var declined = TrainingRun.DiscardLatestUnrecoverableExperiment(
+				aborted, "snapshot missing", _ =>
+				{
+					confirmations++;
+					return false;
+				});
+			Assert.That(declined, Is.Null);
+			Assert.That(TrainingRun.Load(run.RunDirectory)
+				.HasUnresolvedContinuousExperiment, Is.True);
+
+			var discarded = TrainingRun.DiscardLatestUnrecoverableExperiment(
+				aborted, "snapshot missing", _ =>
+				{
+					confirmations++;
+					return true;
+				});
+
+			Assert.That(confirmations, Is.EqualTo(2));
+			Assert.That(discarded.Manifest.Experiment.State,
+				Is.EqualTo(TrainingExperimentStates.Discarded));
+			Assert.That(discarded.HasUnresolvedContinuousExperiment, Is.False);
+			Assert.That(discarded.CanDelete, Is.True);
+			Assert.That(File.ReadAllText(Path.Combine(workspace, "Strategy.cs")),
+				Is.EqualTo("accepted current"));
+		}
+
+		[Test]
 		public void FailedContinuousAgentStartDoesNotPersistAnExperiment()
 		{
 			var run = NewRun();
@@ -348,6 +390,52 @@ namespace AutoCnC.Launcher.Tests
 		}
 
 		[Test]
+		public void CompletedTerminalRunIgnoresAStaleLiveManifestOwner()
+		{
+			var run = NewRun();
+			Complete(run, "Won", 120, army: 2000, opponentArmy: 500);
+			run.Manifest.Owner = ProcessOwnership.Claim();
+			run.Save();
+
+			var loaded = TrainingRun.Load(run.RunDirectory);
+
+			Assert.That(loaded.HasUnfinishedWork, Is.False);
+			Assert.That(loaded.IsBusy, Is.False);
+			Assert.That(loaded.CanDelete, Is.True);
+		}
+
+		[Test]
+		public void CompletedTerminalRunRemainsBusyWhileWorkerIsAlive()
+		{
+			var run = NewRun();
+			Complete(run, "Won", 120, army: 2000, opponentArmy: 500);
+			using var worker = Process.Start(new ProcessStartInfo
+			{
+				FileName = Path.Combine(Environment.SystemDirectory,
+					"WindowsPowerShell", "v1.0", "powershell.exe"),
+				Arguments = "-NoProfile -Command \"Start-Sleep -Seconds 30\"",
+				UseShellExecute = false,
+				CreateNoWindow = true
+			});
+			Assert.That(worker, Is.Not.Null);
+			try
+			{
+				File.WriteAllText(run.WorkerOwnershipPath,
+					JsonSerializer.Serialize(ProcessOwnership.ForProcess(worker)));
+				var loaded = TrainingRun.Load(run.RunDirectory);
+				Assert.That(loaded.HasUnfinishedWork, Is.False);
+				Assert.That(loaded.IsBusy, Is.True);
+				Assert.That(loaded.CanDelete, Is.False);
+			}
+			finally
+			{
+				if (!worker.HasExited)
+					worker.Kill(entireProcessTree: true);
+				worker.WaitForExit();
+			}
+		}
+
+		[Test]
 		public void WorkspaceLockIsCanonicalAcrossRunsAndBlocksOlderRestore()
 		{
 			var older = NewRun();
@@ -474,6 +562,7 @@ namespace AutoCnC.Launcher.Tests
 		[TestCase("missing")]
 		[TestCase("corrupt")]
 		[TestCase("outside")]
+		[TestCase("omitted")]
 		public void SnapshotPreflightFailureLeavesWorkspaceByteIdentical(string fault)
 		{
 			var run = NewRun();
@@ -495,6 +584,11 @@ namespace AutoCnC.Launcher.Tests
 				case "corrupt":
 					File.WriteAllText(snapshotFile, "corrupt snapshot");
 					break;
+				case "omitted":
+					manifest.Files.Remove(entry);
+					File.WriteAllText(run.SnapshotManifestPath,
+						JsonSerializer.Serialize(manifest));
+					break;
 				default:
 					entry.RelativePath = "..\\outside.cs";
 					File.WriteAllText(run.SnapshotManifestPath,
@@ -509,6 +603,41 @@ namespace AutoCnC.Launcher.Tests
 				Is.EqualTo("candidate"));
 			Assert.That(File.ReadAllText(Path.Combine(workspace, "Added.cs")),
 				Is.EqualTo("candidate addition"));
+		}
+
+		[TestCase("snapshot")]
+		[TestCase("workspace")]
+		public void RestoreRejectsJunctionsBeforeWritingAnywhere(string location)
+		{
+			var nested = Path.Combine(workspace, "Nested");
+			Directory.CreateDirectory(nested);
+			File.WriteAllText(Path.Combine(nested, "Nested.cs"), "nested before");
+			var run = NewRun();
+			WorkspaceSnapshot.Capture(run);
+			File.WriteAllText(Path.Combine(workspace, "Strategy.cs"), "candidate");
+			var outside = Path.Combine(root, "outside-" + location);
+			Directory.CreateDirectory(outside);
+			File.WriteAllText(Path.Combine(outside, "Nested.cs"), "outside");
+			var junction = location == "snapshot"
+				? Path.Combine(run.SnapshotDirectory, "Nested")
+				: nested;
+			Directory.Delete(junction, recursive: true);
+			CreateJunction(junction, outside);
+
+			try
+			{
+				Assert.That(() => WorkspaceSnapshot.Restore(run),
+					Throws.TypeOf<InvalidDataException>());
+				Assert.That(File.ReadAllText(Path.Combine(workspace, "Strategy.cs")),
+					Is.EqualTo("candidate"));
+				Assert.That(File.ReadAllText(Path.Combine(outside, "Nested.cs")),
+					Is.EqualTo("outside"));
+			}
+			finally
+			{
+				if (Directory.Exists(junction))
+					Directory.Delete(junction);
+			}
 		}
 
 		[Test]
@@ -1241,7 +1370,7 @@ namespace AutoCnC.Launcher.Tests
 			run.Finish("finished", match, battle);
 
 			var loaded = TrainingRun.Load(run.RunDirectory);
-			Assert.That(loaded.Manifest.SchemaVersion, Is.EqualTo(12));
+			Assert.That(loaded.Manifest.SchemaVersion, Is.EqualTo(13));
 			Assert.That(loaded.Manifest.Result.Outcome, Is.EqualTo("Won"));
 			Assert.That(loaded.Manifest.Performance.SimulationSpeed, Is.EqualTo(100));
 			Assert.That(loaded.Manifest.Performance.TicksPerSecond, Is.EqualTo(2500));
@@ -1583,6 +1712,23 @@ namespace AutoCnC.Launcher.Tests
 				]
 			};
 			run.Save();
+		}
+
+		static void CreateJunction(string junction, string target)
+		{
+			using var process = Process.Start(new ProcessStartInfo
+			{
+				FileName = Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe",
+				Arguments = $"/c mklink /J \"{junction}\" \"{target}\"",
+				UseShellExecute = false,
+				CreateNoWindow = true,
+				RedirectStandardOutput = true,
+				RedirectStandardError = true
+			});
+			Assert.That(process, Is.Not.Null);
+			process.WaitForExit();
+			Assert.That(process.ExitCode, Is.Zero,
+				process.StandardOutput.ReadToEnd() + process.StandardError.ReadToEnd());
 		}
 
 		static void CreateCheckout(string checkout, string authoringApi)

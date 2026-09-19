@@ -162,6 +162,7 @@ namespace AutoCnC.Launcher
 		public const string Restoring = "restoring";
 		public const string Restored = "restored";
 		public const string Aborted = "aborted";
+		public const string Discarded = "discarded";
 	}
 
 	/// <summary>Durable promotion state for one continuous candidate.</summary>
@@ -178,6 +179,7 @@ namespace AutoCnC.Launcher
 		public DateTime? RestoredUtc { get; set; }
 		public DateTime? InvalidatedUtc { get; set; }
 		public DateTime? AbortedUtc { get; set; }
+		public DateTime? ResolvedUtc { get; set; }
 		public int EvaluationAttempt { get; set; }
 		public string ChampionSourceRevision { get; set; }
 		public string CandidateSourceRevision { get; set; }
@@ -208,6 +210,7 @@ namespace AutoCnC.Launcher
 		public string InvalidationReason { get; set; }
 		public string AbortReason { get; set; }
 		public string AbortedFromState { get; set; }
+		public string Resolution { get; set; }
 		public bool? RequiresReevaluation { get; set; }
 		public bool? CanResumeEvaluation { get; set; }
 
@@ -220,7 +223,7 @@ namespace AutoCnC.Launcher
 
 	public sealed class TrainingRunManifest
 	{
-		public int SchemaVersion { get; set; } = 12;
+		public int SchemaVersion { get; set; } = 13;
 		public string Id { get; set; }
 		public string Status { get; set; }
 
@@ -347,6 +350,8 @@ namespace AutoCnC.Launcher
 			!string.Equals(Manifest.Experiment.State, TrainingExperimentStates.Promoted,
 				StringComparison.OrdinalIgnoreCase) &&
 			!string.Equals(Manifest.Experiment.State, TrainingExperimentStates.Restored,
+				StringComparison.OrdinalIgnoreCase) &&
+			!string.Equals(Manifest.Experiment.State, TrainingExperimentStates.Discarded,
 				StringComparison.OrdinalIgnoreCase);
 		public bool CanResumeContinuousEvaluation =>
 			HasUnresolvedContinuousExperiment &&
@@ -354,6 +359,10 @@ namespace AutoCnC.Launcher
 			(Manifest.Experiment.AbortedFromState is
 				TrainingExperimentStates.Candidate or
 				TrainingExperimentStates.Evaluating);
+		public bool CanDiscardContinuousExperiment =>
+			HasUnresolvedContinuousExperiment &&
+			string.Equals(Manifest.Experiment?.State, TrainingExperimentStates.Aborted,
+				StringComparison.OrdinalIgnoreCase);
 
 		/// <summary>True while the manifest still describes a battle or improvement as under way.</summary>
 		public bool HasUnfinishedWork => Manifest.CompletedUtc == null ||
@@ -389,12 +398,13 @@ namespace AutoCnC.Launcher
 
 		/// <summary>True while that work is genuinely still going on somewhere.</summary>
 		public bool IsBusy =>
-			ProcessOwnership.IsLive(Manifest.Owner) || HasLiveWorker;
+			(HasUnfinishedWork && ProcessOwnership.IsLive(Manifest.Owner)) ||
+			HasLiveWorker;
 
 		/// <summary>
 		/// True when the session was left mid-battle or mid-improvement by a launcher that is gone.
 		/// </summary>
-		public bool WasInterrupted => HasUnfinishedWork && !ProcessOwnership.IsLive(Manifest.Owner);
+		public bool WasInterrupted => HasUnfinishedWork && !IsBusy;
 
 		/// <summary>
 		/// A session can be deleted unless something is still writing to it.
@@ -1100,6 +1110,39 @@ namespace AutoCnC.Launcher
 			Manifest.Status = "candidate";
 			Manifest.Owner = ProcessOwnership.Claim();
 			Save();
+		}
+
+		public static TrainingRun DiscardLatestUnrecoverableExperiment(
+			TrainingRun staleRun, string reason, Func<TrainingRun, bool> confirm)
+		{
+			ArgumentNullException.ThrowIfNull(staleRun);
+			ArgumentNullException.ThrowIfNull(confirm);
+
+			using var workspaceMutation = AcquireWorkspaceMutation(staleRun);
+			using var runMutation = AcquireMutation(staleRun);
+			var current = runMutation.Run;
+			if (current.IsBusy)
+				throw new InvalidOperationException(
+					"An active worker still owns this continuous experiment.");
+			if (!current.CanDiscardContinuousExperiment)
+				throw new InvalidOperationException(
+					"Only an aborted continuous experiment can be discarded.");
+			if (!confirm(current))
+				return null;
+
+			var experiment = current.Manifest.Experiment;
+			experiment.State = TrainingExperimentStates.Discarded;
+			experiment.ResolvedUtc = DateTime.UtcNow;
+			experiment.Resolution = string.IsNullOrWhiteSpace(reason)
+				? "Accepted the current workspace without restoring its snapshot."
+				: reason.Trim();
+			experiment.CanResumeEvaluation = false;
+			experiment.RequiresReevaluation = false;
+			experiment.ExpectedLiveFingerprint = null;
+			current.Manifest.Status = "experiment-discarded";
+			current.Manifest.Owner = null;
+			current.Save();
+			return current;
 		}
 
 		public void MarkContinuousPromoted()

@@ -129,6 +129,7 @@ namespace AutoCnC.Launcher
 		Button retryVerificationButton;
 		Button reviewButton;
 		Button restoreButton;
+		Button discardExperimentButton;
 		Button runFolderButton;
 		Button stopButton;
 		Button replayButton;
@@ -426,6 +427,14 @@ namespace AutoCnC.Launcher
 			restoreButton = new ActionButton { Text = "Restore previous iteration", AutoSize = true };
 			restoreButton.Click += (_, _) => RestoreIteration();
 
+			discardExperimentButton = new ActionButton
+			{
+				Text = "Accept current workspace",
+				AutoSize = true,
+				Visible = false
+			};
+			discardExperimentButton.Click += (_, _) => DiscardUnrecoverableExperiment();
+
 			runFolderButton = new ActionButton { Text = "Open run", AutoSize = true };
 			runFolderButton.Click += (_, _) => OpenTrainingRun();
 
@@ -451,6 +460,7 @@ namespace AutoCnC.Launcher
 			actions.Controls.Add(retryVerificationButton);
 			actions.Controls.Add(reviewButton);
 			actions.Controls.Add(restoreButton);
+			actions.Controls.Add(discardExperimentButton);
 			actions.Controls.Add(runFolderButton);
 
 			var hint = new Label
@@ -1024,6 +1034,10 @@ namespace AutoCnC.Launcher
 				((agent != null && agent.ChangeCount != 0 && agent.RestoredUtc == null) ||
 					run.HasUnresolvedContinuousExperiment) &&
 				File.Exists(run.SnapshotManifestPath);
+			discardExperimentButton.Visible =
+				trainingRunMatches && run?.CanDiscardContinuousExperiment == true;
+			discardExperimentButton.Enabled =
+				!busy && discardExperimentButton.Visible && !run.IsBusy;
 			runFolderButton.Enabled = !busy && run != null && Directory.Exists(run.RunDirectory);
 			stopButton.Enabled = busy;
 
@@ -2796,6 +2810,42 @@ namespace AutoCnC.Launcher
 				MessageBox.Show(this,
 					$"Could not read the source snapshot: {ex.Message}", "AutoC&C",
 					MessageBoxButtons.OK, MessageBoxIcon.Error);
+			}
+		}
+
+		void DiscardUnrecoverableExperiment()
+		{
+			var run = trainingRun;
+			if (OperationInProgress || run?.CanDiscardContinuousExperiment != true ||
+				!RunMatchesSelectedBot(run))
+				return;
+
+			try
+			{
+				var current = TrainingRun.DiscardLatestUnrecoverableExperiment(
+					run,
+					"Player accepted the current workspace because the rollback snapshot was unavailable or unusable.",
+					latest => MessageBox.Show(this,
+						$"Accept the current bot source and permanently discard the unresolved experiment?\n\n" +
+						$"Session: {latest.Manifest.Id}\n\n" +
+						"This does not restore any files. The current workspace becomes your responsibility, " +
+						"and the session will stop blocking deletion and future fights.",
+						"Accept current workspace",
+						MessageBoxButtons.YesNo,
+						MessageBoxIcon.Warning) == DialogResult.Yes);
+				if (current == null)
+					return;
+
+				ReplaceRunReference(run, current);
+				RefreshFeedbackRun(current);
+				Status("The unresolved experiment was discarded; the current workspace was left unchanged.");
+			}
+			catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
+				InvalidOperationException or System.Text.Json.JsonException)
+			{
+				MessageBox.Show(this,
+					"Could not discard the unresolved experiment: " + ex.Message,
+					"AutoC&C", MessageBoxButtons.OK, MessageBoxIcon.Error);
 			}
 		}
 

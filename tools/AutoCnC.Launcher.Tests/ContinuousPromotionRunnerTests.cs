@@ -235,6 +235,18 @@ namespace AutoCnC.Launcher.Tests
 		}
 
 		[Test]
+		public void NullBuildResultIsRejectedAsInvalidData()
+		{
+			var run = Candidate();
+			var plan = promotion.PrepareEvaluation(repo, run);
+			File.WriteAllText(plan.CandidateBuildResultPath, "null");
+
+			Assert.That(() => promotion.CaptureBuiltArm(
+				run, plan, ContinuousEvaluationArm.Candidate),
+				Throws.TypeOf<InvalidDataException>().With.Message.Contains("result is null"));
+		}
+
+		[Test]
 		public void EvaluatedTargetPathSupportsImportedConditionalPropertyExpandedNames()
 		{
 			File.WriteAllText(Path.Combine(workspace, "Directory.Build.props"),

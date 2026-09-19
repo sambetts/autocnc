@@ -225,23 +225,26 @@ namespace AutoCnC.Launcher
 				CleanupFailedStart(started, jobObject);
 				throw;
 			}
-			catch (IOException)
+			catch (IOException ex)
 			{
 				startFailed = true;
 				CleanupFailedStart(started, jobObject);
-				throw;
+				throw new InvalidOperationException(
+					"Could not start the worker process: " + ex.Message, ex);
 			}
-			catch (UnauthorizedAccessException)
+			catch (UnauthorizedAccessException ex)
 			{
 				startFailed = true;
 				CleanupFailedStart(started, jobObject);
-				throw;
+				throw new InvalidOperationException(
+					"Could not start the worker process: " + ex.Message, ex);
 			}
-			catch (JsonException)
+			catch (JsonException ex)
 			{
 				startFailed = true;
 				CleanupFailedStart(started, jobObject);
-				throw;
+				throw new InvalidOperationException(
+					"Could not start the worker process: " + ex.Message, ex);
 			}
 		}
 

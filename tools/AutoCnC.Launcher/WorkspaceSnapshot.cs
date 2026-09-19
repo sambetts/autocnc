@@ -216,6 +216,9 @@ namespace AutoCnC.Launcher
 			EnsureSameWorkspace(run, snapshot);
 			var files = PreflightRestore(run, snapshot);
 			var changes = Compare(run);
+			foreach (var added in changes.Where(change => change.Kind == "added"))
+				EnsureNoReparseComponents(snapshot.WorkspaceRoot,
+					Under(snapshot.WorkspaceRoot, added.RelativePath));
 
 			foreach (var added in changes.Where(c => c.Kind == "added"))
 			{
@@ -246,6 +249,7 @@ namespace AutoCnC.Launcher
 		{
 			var files = new List<(WorkspaceSnapshotEntry, string, string)>();
 			var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+			var snapshotFiles = EnumerateSnapshotFiles(run.SnapshotDirectory);
 			foreach (var entry in snapshot.Files ?? [])
 			{
 				if (entry == null || string.IsNullOrWhiteSpace(entry.RelativePath) ||
@@ -256,6 +260,8 @@ namespace AutoCnC.Launcher
 
 				var source = Under(run.SnapshotDirectory, entry.RelativePath);
 				var destination = Under(snapshot.WorkspaceRoot, entry.RelativePath);
+				EnsureNoReparseComponents(run.SnapshotDirectory, source);
+				EnsureNoReparseComponents(snapshot.WorkspaceRoot, destination);
 				if (!File.Exists(source))
 					throw new InvalidDataException(
 						$"The source snapshot file '{entry.RelativePath}' is missing.");
@@ -270,7 +276,71 @@ namespace AutoCnC.Launcher
 				files.Add((entry, source, destination));
 			}
 
+			if (!seen.SetEquals(snapshotFiles))
+				throw new InvalidDataException(
+					"The source snapshot file tree does not exactly match its manifest.");
+
 			return files;
+		}
+
+		static HashSet<string> EnumerateSnapshotFiles(string root)
+		{
+			var fullRoot = Path.GetFullPath(root);
+			var files = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+			var pending = new Stack<string>();
+			pending.Push(fullRoot);
+
+			while (pending.Count > 0)
+			{
+				var directory = pending.Pop();
+				if ((File.GetAttributes(directory) & FileAttributes.ReparsePoint) != 0)
+					throw new InvalidDataException(
+						"The source snapshot contains a linked directory.");
+
+				foreach (var entry in new DirectoryInfo(directory).EnumerateFileSystemInfos())
+				{
+					if ((entry.Attributes & FileAttributes.ReparsePoint) != 0)
+						throw new InvalidDataException(
+							$"The source snapshot contains a linked entry: {entry.Name}");
+					if (entry is DirectoryInfo child)
+						pending.Push(child.FullName);
+					else
+						files.Add(Path.GetRelativePath(fullRoot, entry.FullName));
+				}
+			}
+
+			return files;
+		}
+
+		static void EnsureNoReparseComponents(string root, string path)
+		{
+			var fullRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
+			var fullPath = Path.GetFullPath(path);
+			var relative = Path.GetRelativePath(fullRoot, fullPath);
+			if (Path.IsPathRooted(relative) || relative == ".." ||
+				relative.StartsWith(".." + Path.DirectorySeparatorChar,
+					StringComparison.Ordinal))
+				throw new InvalidDataException(
+					$"'{path}' points outside the expected directory.");
+
+			var current = fullRoot;
+			if (Directory.Exists(current) &&
+				(File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
+				throw new InvalidDataException(
+					$"Restore path '{current}' is a link or junction.");
+
+			foreach (var segment in relative.Split(
+				Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))
+			{
+				if (segment.Length == 0)
+					continue;
+				current = Path.Combine(current, segment);
+				if (!File.Exists(current) && !Directory.Exists(current))
+					break;
+				if ((File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
+					throw new InvalidDataException(
+						$"Restore path '{current}' is a link or junction.");
+			}
 		}
 
 		static WorkspaceSnapshotManifest Read(TrainingRun run)

@@ -294,7 +294,8 @@ namespace AutoCnC.Launcher.Tests
 				{
 					ScriptPath = script,
 					WorkerOwnershipFile = ownership
-				}, directory), Throws.TypeOf<UnauthorizedAccessException>());
+				}, directory), Throws.TypeOf<InvalidOperationException>()
+					.With.InnerException.TypeOf<UnauthorizedAccessException>());
 				Assert.That(runner.IsRunning, Is.False);
 				Assert.That(File.Exists(ownership), Is.False);
 			}

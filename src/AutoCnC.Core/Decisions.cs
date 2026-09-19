@@ -81,21 +81,73 @@ namespace AutoCnC.Core
 	{
 		public static readonly UnitDecision Continue = new(UnitAction.Continue, 0, 0, 0, null, null, "no change");
 
-		public static UnitDecision Hold(string reason) => new(UnitAction.Hold, 0, 0, 0, null, null, reason);
-		public static UnitDecision Attack(uint targetActorId, string reason) => new(UnitAction.Attack, targetActorId, 0, 0, null, null, reason);
-		public static UnitDecision ReturnToAnchor(string reason) => new(UnitAction.ReturnToAnchor, 0, 0, 0, null, null, reason);
-		public static UnitDecision Retreat(string reason) => new(UnitAction.Retreat, 0, 0, 0, null, null, reason);
-		public static UnitDecision AdvanceToObjective(uint objectiveActorId, string reason) => new(UnitAction.AdvanceToObjective, objectiveActorId, 0, 0, null, null, reason);
-		public static UnitDecision MoveTo(int x, int y, string reason) => new(UnitAction.MoveTo, 0, x, y, null, null, reason);
-		public static UnitDecision AttackMoveTo(int x, int y, string reason) => new(UnitAction.AttackMoveTo, 0, x, y, null, null, reason);
-		public static UnitDecision Deploy(string reason) => new(UnitAction.Deploy, 0, 0, 0, null, null, reason);
-		public static UnitDecision Produce(string queue, string itemName, string reason) => new(UnitAction.Produce, 0, 0, 0, itemName, queue, reason);
-		public static UnitDecision PlaceBuilding(string queue, string itemName, int x, int y, string reason) => new(UnitAction.PlaceBuilding, 0, x, y, itemName, queue, reason);
-		public static UnitDecision Harvest(int x, int y, string reason) => new(UnitAction.Harvest, 0, x, y, null, null, reason);
+		/// <summary>
+		/// Stable machine-readable explanation for this decision. Null on decisions created
+		/// through the legacy factories or positional constructor.
+		/// </summary>
+		/// <remarks>
+		/// Keep this stable when the human-readable <see cref="Reason"/> changes. Dotted or
+		/// kebab-case identifiers such as <c>combat.focus-armour</c> work well in evidence checks.
+		/// It is deliberately not positional, so the historical seven-argument constructor and
+		/// deconstruction shape remain source-compatible.
+		/// </remarks>
+		public string ReasonId { get; init; }
+
+		public static UnitDecision Hold(string reason) => Hold(reason, null);
+		public static UnitDecision Hold(string reason, string reasonId) =>
+			new(UnitAction.Hold, 0, 0, 0, null, null, reason) { ReasonId = reasonId };
+
+		public static UnitDecision Attack(uint targetActorId, string reason) => Attack(targetActorId, reason, null);
+		public static UnitDecision Attack(uint targetActorId, string reason, string reasonId) =>
+			new(UnitAction.Attack, targetActorId, 0, 0, null, null, reason) { ReasonId = reasonId };
+
+		public static UnitDecision ReturnToAnchor(string reason) => ReturnToAnchor(reason, null);
+		public static UnitDecision ReturnToAnchor(string reason, string reasonId) =>
+			new(UnitAction.ReturnToAnchor, 0, 0, 0, null, null, reason) { ReasonId = reasonId };
+
+		public static UnitDecision Retreat(string reason) => Retreat(reason, null);
+		public static UnitDecision Retreat(string reason, string reasonId) =>
+			new(UnitAction.Retreat, 0, 0, 0, null, null, reason) { ReasonId = reasonId };
+
+		public static UnitDecision AdvanceToObjective(uint objectiveActorId, string reason) =>
+			AdvanceToObjective(objectiveActorId, reason, null);
+
+		public static UnitDecision AdvanceToObjective(uint objectiveActorId, string reason, string reasonId) =>
+			new(UnitAction.AdvanceToObjective, objectiveActorId, 0, 0, null, null, reason) { ReasonId = reasonId };
+
+		public static UnitDecision MoveTo(int x, int y, string reason) => MoveTo(x, y, reason, null);
+		public static UnitDecision MoveTo(int x, int y, string reason, string reasonId) =>
+			new(UnitAction.MoveTo, 0, x, y, null, null, reason) { ReasonId = reasonId };
+
+		public static UnitDecision AttackMoveTo(int x, int y, string reason) => AttackMoveTo(x, y, reason, null);
+		public static UnitDecision AttackMoveTo(int x, int y, string reason, string reasonId) =>
+			new(UnitAction.AttackMoveTo, 0, x, y, null, null, reason) { ReasonId = reasonId };
+
+		public static UnitDecision Deploy(string reason) => Deploy(reason, null);
+		public static UnitDecision Deploy(string reason, string reasonId) =>
+			new(UnitAction.Deploy, 0, 0, 0, null, null, reason) { ReasonId = reasonId };
+
+		public static UnitDecision Produce(string queue, string itemName, string reason) =>
+			Produce(queue, itemName, reason, null);
+
+		public static UnitDecision Produce(string queue, string itemName, string reason, string reasonId) =>
+			new(UnitAction.Produce, 0, 0, 0, itemName, queue, reason) { ReasonId = reasonId };
+
+		public static UnitDecision PlaceBuilding(string queue, string itemName, int x, int y, string reason) =>
+			PlaceBuilding(queue, itemName, x, y, reason, null);
+
+		public static UnitDecision PlaceBuilding(string queue, string itemName, int x, int y,
+			string reason, string reasonId) =>
+			new(UnitAction.PlaceBuilding, 0, x, y, itemName, queue, reason) { ReasonId = reasonId };
+
+		public static UnitDecision Harvest(int x, int y, string reason) => Harvest(x, y, reason, null);
+		public static UnitDecision Harvest(int x, int y, string reason, string reasonId) =>
+			new(UnitAction.Harvest, 0, x, y, null, null, reason) { ReasonId = reasonId };
 
 		/// <summary>
 		/// True if this decision commands the same thing as <paramref name="other"/>, ignoring the
-		/// human-readable reason. Used to suppress duplicate orders.
+		/// human-readable reason and machine-readable reason identifier. Used to suppress
+		/// duplicate orders.
 		/// </summary>
 		public bool SameIntent(in UnitDecision other) =>
 			Action == other.Action &&

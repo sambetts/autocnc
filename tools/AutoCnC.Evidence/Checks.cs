@@ -29,8 +29,8 @@ namespace AutoCnC.Evidence
 	/// written so the harness can settle it.
 	/// </para>
 	/// <para>
-	/// The <c>reason:</c> query is the important one. A round that adds a code path gives the path
-	/// a reason literal nothing else uses and asserts it appears; the check then distinguishes
+	/// The <c>reason-id:</c> query is the important one. A round that adds a code path gives the
+	/// path a stable identifier and asserts it appears; the check then distinguishes
 	/// "the branch is wrong" from "the branch never ran at all", which are the two explanations
 	/// that get confused when the same class of bug is re-introduced four times under four names.
 	/// </para>
@@ -46,7 +46,9 @@ namespace AutoCnC.Evidence
 		/// <item><c>summary.&lt;dotted.path&gt;</c> — any field of <c>summary.json</c>.</item>
 		/// <item><c>summary.unitTypes[e1].creditsPerKill</c> — a unit type's ledger entry.</item>
 		/// <item><c>summary.production[Infantry].deepestPlanStepIndex</c> — one queue.</item>
-		/// <item><c>reason:&lt;literal&gt;</c> — decisions whose reason contains the literal.</item>
+		/// <item><c>reason-id:&lt;id&gt;</c> — exact machine-readable reason identifier.</item>
+		/// <item><c>reason:&lt;literal&gt;</c> — exact ID when present, otherwise the legacy
+		/// case-insensitive prose substring query.</item>
 		/// <item><c>units.count(type=e1)</c>, <c>units.sum(kills,type=e1)</c>,
 		/// <c>units.mean(lifetimeSeconds,type=e1)</c>, <c>units.max(...)</c>,
 		/// <c>units.min(...)</c> — aggregates over <c>units.csv</c>.</item>
@@ -219,6 +221,9 @@ namespace AutoCnC.Evidence
 				throw new ArgumentException("the check has no query");
 
 			query = query.Trim();
+
+			if (query.StartsWith("reason-id:", StringComparison.OrdinalIgnoreCase))
+				return trace?.ReasonIdMentions(query["reason-id:".Length..].Trim()) ?? 0;
 
 			if (query.StartsWith("reason:", StringComparison.OrdinalIgnoreCase))
 				return trace?.ReasonMentions(query["reason:".Length..].Trim()) ?? 0;

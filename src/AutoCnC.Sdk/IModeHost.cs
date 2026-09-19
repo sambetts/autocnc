@@ -68,5 +68,16 @@ namespace AutoCnC.Sdk
 		/// not in the bot is ignored rather than fatal.
 		/// </remarks>
 		void RequestDoctrine(string doctrine, string reason);
+
+		/// <summary>
+		/// Ask for a different doctrine with a stable machine-readable reason identifier.
+		/// </summary>
+		/// <remarks>
+		/// The default preserves compatibility with older hosts by forwarding to the historical
+		/// overload. The AutoC&amp;C platform overrides this and retains <paramref name="reasonId"/>
+		/// in the decision trace.
+		/// </remarks>
+		void RequestDoctrine(string doctrine, string reason, string reasonId) =>
+			RequestDoctrine(doctrine, reason);
 	}
 }

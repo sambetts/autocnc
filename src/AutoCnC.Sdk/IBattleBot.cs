@@ -53,11 +53,13 @@ namespace AutoCnC.Sdk
 	///
 	///     public override DoctrineDecision Reassess(in BattleState s)
 	///     {
-	///         if (s.BuildingsLost &gt; 0)
-	///             return DoctrineDecision.SwitchTo("Defence", "losing buildings");
+	///         if (s.BaseUnderAttack)
+	///             return DoctrineDecision.SwitchUrgentlyTo(
+	///                 "Defence", "base is under attack", "doctrine.defence.base-under-attack");
 	///
 	///         if (s.ArmyValue &gt; 6000 &amp;&amp; s.EnemyBaseFound)
-	///             return DoctrineDecision.SwitchTo("Attack", "army is worth spending");
+	///             return DoctrineDecision.SwitchTo(
+	///                 "Attack", "army is worth spending", "doctrine.attack.ready");
 	///
 	///         return DoctrineDecision.Continue;
 	///     }
@@ -84,6 +86,8 @@ namespace AutoCnC.Sdk
 		/// state its condition without also having to check what is loaded. The platform will not
 		/// act on a switch until the current doctrine has had its minimum time, which is what
 		/// stops two rules that disagree from flipping the army back and forth every few seconds.
+		/// <see cref="DoctrineDecision.SwitchUrgentlyTo(string, string)"/> explicitly bypasses that
+		/// dwell only while <see cref="BattleState.BaseUnderAttack"/> is true.
 		/// </remarks>
 		DoctrineDecision Reassess(in BattleState state);
 	}

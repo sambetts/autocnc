@@ -11,6 +11,7 @@
 using System;
 using System.IO;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using AutoCnC.Core;
 using OpenRA;
 
@@ -29,7 +30,8 @@ namespace AutoCnC.Platform.Traits
 	{
 		static readonly JsonSerializerOptions JsonOptions = new()
 		{
-			PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+			PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+			Converters = { new JsonStringEnumConverter() }
 		};
 
 		StreamWriter writer;
@@ -40,7 +42,7 @@ namespace AutoCnC.Platform.Traits
 			Write(new
 			{
 				Event = "started",
-				SchemaVersion = 1,
+				SchemaVersion = 2,
 				RecordedAtUtc = DateTime.UtcNow
 			});
 		}
@@ -92,14 +94,18 @@ namespace AutoCnC.Platform.Traits
 				Outcome = outcome
 			});
 
-		public void DoctrineChanged(int seconds, string from, string to, string reason) =>
+		public void DoctrineChanged(int seconds, string from, string to, string reason,
+			string reasonId, bool urgent, bool dwellBypassed) =>
 			Write(new
 			{
 				Event = "doctrine",
 				Seconds = seconds,
 				From = from,
 				To = to,
-				Reason = reason
+				Reason = reason,
+				ReasonId = reasonId,
+				Urgent = urgent,
+				DwellBypassed = dwellBypassed
 			});
 
 		public void UnitDecisionIssued(int seconds, string actor, uint actorId, string mode,
@@ -118,6 +124,7 @@ namespace AutoCnC.Platform.Traits
 				decision.ItemName,
 				decision.Queue,
 				decision.Reason,
+				decision.ReasonId,
 				Order = order
 			});
 
@@ -144,7 +151,9 @@ namespace AutoCnC.Platform.Traits
 		{
 			WantsChange = decision.WantsChange,
 			decision.Doctrine,
-			decision.Reason
+			decision.Reason,
+			decision.ReasonId,
+			decision.IsUrgent
 		};
 
 		void Write(object value)

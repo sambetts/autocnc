@@ -31,10 +31,10 @@ namespace AutoCnC.Platform
 	/// why the filtering has to be deliberate.
 	/// </para>
 	/// <para>
-	/// Losses and kills are differences in <see cref="PlayerStatistics"/> across a rolling window
-	/// rather than counted from notifications. The engine already keeps those totals, and a
+	/// Losses, kills, their build values, and earned income are differences in the engine's
+	/// running totals across a rolling window rather than counted from notifications. A
 	/// difference of two totals cannot drift the way a parallel tally can — the question a bot
-	/// asks is "how much have I lost lately", and lately is exactly what a window is.
+	/// asks is "how much have I lost or earned lately", and lately is exactly what a window is.
 	/// </para>
 	/// </remarks>
 	public sealed class BattleAssessor
@@ -42,16 +42,13 @@ namespace AutoCnC.Platform
 		/// <summary>Milliseconds per tick at <c>default</c> speed, which fixes the time axis.</summary>
 		const int NominalTimestep = Traits.TurboSpeed.NominalTimestep;
 
-		/// <summary>One reading of the engine's running totals, and when it was taken.</summary>
-		readonly record struct Totals(int Seconds, int UnitsDead, int BuildingsDead, int Killed);
-
 		readonly World world;
 		readonly Player self;
 		readonly int windowSeconds;
 		readonly int baseRadiusCells;
 
 		/// <summary>Readings inside the window, oldest first. A handful of entries at most.</summary>
-		readonly Queue<Totals> history = new();
+		readonly Queue<BattleCumulativeTotals> history = new();
 
 		bool enemyBaseFound;
 		int lastContactSeconds = -1;
@@ -79,7 +76,7 @@ namespace AutoCnC.Platform
 
 			var mine = Own();
 			var seen = Contact(seconds, mine.Home);
-			var lately = Recent(seconds, stats);
+			var lately = Recent(seconds, stats, resources);
 
 			return new BattleState(
 				Seconds: seconds,
@@ -99,17 +96,27 @@ namespace AutoCnC.Platform
 				WindowSeconds: windowSeconds,
 				UnitsLost: lately.UnitsLost,
 				BuildingsLost: lately.BuildingsLost,
-				UnitsKilled: lately.Killed,
+				UnitsKilled: lately.UnitsKilled,
 
 				EnemiesInSight: seen.InSight,
 				EnemiesNearBase: seen.NearBase,
 				NearestEnemyCells: seen.NearestCells,
 				SecondsSinceContact: lastContactSeconds < 0 ? -1 : seconds - lastContactSeconds,
-				EnemyBaseFound: enemyBaseFound);
+				EnemyBaseFound: enemyBaseFound)
+			{
+				CreditsKilled = lately.CreditsKilled,
+				CreditsLost = lately.CreditsLost,
+				IncomeEarned = lately.IncomeEarned,
+				VisibleEnemyValue = seen.VisibleValue,
+				EnemyValueNearBase = seen.NearBaseValue,
+				OwnArmyValueNearBase = mine.ArmyValueNearBase,
+				VisibleEnemyMix = seen.Mix
+			};
 		}
 
 		/// <summary>Your own side, counted from the world because all of it is yours to count.</summary>
-		(int Units, int Buildings, int BaseValue, int Harvesters, int Refineries, CPos? Home) Own()
+		(int Units, int Buildings, int BaseValue, int Harvesters, int Refineries,
+			int ArmyValueNearBase, CPos? Home) Own()
 		{
 			var units = 0;
 			var buildings = 0;
@@ -117,11 +124,15 @@ namespace AutoCnC.Platform
 			var harvesters = 0;
 			var refineries = 0;
 			CPos? home = null;
+			var army = new List<(CPos Location, int Value)>();
 
 			foreach (var actor in world.Actors)
 			{
 				if (actor.Owner != self || actor.IsDead || !actor.IsInWorld || actor.OccupiesSpace == null)
 					continue;
+
+				if (actor.Info.TraitInfoOrDefault<UpdatesPlayerStatisticsInfo>()?.AddToArmyValue == true)
+					army.Add((actor.Location, actor.Info.TraitInfoOrDefault<ValuedInfo>()?.Cost ?? 0));
 
 				if (actor.Info.HasTraitInfo<BuildingInfo>())
 				{
@@ -149,7 +160,13 @@ namespace AutoCnC.Platform
 					units++;
 			}
 
-			return (units, buildings, baseValue, harvesters, refineries, home);
+			var armyValueNearBase = 0;
+			if (home != null)
+				foreach (var item in army)
+					if ((item.Location - home.Value).Length <= baseRadiusCells)
+						armyValueNearBase += Math.Max(0, item.Value);
+
+			return (units, buildings, baseValue, harvesters, refineries, armyValueNearBase, home);
 		}
 
 		/// <summary>
@@ -161,37 +178,54 @@ namespace AutoCnC.Platform
 		/// when the shroud closes over it again. That is the one enemy fact a bot keeps, and it
 		/// is one it genuinely learned.
 		/// </remarks>
-		(int InSight, int NearBase, int NearestCells) Contact(int seconds, CPos? home)
+		(int InSight, int NearBase, int NearestCells, int VisibleValue, int NearBaseValue,
+			IReadOnlyList<ThreatValueSummary> Mix) Contact(int seconds, CPos? home)
 		{
-			var inSight = 0;
-			var nearBase = 0;
 			var nearest = -1;
+			var values = new BattleValueAccumulator();
 
 			foreach (var actor in world.Actors)
 			{
-				if (actor.OccupiesSpace == null || !ModeContext.IsVisibleEnemy(self, actor))
+				if (actor.OccupiesSpace == null)
 					continue;
 
-				inSight++;
+				var visible = ModeContext.IsVisibleEnemy(self, actor);
+				if (!visible)
+				{
+					values.ObserveEnemy(false, false, ThreatKind.Unknown, 0);
+					continue;
+				}
 
 				if (actor.Info.HasTraitInfo<BuildingInfo>())
 					enemyBaseFound = true;
 
-				if (home == null)
-					continue;
+				var nearBase = false;
+				if (home != null)
+				{
+					var cells = (actor.Location - home.Value).Length;
+					if (nearest < 0 || cells < nearest)
+						nearest = cells;
 
-				var cells = (actor.Location - home.Value).Length;
-				if (nearest < 0 || cells < nearest)
-					nearest = cells;
+					nearBase = cells <= baseRadiusCells;
+				}
 
-				if (cells <= baseRadiusCells)
-					nearBase++;
+				values.ObserveEnemy(
+					visible: true,
+					nearBase: nearBase,
+					kind: ModeContext.Classify(actor),
+					value: actor.Info.TraitInfoOrDefault<ValuedInfo>()?.Cost ?? 0);
 			}
 
-			if (inSight > 0)
+			if (values.EnemiesInSight > 0)
 				lastContactSeconds = seconds;
 
-			return (inSight, nearBase, nearest);
+			return (
+				values.EnemiesInSight,
+				values.EnemiesNearBase,
+				nearest,
+				values.VisibleEnemyValue,
+				values.EnemyValueNearBase,
+				values.VisibleEnemyMix());
 		}
 
 		/// <summary>
@@ -201,13 +235,16 @@ namespace AutoCnC.Platform
 		/// Early in a match there is nothing older than the window, and the answer is correctly
 		/// the whole match so far.
 		/// </remarks>
-		(int UnitsLost, int BuildingsLost, int Killed) Recent(int seconds, PlayerStatistics stats)
+		BattleWindowTotals Recent(int seconds, PlayerStatistics stats, PlayerResources resources)
 		{
-			var now = new Totals(
+			var now = new BattleCumulativeTotals(
 				seconds,
 				stats?.UnitsDead ?? 0,
 				stats?.BuildingsDead ?? 0,
-				(stats?.UnitsKilled ?? 0) + (stats?.BuildingsKilled ?? 0));
+				(stats?.UnitsKilled ?? 0) + (stats?.BuildingsKilled ?? 0),
+				stats?.DeathsCost ?? 0,
+				stats?.KillsCost ?? 0,
+				resources?.Earned ?? 0);
 
 			history.Enqueue(now);
 
@@ -217,11 +254,7 @@ namespace AutoCnC.Platform
 				history.Dequeue();
 
 			var then = history.Peek();
-
-			return (
-				Math.Max(0, now.UnitsDead - then.UnitsDead),
-				Math.Max(0, now.BuildingsDead - then.BuildingsDead),
-				Math.Max(0, now.Killed - then.Killed));
+			return BattleWindowCalculator.Difference(now, then);
 		}
 	}
 }

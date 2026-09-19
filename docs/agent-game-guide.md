@@ -47,7 +47,9 @@ it as authoritative context alongside the source and the evidence from one compl
 - Keep the decision layer pure and engine-free. Pure state-to-decision functions are easy to reason
   about and make strategy changes explainable.
 - A doctrine switch changes plans and assignments for the whole side. Switches are rate-limited;
-  do not create rules that oscillate between doctrines.
+  do not create rules that oscillate between doctrines. An explicit
+  `DoctrineDecision.SwitchUrgentlyTo(...)` bypasses the dwell only while `BaseUnderAttack`; a
+  doctrine name never implies urgency.
 
 ## Information and fairness rules
 
@@ -56,6 +58,9 @@ it as authoritative context alongside the source and the evidence from one compl
   encode facts that the side could not know during the match.
 - Own economy, forces, queues, and buildings are known exactly. Enemy actors are known only when
   visible, except for facts the bot legitimately remembers such as having found an enemy base.
+- `BattleState` exposes rolling income and killed/lost value, visible enemy value and mix, and own
+  versus enemy value near the base. All enemy values retain the same visibility filter as
+  `SenseThreats`.
 - A damage callback can identify an unseen attacker because the attacked unit receives that same
   notification. Do not generalize that exception into map-wide enemy knowledge.
 - Improvement happens between matches. Edited assemblies require a rebuild and a fresh game; do
@@ -75,8 +80,11 @@ it as authoritative context alongside the source and the evidence from one compl
 - For deployment, check both `ctx.CanDeploy` and `ctx.DeploysIntoBuilding`; otherwise a
   construction yard can repeatedly pack and unpack.
 - Do not retain lists returned by sensing methods; their buffers are reused.
-- Fill every decision's reason with a concise explanation. Reasons appear in the decision trace
-  and are essential when correlating behavior with an outcome.
+- Fill every decision's `Reason` with a concise explanation and use the overload's final
+  `ReasonId` argument for a stable machine identifier. Both appear in the decision trace;
+  `SameIntent` ignores both.
+- `ThreatSnapshot` includes actor type, cell coordinates, value, and maximum enabled weapon range
+  in addition to its historical combat fields.
 
 ## Plans and assignments
 

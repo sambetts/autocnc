@@ -237,7 +237,10 @@ namespace AutoCnC.Platform.Traits
 				(string.IsNullOrEmpty(executor.DoctrineReason) ? " (its opening)." : $" because {executor.DoctrineReason}."));
 
 			Debug($"For {s.DoctrineSeconds}s. Army {s.ArmyValue} in {s.Units} units, {s.Buildings} buildings, {s.Cash} cash.");
-			Debug($"Last {s.WindowSeconds}s: lost {s.UnitsLost} units and {s.BuildingsLost} buildings, killed {s.UnitsKilled}.");
+			Debug($"Last {s.WindowSeconds}s: lost {s.UnitsLost} units/{s.CreditsLost} value and " +
+				$"{s.BuildingsLost} buildings, killed {s.UnitsKilled}/{s.CreditsKilled} value, earned {s.IncomeEarned}.");
+			Debug($"Visible enemy value {s.VisibleEnemyValue}; near base enemy {s.EnemyValueNearBase}, " +
+				$"own army {s.OwnArmyValueNearBase}.");
 
 			Debug(s.EnemiesInSight == 0
 				? s.EnemyBaseFound

@@ -359,7 +359,9 @@ write `evidence/decisions.jsonl` in their run directory, a structured trace with
 - every `BattleState` assessment;
 - the bot's doctrine decision and any mode-requested switch;
 - whether a switch continued, was rate-limited, failed validation, or applied;
-- every unit decision that actually became an engine order.
+- every unit decision that actually became an engine order;
+- stable `ReasonId` values for decisions and doctrine changes, including whether an urgent switch
+  bypassed the minimum dwell.
 
 It is the bridge between evidence and result. If `battle.csv` says an enemy was spotted at the
 base, `evidence/decisions.jsonl` says which doctrine assessment followed and whether individual units

@@ -12,7 +12,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Text.Json;
 
 namespace AutoCnC.Evidence
@@ -28,7 +27,16 @@ namespace AutoCnC.Evidence
 		public string ItemName { get; init; }
 		public string Queue { get; init; }
 		public string Reason { get; init; }
+		public string ReasonId { get; init; }
 		public string Order { get; init; }
+	}
+
+	/// <summary>Visible enemy count and value for one threat kind in an assessment.</summary>
+	public sealed class ThreatValueRecord
+	{
+		public string Kind { get; init; }
+		public int Count { get; init; }
+		public int Value { get; init; }
 	}
 
 	/// <summary>One <c>assessment</c> record's <c>state</c> block, flattened.</summary>
@@ -42,12 +50,23 @@ namespace AutoCnC.Evidence
 		public int Refineries { get; init; }
 		public int ArmyValue { get; init; }
 		public int Buildings { get; init; }
+		public int CreditsKilled { get; init; }
+		public int CreditsLost { get; init; }
+		public int IncomeEarned { get; init; }
+		public int VisibleEnemyValue { get; init; }
+		public int EnemyValueNearBase { get; init; }
+		public int OwnArmyValueNearBase { get; init; }
+		public List<ThreatValueRecord> VisibleEnemyMix { get; init; } = [];
 		public int NearestEnemyCells { get; init; }
 		public int SecondsSinceContact { get; init; }
 		public bool EnemyBaseFound { get; init; }
 		public bool BaseUnderAttack { get; init; }
 		public bool BlindToEnemy { get; init; }
 		public bool Winning { get; init; }
+		public string BotReasonId { get; init; }
+		public string ModeRequestReasonId { get; init; }
+		public string EffectiveReasonId { get; init; }
+		public bool EffectiveDecisionUrgent { get; init; }
 		public string Outcome { get; init; }
 	}
 
@@ -58,6 +77,9 @@ namespace AutoCnC.Evidence
 		public string From { get; init; }
 		public string To { get; init; }
 		public string Reason { get; init; }
+		public string ReasonId { get; init; }
+		public bool Urgent { get; init; }
+		public bool DwellBypassed { get; init; }
 	}
 
 	/// <summary>
@@ -91,30 +113,41 @@ namespace AutoCnC.Evidence
 		public List<string> Errors { get; } = [];
 
 		/// <summary>
-		/// Every distinct <c>reason</c> literal the run produced, with how often it was issued.
+		/// Every distinct legacy unit-decision <c>reason</c> literal, with how often it was issued.
 		/// </summary>
 		/// <remarks>
-		/// This is what makes "did the new branch actually run?" a decidable question. A round that
-		/// adds a code path gives it a reason string nothing else uses; the check then asserts that
-		/// literal appears here. Counting rather than just recording presence means "it ran" and
-		/// "it ran twice in a 25-minute match" are distinguishable, which is usually the more
-		/// interesting failure.
+		/// Kept for old traces and <c>reason:</c> checks. New code should use
+		/// <see cref="ReasonIdCounts"/> so explanatory prose can change without invalidating a
+		/// check.
 		/// </remarks>
 		public Dictionary<string, int> ReasonCounts { get; } = new(StringComparer.Ordinal);
+
+		/// <summary>
+		/// Every exact machine-readable reason identifier in the trace, with occurrence count.
+		/// </summary>
+		public Dictionary<string, int> ReasonIdCounts { get; } = new(StringComparer.Ordinal);
 
 		public Dictionary<string, int> ModeDecisionCounts { get; } = new(StringComparer.Ordinal);
 		public Dictionary<string, int> ActionCounts { get; } = new(StringComparer.Ordinal);
 
-		/// <summary>True when any reason literal contains <paramref name="text"/>.</summary>
-		public bool MentionsReason(string text) =>
-			!string.IsNullOrEmpty(text) &&
-			ReasonCounts.Keys.Any(r => r.Contains(text, StringComparison.OrdinalIgnoreCase));
+		/// <summary>
+		/// True when an exact reason ID exists, or a legacy reason contains
+		/// <paramref name="text"/>.
+		/// </summary>
+		public bool MentionsReason(string text) => ReasonMentions(text) > 0;
 
-		/// <summary>How many decisions carried a reason containing <paramref name="text"/>.</summary>
+		/// <summary>
+		/// Counts an exact reason ID when one exists; otherwise falls back to the historical
+		/// case-insensitive prose substring match.
+		/// </summary>
 		public int ReasonMentions(string text)
 		{
 			if (string.IsNullOrEmpty(text))
 				return 0;
+
+			var exact = ReasonIdMentions(text);
+			if (exact > 0)
+				return exact;
 
 			var total = 0;
 			foreach (var pair in ReasonCounts)
@@ -123,6 +156,12 @@ namespace AutoCnC.Evidence
 
 			return total;
 		}
+
+		/// <summary>How many trace fields carried exactly <paramref name="reasonId"/>.</summary>
+		public int ReasonIdMentions(string reasonId) =>
+			!string.IsNullOrEmpty(reasonId) && ReasonIdCounts.TryGetValue(reasonId, out var count)
+				? count
+				: 0;
 
 		public static DecisionTrace Read(string path)
 		{
@@ -172,14 +211,21 @@ namespace AutoCnC.Evidence
 					break;
 
 				case "doctrine":
-					DoctrineChanges.Add(new DoctrineChangeRecord
+				{
+					var change = new DoctrineChangeRecord
 					{
 						Seconds = Integer(root, "seconds"),
 						From = Text(root, "from"),
 						To = Text(root, "to"),
-						Reason = Text(root, "reason")
-					});
+						Reason = Text(root, "reason"),
+						ReasonId = Text(root, "reasonId"),
+						Urgent = Flag(root, "urgent"),
+						DwellBypassed = Flag(root, "dwellBypassed")
+					};
+					DoctrineChanges.Add(change);
+					RegisterReasonId(change.ReasonId);
 					break;
+				}
 
 				case "error":
 					Errors.Add($"{Text(root, "scope")}/{Text(root, "subject")}: {Text(root, "error")}");
@@ -200,7 +246,10 @@ namespace AutoCnC.Evidence
 			if (!root.TryGetProperty("state", out var state) || state.ValueKind != JsonValueKind.Object)
 				return;
 
-			Assessments.Add(new AssessmentRecord
+			var botReasonId = DecisionText(root, "botDecision", "reasonId");
+			var modeRequestReasonId = DecisionText(root, "modeRequest", "reasonId");
+			var effectiveReasonId = DecisionText(root, "effectiveDecision", "reasonId");
+			var record = new AssessmentRecord
 			{
 				Seconds = Integer(root, "seconds"),
 				Doctrine = Text(state, "doctrine"),
@@ -210,14 +259,30 @@ namespace AutoCnC.Evidence
 				Refineries = Integer(state, "refineries"),
 				ArmyValue = Integer(state, "armyValue"),
 				Buildings = Integer(state, "buildings"),
+				CreditsKilled = Integer(state, "creditsKilled"),
+				CreditsLost = Integer(state, "creditsLost"),
+				IncomeEarned = Integer(state, "incomeEarned"),
+				VisibleEnemyValue = Integer(state, "visibleEnemyValue"),
+				EnemyValueNearBase = Integer(state, "enemyValueNearBase"),
+				OwnArmyValueNearBase = Integer(state, "ownArmyValueNearBase"),
+				VisibleEnemyMix = ThreatValues(state, "visibleEnemyMix"),
 				NearestEnemyCells = Integer(state, "nearestEnemyCells"),
 				SecondsSinceContact = Integer(state, "secondsSinceContact"),
 				EnemyBaseFound = Flag(state, "enemyBaseFound"),
 				BaseUnderAttack = Flag(state, "baseUnderAttack"),
 				BlindToEnemy = Flag(state, "blindToEnemy"),
 				Winning = Flag(state, "winning"),
+				BotReasonId = botReasonId,
+				ModeRequestReasonId = modeRequestReasonId,
+				EffectiveReasonId = effectiveReasonId,
+				EffectiveDecisionUrgent = DecisionFlag(root, "effectiveDecision", "isUrgent"),
 				Outcome = Text(root, "outcome")
-			});
+			};
+
+			Assessments.Add(record);
+			RegisterReasonId(botReasonId);
+			RegisterReasonId(modeRequestReasonId);
+			RegisterReasonId(effectiveReasonId);
 		}
 
 		void AcceptUnitDecision(JsonElement root)
@@ -232,6 +297,7 @@ namespace AutoCnC.Evidence
 				ItemName = Text(root, "itemName"),
 				Queue = Text(root, "queue"),
 				Reason = Text(root, "reason"),
+				ReasonId = Text(root, "reasonId"),
 				Order = Text(root, "order")
 			};
 
@@ -240,11 +306,50 @@ namespace AutoCnC.Evidence
 			if (!string.IsNullOrEmpty(record.Reason))
 				ReasonCounts[record.Reason] = ReasonCounts.GetValueOrDefault(record.Reason) + 1;
 
+			RegisterReasonId(record.ReasonId);
+
 			if (!string.IsNullOrEmpty(record.Mode))
 				ModeDecisionCounts[record.Mode] = ModeDecisionCounts.GetValueOrDefault(record.Mode) + 1;
 
 			if (!string.IsNullOrEmpty(record.Action))
 				ActionCounts[record.Action] = ActionCounts.GetValueOrDefault(record.Action) + 1;
+		}
+
+		void RegisterReasonId(string reasonId)
+		{
+			if (!string.IsNullOrEmpty(reasonId))
+				ReasonIdCounts[reasonId] = ReasonIdCounts.GetValueOrDefault(reasonId) + 1;
+		}
+
+		static string DecisionText(JsonElement root, string decision, string name) =>
+			root.TryGetProperty(decision, out var value) && value.ValueKind == JsonValueKind.Object
+				? Text(value, name)
+				: null;
+
+		static bool DecisionFlag(JsonElement root, string decision, string name) =>
+			root.TryGetProperty(decision, out var value) && value.ValueKind == JsonValueKind.Object &&
+			Flag(value, name);
+
+		static List<ThreatValueRecord> ThreatValues(JsonElement root, string name)
+		{
+			var result = new List<ThreatValueRecord>();
+			if (!root.TryGetProperty(name, out var values) || values.ValueKind != JsonValueKind.Array)
+				return result;
+
+			foreach (var value in values.EnumerateArray())
+			{
+				if (value.ValueKind != JsonValueKind.Object)
+					continue;
+
+				result.Add(new ThreatValueRecord
+				{
+					Kind = Text(value, "kind") ?? Integer(value, "kind").ToString(),
+					Count = Integer(value, "count"),
+					Value = Integer(value, "value")
+				});
+			}
+
+			return result;
 		}
 
 		static string Text(JsonElement element, string name) =>

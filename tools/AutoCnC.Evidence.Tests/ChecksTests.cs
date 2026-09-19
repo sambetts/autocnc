@@ -82,6 +82,35 @@ namespace AutoCnC.Evidence.Tests
 		}
 
 		[Test]
+		public void ReasonIdQueryIsExactAndReasonQueryPrefersAnExactId()
+		{
+			var tracePath = WriteFile("reason-ids.jsonl",
+				"{\"event\":\"unit-decision\",\"reason\":\"combat.engage primary\",\"reasonId\":\"combat.engage\"}\n" +
+				"{\"event\":\"unit-decision\",\"reason\":\"combat.engage nearby\",\"reasonId\":\"combat.engage.nearby\"}\n");
+			var trace = DecisionTrace.Read(tracePath);
+			var document = new CheckDocument
+			{
+				Checks =
+				[
+					new Check { Id = "exact", Query = "reason-id:combat.engage", Operator = "==", Value = "1" },
+					new Check { Id = "no-prefix", Query = "reason-id:combat", Operator = "==", Value = "0" },
+					new Check { Id = "preferred", Query = "reason:combat.engage", Operator = "==", Value = "1" },
+					new Check { Id = "legacy", Query = "reason:engage", Operator = "==", Value = "2" }
+				]
+			};
+
+			var report = Checks.Evaluate(document, Summary(), Units(), trace);
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(Result(report, "exact").Passed, Is.True);
+				Assert.That(Result(report, "no-prefix").Passed, Is.True);
+				Assert.That(Result(report, "preferred").Passed, Is.True);
+				Assert.That(Result(report, "legacy").Passed, Is.True);
+			});
+		}
+
+		[Test]
 		public void SummaryHeadlinePathResolvesAndComparesNumerically()
 		{
 			var report = Evaluate(new Check

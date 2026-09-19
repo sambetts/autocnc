@@ -26,7 +26,23 @@ namespace AutoCnC.Core
 		int HealthPercent,
 		ThreatKind Kind,
 		bool IsAttackable,
-		bool CanHitUs);
+		bool CanHitUs)
+	{
+		/// <summary>Engine actor type, e.g. <c>e1</c> or <c>mtnk</c>.</summary>
+		public string ActorType { get; init; }
+
+		/// <summary>Current map cell X coordinate.</summary>
+		public int CellX { get; init; }
+
+		/// <summary>Current map cell Y coordinate.</summary>
+		public int CellY { get; init; }
+
+		/// <summary>Build cost/value, or zero when the actor has no value.</summary>
+		public int Value { get; init; }
+
+		/// <summary>Longest enabled weapon range in world units, or zero when unarmed.</summary>
+		public int WeaponRangeUnits { get; init; }
+	}
 
 	public enum ThreatKind : byte
 	{

@@ -76,8 +76,10 @@ refinery is strategy, so the plan lives in the doctrine. `BuildBaseMode` reads `
 rather than hardcoding an order, which is why the same mode serves every doctrine.
 
 The same line runs one level up. Sampling the world into a `BattleState` and rate-limiting
-switches is infrastructure, so `BattleAssessor` and the dwell time live in the platform. Deciding
-that two refineries is enough to spare a jeep is strategy, so it lives in the bot.
+switches is infrastructure, so `BattleAssessor` and the dwell time live in the platform. The only
+dwell bypass is a `DoctrineDecision` explicitly marked urgent while `BaseUnderAttack`; doctrine
+names are never interpreted as urgency. Deciding that two refineries is enough to spare a jeep is
+strategy, so it lives in the bot.
 
 ### What a bot is allowed to know
 
@@ -85,7 +87,8 @@ that two refineries is enough to spare a jeep is strategy, so it lives in the bo
 `ModeContext.IsVisibleEnemy` — the same predicate `ctx.SenseThreats` filters with. A client
 simulates the whole world, so this filtering has to be deliberate: without it a bot could switch
 to an attack doctrine on the strength of an army value no unit of yours has ever seen. Your own
-economy and forces are read exactly, because they are yours.
+economy and forces are read exactly, because they are yours. The assessment carries rolling
+income and value exchange, visible enemy value/mix, and own versus enemy value near the base.
 
 ---
 
@@ -337,12 +340,13 @@ The three runtime records have intentionally different trust boundaries:
 
 - telemetry is omniscient and for after-match evaluation only;
 - the battle log is restricted to what the side could observe;
-- the decision trace records the bot's assessments and orders, but is write-only to bot code.
+- the decision trace records the bot's assessments and orders, including stable `ReasonId` values,
+  but is write-only to bot code.
 
 Agent context adds three generated resources. `game-guide.md` is the shared explanation of mechanics,
 SDK semantics, and improvement constraints. `mechanics.md` is the **gospel** half of the prompt —
-game invariants plus a `ModeContext`/`UnitDecision` surface generated from the compiled assemblies
-by `scripts/export-agent-api.ps1`. `game-rules.json` is exported by
+game invariants plus the public bot-facing surface generated from the compiled assemblies by
+`scripts/export-agent-api.ps1`. `game-rules.json` is exported by
 `--export-agent-rules` directly from OpenRA's `ModData.DefaultRules`, after manifest inheritance
 and AutoC&C overrides have resolved. It is therefore a snapshot of the source of truth rather than
 a parallel unit-stats model.

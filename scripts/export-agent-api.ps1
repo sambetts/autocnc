@@ -161,7 +161,13 @@ try {
     Add-Section 'UnitDecision' $core.GetType('AutoCnC.Core.UnitDecision') `
         'Returned from `OnTick`. The static factories are the intended way to build one.'
 
-    foreach ($typeName in 'ResourceCell', 'ResourceField', 'ThreatSnapshot', 'ThreatKind') {
+    Add-Section 'BattleState' $core.GetType('AutoCnC.Core.BattleState') `
+        'Visibility-filtered strategic state passed to `IBattleBot.Reassess`.'
+
+    Add-Section 'DoctrineDecision' $core.GetType('AutoCnC.Core.DoctrineDecision') `
+        'Returned from `IBattleBot.Reassess` to continue or request a doctrine transition.'
+
+    foreach ($typeName in 'ThreatValueSummary', 'ResourceCell', 'ResourceField', 'ThreatSnapshot', 'ThreatKind') {
         $type = $core.GetType("AutoCnC.Core.$typeName")
         if ($type) { Add-Section $typeName $type $null }
     }

@@ -18,4 +18,9 @@
     convention.
   -->
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="AutoCnC.Core.Tests" />
+    <InternalsVisibleTo Include="AutoCnC.Platform" />
+  </ItemGroup>
+
 </Project>

@@ -135,7 +135,11 @@ namespace AutoCnC.Platform.Traits
 		/// is why a request naming the doctrine already running is dropped here rather than kept
 		/// as a standing one nothing will ever clear.
 		/// </remarks>
-		public void RequestDoctrine(string doctrine, string reason)
+		public void RequestDoctrine(string doctrine, string reason) =>
+			RequestDoctrine(doctrine, reason, null);
+
+		/// <summary>Requests a doctrine with a stable reason identifier for the trace.</summary>
+		public void RequestDoctrine(string doctrine, string reason, string reasonId)
 		{
 			if (Bot == null || string.IsNullOrEmpty(doctrine) || Bot.Find(doctrine) == null)
 				return;
@@ -143,7 +147,7 @@ namespace AutoCnC.Platform.Traits
 			if (string.Equals(doctrine, Doctrine?.Name, StringComparison.OrdinalIgnoreCase))
 				return;
 
-			requested = DoctrineDecision.SwitchTo(doctrine, reason);
+			requested = DoctrineDecision.SwitchTo(doctrine, reason, reasonId);
 		}
 
 		/// <summary>Game time since the match started, on the clock every other part of this uses.</summary>
@@ -264,7 +268,8 @@ namespace AutoCnC.Platform.Traits
 		/// the next tick. That is what makes a switch mean something — the army does not merely
 		/// build different things, it fights differently.
 		/// </remarks>
-		void ApplyDoctrine(DoctrineDefinition doctrine, string reason)
+		void ApplyDoctrine(DoctrineDefinition doctrine, string reason, string reasonId = null,
+			bool urgent = false, bool dwellBypassed = false)
 		{
 			if (doctrine == null)
 				return;
@@ -287,7 +292,8 @@ namespace AutoCnC.Platform.Traits
 			foreach (var pair in world.ActorsWithTrait<ProgrammableController>())
 				pair.Trait.ModeOverride = null;
 
-			decisionTrace?.DoctrineChanged(GameSeconds, previous, doctrine.Name, reason);
+			decisionTrace?.DoctrineChanged(GameSeconds, previous, doctrine.Name, reason, reasonId,
+				urgent, dwellBypassed);
 
 			if (previous == null || previous == doctrine.Name)
 				return;
@@ -357,9 +363,15 @@ namespace AutoCnC.Platform.Traits
 				return;
 			}
 
-			if (LastAssessment.DoctrineSeconds < info.MinimumDoctrineSeconds)
+			var dwell = DoctrineTransitionPolicy.CheckDwell(
+				decision, LastAssessment, info.MinimumDoctrineSeconds);
+			if (dwell == DoctrineDwellResult.MinimumDwell ||
+				dwell == DoctrineDwellResult.UrgentWithoutBaseAttack)
 			{
-				decisionTrace?.Assessment(GameSeconds, LastAssessment, botDecision, asked, decision, "minimum-dwell");
+				var outcome = dwell == DoctrineDwellResult.UrgentWithoutBaseAttack
+					? "minimum-dwell-no-base-attack"
+					: "minimum-dwell";
+				decisionTrace?.Assessment(GameSeconds, LastAssessment, botDecision, asked, decision, outcome);
 				return;
 			}
 
@@ -371,8 +383,12 @@ namespace AutoCnC.Platform.Traits
 				return;
 			}
 
-			decisionTrace?.Assessment(GameSeconds, LastAssessment, botDecision, asked, decision, "switch");
-			ApplyDoctrine(wanted, decision.Reason);
+			var dwellBypassed = dwell == DoctrineDwellResult.UrgentDwellBypass;
+			var switchOutcome = dwellBypassed
+				? "urgent-dwell-bypass"
+				: decision.IsUrgent ? "urgent-switch" : "switch";
+			decisionTrace?.Assessment(GameSeconds, LastAssessment, botDecision, asked, decision, switchOutcome);
+			ApplyDoctrine(wanted, decision.Reason, decision.ReasonId, decision.IsUrgent, dwellBypassed);
 		}
 
 		/// <summary>Creates a mode instance from the running doctrine, or null.</summary>

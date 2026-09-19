@@ -98,6 +98,12 @@ namespace AutoCnC.Sdk
 		/// </remarks>
 		public void SwitchDoctrine(string doctrine, string reason) => host.RequestDoctrine(doctrine, reason);
 
+		/// <summary>
+		/// Ask the bot to change doctrine with a stable identifier for evidence queries.
+		/// </summary>
+		public void SwitchDoctrine(string doctrine, string reason, string reasonId) =>
+			host.RequestDoctrine(doctrine, reason, reasonId);
+
 		public bool CanMove => move != null;
 		public bool HasWeapon => attackBases.Length > 0;
 		public bool IsIdle => self.IsIdle;
@@ -221,7 +227,14 @@ namespace AutoCnC.Sdk
 				HealthPercent: hp,
 				Kind: Classify(actor),
 				IsAttackable: CanAttack(actor),
-				CanHitUs: CanHitUs(actor));
+				CanHitUs: CanHitUs(actor))
+			{
+				ActorType = actor.Info.Name,
+				CellX = actor.Location.X,
+				CellY = actor.Location.Y,
+				Value = actor.Info.TraitInfoOrDefault<ValuedInfo>()?.Cost ?? 0,
+				WeaponRangeUnits = MaximumWeaponRange(actor)
+			};
 		}
 
 		bool IsHostileAndVisible(Actor actor) => actor != self && IsVisibleEnemy(self.Owner, actor);
@@ -272,6 +285,22 @@ namespace AutoCnC.Sdk
 					return true;
 
 			return false;
+		}
+
+		static int MaximumWeaponRange(Actor actor)
+		{
+			var best = 0;
+			foreach (var ab in actor.TraitsImplementing<AttackBase>())
+			{
+				if (ab.IsTraitDisabled || ab.IsTraitPaused)
+					continue;
+
+				var range = ab.GetMaximumRange().Length;
+				if (range > best)
+					best = range;
+			}
+
+			return best;
 		}
 
 		/// <summary>What kind of thing an actor is, as a mode sees it.</summary>

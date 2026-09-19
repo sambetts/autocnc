@@ -106,18 +106,21 @@ Written by a round into its own bot workspace; evaluated by the harness against 
 ```json
 { "schemaVersion": 1, "authoredForRevision": "abc1234",
   "checks": [ { "id": "escort-runs", "description": "the new branch executes",
-                "query": "reason:escorting harvester", "operator": ">=", "value": "1" } ] }
+                "query": "reason-id:economy.escort-harvester", "operator": ">=", "value": "1" } ] }
 ```
 
 Queries: `summary.<dotted.path>`, `summary.unitTypes[<type>].<column>`,
 `summary.production[<queue>].<column>`, `units.count(type=x)`, `units.sum(<field>,type=x)`,
-`units.mean(<field>,type=x)`, `units.max(...)`, `units.min(...)`, and `reason:<literal>` for the
-number of decisions whose reason contains that literal. Operators: `>=`, `>`, `<=`, `<`, `==`,
-`!=`, `contains`, `present`, `absent`.
+`units.mean(<field>,type=x)`, `units.max(...)`, `units.min(...)`,
+`reason-id:<id>` for an exact machine-readable identifier, and `reason:<literal>` for compatibility.
+`reason:` prefers an exact `ReasonId` when present, then falls back to the legacy
+case-insensitive prose substring match. Exact-ID counts include every matching unit decision,
+assessment decision, and doctrine-change field in the trace. Operators: `>=`, `>`, `<=`, `<`,
+`==`, `!=`, `contains`, `present`, `absent`.
 
-The `reason:` form is the important one. Give any new code path a reason literal nothing else uses
-and assert it: that is what separates "the new branch is wrong" from "the new branch never ran",
-which are the two explanations that get confused when the same bug reappears under a new name.
+The `reason-id:` form is the preferred one. Give any new code path a stable ID and assert it:
+that is what separates "the new branch is wrong" from "the new branch never ran", without coupling
+the check to prose that may be rewritten.
 
 ### Fitness
 
@@ -189,6 +192,10 @@ permitted way to know where anything is.
   encode facts that the side could not know during the match.
 - Own economy, forces, queues, and buildings are known exactly. Enemy actors are known only when
   visible, except for facts the bot legitimately remembers such as having found an enemy base.
+- `BattleState` includes rolling income and killed/lost value, visible enemy value and mix, and
+  own versus enemy value near the base. Enemy totals use the same visibility predicate as
+  `SenseThreats`.
+- `ThreatSnapshot` includes actor type, cell coordinates, value, and maximum enabled weapon range.
 - **Reading the resource layer through `ModeContext` is fair play, not cheating.** Those reads are
   shroud-filtered for you: a cell the side has never explored reads as empty, exactly as it does
   for a human player. There is no need to add a second fairness check of your own.
@@ -210,14 +217,16 @@ permitted way to know where anything is.
 - Attack, movement, retreat, deploy, production, and placement decisions become normal player
   orders a few ticks later. Do not assume an order applies immediately.
 - Returning the same intent repeatedly is cheap because the host suppresses duplicate orders.
+- Give decisions a stable `ReasonId` through the final factory argument. Human `Reason` prose and
+  `ReasonId` are both ignored by duplicate-intent suppression.
 - Target selection should be stable. Re-picking equivalent targets every evaluation makes units
   dither.
 - Drive a production queue only when `ctx.OwnsQueue(category)` is true.
 - For deployment, check both `ctx.CanDeploy` and `ctx.DeploysIntoBuilding`; otherwise a
   construction yard can repeatedly pack and unpack.
 - Do not retain lists returned by sensing methods; their buffers are reused.
-- Fill every decision's reason with a concise explanation. Reasons appear in the decision trace
-  and are essential when correlating behavior with an outcome.
+- Fill every decision's reason with a concise explanation and its `ReasonId` with a stable
+  machine-readable identifier. Both appear in the decision trace.
 
 ## Modes, doctrines and plans
 
@@ -229,7 +238,8 @@ permitted way to know where anything is.
 - Keep the decision layer pure and engine-free. Pure state-to-decision functions are easy to reason
   about and make strategy changes explainable.
 - A doctrine switch changes plans and assignments for the whole side. Switches are rate-limited;
-  do not create rules that oscillate between doctrines.
+  do not create rules that oscillate between doctrines. The only early-switch path is an explicit
+  `DoctrineDecision.SwitchUrgentlyTo(...)` while `BattleState.BaseUnderAttack` is true.
 - Mode assignment is by unit type, control group, or globally. Precedence is most-specific-wins:
   unit override, then control group, then unit type, then the actor's YAML default, then global.
 - A plan step that no driven queue can build is skipped silently, without an error.

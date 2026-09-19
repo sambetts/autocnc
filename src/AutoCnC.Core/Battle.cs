@@ -9,8 +9,13 @@
  */
 #endregion
 
+using System.Collections.Generic;
+
 namespace AutoCnC.Core
 {
+	/// <summary>Visible enemy count and value for one broad kind of threat.</summary>
+	public readonly record struct ThreatValueSummary(ThreatKind Kind, int Count, int Value);
+
 	/// <summary>
 	/// How the battle is going, as far as your side can tell.
 	/// </summary>
@@ -59,11 +64,37 @@ namespace AutoCnC.Core
 		int SecondsSinceContact,     // since you last saw any enemy, or -1 if you never have
 		bool EnemyBaseFound)         // true once you have seen an enemy structure
 	{
+		/// <summary>Build value destroyed during the rolling assessment window.</summary>
+		public int CreditsKilled { get; init; }
+
+		/// <summary>Build value lost during the rolling assessment window.</summary>
+		public int CreditsLost { get; init; }
+
+		/// <summary>Income earned during the rolling assessment window.</summary>
+		public int IncomeEarned { get; init; }
+
+		/// <summary>Total build value of enemies visible anywhere on the map.</summary>
+		public int VisibleEnemyValue { get; init; }
+
+		/// <summary>Build value of visible enemies within the configured base radius.</summary>
+		public int EnemyValueNearBase { get; init; }
+
+		/// <summary>Build value of your army within the configured base radius.</summary>
+		public int OwnArmyValueNearBase { get; init; }
+
+		/// <summary>Visible enemy count and value grouped by <see cref="ThreatKind"/>.</summary>
+		/// <remarks>
+		/// Entries with no visible actors are omitted. Historical positional construction remains
+		/// valid because this is an additive non-positional property.
+		/// </remarks>
+		public IReadOnlyList<ThreatValueSummary> VisibleEnemyMix { get; init; } = [];
+
 		/// <summary>Nothing known yet: no doctrine, no contact, nothing built.</summary>
 		public static BattleState Empty { get; } = new()
 		{
 			NearestEnemyCells = -1,
-			SecondsSinceContact = -1
+			SecondsSinceContact = -1,
+			VisibleEnemyMix = []
 		};
 
 		/// <summary>Something is being done to you at home, rather than to you in the field.</summary>
@@ -72,8 +103,19 @@ namespace AutoCnC.Core
 		/// <summary>You do not know where the enemy is, and cannot see one to ask.</summary>
 		public bool BlindToEnemy => !EnemyBaseFound && EnemiesInSight == 0;
 
-		/// <summary>You are trading well and nothing of yours has fallen over.</summary>
-		public bool Winning => UnitsKilled > UnitsLost && BuildingsLost == 0;
+		/// <summary>
+		/// You are trading well by value and the base is not under attack.
+		/// </summary>
+		/// <remarks>
+		/// Legacy states without value data fall back to unit counts. Once either value field is
+		/// populated, value exchange is authoritative, so killing cheap units while losing
+		/// expensive ones cannot report a winning position.
+		/// </remarks>
+		public bool Winning =>
+			!BaseUnderAttack &&
+			(CreditsKilled != 0 || CreditsLost != 0
+				? CreditsKilled > CreditsLost
+				: UnitsKilled > UnitsLost);
 	}
 
 	/// <summary>
@@ -86,12 +128,49 @@ namespace AutoCnC.Core
 	/// </remarks>
 	public readonly record struct DoctrineDecision(string Doctrine, string Reason)
 	{
+		/// <summary>
+		/// Stable machine-readable explanation for this decision. Null for legacy decisions.
+		/// </summary>
+		/// <remarks>
+		/// This is non-positional so the historical two-argument constructor and deconstruction
+		/// shape remain source-compatible.
+		/// </remarks>
+		public string ReasonId { get; init; }
+
+		/// <summary>
+		/// Explicitly asks the platform to consider bypassing its minimum doctrine dwell.
+		/// </summary>
+		/// <remarks>
+		/// Urgency alone never bypasses the dwell: the current <see cref="BattleState"/> must also
+		/// report <see cref="BattleState.BaseUnderAttack"/>.
+		/// </remarks>
+		public bool IsUrgent { get; init; }
+
 		/// <summary>Stay on the current doctrine. The common answer, and the cheap one.</summary>
 		public static DoctrineDecision Continue => default;
 
 		/// <summary>Change to a named doctrine, and say why. The reason reaches the battle log.</summary>
-		public static DoctrineDecision SwitchTo(string doctrine, string reason) => new(doctrine, reason);
+		public static DoctrineDecision SwitchTo(string doctrine, string reason) =>
+			SwitchTo(doctrine, reason, null);
+
+		/// <summary>Change doctrine with a stable reason identifier for evidence queries.</summary>
+		public static DoctrineDecision SwitchTo(string doctrine, string reason, string reasonId) =>
+			new(doctrine, reason) { ReasonId = reasonId };
+
+		/// <summary>
+		/// Request an emergency switch. It bypasses minimum dwell only while the base is under
+		/// attack; the platform does not infer urgency from the doctrine name.
+		/// </summary>
+		public static DoctrineDecision SwitchUrgentlyTo(string doctrine, string reason) =>
+			SwitchUrgentlyTo(doctrine, reason, null);
+
+		/// <summary>Request an emergency switch with a stable reason identifier.</summary>
+		public static DoctrineDecision SwitchUrgentlyTo(string doctrine, string reason, string reasonId) =>
+			new(doctrine, reason) { ReasonId = reasonId, IsUrgent = true };
 
 		public bool WantsChange => !string.IsNullOrEmpty(Doctrine);
+
+		/// <summary>Whether this explicit decision may bypass the platform's minimum dwell.</summary>
+		public bool CanBypassMinimumDwell(in BattleState state) => IsUrgent && state.BaseUnderAttack;
 	}
 }

@@ -44,11 +44,13 @@ public sealed class MyBot : BattleBot
 
     public override DoctrineDecision Reassess(in BattleState s)
     {
-        if (s.BuildingsLost > 0)
-            return DoctrineDecision.SwitchTo("Defence", "losing buildings");
+        if (s.BaseUnderAttack)
+            return DoctrineDecision.SwitchUrgentlyTo(
+                "Defence", "base is under attack", "doctrine.defence.base-under-attack");
 
         if (s.ArmyValue > 6000 && s.EnemyBaseFound)
-            return DoctrineDecision.SwitchTo("Attack", "army is worth spending");
+            return DoctrineDecision.SwitchTo(
+                "Attack", "army is worth spending", "doctrine.attack.ready");
 
         return DoctrineDecision.Continue;
     }
@@ -72,12 +74,16 @@ eyes on.
 | `Cash`, `PowerBalance`, `Harvesters`, `Refineries` | Your economy |
 | `Units`, `ArmyValue`, `Buildings`, `BaseValue` | Your forces |
 | `UnitsLost`, `BuildingsLost`, `UnitsKilled` | What the last `WindowSeconds` cost you |
+| `CreditsLost`, `CreditsKilled`, `IncomeEarned` | Value exchange and income over that same rolling window |
 | `EnemiesInSight`, `EnemiesNearBase`, `NearestEnemyCells` | What you can see, right now |
+| `VisibleEnemyValue`, `EnemyValueNearBase`, `OwnArmyValueNearBase` | Visible pressure and local defensive value |
+| `VisibleEnemyMix` | Visible enemy count and value grouped by `ThreatKind` |
 | `SecondsSinceContact`, `EnemyBaseFound` | What you have learned and kept |
 
 There are a few conveniences on top — `BaseUnderAttack`, `BlindToEnemy`, `Winning` — and no
 engine types anywhere, which is the point: the deciding half of a bot is a pure function you can
-read on its own.
+read on its own. `Winning` requires the base to be safe and, when value data is present, a
+favourable value trade; legacy hand-built states without value data still fall back to unit counts.
 
 ```csharp
 public static Assessment Decide(BattleState s) =>
@@ -93,7 +99,10 @@ A doctrine carries its own build plan, production plan and assignments, so chang
 what the whole side is trying to do — and two rules that disagree would otherwise flip the army
 back and forth every few seconds. The platform will not act on a switch until the current
 doctrine has had `MinimumDoctrineSeconds` (30 by default). Read `DoctrineSeconds` if you want to
-be stricter still.
+be stricter still. The sole early-switch path is an explicit
+`DoctrineDecision.SwitchUrgentlyTo(...)` while `BaseUnderAttack` is true. Naming a doctrine
+“Defence” does not make an ordinary decision urgent, and an urgent decision made away from the
+base remains rate-limited.
 
 ### A lone doctrine is still a bot
 
@@ -151,6 +160,9 @@ if (ctx.SenseStructures(new WDist(10 * 1024)).Count > 0)
 `ctx.Doctrine` is the one running, `ctx.Doctrines` lists them all. It is a request rather than a
 command: it goes through the same assessment and the same dwell time, so calling it every tick is
 harmless, and asking for the doctrine already running does nothing.
+
+Pass a stable third argument when the request represents a branch you want to verify:
+`ctx.SwitchDoctrine("Opening", "scout found their base", "doctrine.opening.enemy-found")`.
 
 **The bot outranks it.** `Reassess` is asked first and always, and a request only carries when the
 bot returns `Continue` — otherwise a mode that asked every tick could starve the bot of its own
@@ -386,6 +398,12 @@ UnitDecision.PlaceBuilding(queue, item, x, y, reason)
 UnitDecision.Harvest(x, y, reason)              // send a harvester to a tiberium field
 ```
 
+Every factory also has an overload with `reasonId` as its final argument. Keep `Reason` concise
+and human-readable; keep `ReasonId` stable and machine-readable, for example
+`UnitDecision.Attack(id, "focus damaged tank", "combat.focus-damaged-armour")`. Duplicate-order
+suppression compares action and targets only, so changing either explanation does not resend an
+otherwise identical order.
+
 **`Harvest` is not `MoveTo`.** A move order parks the harvester on the tiberium and stops there.
 `Harvest` re-centres the engine's own harvest-and-deliver loop on the cell you name, so the
 harvester delivers any load it is carrying, cuts the new field, and keeps going without further
@@ -433,7 +451,7 @@ declare, so the rule and the shipped strategy cannot drift apart.
 | `DistanceFromAnchorUnits`, `DistanceTo(...)` | Distances |
 | `IsIdle`, `CanMove`, `HasWeapon`, `IsBuilding` | Capability checks |
 | `GroupId`, `Anchor`, `ModeName` | Unit state |
-| `SenseThreats(radius)` | Visible enemies (reused buffer — don't retain) |
+| `SenseThreats(radius)` | Visible enemies (reused buffer — don't retain); snapshots include actor type, cell, value, and weapon range |
 | `SenseStructures(radius)` | Visible enemy buildings |
 | `SenseAllies(radius, type)` | Friendly actors |
 | `CanAttack(actor)` | Do our weapons work against it? |
@@ -514,8 +532,7 @@ they work unchanged for any doctrine: change the plan in your `IDoctrine`, not t
 [mode] pyle#30 TrainUnitsMode: Produce e1 -> StartProduction (training e1)
 ```
 
-You get the decision, the order it became, and your own stated reason — which is why filling in
-the `reason` argument properly pays off.
+You get the decision, the order it became, and both the prose `Reason` and stable `ReasonId`.
 
 `/modelog` says what your code *did*. The **battle log** says what it had to go on: the launcher's
 output window records every event your side could react to — an enemy coming into view, a hit

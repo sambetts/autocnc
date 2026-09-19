@@ -241,15 +241,18 @@ namespace AutoCnC.Reference.Modes
 
 			// Starting a construction item is not a cash reservation: it draws from the same
 			// income as every production queue. Do not let a new refinery or tower strand an
-			// active recovery harvester when the live fleet is still below its established
-			// release band. The yard cannot reliably observe a sibling Vehicle queue's new
-			// order, so the stable reservation signal is the combination that makes recovery
-			// actionable: a standing factory and an understrength fleet. TrainUnitsMode keeps
-			// the harvester rung first until that floor is restored. Finished structures still
-			// place, and emergency power remains available because a brownout would slow the
-			// harvester too.
+			// active recovery harvester when the completed fleet is still below its established
+			// release band. Owned counts include an active production item once its order is
+			// visible, so exclude that item here: starting a harvester does not mean its income
+			// has arrived. TrainUnitsMode keeps the harvester rung first until that floor is
+			// restored. Finished structures still place, and emergency power remains available
+			// because a brownout would slow the harvester too.
 			var standingHarvesters = ExpansionLogic.Standing(
 				ctx.OwnedUnitCounts(), HarvesterCandidates);
+			if (standingHarvesters > 0
+				&& Named(HarvesterCandidates, ctx.ProducingItem("Vehicle")))
+				standingHarvesters--;
+
 			var refineryCount = ExpansionLogic.Standing(owned, RefineryCandidates);
 			var harvesterRelease = ArmyBalanceLogic.ReleaseAt(
 				ExpansionLogic.DesiredHarvesters(refineryCount, 0, expansion), balance);
@@ -276,7 +279,7 @@ namespace AutoCnC.Reference.Modes
 			{
 				deferredConstructionForHarvester = true;
 				return UnitDecision.Hold(
-					"construction yielding shared cash to factory-backed harvester recovery");
+					"construction cash held until recovery harvester delivery");
 			}
 
 			if (deferredConstructionForHarvester
@@ -284,7 +287,7 @@ namespace AutoCnC.Reference.Modes
 				&& order.Action == ConstructionAction.Produce)
 			{
 				order = new ConstructionOrder(order.Action, order.Queue, order.Item,
-					$"{order.Reason}, construction resumed after harvester funding hold");
+					$"{order.Reason}, construction resumed after recovery harvester delivered");
 				deferredConstructionForHarvester = false;
 			}
 

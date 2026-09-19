@@ -22,6 +22,7 @@ namespace AutoCnC.Reference.Logic
 		int PreemptiveThreatCount,
 		int ThreatClearTicks,
 		int StallEvaluations,
+		int ActiveStallTicks,
 		int FirstProbeCells,
 		int ProbeStepCells,
 		int MaxProbeCells,
@@ -52,10 +53,13 @@ namespace AutoCnC.Reference.Logic
 			// cover. Keep the retreat active long enough for that gap not to restart harvesting.
 			ThreatClearTicks: 300,
 
-			// Consecutive evaluations of "idle AND has not changed cell" before we intervene. A
-			// harvester that is driving, cutting tiberium or unloading has a live activity and is
-			// not idle, so this cannot fire on one that is still earning.
+			// Consecutive evaluations of "idle AND has not changed cell" before we intervene.
 			StallEvaluations: 4,
+
+			// A live Harvest activity is not proof of progress: pathing or a depleted search
+			// bubble can leave it active indefinitely. Give normal cutting and unloading ample
+			// time, then recover an active order that has not changed the harvester's cell.
+			ActiveStallTicks: 750,
 
 			FirstProbeCells: 6,
 			ProbeStepCells: 8,
@@ -187,6 +191,7 @@ namespace AutoCnC.Reference.Logic
 		int StillEvaluations,
 		int ProbeIndex,
 		int MovingEvaluations,
+		int LastProgressTick,
 		int EvaluationsSinceScan,
 		int AssignedX,
 		int AssignedY,
@@ -205,7 +210,7 @@ namespace AutoCnC.Reference.Logic
 		/// </summary>
 		public static HarvesterWatchdog Start { get; } =
 			new(
-				int.MinValue, int.MinValue, 0, 0, 0, int.MaxValue,
+				int.MinValue, int.MinValue, 0, 0, 0, int.MinValue, int.MaxValue,
 				int.MinValue, int.MinValue, int.MinValue, int.MinValue,
 				false, false, 0, int.MinValue, int.MinValue);
 
@@ -297,7 +302,7 @@ namespace AutoCnC.Reference.Logic
 		/// </para>
 		/// </remarks>
 		public static bool ShouldScan(in HarvesterWatchdog watchdog, in HarvesterState state, in HarvesterTuning tuning) =>
-			DueForScan(Observe(watchdog, state, tuning), tuning);
+			DueForScan(Observe(watchdog, state, tuning), state, tuning);
 
 		/// <summary>The scan test itself, over an already-advanced watchdog.</summary>
 		/// <remarks>
@@ -305,14 +310,21 @@ namespace AutoCnC.Reference.Logic
 		/// apart about whether <c>fields</c> is meaningful — the drift above was exactly that,
 		/// expressed as two different watchdogs rather than two different tests.
 		/// </remarks>
-		static bool DueForScan(in HarvesterWatchdog observed, in HarvesterTuning tuning) =>
+		static bool DueForScan(in HarvesterWatchdog observed, in HarvesterState state, in HarvesterTuning tuning) =>
 			observed.StillEvaluations >= tuning.StallEvaluations
+			|| ActiveOrderStalled(observed, state, tuning)
 			|| observed.EvaluationsSinceScan >= tuning.ReviewEvaluations;
+
+		static bool ActiveOrderStalled(in HarvesterWatchdog observed, in HarvesterState state, in HarvesterTuning tuning) =>
+			!state.IsIdle
+			&& observed.LastProgressTick != int.MinValue
+			&& state.WorldTick >= observed.LastProgressTick
+			&& state.WorldTick - observed.LastProgressTick >= tuning.ActiveStallTicks;
 
 		public static HarvesterOutcome Decide(in HarvesterState state, in HarvesterWatchdog watchdog, in HarvesterTuning tuning, IReadOnlyList<FieldOption> fields)
 		{
 			var seen = Observe(watchdog, state, tuning);
-			var scanned = DueForScan(seen, tuning);
+			var scanned = DueForScan(seen, state, tuning);
 			seen = seen with
 			{
 				EvaluationsSinceScan = scanned
@@ -422,18 +434,28 @@ namespace AutoCnC.Reference.Logic
 
 				if (state.HasThreatCenter)
 				{
-					var escape = ThreatEscapeCell(state, tuning);
+					// Once the first screened withdrawal is spent, renewed contact must extend
+					// from the damaged harvester instead of reversing it through the refinery.
+					var continuingUnrepairedEscape =
+						lowHealthDanger && seen.PreemptiveWithdrawalSpent;
+					var escape = ThreatEscapeCell(
+						state,
+						tuning,
+						preserveRefineryAccess: !continuingUnrepairedEscape);
+					var reason = continuingUnrepairedEscape
+						? $"harvester continuing unrepaired escape without refinery reversal at {state.HealthPercent}%"
+						: damageConfirmedDanger
+							? escape.PreservesRefineryAccess
+								? $"harvester threat-vector withdrawal preserving refinery access, damage-confirmed harvester withdrawal at {state.HealthPercent}%"
+								: $"harvester threat-vector withdrawal, damage-confirmed harvester withdrawal at {state.HealthPercent}%"
+							: escape.PreservesRefineryAccess
+								? $"harvester threat-vector withdrawal preserving refinery access at {state.HealthPercent}%"
+								: $"harvester threat-vector withdrawal at {state.HealthPercent}%";
 					return new HarvesterOutcome(
 						UnitDecision.MoveTo(
 							escape.X,
 							escape.Y,
-							damageConfirmedDanger
-								? escape.PreservesRefineryAccess
-									? $"harvester threat-vector withdrawal preserving refinery access, damage-confirmed harvester withdrawal at {state.HealthPercent}%"
-									: $"harvester threat-vector withdrawal, damage-confirmed harvester withdrawal at {state.HealthPercent}%"
-								: escape.PreservesRefineryAccess
-									? $"harvester threat-vector withdrawal preserving refinery access at {state.HealthPercent}%"
-									: $"harvester threat-vector withdrawal at {state.HealthPercent}%"),
+							reason),
 						drivenOff with
 						{
 							StillEvaluations = 0,
@@ -472,8 +494,13 @@ namespace AutoCnC.Reference.Logic
 					retreating);
 			}
 
-			var stalled = seen.StillEvaluations >= tuning.StallEvaluations;
+			var activeOrderStalled = ActiveOrderStalled(seen, state, tuning);
+			var stalled = seen.StillEvaluations >= tuning.StallEvaluations || activeOrderStalled;
 			var count = fields?.Count ?? 0;
+			var ordered = seen with { LastProgressTick = state.WorldTick };
+			var activeStallPrefix = activeOrderStalled
+				? "harvester active-order progress watchdog, "
+				: string.Empty;
 
 			if (completedBoundedWithdrawal && scanned && count > 0)
 			{
@@ -482,8 +509,8 @@ namespace AutoCnC.Reference.Logic
 				var f = fields[best];
 				return Assign(
 					f,
-					seen,
-					$"harvester resumed economy after bounded threat withdrawal, harvesting {f.CellCount} cells ({f.TotalDensity} left) {f.DistanceUnits / 1024} cells out");
+					ordered,
+					$"{activeStallPrefix}harvester resumed economy after bounded threat withdrawal, harvesting {f.CellCount} cells ({f.TotalDensity} left) {f.DistanceUnits / 1024} cells out");
 			}
 
 			// 2. Choosing the ground. Only on a review, because this is the half that costs a scan.
@@ -499,7 +526,7 @@ namespace AutoCnC.Reference.Logic
 				{
 					var f = fields[best];
 					var why = watchdog.HasAssignment ? "field worked out" : "picking a field";
-					return Assign(f, seen, $"{why}, harvesting {f.CellCount} cells ({f.TotalDensity} left) {f.DistanceUnits / 1024} cells out");
+					return Assign(f, ordered, $"{activeStallPrefix}{why}, harvesting {f.CellCount} cells ({f.TotalDensity} left) {f.DistanceUnits / 1024} cells out");
 				}
 
 				// Still there, but no longer worth staying on: something within reach holds enough
@@ -530,7 +557,7 @@ namespace AutoCnC.Reference.Logic
 							? $"field {fields[assigned].DistanceUnits / 1024} cells out is past the {tuning.MaxHaulCells} cell haul limit, coming back to {f.TotalDensity} left {f.DistanceUnits / 1024} cells out"
 							: $"field thinning to {fields[assigned].TotalDensity}, crossing to {f.TotalDensity} left {f.DistanceUnits / 1024} cells out";
 
-					return Assign(f, seen, why);
+					return Assign(f, ordered, $"{activeStallPrefix}{why}");
 				}
 
 				if (stalled)
@@ -543,8 +570,8 @@ namespace AutoCnC.Reference.Logic
 					if (seen.ProbeIndex == 0)
 					{
 						var f = fields[assigned];
-						return Assign(f, seen,
-							$"stopped for {seen.StillEvaluations} evaluations, re-cutting {f.TotalDensity} left {f.DistanceUnits / 1024} cells out",
+						return Assign(f, ordered,
+							$"{activeStallPrefix}stopped for {seen.StillEvaluations} evaluations, re-cutting {f.TotalDensity} left {f.DistanceUnits / 1024} cells out",
 							probeIndex: 1);
 					}
 
@@ -559,8 +586,8 @@ namespace AutoCnC.Reference.Logic
 					if (other >= 0)
 					{
 						var f = fields[other];
-						return Assign(f, seen,
-							$"stopped for {seen.StillEvaluations} evaluations, giving that field up for {f.TotalDensity} left {f.DistanceUnits / 1024} cells out",
+						return Assign(f, ordered,
+							$"{activeStallPrefix}stopped for {seen.StillEvaluations} evaluations, giving that field up for {f.TotalDensity} left {f.DistanceUnits / 1024} cells out",
 							probeIndex: 1);
 					}
 				}
@@ -576,8 +603,8 @@ namespace AutoCnC.Reference.Logic
 			//    full hold and nowhere it thinks it should take it.
 			if (seen.ProbeIndex == 0 && awayFromRefinery)
 				return new HarvesterOutcome(
-					UnitDecision.MoveTo(state.RefineryX, state.RefineryY, $"stopped for {seen.StillEvaluations} evaluations, returning to the refinery"),
-					seen with { StillEvaluations = 0, ProbeIndex = 1 });
+					UnitDecision.MoveTo(state.RefineryX, state.RefineryY, $"{activeStallPrefix}stopped for {seen.StillEvaluations} evaluations, returning to the refinery"),
+					ordered with { StillEvaluations = 0, ProbeIndex = 1 });
 
 			// 6. Nothing known anywhere: the scan above ran — a stall always scans now — and came
 			//    back with no field at all, so every patch this side has *explored* is mined out.
@@ -588,8 +615,8 @@ namespace AutoCnC.Reference.Logic
 
 			return new HarvesterOutcome(
 				UnitDecision.MoveTo(target.X, target.Y,
-					$"stopped for {seen.StillEvaluations} evaluations, no tiberium in sight, searching {cells} cells out"),
-				seen with { StillEvaluations = 0, ProbeIndex = probe + 1 });
+					$"{activeStallPrefix}stopped for {seen.StillEvaluations} evaluations, no tiberium in sight, searching {cells} cells out"),
+				ordered with { StillEvaluations = 0, ProbeIndex = probe + 1 });
 		}
 
 		static bool IsNear(int x, int y, int targetX, int targetY) =>
@@ -825,13 +852,13 @@ namespace AutoCnC.Reference.Logic
 		}
 
 		/// <summary>
-		/// Advances the watchdog. Only a harvester that is idle AND has not changed cell counts as
-		/// stopped; anything else resets the count, so a working harvester is never interrupted.
+		/// Advances the watchdog. Idle units use the short evaluation counter; active units use
+		/// the movement clock so repeated callbacks cannot make a healthy activity look stalled.
 		/// </summary>
 		public static HarvesterWatchdog Observe(in HarvesterWatchdog watchdog, in HarvesterState state, in HarvesterTuning tuning)
 		{
 			var moved = state.X != watchdog.LastX || state.Y != watchdog.LastY;
-			if (moved || !state.IsIdle)
+			if (moved)
 			{
 				var moving = watchdog.MovingEvaluations >= tuning.ProbeResetEvaluations
 					? tuning.ProbeResetEvaluations
@@ -840,10 +867,33 @@ namespace AutoCnC.Reference.Logic
 				// Sustained healthy behaviour means the search paid off: start the ladder again
 				// from the bottom next time, rather than leaping straight to the far edge.
 				var probe = moving >= tuning.ProbeResetEvaluations ? 0 : watchdog.ProbeIndex;
-				return watchdog with { LastX = state.X, LastY = state.Y, StillEvaluations = 0, ProbeIndex = probe, MovingEvaluations = moving };
+				return watchdog with
+				{
+					LastX = state.X,
+					LastY = state.Y,
+					StillEvaluations = 0,
+					ProbeIndex = probe,
+					MovingEvaluations = moving,
+					LastProgressTick = state.WorldTick
+				};
 			}
 
-			return watchdog with { LastX = state.X, LastY = state.Y, StillEvaluations = watchdog.StillEvaluations + 1, MovingEvaluations = 0 };
+			if (!state.IsIdle)
+				return watchdog with
+				{
+					LastX = state.X,
+					LastY = state.Y,
+					StillEvaluations = 0,
+					MovingEvaluations = 0
+				};
+
+			return watchdog with
+				{
+					LastX = state.X,
+					LastY = state.Y,
+					StillEvaluations = watchdog.StillEvaluations + 1,
+					MovingEvaluations = 0
+				};
 		}
 
 		/// <summary>How far out the n-th search step reaches, in cells.</summary>

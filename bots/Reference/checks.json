@@ -3,235 +3,207 @@
   "authoredForRevision": "7fdbc489c04f16b7289acb4d493d2af4d119efaa",
   "checks": [
     {
-      "id": "defensive-anti-air-release-runs",
-      "description": "After the first ground emplacement, Defence reaches its faction-portable anti-air rung without waiting for two guard towers to overlap.",
-      "query": "reason:defensive anti-air released after first ground emplacement",
+      "id": "unrepaired-escape-does-not-reverse",
+      "description": "A critically damaged harvester under renewed contact extends from its current position instead of reversing through the refinery screen.",
+      "query": "reason:harvester continuing unrepaired escape without refinery reversal",
       "operator": ">=",
       "value": "1"
     },
     {
-      "id": "early-defensive-anti-air-delivers",
-      "description": "The released faction-portable anti-air item completes and receives a placement order.",
-      "query": "reason:placing first defensive anti-air from early release",
+      "id": "first-screened-withdrawal-still-runs",
+      "description": "The first damage-confirmed withdrawal still uses the threat-opposite side of the refinery.",
+      "query": "reason:harvester threat-vector withdrawal preserving refinery access, damage-confirmed harvester withdrawal",
       "operator": ">=",
       "value": "1"
     },
     {
-      "id": "damage-confirmed-harvester-withdrawal-runs",
-      "description": "A damaged harvester facing concentrated nearby threats takes the one high-health escape that replaces proximity-only retreat loops.",
-      "query": "reason:damage-confirmed harvester withdrawal",
-      "operator": ">=",
-      "value": "1"
-    },
-    {
-      "id": "undamaged-harvester-withdrawal-stays-gated",
-      "description": "Concentrated contacts do not trigger the damage-confirmed escape while the harvester remains at full health.",
+      "id": "undamaged-withdrawal-stays-gated",
+      "description": "Nearby contacts alone still do not trigger a damage-confirmed withdrawal at full health.",
       "query": "reason:damage-confirmed harvester withdrawal at 100%",
       "operator": "absent",
       "value": ""
     },
     {
-      "id": "harvester-active-threat-extension-runs",
-      "description": "A harvester that reaches its escape point while an attacker remains nearby extends away from the live threat instead of stopping in weapon range.",
-      "query": "reason:harvester extending escape while immediate threat remains",
-      "operator": ">=",
-      "value": "1"
-    },
-    {
-      "id": "harvester-post-threat-shelter-runs",
-      "description": "A harvester shelters during the short route-clear grace period only after immediate attackers leave its panic radius.",
-      "query": "reason:harvester sheltering after immediate threat clears",
-      "operator": ">=",
-      "value": "1"
-    },
-    {
-      "id": "harvester-lifetime-improves",
-      "description": "Extending an escape under active fire keeps at least one harvester alive longer than the latest fight's opening harvester.",
-      "query": "units.max(lifetimeSeconds,type=harv)",
-      "operator": ">",
-      "value": "140"
-    },
-    {
-      "id": "defensive-consolidation-runs",
-      "description": "A defender facing a massed screen outside its weapon range cancels pursuit and consolidates at the base.",
-      "query": "reason:consolidating defensive line against",
-      "operator": ">=",
-      "value": "1"
-    },
-    {
-      "id": "recovered-force-finishes-structure",
-      "description": "Preserved income funds enough recovery for a later assault to complete an enemy building kill.",
-      "query": "summary.headline.buildingsKilled",
-      "operator": ">=",
-      "value": "1"
-    },
-    {
-      "id": "harvester-funding-hold-runs",
-      "description": "Construction resumes after the factory-backed harvester reservation restores the release floor.",
-      "query": "reason:construction resumed after harvester funding hold",
-      "operator": ">=",
-      "value": "1"
-    },
-    {
-      "id": "prequeue-harvester-reservation-runs",
-      "description": "The established understrength Vehicle request still marks recovery before its queue update is visible.",
-      "query": "reason:reserving construction cash before harvester queue visibility",
-      "operator": ">=",
-      "value": "1"
-    },
-    {
-      "id": "vehicle-delivery-recovers",
-      "description": "Protected shared cash lets the Vehicle queue complete at least one unit.",
-      "query": "summary.production[Vehicle].delivered",
-      "operator": ">=",
-      "value": "1"
-    },
-    {
-      "id": "recovery-harvester-delivers",
-      "description": "The Vehicle queue delivers a harvester beyond the opening refinery-provided unit.",
-      "query": "summary.unitTypes[harv].built",
-      "operator": ">",
-      "value": "1"
-    },
-    {
-      "id": "harvester-outage-gain-holds",
-      "description": "The established replacement and withdrawal logic keeps the no-harvester interval below its prior regression guard.",
-      "query": "summary.economy.secondsWithNoHarvester",
-      "operator": "<",
-      "value": "821"
-    },
-    {
-      "id": "harvester-outage-improves",
-      "description": "A harvester that continues escaping active fire reduces time without any live harvester below the latest fight.",
-      "query": "summary.economy.secondsWithNoHarvester",
-      "operator": "<",
-      "value": "570"
-    },
-    {
-      "id": "income-rate-improves",
-      "description": "Harvesters allowed to work through harmless proximity raise earned credits per second above the latest fight.",
-      "query": "summary.headline.creditsEarnedPerSecond",
-      "operator": ">",
-      "value": "1.847"
-    },
-    {
-      "id": "total-income-improves",
-      "description": "Avoiding repeated healthy retreat cycles raises total harvested credits above the latest fight.",
-      "query": "summary.headline.creditsEarned",
-      "operator": ">",
-      "value": "1400"
-    },
-    {
-      "id": "spending-rate-improves",
-      "description": "Recovered income raises construction and production spending above the latest fight.",
-      "query": "summary.headline.creditsSpentPerSecond",
-      "operator": ">",
-      "value": "11.741"
-    },
-    {
-      "id": "army-value-improves",
-      "description": "Recovered income funds enough production to raise mean standing army value above the latest fight.",
-      "query": "summary.headline.meanArmyValue",
-      "operator": ">",
-      "value": "367.2"
-    },
-    {
-      "id": "refinery-redundancy-recovers",
-      "description": "Construction resumes after recovery and completes another refinery.",
-      "query": "summary.unitTypes[proc].built",
-      "operator": ">",
-      "value": "1"
-    },
-    {
-      "id": "credits-killed-improves",
-      "description": "Income-backed reinforcements destroy more enemy value than the latest fight.",
-      "query": "summary.headline.creditsKilled",
-      "operator": ">",
-      "value": "2300"
-    },
-    {
-      "id": "fitness-improves",
-      "description": "Harvester throughput converts into higher Hard fitness than the latest fight.",
-      "query": "summary.fitness.total",
-      "operator": ">",
-      "value": "0.107"
-    },
-    {
-      "id": "early-replacement-factory-still-runs",
-      "description": "The established faction-portable Vehicle factory still opens before refinery two.",
-      "query": "reason:opening replacement factory before second refinery",
-      "operator": ">=",
-      "value": "1"
-    },
-    {
-      "id": "understrength-harvester-priority-still-runs",
-      "description": "The established Vehicle-queue recovery rule still moves a harvester ahead of cheaper combat vehicles.",
-      "query": "reason:understrength harvester floor first",
-      "operator": ">=",
-      "value": "1"
-    },
-    {
-      "id": "refinery-access-withdrawal-still-runs",
-      "description": "A threatened harvester still withdraws on the threat-opposite side of its refinery screen.",
-      "query": "reason:harvester threat-vector withdrawal preserving refinery access",
-      "operator": ">=",
-      "value": "1"
-    },
-    {
-      "id": "bounded-threat-escape-still-runs",
-      "description": "A threatened harvester keeps its stable escape destination while travelling.",
+      "id": "bounded-escape-still-runs",
+      "description": "A threatened harvester retains its stable escape destination while travelling.",
       "query": "reason:harvester bounded threat escape en route",
       "operator": ">=",
       "value": "1"
     },
     {
-      "id": "bounded-threat-escape-resumes-economy",
-      "description": "A healthy harvester still resumes harvesting after its bounded withdrawal.",
+      "id": "active-threat-extension-still-runs",
+      "description": "A harvester reaching an escape point still extends away from a live immediate threat.",
+      "query": "reason:harvester extending escape while immediate threat remains",
+      "operator": ">=",
+      "value": "1"
+    },
+    {
+      "id": "post-threat-shelter-still-runs",
+      "description": "A harvester still shelters briefly after immediate attackers leave its panic radius.",
+      "query": "reason:harvester sheltering after immediate threat clears",
+      "operator": ">=",
+      "value": "1"
+    },
+    {
+      "id": "bounded-escape-resumes-economy",
+      "description": "A healthy route still returns a withdrawn harvester to harvesting.",
       "query": "reason:harvester resumed economy after bounded threat withdrawal",
       "operator": ">=",
       "value": "1"
     },
     {
-      "id": "light-vehicle-screen-funding-still-runs",
-      "description": "Cross-queue funding still protects the faction-portable light-vehicle screen.",
-      "query": "reason:light vehicle screen first",
+      "id": "first-screen-precedes-recovery",
+      "description": "One faction-portable light screen retains priority while a surviving harvester can fund recovery.",
+      "query": "reason:first light screen before harvester recovery",
       "operator": ">=",
       "value": "1"
     },
     {
+      "id": "prequeue-harvester-reservation-still-runs",
+      "description": "An understrength Vehicle request still reserves shared cash before queue visibility updates.",
+      "query": "reason:reserving construction cash before harvester queue visibility",
+      "operator": ">=",
+      "value": "1"
+    },
+    {
+      "id": "early-replacement-factory-still-runs",
+      "description": "The faction-portable Vehicle factory still opens before refinery two.",
+      "query": "reason:opening replacement factory before second refinery",
+      "operator": ">=",
+      "value": "1"
+    },
+    {
+      "id": "construction-releases-after-delivery",
+      "description": "The construction queue still resumes after a recovery harvester is delivered.",
+      "query": "reason:construction resumed after recovery harvester delivered",
+      "operator": ">=",
+      "value": "1"
+    },
+    {
+      "id": "defensive-consolidation-still-runs",
+      "description": "Defenders facing a massed distant screen still consolidate at the base.",
+      "query": "reason:consolidating defensive line against",
+      "operator": ">=",
+      "value": "1"
+    },
+    {
+      "id": "damaged-objective-commitment-remains-armed",
+      "description": "When an Assault episode reaches a contested damaged objective, units retain their sticky target.",
+      "query": "reason:finishing damaged objective despite immediate screen",
+      "operator": ">=",
+      "value": "1"
+    },
+    {
+      "id": "initial-objective-screen-remains-armed",
+      "description": "When an Assault episode reaches an untouched objective, units still clear an immediate attacker first.",
+      "query": "reason:screening immediate threat before objective",
+      "operator": ">=",
+      "value": "1"
+    },
+    {
+      "id": "income-rate-improves",
+      "description": "Keeping a harvester alive raises harvested credits per second above the latest fight.",
+      "query": "summary.headline.creditsEarnedPerSecond",
+      "operator": ">",
+      "value": "4.163"
+    },
+    {
+      "id": "harvester-outage-shrinks",
+      "description": "Avoiding the refinery reversal shortens the latest fight's no-harvester interval.",
+      "query": "summary.economy.secondsWithNoHarvester",
+      "operator": "<",
+      "value": "730"
+    },
+    {
+      "id": "harvester-lifetime-improves",
+      "description": "At least one harvester survives longer than the latest fight's 281-second maximum.",
+      "query": "units.max(lifetimeSeconds,type=harv)",
+      "operator": ">",
+      "value": "281"
+    },
+    {
+      "id": "harvester-movement-improves",
+      "description": "The fleet travels farther productively than the latest fight's 24 observed cells.",
+      "query": "units.sum(cellsTravelled,type=harv)",
+      "operator": ">",
+      "value": "24"
+    },
+    {
+      "id": "vehicle-throughput-improves",
+      "description": "Sustained income delivers more Vehicle-queue units than the latest fight.",
+      "query": "summary.production[Vehicle].delivered",
+      "operator": ">",
+      "value": "2"
+    },
+    {
+      "id": "anti-air-core-holds",
+      "description": "The faction-portable rocket core does not fall below the latest fight.",
+      "query": "summary.unitTypes[e3].built",
+      "operator": ">=",
+      "value": "6"
+    },
+    {
       "id": "exploration-improves",
-      "description": "Economic recovery reaches the existing scout path and explores more cells than the latest fight.",
+      "description": "A funded force observes more cells than the latest fight.",
       "query": "summary.headline.cellsExplored",
       "operator": ">",
-      "value": "72"
+      "value": "116"
     },
     {
-      "id": "value-exchange-gain-holds",
-      "description": "Income-backed defenders improve combat value conversion above the latest fight.",
+      "id": "peak-army-value-improves",
+      "description": "Continued production raises peak standing army value above the latest fight.",
+      "query": "summary.headline.peakArmyValue",
+      "operator": ">",
+      "value": "3400"
+    },
+    {
+      "id": "mean-army-value-improves",
+      "description": "Continued production raises mean standing army value above the latest fight.",
+      "query": "summary.headline.meanArmyValue",
+      "operator": ">",
+      "value": "600.1"
+    },
+    {
+      "id": "value-exchange-improves",
+      "description": "Preserving the economy improves value exchange above the latest fight.",
       "query": "summary.headline.valueExchangeRatio",
       "operator": ">",
-      "value": "0.17"
+      "value": "0.096"
     },
     {
-      "id": "survival-gain-holds",
-      "description": "Preserved production and economy extend survival beyond the latest fight.",
-      "query": "summary.headline.durationSeconds",
+      "id": "credits-killed-improves",
+      "description": "The sustained army destroys more enemy value than the latest fight.",
+      "query": "summary.headline.creditsKilled",
       "operator": ">",
-      "value": "706"
+      "value": "1300"
     },
     {
-      "id": "asset-loss-gain-holds",
-      "description": "Holding the defensive line reduces destroyed asset value below the latest fight.",
+      "id": "credits-lost-improves",
+      "description": "The non-reversing escape reduces value lost below the latest fight.",
       "query": "summary.headline.creditsLost",
       "operator": "<",
-      "value": "33650"
+      "value": "13600"
     },
     {
-      "id": "building-loss-gain-holds",
-      "description": "Earlier anti-air reduces building losses below the latest fight.",
-      "query": "summary.headline.buildingsLost",
-      "operator": "<",
-      "value": "17"
+      "id": "enemy-building-finished",
+      "description": "A sustained force converts pressure into at least one completed building kill.",
+      "query": "summary.headline.buildingsKilled",
+      "operator": ">",
+      "value": "0"
+    },
+    {
+      "id": "survival-improves",
+      "description": "A surviving economy extends survival beyond the latest fight.",
+      "query": "summary.headline.durationSeconds",
+      "operator": ">",
+      "value": "1009"
+    },
+    {
+      "id": "fitness-improves",
+      "description": "Economic, army, exchange, exploration, and survival gains improve Hard fitness.",
+      "query": "summary.fitness.total",
+      "operator": ">",
+      "value": "0.1435"
     }
   ]
 }

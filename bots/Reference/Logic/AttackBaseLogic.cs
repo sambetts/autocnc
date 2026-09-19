@@ -81,7 +81,14 @@ namespace AutoCnC.Reference.Logic
 			{
 				var screen = SelectObjectiveScreen(state, tuning, role);
 				if (screen.HasValue)
+				{
+					if (ObjectiveIsDamaged(state))
+						return UnitDecision.Attack(
+							state.ObjectiveActorId,
+							"finishing damaged objective despite immediate screen");
+
 					return UnitDecision.Attack(screen.Value.ActorId, "screening immediate threat before objective");
+				}
 
 				return UnitDecision.Attack(state.ObjectiveActorId, "objective in range");
 			}
@@ -239,6 +246,22 @@ namespace AutoCnC.Reference.Logic
 			}
 
 			return best;
+		}
+
+		static bool ObjectiveIsDamaged(in AssaultState state)
+		{
+			var threats = state.Threats;
+			if (threats == null)
+				return false;
+
+			for (var i = 0; i < threats.Count; i++)
+			{
+				var threat = threats[i];
+				if (threat.ActorId == state.ObjectiveActorId)
+					return threat.HealthPercent < 100;
+			}
+
+			return false;
 		}
 
 		/// <inheritdoc cref="SelectBlocker(in AssaultState, in AssaultTuning)"/>

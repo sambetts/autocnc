@@ -179,6 +179,15 @@ namespace AutoCnC.Reference.Modes
 				: new FloorRelease(plan, 0, 0);
 			plan = defenceVehicleRelease.Plan;
 
+			// One faction-equivalent tank gives the defensive screen a durable line unit without
+			// turning a dying two-tank floor into the next permanent Vehicle-queue blocker.
+			// Zero remains strict; one survivor releases the second slot to siege and income.
+			var defenceArmourRelease = ctx.Doctrine == ReferenceDoctrines.Defence
+				? ArmyBalanceLogic.Release(
+					plan, owned, ReferencePlans.DefenceArmourVehicles, defenceScreenBalance)
+				: new FloorRelease(plan, 0, 0);
+			plan = defenceArmourRelease.Plan;
+
 			// The endless infantry rung is what every leftover credit buys for the rest of the
 			// match, and which body that should be is a property of the enemy rather than of the
 			// plan. Both constants have now lost a match: endless e3 against an opponent who was
@@ -250,14 +259,21 @@ namespace AutoCnC.Reference.Modes
 
 			plan = incomeHold.Plan;
 
-			// A cash hold protects the Vehicle queue from other queues, but not from a cheaper
-			// rung in the Vehicle queue itself. Keep the first harvester rung ahead until the
-			// fleet reaches the same release floor used by the rest of the production logic.
-			// Reaching that floor restores the doctrine's exact order.
+			// A cash hold protects the Vehicle queue from other queues, but not from cheaper
+			// rungs in the Vehicle queue itself. Recovery normally leads them. Preserve one
+			// cheap screen while an earner survives, however, so the replacement is not started
+			// behind the same unopposed pressure that killed the fleet. At zero harvesters,
+			// recovery remains immediate.
+			var preserveFirstScreen =
+				standingHarvesters > 0
+				&& standingHarvesters < shortBelow
+				&& standingScreenVehicles < screenVehicleShortBelow
+				&& screenVehicleBuildable;
 			var unprioritized = plan;
-			plan = IncomeFirstLogic.PrioritizeRecovery(
-				plan, ReferencePlans.HarvesterUnits,
-				standingHarvesters, shortBelow, factories > 0);
+			if (!preserveFirstScreen)
+				plan = IncomeFirstLogic.PrioritizeRecovery(
+					plan, ReferencePlans.HarvesterUnits,
+					standingHarvesters, shortBelow, factories > 0);
 
 			// --- Decide ------------------------------------------------------------
 			var choice = UnitProductionLogic.ChooseNext(state, plan);
@@ -268,6 +284,14 @@ namespace AutoCnC.Reference.Modes
 			// barracks would race to queue the same unit.
 			if (!ctx.OwnsQueue(choice.Queue))
 				return UnitDecision.Continue;
+
+			var standingDefenceArmour =
+				ExpansionLogic.Standing(owned, ReferencePlans.DefenceArmourVehicles);
+			var defenceArmourAnchorChoice =
+				ctx.Doctrine == ReferenceDoctrines.Defence
+					&& standingDefenceArmour < ArmyBalanceLogic.ReleaseAt(
+						ReferencePlans.DefenceArmourCore, defenceScreenBalance)
+					&& ArmyMixLogic.Names(ReferencePlans.DefenceArmourVehicles, choice.ActorType);
 
 			var harvesterRecoveryChoice =
 				standingHarvesters < shortBelow
@@ -310,6 +334,12 @@ namespace AutoCnC.Reference.Modes
 			if (defenceVehicleRelease.Released)
 				why += $", defence light vehicle screen released: {defenceVehicleRelease.Standing} of {defenceVehicleRelease.Target} standing";
 
+			if (defenceArmourAnchorChoice)
+				why += ", defence armour anchor first";
+
+			if (defenceArmourRelease.Released)
+				why += $", defence armour floor released: {defenceArmourRelease.Standing} of {defenceArmourRelease.Target} standing";
+
 			// The income gate is invisible in what got built — a barracks that buys four rifles
 			// looks the same whether it was capped at four or simply had no fifth rung to reach
 			// — so it says so itself, on whichever queue's order survived it.
@@ -318,6 +348,18 @@ namespace AutoCnC.Reference.Modes
 
 			if (screenHold.Held)
 				why += $", light vehicle screen first: {screenHold.Standing} of {screenHold.ShortBelow} on {screenHold.Cash} cash, {screenHold.RungsCapped} infantry rung(s) capped at {income.GarrisonBodies}";
+
+			if (preserveFirstScreen
+				&& ArmyMixLogic.Names(ReferencePlans.ScreenVehicles, choice.ActorType))
+			{
+				var recoveryPlan = IncomeFirstLogic.PrioritizeRecovery(
+					unprioritized, ReferencePlans.HarvesterUnits,
+					standingHarvesters, shortBelow, factories > 0);
+				var recoveryChoice = UnitProductionLogic.ChooseNext(state, recoveryPlan);
+				if (recoveryChoice.IsValid
+					&& ArmyMixLogic.Names(ReferencePlans.HarvesterUnits, recoveryChoice.ActorType))
+					why += ", first light screen before harvester recovery";
+			}
 
 			if (!ReferenceEquals(plan, unprioritized)
 				&& ArmyMixLogic.Names(ReferencePlans.HarvesterUnits, choice.ActorType))
@@ -348,9 +390,10 @@ namespace AutoCnC.Reference.Modes
 				baseline = IncomeFirstLogic.Hold(
 					baseline, ReferencePlans.InfantryQueue, ctx.Cash,
 					standingHarvesters, shortBelow, factories > 0, income).Plan;
-				baseline = IncomeFirstLogic.PrioritizeRecovery(
-					baseline, ReferencePlans.HarvesterUnits,
-					standingHarvesters, shortBelow, factories > 0);
+				if (!preserveFirstScreen)
+					baseline = IncomeFirstLogic.PrioritizeRecovery(
+						baseline, ReferencePlans.HarvesterUnits,
+						standingHarvesters, shortBelow, factories > 0);
 
 				var before = UnitProductionLogic.ChooseNext(state, baseline);
 				if (before.IsValid && ArmyMixLogic.Names(ReferencePlans.RifleBodies, before.ActorType))

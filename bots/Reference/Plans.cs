@@ -93,6 +93,17 @@ namespace AutoCnC.Reference
 		/// </summary>
 		public const int DefenceAntiAirCore = 2;
 
+		/// <summary>
+		/// The defensive armour pair keeps one durable line unit standing without pinning the
+		/// Vehicle queue ahead of recovery and long-range fire.
+		/// </summary>
+		/// <remarks>
+		/// <see cref="Modes.TrainUnitsMode"/> releases this two-unit rung after one survivor, just
+		/// as it does for the light screen. Zero armour therefore rebuilds one faction-equivalent
+		/// tank, while one standing tank lets the queue continue to siege and income rungs.
+		/// </remarks>
+		public const int DefenceArmourCore = 2;
+
 		// Scout targets the pair. Defence keeps one strict and lets that survivor release the
 		// second slot so repeated screen losses cannot pin the Vehicle queue.
 		const int ScreenVehicleCore = 2;
@@ -352,6 +363,12 @@ namespace AutoCnC.Reference
 		/// <summary>The cheap faction-portable vehicles that scout and screen the economy.</summary>
 		public static string[] ScreenVehicles { get; } = ["jeep", "bggy"];
 
+		/// <summary>The faction-portable tanks that anchor a defensive line.</summary>
+		public static string[] DefenceArmourVehicles { get; } = ["mtnk", "ltnk"];
+
+		/// <summary>Faction alternatives for the tech infantry that clears infantry off harvesters.</summary>
+		public static string[] HarvesterGuardInfantry { get; } = ["e2", "e4"];
+
 		/// <summary>
 		/// The economy every doctrine wants, whichever one is running.
 		/// </summary>
@@ -503,7 +520,7 @@ namespace AutoCnC.Reference
 			new("Infantry", ["e3"], 4),        // ...and rockets, which that same barracks can build
 			new("Vehicle", ["harv"], HarvesterCore),   // then income, before anything that shoots
 			new("Infantry", ["e1"], RifleCore),
-			new("Infantry", ["e2"], 4),
+			new(InfantryQueue, HarvesterGuardInfantry, 4),
 			new("Vehicle", SiegeVehicles, SiegeCore),       // reach, ahead of the last of the income
 			new("Vehicle", ["harv"], HarvesterSaturation),  // ...and all of the income, before any of the armour
 			new("Vehicle", ["mtnk", "ltnk"], 4),
@@ -629,6 +646,7 @@ namespace AutoCnC.Reference
 			new("Vehicle", ScreenVehicles, ScreenVehicleCore), // keep one escort strict; TrainUnitsMode releases the second
 			new("Vehicle", ["harv"], HarvesterCore),   // a siege that kills the economy wins by itself
 			new("Infantry", ["e2"], 4),
+			new("Vehicle", DefenceArmourVehicles, DefenceArmourCore), // one tank holds the line; TrainUnitsMode releases the second
 			new("Vehicle", SiegeVehicles, SiegeCore),  // 11 cells of reach, sited at home
 			new("Vehicle", ["harv"], HarvesterSaturation),
 			new("Vehicle", EndlessReach, int.MaxValue),      // reach forever: see EndlessReach

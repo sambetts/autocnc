@@ -154,9 +154,10 @@ namespace AutoCnC.Reference.Logic
 		/// <remarks>
 		/// Cross-queue cash holds cannot help when a cheaper combat rung leads the harvester in
 		/// the Vehicle queue itself. The same release floor that normally lets the queue move
-		/// beyond harvesters defines when recovery is complete, so one remaining earner cannot
-		/// be spent down behind a screen rung. The original plan returns by reference as soon as
-		/// the floor is restored.
+		/// beyond harvesters defines when recovery is complete. Callers may preserve one leading
+		/// screen while an earner survives; once recovery is selected, this method moves it
+		/// ahead of every cheaper rung. The original plan returns by reference as soon as the
+		/// floor is restored.
 		/// </remarks>
 		public static IReadOnlyList<ProductionStep> PrioritizeRecovery(
 			IReadOnlyList<ProductionStep> plan,

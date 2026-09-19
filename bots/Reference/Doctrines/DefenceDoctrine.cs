@@ -29,10 +29,10 @@ namespace AutoCnC.Reference.Doctrines
 		{
 			b.Assign<DefensiveMode>().ToAll();
 
-			// Scouts stay with the economy, rockets answer vehicles, and siege units can return
-			// fire beyond a harvester's sight. Reports are matched to the escort's weapon and
-			// claimed by attacker, with a bounded pair reserved for armoured threats.
-			b.Assign<HarvesterEscortMode>().ToUnitType("jeep", "bggy", "e3", "arty", "msam");
+			// Scouts and faction-equivalent anti-infantry specialists stay with the economy,
+			// rockets answer vehicles, and siege units can return fire beyond a harvester's
+			// sight. Claims bound the response to each reported attacker.
+			b.Assign<HarvesterEscortMode>().ToUnitType("jeep", "bggy", "e2", "e4", "e3", "arty", "msam");
 		}
 	}
 }

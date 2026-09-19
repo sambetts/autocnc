@@ -21,11 +21,13 @@ namespace AutoCnC.Reference.Modes
 
 		uint wardId;
 		WeaponRole role;
+		bool isAntiInfantrySpecialist;
 
 		public override void OnEnter(Actor self, ModeContext ctx)
 		{
 			wardId = 0;
 			role = WeaponMatchLogic.RoleOf(self.Info.Name);
+			isAntiInfantrySpecialist = self.Info.Name == "e2" || self.Info.Name == "e4";
 			ctx.Anchor = ctx.BaseCenter;
 		}
 
@@ -70,7 +72,9 @@ namespace AutoCnC.Reference.Modes
 					report,
 					self,
 					ctx,
-					responderNumber > 1
+					isAntiInfantrySpecialist
+						? "specialist anti-infantry harvester response"
+						: responderNumber > 1
 						? "paired weapon-matched harvester response"
 						: "stable weapon-matched harvester response");
 				if (response.HasValue)

@@ -20,7 +20,10 @@ namespace AutoCnC.Launcher
 		/// <summary>The player read the agent's proposal and approved it.</summary>
 		Manual,
 
-		/// <summary>Continuous improvement accepted a valid proposal without a player reading it.</summary>
+		/// <summary>
+		/// A legacy continuous-improvement revision accepted before automatic prompt rewriting was
+		/// disabled. Kept so existing prompt-history indexes remain readable.
+		/// </summary>
 		Continuous
 	}
 
@@ -216,7 +219,7 @@ namespace AutoCnC.Launcher
 				  baseline     docs/agent-prompt-template.md, recorded so revision 2 has something
 				               to diff against.
 				  manual       The player reviewed and approved the proposal.
-				  continuous   Continuous improvement accepted it unreviewed.
+				  continuous   Legacy continuous improvement accepted it unreviewed.
 
 				A template identical to the previous one is not recorded, so consecutive files
 				always differ.

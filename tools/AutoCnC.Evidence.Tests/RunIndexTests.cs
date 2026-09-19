@@ -275,6 +275,41 @@ namespace AutoCnC.Evidence.Tests
 			Assert.That(effect.MeanFitnessDelta, Is.EqualTo(0.1).Within(0.0001));
 		}
 
+		[Test]
+		public void UndefinedAndFailedRunsAreExcludedFromTrendButLegacyWinsAndLossesRemain()
+		{
+			var history = new RunHistory { Bot = "TestBot" };
+			RunIndex.Record(history, "TestBot", Entry("legacy-lost", 0, 40, 100, "candidate", "Lost"));
+			RunIndex.Record(history, "TestBot", Entry("undefined", 1, 1, 999, "candidate", "Undefined"));
+			RunIndex.Record(history, "TestBot", Entry("failed", 2, 2, 888, "candidate", "Failed"));
+			RunIndex.Record(history, "TestBot", Entry("legacy-won", 3, 60, 50, "candidate", "Won"));
+
+			var trend = RunIndex.Trend(history);
+			var spend = trend.Metrics.Single(m => m.Name == "creditsSpentPerSecond");
+
+			Assert.That(trend.RunsCompared, Is.EqualTo(2));
+			Assert.That(trend.LatestRunId, Is.EqualTo("legacy-won"));
+			Assert.That(spend.Recent, Is.EqualTo(new[] { 40d, 60d }));
+			Assert.That(history.Runs, Has.Count.EqualTo(4), "invalid evidence stays durable; it is only excluded");
+		}
+
+		[Test]
+		public void PromptEffectsDoNotUseOrBridgeAcrossAnUndefinedRun()
+		{
+			var history = new RunHistory { Bot = "TestBot" };
+			RunIndex.Record(history, "TestBot", Prompted("r1", 0, 0.40, "before-failure"));
+			var undefined = Prompted("r2", 1, 0.99, "failed");
+			undefined.Outcome = "Undefined";
+			RunIndex.Record(history, "TestBot", undefined);
+			RunIndex.Record(history, "TestBot", Prompted("r3", 2, 0.60, "valid"));
+			RunIndex.Record(history, "TestBot", Prompted("r4", 3, 0.70, "next"));
+
+			var effects = RunIndex.PromptEffects(history);
+
+			Assert.That(effects.Select(e => e.PromptId), Is.EqualTo(new[] { "valid" }));
+			Assert.That(effects[0].MeanFitnessDelta, Is.EqualTo(0.1).Within(0.0001));
+		}
+
 		static RunHistoryEntry AtDifficulty(string id, int days, double fitness, string difficulty)
 		{
 			var entry = Entry(id, days, 40, 100, "candidate", "Lost");

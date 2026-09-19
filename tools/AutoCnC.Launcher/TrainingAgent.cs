@@ -778,7 +778,9 @@ namespace AutoCnC.Launcher
 
 			Keep a section telling the next round to write checks.json into {workspace} before it
 			finishes, and to give any new code path a reason literal nothing else uses so a
-			`reason:` check can prove it ran.
+			`reason:` check can prove it ran. Categorize checks as `activation`, `invariant`, or
+			`outcome`. Outcome checks are observations, not a promotion pass-rate gate; paired
+			benchmark wins and fitness decide promotion.
 
 			Your template is measured. Each run records which prompt steered it, and the trend
 			reports the mean fitness change from the round a prompt was given to the round after
@@ -799,8 +801,8 @@ namespace AutoCnC.Launcher
 			<complete replacement prompt template>
 			{{NextPromptEnd}}
 
-			In manual mode the player will review and edit it before it is saved. Continuous
-			improvement may accept a valid template automatically.
+			The player will review and edit it before it is saved. Continuous improvement records
+			the draft but keeps the current prompt unchanged until that manual review.
 			""";
 	}
 }

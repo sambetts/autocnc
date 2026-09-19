@@ -14,24 +14,38 @@ namespace AutoCnC.Launcher
 	{
 		Idle,
 		Fighting,
-		Improving
+		Improving,
+		Evaluating,
+		Restoring
 	}
 
 	public enum ContinuousTrainingAction
 	{
 		None,
 		Fight,
-		Improve
+		Improve,
+		Evaluate,
+		Restore
 	}
 
-	/// <summary>Controls the unattended fight-and-improve cycle independently of the UI queue.</summary>
+	public enum ContinuousEvaluationDecision
+	{
+		Undefined,
+		Promote,
+		Restore
+	}
+
+	/// <summary>Controls the promotion-gated unattended cycle independently of the UI queue.</summary>
 	public sealed class ContinuousTrainingLoop
 	{
+		bool stopAfterRestore;
+
 		public ContinuousTrainingStage Stage { get; private set; }
 		public bool IsRunning => Stage != ContinuousTrainingStage.Idle;
 
 		public void Begin(bool enabled)
 		{
+			stopAfterRestore = false;
 			Stage = enabled ? ContinuousTrainingStage.Fighting : ContinuousTrainingStage.Idle;
 		}
 
@@ -44,17 +58,51 @@ namespace AutoCnC.Launcher
 			return ContinuousTrainingAction.Improve;
 		}
 
-		public ContinuousTrainingAction ImprovementCompleted()
+		public ContinuousTrainingAction ImprovementCompleted(bool succeeded = true)
 		{
 			if (Stage != ContinuousTrainingStage.Improving)
 				return ContinuousTrainingAction.None;
 
-			Stage = ContinuousTrainingStage.Fighting;
-			return ContinuousTrainingAction.Fight;
+			Stage = succeeded
+				? ContinuousTrainingStage.Evaluating
+				: ContinuousTrainingStage.Restoring;
+			stopAfterRestore = !succeeded;
+			return succeeded
+				? ContinuousTrainingAction.Evaluate
+				: ContinuousTrainingAction.Restore;
+		}
+
+		public ContinuousTrainingAction EvaluationCompleted(ContinuousEvaluationDecision decision)
+		{
+			if (Stage != ContinuousTrainingStage.Evaluating)
+				return ContinuousTrainingAction.None;
+
+			if (decision == ContinuousEvaluationDecision.Promote)
+			{
+				stopAfterRestore = false;
+				Stage = ContinuousTrainingStage.Fighting;
+				return ContinuousTrainingAction.Fight;
+			}
+
+			stopAfterRestore = decision == ContinuousEvaluationDecision.Undefined;
+			Stage = ContinuousTrainingStage.Restoring;
+			return ContinuousTrainingAction.Restore;
+		}
+
+		public ContinuousTrainingAction RestorationCompleted()
+		{
+			if (Stage != ContinuousTrainingStage.Restoring)
+				return ContinuousTrainingAction.None;
+
+			var stop = stopAfterRestore;
+			stopAfterRestore = false;
+			Stage = stop ? ContinuousTrainingStage.Idle : ContinuousTrainingStage.Fighting;
+			return stop ? ContinuousTrainingAction.None : ContinuousTrainingAction.Fight;
 		}
 
 		public void Stop()
 		{
+			stopAfterRestore = false;
 			Stage = ContinuousTrainingStage.Idle;
 		}
 	}

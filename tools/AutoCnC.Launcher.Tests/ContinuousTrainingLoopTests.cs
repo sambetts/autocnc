@@ -16,7 +16,7 @@ namespace AutoCnC.Launcher.Tests
 	public sealed class ContinuousTrainingLoopTests
 	{
 		[Test]
-		public void EnabledLoopAlternatesFightAndImprovementUntilStopped()
+		public void EnabledLoopPromotesOnlyAfterEvaluation()
 		{
 			var loop = new ContinuousTrainingLoop();
 
@@ -24,7 +24,10 @@ namespace AutoCnC.Launcher.Tests
 			Assert.That(loop.Stage, Is.EqualTo(ContinuousTrainingStage.Fighting));
 			Assert.That(loop.BattleCompleted(), Is.EqualTo(ContinuousTrainingAction.Improve));
 			Assert.That(loop.Stage, Is.EqualTo(ContinuousTrainingStage.Improving));
-			Assert.That(loop.ImprovementCompleted(), Is.EqualTo(ContinuousTrainingAction.Fight));
+			Assert.That(loop.ImprovementCompleted(), Is.EqualTo(ContinuousTrainingAction.Evaluate));
+			Assert.That(loop.Stage, Is.EqualTo(ContinuousTrainingStage.Evaluating));
+			Assert.That(loop.EvaluationCompleted(ContinuousEvaluationDecision.Promote),
+				Is.EqualTo(ContinuousTrainingAction.Fight));
 			Assert.That(loop.Stage, Is.EqualTo(ContinuousTrainingStage.Fighting));
 
 			loop.Stop();
@@ -42,6 +45,65 @@ namespace AutoCnC.Launcher.Tests
 			Assert.That(loop.IsRunning, Is.False);
 			Assert.That(loop.BattleCompleted(), Is.EqualTo(ContinuousTrainingAction.None));
 			Assert.That(loop.ImprovementCompleted(), Is.EqualTo(ContinuousTrainingAction.None));
+			Assert.That(loop.EvaluationCompleted(ContinuousEvaluationDecision.Promote),
+				Is.EqualTo(ContinuousTrainingAction.None));
+			Assert.That(loop.RestorationCompleted(), Is.EqualTo(ContinuousTrainingAction.None));
+		}
+
+		[Test]
+		public void RejectedCandidateRestoresBeforeFighting()
+		{
+			var loop = new ContinuousTrainingLoop();
+			loop.Begin(enabled: true);
+			loop.BattleCompleted();
+			loop.ImprovementCompleted();
+
+			Assert.That(loop.EvaluationCompleted(ContinuousEvaluationDecision.Restore),
+				Is.EqualTo(ContinuousTrainingAction.Restore));
+			Assert.That(loop.Stage, Is.EqualTo(ContinuousTrainingStage.Restoring));
+			Assert.That(loop.RestorationCompleted(), Is.EqualTo(ContinuousTrainingAction.Fight));
+			Assert.That(loop.Stage, Is.EqualTo(ContinuousTrainingStage.Fighting));
+		}
+
+		[Test]
+		public void UndefinedEvaluationRestoresAndStops()
+		{
+			var loop = new ContinuousTrainingLoop();
+			loop.Begin(enabled: true);
+			loop.BattleCompleted();
+			loop.ImprovementCompleted();
+
+			Assert.That(loop.EvaluationCompleted(ContinuousEvaluationDecision.Undefined),
+				Is.EqualTo(ContinuousTrainingAction.Restore));
+			Assert.That(loop.RestorationCompleted(), Is.EqualTo(ContinuousTrainingAction.None));
+			Assert.That(loop.Stage, Is.EqualTo(ContinuousTrainingStage.Idle));
+		}
+
+		[Test]
+		public void FailedImprovementRestoresWithoutEnteringEvaluation()
+		{
+			var loop = new ContinuousTrainingLoop();
+			loop.Begin(enabled: true);
+			loop.BattleCompleted();
+
+			Assert.That(loop.ImprovementCompleted(succeeded: false),
+				Is.EqualTo(ContinuousTrainingAction.Restore));
+			Assert.That(loop.Stage, Is.EqualTo(ContinuousTrainingStage.Restoring));
+			Assert.That(loop.RestorationCompleted(), Is.EqualTo(ContinuousTrainingAction.None));
+			Assert.That(loop.Stage, Is.EqualTo(ContinuousTrainingStage.Idle));
+		}
+
+		[Test]
+		public void InvalidTransitionsAreNoOpsAndLeaveTheStageUnchanged()
+		{
+			var loop = new ContinuousTrainingLoop();
+			loop.Begin(enabled: true);
+
+			Assert.That(loop.ImprovementCompleted(), Is.EqualTo(ContinuousTrainingAction.None));
+			Assert.That(loop.EvaluationCompleted(ContinuousEvaluationDecision.Promote),
+				Is.EqualTo(ContinuousTrainingAction.None));
+			Assert.That(loop.RestorationCompleted(), Is.EqualTo(ContinuousTrainingAction.None));
+			Assert.That(loop.Stage, Is.EqualTo(ContinuousTrainingStage.Fighting));
 		}
 	}
 }

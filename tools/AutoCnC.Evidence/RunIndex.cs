@@ -318,6 +318,7 @@ namespace AutoCnC.Evidence
 		{
 			var candidates = history.Runs
 				.Where(r => !string.Equals(r.Arm, "control", StringComparison.OrdinalIgnoreCase))
+				.Where(ValidOutcome)
 				.OrderBy(r => r.CompletedUtc)
 				.ToList();
 
@@ -455,6 +456,7 @@ namespace AutoCnC.Evidence
 		{
 			var runs = history.Runs
 				.Where(r => !string.Equals(r.Arm, "control", StringComparison.OrdinalIgnoreCase))
+				.Where(ValidOutcome)
 				.Where(r => !string.IsNullOrEmpty(r.PromptId))
 				.OrderBy(r => r.CompletedUtc)
 				.ToList();
@@ -474,6 +476,8 @@ namespace AutoCnC.Evidence
 					continue;
 
 				var next = all[index + 1];
+				if (!ValidOutcome(next))
+					continue;
 
 				// A delta that straddles a difficulty change measures the ladder, not the prompt.
 				// The round after a step up faces a different opponent personality and handicap,
@@ -566,7 +570,8 @@ namespace AutoCnC.Evidence
 		/// </remarks>
 		static BenchmarkComparison Compare(RunHistory history)
 		{
-			var latest = history.Runs.LastOrDefault(r => !string.IsNullOrEmpty(r.Benchmark));
+			var latest = history.Runs.LastOrDefault(r =>
+				!string.IsNullOrEmpty(r.Benchmark) && ValidOutcome(r));
 			if (latest == null)
 				return null;
 
@@ -575,9 +580,10 @@ namespace AutoCnC.Evidence
 			var runs = string.IsNullOrEmpty(latest.Batch)
 				? history.Runs.Where(r =>
 					string.Equals(r.Benchmark, latest.Benchmark, StringComparison.OrdinalIgnoreCase) &&
-					string.IsNullOrEmpty(r.Batch)).ToList()
+					string.IsNullOrEmpty(r.Batch) && ValidOutcome(r)).ToList()
 				: history.Runs.Where(r =>
-					string.Equals(r.Batch, latest.Batch, StringComparison.OrdinalIgnoreCase)).ToList();
+					string.Equals(r.Batch, latest.Batch, StringComparison.OrdinalIgnoreCase) &&
+					ValidOutcome(r)).ToList();
 
 			var candidate = runs.Where(r => !string.Equals(r.Arm, "control", StringComparison.OrdinalIgnoreCase)).ToList();
 			var control = runs.Where(r => string.Equals(r.Arm, "control", StringComparison.OrdinalIgnoreCase)).ToList();
@@ -605,6 +611,10 @@ namespace AutoCnC.Evidence
 
 		static bool Won(RunHistoryEntry entry) =>
 			string.Equals(entry.Outcome, "Won", StringComparison.OrdinalIgnoreCase);
+
+		static bool ValidOutcome(RunHistoryEntry entry) =>
+			string.Equals(entry.Outcome, "Won", StringComparison.OrdinalIgnoreCase) ||
+			string.Equals(entry.Outcome, "Lost", StringComparison.OrdinalIgnoreCase);
 
 		static double Median(double[] values)
 		{
@@ -653,9 +663,8 @@ namespace AutoCnC.Evidence
 
 			if (report.Prompts.Count > 0)
 			{
-				// The prompt is the one artifact in this loop that rewrites itself and has never
-				// been graded. Showing a round what its predecessors' templates actually did is
-				// the whole point of recording the id.
+				// Prompt revisions used to be accepted unattended and were never graded. Showing
+				// a round what manually adopted predecessors actually did is the point of the id.
 				text.Append("\nWhat each prompt revision did to the rounds it steered " +
 					"(fitness change from the round it was given to the round after):\n");
 

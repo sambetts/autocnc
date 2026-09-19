@@ -26,4 +26,8 @@
     <InternalsVisibleTo Include="AutoCnC.Launcher.Tests" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\AutoCnC.Evidence\AutoCnC.Evidence.csproj" />
+  </ItemGroup>
+
 </Project>

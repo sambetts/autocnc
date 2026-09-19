@@ -21,6 +21,25 @@ using System.Text.Json.Serialization;
 
 namespace AutoCnC.Evidence
 {
+	public static class CheckCategories
+	{
+		public const string Activation = "activation";
+		public const string Invariant = "invariant";
+		public const string Outcome = "outcome";
+		public const string Uncategorized = "uncategorized";
+
+		public static string Normalize(string category)
+		{
+			if (string.IsNullOrWhiteSpace(category))
+				return null;
+
+			var normalized = category.Trim().ToLowerInvariant();
+			return normalized is Activation or Invariant or Outcome
+				? normalized
+				: Uncategorized;
+		}
+	}
+
 	/// <summary>One falsifiable claim about the next fight.</summary>
 	/// <remarks>
 	/// <para>
@@ -39,6 +58,13 @@ namespace AutoCnC.Evidence
 	{
 		public string Id { get; set; }
 		public string Description { get; set; }
+
+		/// <summary>
+		/// <c>activation</c> proves a path ran, <c>invariant</c> protects a safety property, and
+		/// <c>outcome</c> records an observed result without becoming a promotion pass-rate gate.
+		/// Null keeps schema 1 checks authored before categories fully valid.
+		/// </summary>
+		public string Category { get; set; }
 
 		/// <summary>
 		/// What to measure. One of:
@@ -75,11 +101,20 @@ namespace AutoCnC.Evidence
 	{
 		public string Id { get; set; }
 		public string Description { get; set; }
+		public string Category { get; set; }
 		public string Query { get; set; }
 		public string Expected { get; set; }
 		public string Actual { get; set; }
 		public bool Passed { get; set; }
 		public string Error { get; set; }
+	}
+
+	public sealed class CheckCategorySummary
+	{
+		public string Category { get; set; }
+		public int Total { get; set; }
+		public int Passed { get; set; }
+		public int Failed { get; set; }
 	}
 
 	public sealed class CheckReport
@@ -92,6 +127,7 @@ namespace AutoCnC.Evidence
 		public int Passed { get; set; }
 		public int Failed { get; set; }
 		public List<CheckResult> Results { get; set; } = [];
+		public List<CheckCategorySummary> Categories { get; set; } = [];
 
 		/// <summary>
 		/// The block the next prompt injects verbatim, so the "already diagnosed — verify each in
@@ -159,6 +195,7 @@ namespace AutoCnC.Evidence
 				{
 					Id = check.Id,
 					Description = check.Description,
+					Category = CheckCategories.Normalize(check.Category),
 					Query = check.Query,
 					Expected = $"{check.Operator} {check.Value}".Trim()
 				};
@@ -182,6 +219,18 @@ namespace AutoCnC.Evidence
 			report.Total = report.Results.Count;
 			report.Passed = report.Results.Count(r => r.Passed);
 			report.Failed = report.Total - report.Passed;
+			report.Categories = report.Results
+				.GroupBy(r => r.Category ?? CheckCategories.Uncategorized,
+					StringComparer.OrdinalIgnoreCase)
+				.Select(group => new CheckCategorySummary
+				{
+					Category = group.Key,
+					Total = group.Count(),
+					Passed = group.Count(r => r.Passed),
+					Failed = group.Count(r => !r.Passed)
+				})
+				.OrderBy(category => category.Category, StringComparer.Ordinal)
+				.ToList();
 			report.Rendered = Render(report);
 			return report;
 		}
@@ -198,7 +247,9 @@ namespace AutoCnC.Evidence
 
 			foreach (var result in report.Results)
 				text.Append(CultureInfo.InvariantCulture,
-					$"- [{(result.Passed ? "PASS" : "FAIL")}] {result.Id}: {result.Description}\n" +
+					$"- [{(result.Passed ? "PASS" : "FAIL")}]" +
+					$"{(result.Category != null ? " [" + result.Category + "]" : "")} " +
+					$"{result.Id}: {result.Description}\n" +
 					$"    query {result.Query} expected {result.Expected}, actual {result.Actual}" +
 					$"{(result.Error != null ? " (" + result.Error + ")" : "")}\n");
 

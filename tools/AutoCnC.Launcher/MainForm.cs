@@ -16,6 +16,7 @@ using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Windows.Forms;
+using AutoCnC.Evidence;
 
 namespace AutoCnC.Launcher
 {
@@ -75,6 +76,7 @@ namespace AutoCnC.Launcher
 		readonly BattleEventLog battleLog = new();
 		readonly TaskbarProgress taskbarProgress = new();
 		readonly ContinuousTrainingLoop continuousLoop = new();
+		readonly ContinuousPromotionRunner continuousPromotion = new();
 
 		/// <summary>Script output produced before there was a window to put it in.</summary>
 		readonly List<string> pendingOutput = [];
@@ -83,6 +85,7 @@ namespace AutoCnC.Launcher
 		ScriptJob activeJob;
 		TrainingRun activeRun;
 		TrainingRun lastRun;
+		TrainingRun continuousCandidateRun;
 		TrainingHistory loadedHistory = TrainingHistory.Empty;
 		string loadedHistoryBot;
 		DateTime battleStartedUtc;
@@ -91,6 +94,7 @@ namespace AutoCnC.Launcher
 		bool closing;
 		bool battleRunning;
 		bool battleFinished;
+		ContinuousTrainingAction pendingContinuousAction;
 
 		/// <summary>
 		/// A battle finished and the cycle has not yet acted on it.
@@ -1072,6 +1076,12 @@ namespace AutoCnC.Launcher
 			if (lastRun?.Manifest.Status == "improved")
 				return "Improvement verified and deployed. Fight again to measure it.";
 
+			if (lastRun?.Manifest.Status == "candidate")
+				return "Candidate verified. Paired benchmark evaluation has not finished.";
+
+			if (lastRun?.Manifest.Status == "promoted")
+				return "Candidate beat its paired control and was promoted. Fighting the new champion next.";
+
 			if (LastRunMatchesSelectedBot() && lastRun?.Manifest.Status == "improvement-failed")
 				return "Improvement failed. Fix its current changes with the agent, or restore the previous iteration.";
 
@@ -1097,9 +1107,16 @@ namespace AutoCnC.Launcher
 					: activeRun?.Manifest.Battle?.ExecutionMode == BattleExecutionModes.Headless
 						? "Headless battle in progress at CPU speed. Results and output are following it; Stop ends it cleanly."
 						: "Battle in progress. The results and output windows are following it; this one waits until it is over."
-				: continuousLoop.Stage == ContinuousTrainingStage.Improving
-					? "Continuous training is improving the bot from the finished battle. The next fight starts automatically."
-					: "The last battle is finished. Its results and output are still open - close them when you are done reading.";
+				: continuousLoop.Stage switch
+				{
+					ContinuousTrainingStage.Improving =>
+						"Continuous training is editing a candidate from the finished battle.",
+					ContinuousTrainingStage.Evaluating =>
+						"Continuous training is evaluating the candidate against its paired control.",
+					ContinuousTrainingStage.Restoring =>
+						"Continuous training is restoring the pre-agent champion after evaluation.",
+					_ => "The last battle is finished. Its results and output are still open - close them when you are done reading."
+				};
 		}
 
 		bool BotExists()
@@ -1422,8 +1439,12 @@ namespace AutoCnC.Launcher
 			}
 
 			if (play && !continuousContinuation)
+			{
 				continuousLoop.Begin(continuousBox.Checked &&
 					BotWorkspace.ResolveProject(botBox.Text.Trim()) != null);
+				pendingContinuousAction = ContinuousTrainingAction.None;
+				continuousCandidateRun = null;
+			}
 
 			Save();
 			ClearOutput();
@@ -1667,6 +1688,8 @@ namespace AutoCnC.Launcher
 			{
 				if (!File.Exists(run.SnapshotManifestPath))
 					WorkspaceSnapshot.Capture(run);
+				if (automatic && run.Manifest.Experiment == null)
+					continuousPromotion.BeginCandidate(run);
 
 				if (!File.Exists(run.GameRulesPath))
 					AgentRulesExporter.Export(repo, run.GameRulesPath);
@@ -1814,47 +1837,160 @@ namespace AutoCnC.Launcher
 			if (!closing && improvementWindow != null)
 			{
 				improvementWindow.CurrentPromptTemplate = settings.AgentPromptTemplate;
-
-				// Continuous improvement adopts the proposal itself a moment from now, so putting
-				// the diff in front of a player who is not there to read it would only steal the
-				// progress view from the round that starts next.
 				improvementWindow.CompleteAgentRun(run, reviewNextPrompt: !continuousLoop.IsRunning);
 			}
 
-			if (exitCode == 0 && continuousLoop.Stage == ContinuousTrainingStage.Improving)
-				AcceptContinuousPrompt(run, suggestedNextPrompt);
+			if (continuousLoop.Stage == ContinuousTrainingStage.Improving)
+			{
+				var action = continuousLoop.ImprovementCompleted(exitCode == 0);
+				if (action == ContinuousTrainingAction.Evaluate)
+				{
+					continuousCandidateRun = run;
+					pendingContinuousAction = action;
+					if (!string.IsNullOrWhiteSpace(suggestedNextPrompt))
+						AppendImprovementOutput(
+							"The next-prompt draft was saved for manual review; continuous mode kept the current prompt.");
+				}
+				else if (action == ContinuousTrainingAction.Restore)
+				{
+					try
+					{
+						var evaluation = continuousPromotion.RecordFailedCandidate(run,
+							failureMessage ?? "The candidate improvement failed before paired evaluation.");
+						continuousPromotion.ApplyDecision(run, evaluation);
+						continuousLoop.RestorationCompleted();
+						AppendImprovementOutput(
+							"The failed continuous candidate was restored to its pre-agent champion snapshot.");
+					}
+					catch (Exception ex) when (ex is InvalidDataException or IOException or
+						UnauthorizedAccessException or InvalidOperationException)
+					{
+						continuousLoop.Stop();
+						AppendImprovementOutput(
+							"Could not restore the failed continuous candidate: " + ex.Message);
+					}
+				}
+			}
 
 			RefreshFeedbackRun(run);
 		}
 
-		void AcceptContinuousPrompt(TrainingRun run, string promptTemplate)
+		void StartContinuousEvaluation()
 		{
-			if (string.IsNullOrWhiteSpace(promptTemplate))
+			var run = continuousCandidateRun;
+			if (run == null || continuousLoop.Stage != ContinuousTrainingStage.Evaluating)
 			{
-				AppendImprovementOutput("The agent returned no next-round prompt; continuing with the current prompt.");
+				continuousLoop.Stop();
+				pendingContinuousAction = ContinuousTrainingAction.None;
+				Status("Continuous improvement stopped before paired evaluation could start.");
+				UpdateEnabledState();
 				return;
 			}
 
-			promptTemplate = TrainingAgent.EnsureMechanicsPlaceholder(promptTemplate);
-			if (!TrainingAgent.ValidatePromptTemplate(promptTemplate, out var error))
+			try
 			{
-				AppendImprovementOutput("The agent's next-round prompt was invalid; continuing with the current prompt. " + error);
+				var plan = continuousPromotion.PrepareEvaluation(repo, run);
+				if (!plan.CanRun)
+				{
+					FinishContinuousEvaluation(run, plan.ImmediateEvaluation);
+					if (pendingContinuousAction == ContinuousTrainingAction.Fight)
+					{
+						pendingContinuousAction = ContinuousTrainingAction.None;
+						StartNextContinuousFight();
+					}
+					else
+					{
+						Status("Candidate restored. Continuous improvement stopped because evaluation was undefined.");
+						UpdateEnabledState();
+					}
+
+					return;
+				}
+
+				activeTrainingRun = run;
+				queue.Clear();
+				queue.Enqueue(new ScriptJob
+				{
+					Title = "Evaluating the candidate against its paired control",
+					ScriptPath = plan.ScriptPath,
+					Arguments = plan.Arguments,
+					PreserveColor = true,
+					Kind = ScriptJobKind.Improvement,
+					Output = AppendImprovementOutput,
+					Completed = code => FinishContinuousEvaluation(run, code)
+				});
+
+				RunNext();
+			}
+			catch (Exception ex) when (ex is InvalidDataException or IOException or
+				UnauthorizedAccessException or InvalidOperationException)
+			{
+				continuousLoop.Stop();
+				pendingContinuousAction = ContinuousTrainingAction.None;
+				AppendImprovementOutput("Could not prepare paired evaluation: " + ex.Message);
+				Status("Continuous improvement stopped before paired evaluation could start.");
+				UpdateEnabledState();
+			}
+		}
+
+		void FinishContinuousEvaluation(TrainingRun run, int exitCode)
+		{
+			if (SamePath(activeTrainingRun?.RunDirectory, run.RunDirectory))
+				activeTrainingRun = null;
+
+			try
+			{
+				FinishContinuousEvaluation(run,
+					continuousPromotion.CompleteEvaluation(run, exitCode));
+			}
+			catch (Exception ex) when (ex is InvalidDataException or IOException or
+				UnauthorizedAccessException or InvalidOperationException)
+			{
+				continuousLoop.Stop();
+				pendingContinuousAction = ContinuousTrainingAction.None;
+				AppendImprovementOutput("Could not finish paired evaluation: " + ex.Message);
+			}
+		}
+
+		void FinishContinuousEvaluation(TrainingRun run, PairedBenchmarkEvaluation evaluation)
+		{
+			var decision = ContinuousPromotionRunner.DecisionFor(evaluation);
+			var action = continuousLoop.EvaluationCompleted(decision);
+			if (action == ContinuousTrainingAction.None)
 				return;
-			}
 
-			var approved = promptTemplate.Trim();
-			RecordPromptRevision(approved, PromptOrigin.Continuous, run);
-			settings.AgentPromptTemplate = approved;
-			settings.AgentPromptGuidance = null;
-			run.AcceptSuggestedNextPrompt(approved);
-			PersistSettings();
-			if (improvementWindow != null)
+			try
 			{
-				improvementWindow.CurrentPromptTemplate = approved;
-				improvementWindow.MarkNextPromptSaved();
-			}
+				continuousPromotion.ApplyDecision(run, evaluation);
+				if (action == ContinuousTrainingAction.Restore)
+					action = continuousLoop.RestorationCompleted();
 
-			AppendImprovementOutput("The next-round prompt was accepted automatically for continuous improvement.");
+				pendingContinuousAction = action;
+				continuousCandidateRun = null;
+				AppendImprovementOutput(evaluation.CanPromote
+					? "Paired evaluation promoted the candidate."
+					: "Paired evaluation did not promote the candidate; the pre-agent champion was restored. " +
+						evaluation.Reason);
+				RefreshFeedbackRun(run);
+			}
+			catch (Exception ex) when (ex is InvalidDataException or IOException or
+				UnauthorizedAccessException or InvalidOperationException)
+			{
+				continuousLoop.Stop();
+				pendingContinuousAction = ContinuousTrainingAction.None;
+				AppendImprovementOutput("Could not apply the paired evaluation decision: " + ex.Message);
+			}
+		}
+
+		void StartNextContinuousFight()
+		{
+			Status("Promotion decision settled. Starting the next champion fight...");
+			if (!Launch(play: true, continuousContinuation: true))
+			{
+				continuousLoop.Stop();
+				Status("Continuous improvement stopped before the next fight could start.");
+				UpdateEnabledState();
+			}
 		}
 
 		void RetryVerification()
@@ -2150,8 +2286,13 @@ namespace AutoCnC.Launcher
 				var completedBattle = battleJustCompleted;
 				battleJustCompleted = false;
 
-				if (completedBattle &&
-					continuousLoop.BattleCompleted() == ContinuousTrainingAction.Improve)
+				var continuousAction = completedBattle
+					? continuousLoop.BattleCompleted()
+					: pendingContinuousAction;
+				if (!completedBattle)
+					pendingContinuousAction = ContinuousTrainingAction.None;
+
+				if (continuousAction == ContinuousTrainingAction.Improve)
 				{
 					Status("Battle saved. Starting continuous improvement...");
 					if (!ImproveBot(automatic: true))
@@ -2164,17 +2305,16 @@ namespace AutoCnC.Launcher
 					return;
 				}
 
-				if (!completedBattle &&
-					continuousLoop.ImprovementCompleted() == ContinuousTrainingAction.Fight)
+				if (continuousAction == ContinuousTrainingAction.Evaluate)
 				{
-					Status("Improvement deployed. Starting the next fight...");
-					if (!Launch(play: true, continuousContinuation: true))
-					{
-						continuousLoop.Stop();
-						Status("Continuous improvement stopped before the next fight could start.");
-						UpdateEnabledState();
-					}
+					Status("Candidate verified. Starting paired benchmark evaluation...");
+					StartContinuousEvaluation();
+					return;
+				}
 
+				if (continuousAction == ContinuousTrainingAction.Fight)
+				{
+					StartNextContinuousFight();
 					return;
 				}
 
@@ -2206,6 +2346,8 @@ namespace AutoCnC.Launcher
 				InvokeJobCompleted(job, -1);
 				StopWatchingBattle("failed");
 				continuousLoop.Stop();
+				pendingContinuousAction = ContinuousTrainingAction.None;
+				continuousCandidateRun = null;
 			}
 			catch (InvalidOperationException ex)
 			{
@@ -2216,6 +2358,8 @@ namespace AutoCnC.Launcher
 				InvokeJobCompleted(job, -1);
 				StopWatchingBattle("failed");
 				continuousLoop.Stop();
+				pendingContinuousAction = ContinuousTrainingAction.None;
+				continuousCandidateRun = null;
 			}
 
 			UpdateEnabledState();
@@ -2234,6 +2378,8 @@ namespace AutoCnC.Launcher
 				InvokeJobCompleted(completed, exitCode);
 				StopWatchingBattle("stopped");
 				continuousLoop.Stop();
+				pendingContinuousAction = ContinuousTrainingAction.None;
+				continuousCandidateRun = null;
 				battleJustCompleted = false;
 				Status("Stopped.");
 				stopRequested = false;
@@ -2259,6 +2405,8 @@ namespace AutoCnC.Launcher
 				InvokeJobCompleted(completed, exitCode);
 				StopWatchingBattle("failed");
 				continuousLoop.Stop();
+				pendingContinuousAction = ContinuousTrainingAction.None;
+				continuousCandidateRun = null;
 				battleJustCompleted = false;
 				Status($"Stopped with exit code {exitCode}. See the {(completed?.Kind == ScriptJobKind.Generic ? "output" : "improvement")} window.");
 				queue.Clear();
@@ -2310,7 +2458,12 @@ namespace AutoCnC.Launcher
 			// afterwards: that job would be reported as stopped, and a failed improvement would be
 			// recorded as one the player cancelled.
 			stopRequested = runner.IsRunning;
-			continuousLoop.Stop();
+			if (!stopRequested)
+			{
+				continuousLoop.Stop();
+				continuousCandidateRun = null;
+			}
+			pendingContinuousAction = ContinuousTrainingAction.None;
 			queue.Clear();
 
 			// Queued questions go with it. They were written for a situation the player has just
@@ -2422,10 +2575,12 @@ namespace AutoCnC.Launcher
 				activeJob = null;
 				closing = true;
 				stopRequested = true;
-				continuousLoop.Stop();
+				pendingContinuousAction = ContinuousTrainingAction.None;
 				runner.Stop();
 				InvokeJobCompleted(stoppedJob, -1);
 				StopWatchingBattle("stopped");
+				continuousLoop.Stop();
+				continuousCandidateRun = null;
 			}
 
 			if (IsHandleCreated)

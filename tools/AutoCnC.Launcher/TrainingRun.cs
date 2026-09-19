@@ -151,9 +151,51 @@ namespace AutoCnC.Launcher
 		public string Message { get; set; }
 	}
 
+	public static class TrainingExperimentStates
+	{
+		public const string Prepared = "prepared";
+		public const string Improving = "improving";
+		public const string Candidate = "candidate";
+		public const string Failed = "failed";
+		public const string Evaluating = "evaluating";
+		public const string Promoted = "promoted";
+		public const string Restoring = "restoring";
+		public const string Restored = "restored";
+	}
+
+	/// <summary>Durable promotion state for one continuous candidate.</summary>
+	public sealed class TrainingExperiment
+	{
+		public int SchemaVersion { get; set; } = 1;
+		public string Id { get; set; }
+		public bool? Continuous { get; set; }
+		public string State { get; set; }
+		public DateTime? StartedUtc { get; set; }
+		public DateTime? EvaluationStartedUtc { get; set; }
+		public DateTime? EvaluationCompletedUtc { get; set; }
+		public DateTime? PromotedUtc { get; set; }
+		public DateTime? RestoredUtc { get; set; }
+		public string ChampionSourceRevision { get; set; }
+		public string CandidateSourceRevision { get; set; }
+		public string ControlRevision { get; set; }
+		public string ChampionSnapshotFile { get; set; }
+		public string BenchmarkResultFile { get; set; }
+		public string EvaluationFile { get; set; }
+		public string Benchmark { get; set; }
+		public string Batch { get; set; }
+		public string Decision { get; set; }
+		public string Reason { get; set; }
+
+		/// <summary>
+		/// True records that continuous mode kept the current prompt until a player reviewed the
+		/// proposal. Nullable so manifests written before this policy remain valid.
+		/// </summary>
+		public bool? PromptRewriteFrozen { get; set; }
+	}
+
 	public sealed class TrainingRunManifest
 	{
-		public int SchemaVersion { get; set; } = 7;
+		public int SchemaVersion { get; set; } = 8;
 		public string Id { get; set; }
 		public string Status { get; set; }
 
@@ -181,6 +223,7 @@ namespace AutoCnC.Launcher
 		public TrainingBattleResult Result { get; set; }
 		public TrainingSimulationPerformance Performance { get; set; }
 		public TrainingAgentResult Agent { get; set; }
+		public TrainingExperiment Experiment { get; set; }
 
 		/// <summary>
 		/// The launcher that is fighting this battle or running its improvement, while one is.
@@ -248,6 +291,10 @@ namespace AutoCnC.Launcher
 		public string SnapshotDirectory => Path.Combine(RunDirectory, "source-before-agent");
 		public string SnapshotManifestPath => Path.Combine(RunDirectory, "source-before-agent.json");
 		public string ChangesPath => Path.Combine(RunDirectory, "agent-changes.json");
+		public string ExperimentDirectory => Path.Combine(RunDirectory, "experiment");
+		public string BenchmarkRunsDirectory => Path.Combine(ExperimentDirectory, "benchmark-runs");
+		public string BenchmarkResultPath => Path.Combine(ExperimentDirectory, "benchmark-result.json");
+		public string PromotionEvaluationPath => Path.Combine(ExperimentDirectory, "promotion-evaluation.json");
 
 		public bool IsEditable => !string.IsNullOrEmpty(Manifest.BotProject) &&
 			File.Exists(Manifest.BotProject) && Directory.Exists(Manifest.BotDirectory);
@@ -264,7 +311,10 @@ namespace AutoCnC.Launcher
 		public bool HasUnfinishedWork => Manifest.CompletedUtc == null ||
 			Manifest.Agent is { StartedUtc: not null, CompletedUtc: null } ||
 			string.Equals(Manifest.Status, "improving", StringComparison.OrdinalIgnoreCase) ||
-			string.Equals(Manifest.Status, "verifying", StringComparison.OrdinalIgnoreCase);
+			string.Equals(Manifest.Status, "verifying", StringComparison.OrdinalIgnoreCase) ||
+			string.Equals(Manifest.Status, "candidate", StringComparison.OrdinalIgnoreCase) ||
+			string.Equals(Manifest.Status, "evaluating", StringComparison.OrdinalIgnoreCase) ||
+			string.Equals(Manifest.Status, "restoring", StringComparison.OrdinalIgnoreCase);
 
 		/// <summary>True while that work is genuinely still going on somewhere.</summary>
 		public bool IsBusy => HasUnfinishedWork && ProcessOwnership.IsLive(Manifest.Owner);
@@ -633,6 +683,97 @@ namespace AutoCnC.Launcher
 			return Manifest.AgentSessionId;
 		}
 
+		public void BeginContinuousExperiment()
+		{
+			if (!File.Exists(SnapshotManifestPath))
+				throw new InvalidOperationException(
+					"Continuous improvement requires the pre-agent source snapshot.");
+			if (Manifest.Experiment != null)
+				throw new InvalidOperationException("This training run already has an experiment.");
+
+			Manifest.Experiment = new TrainingExperiment
+			{
+				Id = Guid.NewGuid().ToString("N"),
+				Continuous = true,
+				State = TrainingExperimentStates.Prepared,
+				StartedUtc = DateTime.UtcNow,
+				ChampionSourceRevision = BotWorkspace.SourceRevision(Manifest.BotDirectory),
+				ChampionSnapshotFile = Path.GetRelativePath(RunDirectory, SnapshotManifestPath),
+				BenchmarkResultFile = Path.GetRelativePath(RunDirectory, BenchmarkResultPath),
+				EvaluationFile = Path.GetRelativePath(RunDirectory, PromotionEvaluationPath),
+				PromptRewriteFrozen = true
+			};
+			Save();
+		}
+
+		public void BeginContinuousEvaluation(string controlRevision)
+		{
+			var experiment = Manifest.Experiment;
+			if (experiment?.Continuous != true ||
+				!string.Equals(experiment.State, TrainingExperimentStates.Candidate,
+					StringComparison.OrdinalIgnoreCase))
+				throw new InvalidOperationException("Only a finished continuous candidate can be evaluated.");
+
+			Directory.CreateDirectory(ExperimentDirectory);
+			experiment.State = TrainingExperimentStates.Evaluating;
+			experiment.EvaluationStartedUtc = DateTime.UtcNow;
+			experiment.CandidateSourceRevision = BotWorkspace.SourceRevision(Manifest.BotDirectory);
+			experiment.ControlRevision = controlRevision;
+			Manifest.Status = "evaluating";
+			Manifest.Owner = ProcessOwnership.Claim();
+			Save();
+		}
+
+		public void RecordContinuousEvaluation(string decision, string reason,
+			string benchmark = null, string batch = null)
+		{
+			var experiment = Manifest.Experiment;
+			if (experiment?.Continuous != true ||
+				(!string.Equals(experiment.State, TrainingExperimentStates.Evaluating,
+						StringComparison.OrdinalIgnoreCase) &&
+					!string.Equals(experiment.State, TrainingExperimentStates.Failed,
+						StringComparison.OrdinalIgnoreCase)))
+				throw new InvalidOperationException("This run has no continuous evaluation in progress.");
+
+			experiment.EvaluationStartedUtc ??= DateTime.UtcNow;
+			experiment.EvaluationCompletedUtc = DateTime.UtcNow;
+			experiment.Decision = decision;
+			experiment.Reason = reason;
+			experiment.Benchmark = benchmark;
+			experiment.Batch = batch;
+			Manifest.Owner = null;
+			Save();
+		}
+
+		public void MarkContinuousPromoted()
+		{
+			var experiment = Manifest.Experiment;
+			if (experiment?.Continuous != true ||
+				!string.Equals(experiment.State, TrainingExperimentStates.Evaluating,
+					StringComparison.OrdinalIgnoreCase) ||
+				!string.Equals(experiment.Decision, "Promote", StringComparison.OrdinalIgnoreCase))
+				throw new InvalidOperationException("Only an evaluated improving candidate can be promoted.");
+
+			experiment.State = TrainingExperimentStates.Promoted;
+			experiment.PromotedUtc = DateTime.UtcNow;
+			Manifest.Status = "promoted";
+			Manifest.Owner = null;
+			Save();
+		}
+
+		public void MarkContinuousRestoring()
+		{
+			var experiment = Manifest.Experiment;
+			if (experiment?.Continuous != true ||
+				experiment.State is TrainingExperimentStates.Promoted or TrainingExperimentStates.Restored)
+				throw new InvalidOperationException("This run has no continuous candidate to restore.");
+
+			experiment.State = TrainingExperimentStates.Restoring;
+			Manifest.Status = "restoring";
+			Manifest.Owner = ProcessOwnership.Claim();
+			Save();
+		}
+
 		public void AgentStarted(string command, string recoveryTranscript = null,
 			bool repairing = false)
 		{
@@ -656,6 +797,10 @@ namespace AutoCnC.Launcher
 			};
 			Manifest.Status = "improving";
 			Manifest.Owner = ProcessOwnership.Claim();
+			if (Manifest.Experiment?.Continuous == true &&
+				string.Equals(Manifest.Experiment.State, TrainingExperimentStates.Prepared,
+					StringComparison.OrdinalIgnoreCase))
+				Manifest.Experiment.State = TrainingExperimentStates.Improving;
 			Save();
 		}
 
@@ -691,8 +836,16 @@ namespace AutoCnC.Launcher
 			Manifest.Agent.SuggestedNextPrompt = suggestedNextPrompt;
 			Manifest.Agent.FailurePhase = failurePhase;
 			Manifest.Agent.FailureMessage = failureMessage;
+			var continuousCandidate = Manifest.Experiment?.Continuous == true &&
+				string.Equals(Manifest.Experiment.State, TrainingExperimentStates.Improving,
+					StringComparison.OrdinalIgnoreCase);
+			if (continuousCandidate)
+				Manifest.Experiment.State = exitCode == 0
+					? TrainingExperimentStates.Candidate
+					: TrainingExperimentStates.Failed;
+
 			Manifest.Status = exitCode == 0
-				? "improved"
+				? continuousCandidate ? "candidate" : "improved"
 				: cancelled ? "improvement-cancelled" : "improvement-failed";
 			Manifest.Owner = null;
 			Save();
@@ -724,6 +877,11 @@ namespace AutoCnC.Launcher
 		{
 			Manifest.Agent ??= new TrainingAgentResult();
 			Manifest.Agent.RestoredUtc = DateTime.UtcNow;
+			if (Manifest.Experiment?.Continuous == true)
+			{
+				Manifest.Experiment.State = TrainingExperimentStates.Restored;
+				Manifest.Experiment.RestoredUtc = Manifest.Agent.RestoredUtc;
+			}
 			Manifest.Status = "restored";
 			Manifest.Owner = null;
 			Save();

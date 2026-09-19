@@ -586,13 +586,15 @@ rules. Use **Restore previous iteration** to put the exact pre-agent source back
 
 For an unattended loop, keep **Execution** on its default **Headless** in Proving ground.
 In **AI training**, check **Repeat: fight > analyze > improve > fight**, then press
-**Start AI training**. It repeats the cycle until **Stop operation**,
-always improving from the battle just fought and automatically accepting each valid next-round
-prompt, regardless of an older manual selection. Switch Execution to **Rendered** when you
-want to watch the same loop. It never pauses for feedback; review those battles from **History &
-trends** after stopping. Feedback actions are locked only while an operation is running, not merely
-because the repeat checkbox is selected. A failed game, agent command, or build stops the loop instead of advancing
-with an unverified bot.
+**Start AI training**. It repeats Fight -> candidate edit -> paired benchmark -> promote or restore
+until **Stop operation**, always improving from the battle just fought rather than an older manual
+selection. Wins rank first and median paired fitness is the tie-break; missing, failed, mismatched,
+or `Undefined` evidence restores the pre-agent snapshot and stops instead of treating an
+unmeasured edit as progress. The current benchmark script needs a clean Git champion under this
+checkout's `bots` directory for its control arm. Switch Execution to **Rendered** when you want to
+watch the same loop. It never pauses for feedback; review those battles from **History & trends**
+after stopping. Feedback actions are locked only while an operation is running, not merely because
+the repeat checkbox is selected.
 
 Fight and rules JSON are shown as collapsible trees. When the run finishes, the agent drafts an
 entire replacement prompt template and the window opens **Next prompt*** on it. The top pane shows
@@ -600,12 +602,12 @@ what accepting would change in the prompt you are using now — added and remove
 long unchanged stretches elided — and the bottom pane holds the complete draft, which you can edit
 to see the comparison follow. Choose **Use this prompt next round** to adopt it or **Keep the
 current prompt** to turn it down; rejecting changes nothing and is remembered, so reopening the
-session does not ask again. Continuous mode accepts a valid template automatically and leaves the
-progress view alone. The launcher inserts that round's paths,
-evidence, result, and source revision through required placeholders. This replaces rather than
-appends, so the prompt can get more focused without growing indefinitely. Each adopted template is
-kept in `%LOCALAPPDATA%\AutoCnC\PromptHistory` as a numbered file, so a loop left running overnight
-still leaves a readable trail of how its prompt changed. While a build, fight, or
+session does not ask again. Continuous mode leaves the progress view alone and stores the proposal
+as a draft, but keeps the current prompt frozen until a player reviews it. The launcher inserts
+that round's paths, evidence, result, and source revision through required placeholders when an
+approved prompt is used. This replaces rather than appends, so the prompt can get more focused
+without growing indefinitely. Each adopted template is kept in
+`%LOCALAPPDATA%\AutoCnC\PromptHistory` as a numbered file. While a build, fight, evaluation, or
 improvement is running, the launcher taskbar icon shows indeterminate progress.
 
 If improvement stops with a build error, it no longer dead-ends. The Improvement window

@@ -51,8 +51,8 @@ namespace AutoCnC.Evidence
 	/// </summary>
 	/// <remarks>
 	/// <para>
-	/// The prompt is the only artifact in this loop that rewrites itself every round and is never
-	/// graded. Bot code faces a match; the prompt faces nothing. That asymmetry is why a saved
+	/// The prompt was once rewritten unattended every round and was never graded. Bot code faces a
+	/// match; the prompt faces nothing. That asymmetry is why a saved
 	/// template grew to twenty-seven thousand characters of triage recipes, why one claimed an API
 	/// did not exist for many rounds after it shipped, and why a rule stated only in the mutable
 	/// half was silently dropped and the next round undid the work it protected. Measuring it is

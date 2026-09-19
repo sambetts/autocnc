@@ -416,13 +416,26 @@ failure leaves a visible, retryable entry. Last-run and training selections, vie
 summaries are refreshed without reintroducing the deleted run.
 
 Continuous mode is a small explicit state machine over the existing script queue: Fighting ->
-Improving -> Fighting. Headless is the default execution mode, with Rendered selectable for
-watching/debugging. It creates a fresh durable run and source snapshot on every pass, automatically
-accepts only a valid complete next-round prompt, and stops on user request or any non-zero game,
-agent, or build exit. Headless also treats 90 nominal game minutes without a result as a
-failed stalemate (configurable with `-MaxGameSeconds`). Stop writes the run's cancellation sentinel
-first, allowing the world, evidence writers and replay recorder to close cleanly before process-tree
-termination is used as a fallback. It deliberately has no player-assessment pause.
+Improving -> Evaluating -> either Fighting after promotion, or Restoring -> Fighting after a
+measured rejection. Failed improvements and `Undefined` evaluations also enter Restoring, then
+stop. Invalid transition calls are no-ops, matching the queue's existing completion guards.
+Headless is the default execution mode, with Rendered selectable for watching/debugging.
+
+Every pass records additive `TrainingRun.Experiment` metadata and keeps the existing
+`WorkspaceSnapshot` as the pre-agent champion. A successful edit is labelled `candidate`, not
+`improved`; `ContinuousPromotionRunner` invokes `benchmark-bot.ps1`, reads its machine result
+through `AutoCnC.Evidence.PairedBenchmarkEvaluator`, and persists both raw and evaluated artifacts.
+Candidate and control must share benchmark, batch and repeat/scenario configurations. Wins rank
+first and median paired fitness is the tie-break. Failed, incomplete, mismatched, or `Undefined`
+evidence cannot promote and restores through `WorkspaceSnapshot`, never checkout/reset. The
+current script can materialize a control only from a clean Git revision under the checkout's
+`bots` directory; otherwise evaluation is explicitly `Undefined`.
+
+The loop stops on user request or any non-zero game, agent, or build exit. Headless also treats 90
+nominal game minutes without a result as a failed stalemate (configurable with
+`-MaxGameSeconds`). Stop writes the run's cancellation sentinel first, allowing the world,
+evidence writers and replay recorder to close cleanly before process-tree termination is used as a
+fallback. It deliberately has no player-assessment pause.
 
 The JSON views parse lazily into collapsible trees, so the resolved rules snapshot is not expanded
 into thousands of controls up front. After coding, the agent returns a complete replacement prompt
@@ -431,14 +444,15 @@ which opens by itself and shows the proposal as a line-by-line difference agains
 force — unchanged stretches elided — above the editable draft, so the player approves or rejects a
 change rather than comparing two walls of text. Editing the draft updates the difference. Rejecting
 leaves the saved template untouched and records the decision on the round, so reopening the session
-does not present a settled question as outstanding. Continuous mode applies the same validation
-before accepting automatically, and does not steal the progress view to display a difference nobody
-is reading. Approval replaces the saved template; required placeholders preserve fresh
+does not present a settled question as outstanding. Continuous mode records the proposal but keeps
+the current template frozen until a player reviews it, and does not steal the progress view to
+display a difference nobody is reading. Manual approval replaces the saved template; required placeholders preserve fresh
 workspace, evidence, result, and recursive next-template contract values without accumulating
 additive guidance. `docs/agent-prompt-template.md` is the repository default, while an approved
 replacement is user state. Since approval overwrites that state, each adopted template is also
 appended to `%LOCALAPPDATA%\AutoCnC\PromptHistory` as a numbered file plus an `index.json` of
-provenance, which is the only record of how the prompt evolved across a long continuous loop.
+provenance; legacy entries retain their `continuous` origin even though unattended prompt
+acceptance is no longer performed.
 Script queue activity is mirrored to Windows taskbar indeterminate
 progress and cleared on every terminal state.
 

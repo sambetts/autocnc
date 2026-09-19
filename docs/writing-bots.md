@@ -272,6 +272,9 @@ The launcher preserves every fight as a unique training run under
 | `evidence/battle.csv` | What this side could observe and react to |
 | `evidence/decisions.jsonl` | What the bot assessed and which mode decisions became orders |
 | `evidence/replay.orarep` | What the fight looked like |
+| `source-before-agent.json` + `source-before-agent/` | The champion snapshot used for safe restoration |
+| `experiment/benchmark-result.json` | Raw paired candidate/control benchmark output |
+| `experiment/promotion-evaluation.json` | Validated `Promote`, `Restore`, or `Undefined` decision |
 
 That is enough to correlate cause and effect without giving strategy code omniscient information
 during the match. `decisions.jsonl` is diagnostic output written by the host; a bot cannot read it.
@@ -317,9 +320,11 @@ replacement is saved in the player's launcher settings.
 Because each approval overwrites that single saved template, every template ever adopted is also
 appended to `%LOCALAPPDATA%\AutoCnC\PromptHistory` as a numbered plain-text file, oldest first,
 with an `index.json` recording when it was adopted, whether a player approved it or continuous
-improvement did, and the bot, session and outcome behind it. Diff two consecutive files to see
-what a round changed. A template identical to the one before it is not recorded. Nothing reads
-the archive back, so editing or deleting it only loses history; it changes no behaviour.
+improvement did in older releases, and the bot, session and outcome behind it. New continuous
+rounds keep their proposal on the run for later manual review and do not add an unreviewed
+revision. Diff two consecutive files to see what a round changed. A template identical to the one
+before it is not recorded. Nothing reads the archive back, so editing or deleting it only loses
+history; it changes no behaviour.
 
 **History & trends** lists every compatible recorded session for the selected bot, newest first,
 with explicit provided/missing feedback status, outcome, duration, and the local side's stats as
@@ -339,13 +344,20 @@ tab pairs units, army value and base value as the battle was decided with the pe
 alongside kills and an outcome-colored duration line, comparing the local side against the
 opponents' total.
 
-Checking **Continuous improvement** starts a stateful Fight -> improve -> Fight loop. Every cycle
-still has its own source revision, evidence, reversible snapshot, independent verification, and
-result. A valid agent-authored next prompt is accepted automatically; any battle, agent, or
-build failure stops the loop. Each automatic improvement uses the battle just fought, rather than
-an older manually selected battle. The loop never pauses for feedback. Once it stops, its recorded
-battles can be reviewed from history; leaving the repeat checkbox selected does not disable
-feedback while idle.
+Checking **Continuous improvement** starts a stateful Fight -> candidate edit -> paired evaluation
+-> promote or restore -> Fight loop. Every candidate has durable experiment metadata, its
+pre-agent champion `WorkspaceSnapshot`, independent verification, the raw benchmark result and a
+machine-readable promotion evaluation. Candidate and control must cover the same benchmark, batch,
+repeat and scenario set. The decision ranks wins first and the median paired fitness delta second;
+check pass percentages never decide promotion. Missing, failed, mismatched, or `Undefined` runs
+produce an `Undefined` decision, restore the champion and stop the loop.
+
+The current benchmark script materializes controls from clean Git revisions under this checkout's
+`bots` directory. If the champion is dirty or external, the launcher records that limitation as an
+`Undefined` evaluation and restores rather than using a stale commit. Each automatic improvement
+uses the battle just fought, rather than an older manually selected battle. Continuous mode does
+not pause for feedback or prompt review: an agent-authored next prompt remains a draft on the run,
+the current prompt stays frozen, and the player can review the draft after the loop stops.
 
 An agent exit and a host verification failure are recorded separately. Verification always cleans
 the bot's generated `bin`/`obj` output before building. If it still fails, **Retry verification**

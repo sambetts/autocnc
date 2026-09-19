@@ -323,6 +323,58 @@ namespace AutoCnC.Evidence.Tests
 			Assert.That(report.Rendered, Does.Contain("actual 12.5"));
 		}
 
+		[Test]
+		public void CategoriesAreAdditiveAndOutcomeChecksRemainDescriptive()
+		{
+			var report = Evaluate(
+				new Check
+				{
+					Id = "activated",
+					Category = CheckCategories.Activation,
+					Description = "new branch ran",
+					Query = "reason:toward",
+					Operator = ">=",
+					Value = "1"
+				},
+				new Check
+				{
+					Id = "safe",
+					Category = CheckCategories.Invariant,
+					Description = "loss stayed bounded",
+					Query = "summary.headline.creditsLost",
+					Operator = "<",
+					Value = "30"
+				},
+				new Check
+				{
+					Id = "won",
+					Category = CheckCategories.Outcome,
+					Description = "the match was won",
+					Query = "summary.fight.outcome",
+					Operator = "==",
+					Value = "Lost"
+				},
+				new Check
+				{
+					Id = "legacy",
+					Description = "old schema entry",
+					Query = "summary.fight.map",
+					Operator = "present"
+				});
+
+			Assert.That(report.Categories.Single(c => c.Category == CheckCategories.Activation).Passed,
+				Is.EqualTo(1));
+			Assert.That(report.Categories.Single(c => c.Category == CheckCategories.Invariant).Passed,
+				Is.EqualTo(1));
+			Assert.That(report.Categories.Single(c => c.Category == CheckCategories.Outcome).Failed,
+				Is.EqualTo(1));
+			Assert.That(report.Categories.Single(c => c.Category == CheckCategories.Uncategorized).Passed,
+				Is.EqualTo(1));
+			Assert.That(Result(report, "legacy").Category, Is.Null,
+				"schema 1 checks without a category remain valid");
+			Assert.That(report.Rendered, Does.Contain("[outcome]"));
+		}
+
 		bool Passed(string id, string query, string @operator, string value)
 		{
 			return Result(Evaluate(new Check

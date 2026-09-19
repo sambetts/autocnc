@@ -128,6 +128,7 @@ round taking your word for it. The harness reads it from there and reports it as
   "checks": [
     {
       "id": "harvester-escort-runs",
+      "category": "activation",
       "description": "The new harvester escort branch actually executes",
       "query": "reason-id:economy.escort-harvester",
       "operator": ">=",
@@ -135,6 +136,7 @@ round taking your word for it. The harness reads it from there and reports it as
     },
     {
       "id": "spend-rate-recovers",
+      "category": "outcome",
       "description": "Lifetime spend returns above 40 credits per second",
       "query": "summary.headline.creditsSpentPerSecond",
       "operator": ">=",
@@ -142,6 +144,7 @@ round taking your word for it. The harness reads it from there and reports it as
     },
     {
       "id": "light-infantry-earn-their-cost",
+      "category": "invariant",
       "description": "e1 stays under 200 credits spent per kill",
       "query": "summary.unitTypes[e1].creditsPerKill",
       "operator": "<=",
@@ -159,6 +162,9 @@ exact `ReasonId` when one exists. Exact-ID counts include matching unit evaluati
 decisions, and doctrine changes. Unit IDs count evaluations rather than only issued orders;
 legacy issued-decision indexes remain unchanged. Operators: `>=`, `>`, `<=`, `<`, `==`, `!=`,
 `contains`, `present`, `absent`.
+Use category `activation` for proof a path ran, `invariant` for a safety property, and `outcome`
+for a measured result. Outcome checks are diagnostic; paired benchmark wins and fitness, not the
+percentage of outcome checks passing, decide promotion.
 
 If you added or changed a code path, give it a stable `ReasonId` and assert it with a
 `reason-id:` check. That is the only thing that distinguishes "the new branch is wrong" from

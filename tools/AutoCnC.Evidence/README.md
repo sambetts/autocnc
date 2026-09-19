@@ -112,8 +112,25 @@ Operators: `>=`, `>`, `<=`, `<`, `==`, `!=`, `contains`, `present`, `absent`.
 new code path actually ran, which is what separates "the branch is wrong" from "the branch never
 executed".
 
+Checks may add a `category` of `activation`, `invariant`, or `outcome`. Reports retain the category
+and publish per-category totals; checks written before categories remain valid and appear as
+`uncategorized`. Outcome checks are descriptive evidence, not a promotion pass-rate gate.
+
 An unresolvable query produces a failed result carrying an `Error`. It never throws out of
 `Checks.Evaluate`, because one bad check must not cost the other nine.
+
+### Paired benchmark promotion evaluation — `schemaVersion` 1
+
+`PairedBenchmarkEvaluator` reads the machine result written by `benchmark-bot.ps1`, requires both
+arms to name the same benchmark batch and the same unique repeat/scenario configurations, and
+cross-checks the paired rows against the raw match rows. Missing arms, duplicate or mismatched
+scenarios, failed statuses, non-finite fitness, and outcomes other than `Won` or `Lost` produce an
+`Undefined` verdict, which cannot promote.
+
+Complete evidence is ranked lexicographically: candidate wins against control wins first, then
+the median of per-scenario fitness deltas when wins tie. The result is written as
+`promotion-evaluation.json` with `Promote`, `Restore`, or `Undefined`, the basis, reason, aggregate
+counts, median paired delta, and every validated pair. It never uses check pass percentage.
 
 ### `history.json` and `trend.json` — `schemaVersion` 1
 
@@ -141,6 +158,10 @@ A fitness score is therefore only comparable within a difficulty. Nothing here r
 rungs comparable: a multiplier chosen to equate Normal with Hard would be invented, and an invented
 number that looks like a measurement is worse than an honest gap.
 
+Runs whose outcome is failed, unknown, or `Undefined` remain in `history.json` as durable evidence
+but are excluded from rolling trends and prompt effects. Prompt attribution also refuses to bridge
+across an invalid run to a later valid one.
+
 **History is for the improvement agent, between matches.** It is never readable by a running bot,
 never compiled into one, and must never justify a map- or opponent-specific constant in strategy
 code. `BotSourceAudit` is a cheap mechanical smell test for exactly that failure, and is advisory
@@ -149,9 +170,10 @@ history never reaches a running bot.
 
 ### Measuring the prompt itself
 
-The prompt rewrites itself every round and, until now, was the one artifact in the loop with no
-fitness function at all. Bot code faces a match; the prompt faced nothing. That asymmetry is why a
-saved template grew to 27,250 characters of triage recipes, why one claimed an API did not exist
+The prompt can be revised after manual review and was once rewritten unattended every round, while
+remaining the one artifact in the loop with no fitness function at all. Bot code faces a match;
+the prompt faced nothing. That asymmetry is why a saved template grew to 27,250 characters of
+triage recipes, why one claimed an API did not exist
 for many rounds after it shipped, and why a rule stated only in the mutable half was dropped — and
 the next round promptly undid the work it protected.
 

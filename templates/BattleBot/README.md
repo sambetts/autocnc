@@ -10,7 +10,8 @@ dotnet build .\__AUTOCNC_BOT_IDENTIFIER__.sln
 Use **Open code** to edit it, **Deploy bot** to build and install it, and **Fight** to measure it.
 After a fight, **Analyze & improve** can ask your configured local coding agent to make a
 reversible improvement from the saved battle evidence. **History & trends** compares KPIs across
-iterations; **Continuous improvement** repeats the fight-and-improve cycle until you stop it.
+iterations; **Continuous improvement** evaluates each candidate against a paired control and
+promotes it or restores the saved champion before continuing.
 
 Start with `Doctrines/StarterDoctrine.cs` for the build and production plan,
 `Logic/StarterLogic.cs` for pure decisions, and `Modes/StarterMode.cs` for the engine-facing

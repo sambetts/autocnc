@@ -85,6 +85,28 @@ namespace AutoCnC.Launcher.Tests
 		}
 
 		[Test]
+		public void LegacyManifestWithoutExperimentMetadataLoadsAndKeepsManualSemantics()
+		{
+			var run = NewRun();
+			run.Manifest.SchemaVersion = 7;
+			run.Save();
+			var legacy = File.ReadAllText(run.ManifestPath)
+				.Replace("  \"Experiment\": null,\n", "", StringComparison.Ordinal);
+			File.WriteAllText(run.ManifestPath, legacy);
+
+			var loaded = TrainingRun.Load(run.RunDirectory);
+			loaded.AgentStarted("agent");
+			loaded.AgentFinished(0, 1, "manual draft");
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(loaded.Manifest.Experiment, Is.Null);
+				Assert.That(loaded.Manifest.Status, Is.EqualTo("improved"));
+				Assert.That(loaded.Manifest.Agent.SuggestedNextPromptAccepted, Is.False);
+			});
+		}
+
+		[Test]
 		public void DiscoverySkipsAnIncompatibleRememberedCheckout()
 		{
 			var oldRoot = Path.Combine(root, "old-checkout");
@@ -354,7 +376,8 @@ namespace AutoCnC.Launcher.Tests
 				"<complete replacement prompt template>",
 				TrainingAgent.NextPromptEnd,
 				"",
-				"Continuous improvement may accept it automatically."
+				"The player will review and edit it before it is saved. Continuous improvement records",
+				"the draft but keeps the current prompt unchanged until that manual review."
 			]);
 			var proposal = promptTemplate
 				.Replace("{workspace}", run.Manifest.BotDirectory, StringComparison.Ordinal)
@@ -739,7 +762,7 @@ namespace AutoCnC.Launcher.Tests
 			run.Finish("finished", match, battle);
 
 			var loaded = TrainingRun.Load(run.RunDirectory);
-			Assert.That(loaded.Manifest.SchemaVersion, Is.EqualTo(7));
+			Assert.That(loaded.Manifest.SchemaVersion, Is.EqualTo(8));
 			Assert.That(loaded.Manifest.Result.Outcome, Is.EqualTo("Won"));
 			Assert.That(loaded.Manifest.Performance.SimulationSpeed, Is.EqualTo(100));
 			Assert.That(loaded.Manifest.Performance.TicksPerSecond, Is.EqualTo(2500));

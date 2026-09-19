@@ -371,18 +371,23 @@ only the bot and that run's evidence, then independently builds and deploys the 
 prompt, game guide, resolved unit/weapon stats, fight manifest, and changed files;
 **Restore previous iteration** puts the exact pre-agent source back.
 
-Check **Continuous improvement** before starting to repeat Fight -> analyze and improve -> Fight
-until **Stop**. Continuous mode cannot pause for a player assessment; it automatically adopts a
-valid next-round prompt from the agent and stops on any failed battle, agent run, or build.
+Check **Continuous improvement** before starting to repeat Fight -> candidate edit -> paired
+evaluation -> promote or restore -> Fight until **Stop**. A successful edit is only a candidate:
+the launcher keeps the pre-agent `WorkspaceSnapshot`, runs the candidate against a control on the
+same benchmark scenarios, ranks wins first and paired fitness second, and restores the snapshot
+unless the candidate wins that decision. Missing, failed, mismatched, or `Undefined` benchmark
+evidence cannot promote. With the current benchmark script the control must be a clean Git
+revision under this checkout's `bots` directory; otherwise the candidate is restored and the loop
+stops rather than guessing.
 
 Resolved rules and fight JSON use lazy, collapsible trees rather than raw text. At the end of an
 improvement the agent drafts an entirely new prompt template in **Next prompt***. In manual mode the
-player can edit and approve it; continuous mode accepts a valid template automatically. That
-template replaces the previous one next round, with fresh paths, fight, result, and evidence
-inserted through required placeholders. Because that replacement is destructive, every template
-the loop adopts is archived to `%LOCALAPPDATA%\AutoCnC\PromptHistory` as numbered plain-text files
-you can diff, so you can still see how the prompt evolved. Long-running launcher work also shows
-an indeterminate progress bar on its Windows taskbar icon.
+player can edit and approve it. Continuous mode stores the draft but freezes the template in force
+until a player reviews it; it never accepts an agent rewrite unattended. An approved manual
+template is rendered next round with fresh paths, fight, result, and evidence inserted through
+required placeholders. Every adopted template is archived to
+`%LOCALAPPDATA%\AutoCnC\PromptHistory` as numbered plain-text files you can diff. Long-running
+launcher work also shows an indeterminate progress bar on its Windows taskbar icon.
 
 Agent and independent-verification failures are separate states. A failed verification exposes
 **Retry verification**, which cleans generated output before rebuilding, plus **Fix failed

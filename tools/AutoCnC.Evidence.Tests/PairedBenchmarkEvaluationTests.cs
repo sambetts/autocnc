@@ -98,6 +98,32 @@ namespace AutoCnC.Evidence.Tests
 		}
 
 		[Test]
+		public void AnIdenticalCandidateIsRefused()
+		{
+			// The measured A/A sitting on hard-16-9 once the engine stopped seeding the opponent
+			// from the wall clock: the same assembly in both arms reproduces every scenario, so
+			// every paired delta is exactly zero. Under the old rule this tied on wins and then
+			// promoted on whichever side of a 0.00015 deadband the median happened to fall.
+			var result = Result(
+				("Lost", "Lost", 0.3446, 0.3446),
+				("Lost", "Lost", 0.4053, 0.4053),
+				("Lost", "Lost", 0.2727, 0.2727),
+				("Won", "Won", 0.9904, 0.9904),
+				("Lost", "Lost", 0.2980, 0.2980),
+				("Lost", "Lost", 0.4649, 0.4649),
+				("Lost", "Lost", 0.2956, 0.2956),
+				("Lost", "Lost", 0.2944, 0.2944));
+
+			var evaluation = PairedBenchmarkEvaluator.Evaluate(result);
+
+			Assert.That(evaluation.CandidateWins, Is.EqualTo(evaluation.ControlWins));
+			Assert.That(evaluation.MedianPairedFitnessDelta, Is.EqualTo(0));
+			Assert.That(evaluation.TiedFitnessPairs, Is.EqualTo(8));
+			Assert.That(evaluation.Verdict, Is.EqualTo(PromotionVerdicts.Restore),
+				"a candidate that changed nothing must never reach the champion");
+		}
+
+		[Test]
 		public void APairedFitnessMedianInsideTheDeadbandIsRefused()
 		{
 			var result = Result(

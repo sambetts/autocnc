@@ -95,13 +95,18 @@
     },
     {
       "name": "hard-holdout",
-      "summary": "Twelve pinned Hard matches on three maps the training set never uses. Never train on this.",
+      "summary": "Eight pinned Hard matches on two maps the Hard training set never uses. Never train on this.",
       "$comment": [
         "A promotion set is something a change can be fitted to: a deterministic benchmark is a",
         "fixed list of games, and a change that only suits those games will pass it. This set",
         "exists to be the thing that was not optimised against, so a promoted change can be asked",
         "whether it generalised. Keep its maps and seeds disjoint from every other set, and do not",
-        "promote on it - read it."
+        "promote on it - read it.",
+        "",
+        "Every match listed here has been run to completion on this harness. blue-mountains was",
+        "dropped after its Nod mirror failed the battle process twice on the same seed: a holdout",
+        "that cannot complete is worse than a smaller one, because a single failed match still",
+        "voids the whole sitting. Add maps by running them first, not by naming them."
       ],
       "difficulty": "Hard",
       "maxGameSeconds": 2400,
@@ -110,10 +115,6 @@
         { "map": "chokepoint.oramap", "faction": "nod", "botFaction": "gdi", "seed": 400002 },
         { "map": "chokepoint.oramap", "faction": "gdi", "botFaction": "gdi", "seed": 400003 },
         { "map": "chokepoint.oramap", "faction": "nod", "botFaction": "nod", "seed": 400004 },
-        { "map": "blue-mountains.oramap", "faction": "gdi", "botFaction": "nod", "seed": 400005 },
-        { "map": "blue-mountains.oramap", "faction": "nod", "botFaction": "gdi", "seed": 400006 },
-        { "map": "blue-mountains.oramap", "faction": "gdi", "botFaction": "gdi", "seed": 400007 },
-        { "map": "blue-mountains.oramap", "faction": "nod", "botFaction": "nod", "seed": 400008 },
         { "map": "carters-ridge.oramap", "faction": "gdi", "botFaction": "nod", "seed": 400009 },
         { "map": "carters-ridge.oramap", "faction": "nod", "botFaction": "gdi", "seed": 400010 },
         { "map": "carters-ridge.oramap", "faction": "gdi", "botFaction": "gdi", "seed": 400011 },

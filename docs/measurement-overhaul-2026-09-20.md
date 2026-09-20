@@ -167,10 +167,18 @@ zero.
 pointless while a seed did not name an opponent; now that it does, a wider set buys scenario
 coverage instead of repeat sampling of one noisy draw.
 
-`hard-holdout` — twelve matches over `chokepoint`, `blue-mountains` and `carters-ridge`, maps no
-training set uses. A deterministic benchmark is a fixed list of games and a change *can* be fitted
-to it. This set exists to be the thing that was not optimised against. Read it; do not promote on
-it.
+`hard-holdout` — eight matches over `chokepoint` and `carters-ridge`, maps no Hard training set
+uses. A deterministic benchmark is a fixed list of games and a change *can* be fitted to it. This
+set exists to be the thing that was not optimised against. Read it; do not promote on it.
+
+Every match in it has been run. A twelve-match version including `blue-mountains` was cut after
+that map's Nod mirror failed the battle process twice on the same seed — a holdout that cannot
+complete is worse than a smaller one, because one failed match still voids the sitting.
+
+The first reading is already informative: the champion wins **4 of 11** completed holdout matches
+at median fitness `0.5439`, against roughly 1 of 8 at median `0.41` on `16-9`. The training map is
+much harder for this bot than the maps it is not trained on, so `16-9` results should not be read
+as a general standard.
 
 ## What this does not fix
 
@@ -196,7 +204,9 @@ Honest limits, so the next round does not mistake them for solved problems.
 
 ## Validation
 
-- Evidence tests: 103 passed (3 added, 1 rewritten).
+- Evidence tests: 104 passed (4 added, 1 rewritten).
 - Core/SDK/Platform tests: 84 passed.
+- Launcher promotion/snapshot/experiment tests: 44 passed.
 - A/A benchmark on `hard-16-9`: 16 matches, 8 paired deltas, all exactly zero.
-- `scripts/benchmarks.json` parses; 5 sets resolve.
+- `hard-holdout` run end to end: 11 of 12 matches completed, which is how `blue-mountains` was cut.
+- `scripts/benchmarks.json` parses; 5 sets resolve. Mod YAML, Fluent, sequence and map lint passed.

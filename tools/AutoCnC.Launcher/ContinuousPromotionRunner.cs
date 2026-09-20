@@ -36,6 +36,7 @@ namespace AutoCnC.Launcher
 		public string Batch { get; init; }
 		public string Benchmark { get; init; }
 		public string Difficulty { get; init; }
+		public int MaxGameSeconds { get; init; }
 		public string CandidateProjectPath { get; init; }
 		public string ControlProjectPath { get; init; }
 		public string CandidateOutputDirectory { get; init; }
@@ -168,6 +169,7 @@ namespace AutoCnC.Launcher
 					Run = run,
 					Benchmark = benchmark,
 					Difficulty = difficulty,
+					MaxGameSeconds = selection.MaxGameSeconds,
 					CandidateFingerprint = candidateFingerprint,
 					ChampionFingerprint = championFingerprint,
 					Scenarios = selection.Scenarios,
@@ -212,6 +214,7 @@ namespace AutoCnC.Launcher
 				Batch = $"promotion-{experiment.Id}-{experiment.EvaluationAttempt:D2}",
 				Benchmark = benchmark,
 				Difficulty = difficulty,
+				MaxGameSeconds = selection.MaxGameSeconds,
 				CandidateProjectPath = candidateProject,
 				ControlProjectPath = controlProject,
 				CandidateOutputDirectory = run.CandidateArtifactDirectory,
@@ -330,7 +333,8 @@ namespace AutoCnC.Launcher
 						? run.CandidateBenchmarkResultPath
 						: run.ControlBenchmarkResultPath,
 					"-Benchmark", plan.Benchmark,
-					"-Difficulty", plan.Difficulty
+					"-Difficulty", plan.Difficulty,
+					"-MaxGameSeconds", plan.MaxGameSeconds.ToString()
 				]
 			};
 		}
@@ -537,6 +541,7 @@ namespace AutoCnC.Launcher
 		{
 			public string Benchmark { get; init; }
 			public string Difficulty { get; init; }
+			public int MaxGameSeconds { get; init; }
 			public IReadOnlyList<ContinuousBenchmarkScenario> Scenarios { get; init; } = [];
 		}
 
@@ -587,6 +592,16 @@ namespace AutoCnC.Launcher
 				matches.GetArrayLength() == 0)
 				throw new InvalidDataException(
 					$"Continuous benchmark '{benchmark}' defines no scenarios.");
+			var maxGameSeconds = 5400;
+			if (selectedSet.TryGetProperty("maxGameSeconds", out var maximum))
+			{
+				if (maximum.ValueKind != JsonValueKind.Number ||
+					!maximum.TryGetInt32(out maxGameSeconds) ||
+					maxGameSeconds < 0 ||
+					maxGameSeconds > 86400)
+					throw new InvalidDataException(
+						$"Continuous benchmark '{benchmark}' has an invalid match time limit.");
+			}
 
 			var scenarios = new List<ContinuousBenchmarkScenario>();
 			var index = 0;
@@ -622,6 +637,7 @@ namespace AutoCnC.Launcher
 			{
 				Benchmark = Text(selectedSet, "name"),
 				Difficulty = resolvedDifficulty,
+				MaxGameSeconds = maxGameSeconds,
 				Scenarios = scenarios
 			};
 		}
@@ -642,6 +658,11 @@ namespace AutoCnC.Launcher
 				throw new InvalidDataException(
 					$"The immutable {arm} result reported difficulty '{result.Difficulty}' " +
 					$"instead of '{plan.Difficulty}'.");
+			if (!result.MaxGameSeconds.HasValue ||
+				result.MaxGameSeconds.Value != plan.MaxGameSeconds)
+				throw new InvalidDataException(
+					$"The immutable {arm} result reported a {result.MaxGameSeconds}-second limit " +
+					$"instead of {plan.MaxGameSeconds}.");
 			if (result.ExpectedMatchesPerArm != plan.Scenarios.Count)
 				throw new InvalidDataException(
 					$"The immutable {arm} result declared {result.ExpectedMatchesPerArm} match(es), " +

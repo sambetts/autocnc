@@ -8,6 +8,7 @@
  */
 #endregion
 
+using System.IO;
 using System.Linq;
 using System.Text.Json;
 using NUnit.Framework;
@@ -209,6 +210,30 @@ namespace AutoCnC.Evidence.Tests
 			Assert.That(evaluation.Verdict, Is.EqualTo(PromotionVerdicts.Promote));
 		}
 
+		[Test]
+		public void DifferentMatchTimeLimitsCannotCompose()
+		{
+			var candidate = SingleArm("candidate-raw", "Won", 0.7);
+			var control = SingleArm("control-raw", "Lost", 0.5);
+			control.MaxGameSeconds = candidate.MaxGameSeconds / 2;
+
+			Assert.That(() => PairedBenchmarkResultComposer.Combine(
+				candidate, control, "promotion-20260920-060000"),
+				Throws.TypeOf<InvalidDataException>().With.Message.Contains("time limit"));
+		}
+
+		[Test]
+		public void MissingMatchTimeLimitCannotCompose()
+		{
+			var candidate = SingleArm("candidate-raw", "Won", 0.7);
+			var control = SingleArm("control-raw", "Lost", 0.5);
+			candidate.MaxGameSeconds = null;
+
+			Assert.That(() => PairedBenchmarkResultComposer.Combine(
+				candidate, control, "promotion-20260920-060100"),
+				Throws.TypeOf<InvalidDataException>().With.Message.Contains("time limit"));
+		}
+
 		static BenchmarkResultDocument Result(
 			params (string CandidateOutcome, string ControlOutcome,
 				double CandidateFitness, double ControlFitness)[] scenarios)
@@ -219,6 +244,7 @@ namespace AutoCnC.Evidence.Tests
 				Benchmark = "hard-16-9",
 				Batch = "hard-16-9-20260919-110459-test",
 				Difficulty = "Hard",
+				MaxGameSeconds = 2400,
 				ExpectedMatchesPerArm = scenarios.Length,
 				Candidate = new BenchmarkArmResult { Arm = "candidate" },
 				Control = new BenchmarkArmResult { Arm = "control" }
@@ -306,6 +332,7 @@ namespace AutoCnC.Evidence.Tests
 				Benchmark = "hard-16-9",
 				Batch = batch,
 				Difficulty = "Hard",
+				MaxGameSeconds = 2400,
 				ExpectedMatchesPerArm = 1,
 				Candidate = new BenchmarkArmResult
 				{

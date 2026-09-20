@@ -193,6 +193,22 @@ namespace AutoCnC.Launcher.Tests
 				"hard-16-9", "Impossible"), Throws.InvalidOperationException);
 		}
 
+		[TestCase("-1")]
+		[TestCase("86401")]
+		[TestCase("2147483648")]
+		public void InvalidContinuousBenchmarkTimeLimitIsRejected(string maximum)
+		{
+			File.WriteAllText(Path.Combine(checkout, "scripts", "benchmarks.json"),
+				"{\"default\":\"hard-16-9\",\"sets\":[" +
+				"{\"name\":\"hard-16-9\",\"difficulty\":\"Hard\"," +
+				$"\"maxGameSeconds\":{maximum},\"matches\":[" +
+				"{\"map\":\"map\",\"faction\":\"gdi\",\"botFaction\":\"nod\",\"seed\":123}]}]}");
+			var run = Candidate();
+
+			Assert.That(() => promotion.PrepareEvaluation(repo, run),
+				Throws.TypeOf<InvalidDataException>().With.Message.Contains("time limit"));
+		}
+
 		[Test]
 		public void BuiltArmsUseDistinctPathsAndMustHaveDifferentHashes()
 		{
@@ -232,6 +248,7 @@ namespace AutoCnC.Launcher.Tests
 					Does.Contain(plan.ControlAssemblyPath).And.Not.Contain("-Control"));
 				Assert.That(plan.Benchmark, Is.EqualTo("hard-16-9"));
 				Assert.That(plan.Difficulty, Is.EqualTo("Hard"));
+				Assert.That(plan.MaxGameSeconds, Is.EqualTo(5400));
 				Assert.That(run.Manifest.Experiment.RequestedBenchmark,
 					Is.EqualTo("hard-16-9"));
 				Assert.That(run.Manifest.Experiment.RequestedDifficulty,
@@ -240,6 +257,8 @@ namespace AutoCnC.Launcher.Tests
 					Does.Contain("-Benchmark").And.Contain("hard-16-9"));
 				Assert.That(candidateBenchmark.Arguments,
 					Does.Contain("-Difficulty").And.Contain("Hard"));
+				Assert.That(candidateBenchmark.Arguments,
+					Does.Contain("-MaxGameSeconds").And.Contain("5400"));
 				Assert.That(plan.CandidateAssemblySha256,
 					Is.Not.EqualTo(plan.ControlAssemblySha256));
 				Assert.That(File.ReadAllText(plan.CandidateAssemblyPath),
@@ -353,6 +372,26 @@ namespace AutoCnC.Launcher.Tests
 				Is.EqualTo(PromotionVerdicts.Undefined));
 			Assert.That(completion.Evaluation.CanPromote, Is.False);
 			Assert.That(completion.Evaluation.Reason, Does.Contain("instead of"));
+		}
+
+		[Test]
+		public void ReturnedMatchTimeLimitMustMatchTheConfiguredBenchmark()
+		{
+			var run = Candidate();
+			var plan = PreparedArms(run);
+			run = plan.Run;
+			var candidate = SingleArm(
+				"candidate-batch-20260920-060000", "Won", 0.7);
+			candidate.MaxGameSeconds = plan.MaxGameSeconds / 2;
+			PairedBenchmarkEvaluator.WriteResult(run.CandidateBenchmarkResultPath, candidate);
+			PairedBenchmarkEvaluator.WriteResult(run.ControlBenchmarkResultPath,
+				SingleArm("control-batch-20260920-060000", "Lost", 0.5));
+
+			var completion = promotion.CompleteEvaluation(run, plan, exitCode: 0);
+
+			Assert.That(completion.Evaluation.Verdict,
+				Is.EqualTo(PromotionVerdicts.Undefined));
+			Assert.That(completion.Evaluation.Reason, Does.Contain("second limit"));
 		}
 
 		[Test]
@@ -644,6 +683,7 @@ namespace AutoCnC.Launcher.Tests
 				Benchmark = benchmark,
 				Batch = batch,
 				Difficulty = difficulty,
+				MaxGameSeconds = 5400,
 				ExpectedMatchesPerArm = 1,
 				Candidate = new BenchmarkArmResult
 				{

@@ -585,14 +585,25 @@ try {
     } else {
         $null
     }
+    $candidateResults = @($results | Where-Object { $_.Arm -eq 'candidate' })
+    $controlResults = @($results | Where-Object { $_.Arm -eq 'control' })
+    $pairs = @(Compare-PairedResults $candidateResults $controlResults)
 
     if ($controlSummary -and $candidateSummary) {
         $verdict = if ($candidateSummary.Undefined -gt 0 -or $controlSummary.Undefined -gt 0) { 'undefined because one or more matches failed' }
         elseif ($candidateSummary.Wins -gt $controlSummary.Wins) { 'candidate ahead on wins' }
         elseif ($candidateSummary.Wins -lt $controlSummary.Wins) { 'control ahead on wins' }
-        elseif ($candidateSummary.MedianFitness -gt $controlSummary.MedianFitness) { 'level on wins, candidate ahead on fitness' }
-        elseif ($candidateSummary.MedianFitness -lt $controlSummary.MedianFitness) { 'level on wins, control ahead on fitness' }
-        else { 'indistinguishable' }
+        else {
+            $completedPairs = @($pairs | Where-Object { $_.Status -eq 'Completed' })
+            if ($completedPairs.Count -ne $matchCount) {
+                'undefined because the paired rows are incomplete'
+            } else {
+                $medianDelta = Get-Median ($completedPairs | ForEach-Object { $_.FitnessDelta })
+                if ($medianDelta -gt 0.00015) { 'level on wins, candidate ahead on paired fitness' }
+                elseif ($medianDelta -lt -0.00015) { 'level on wins, control ahead on paired fitness' }
+                else { 'level on wins and paired fitness; control retained' }
+            }
+        }
 
         Write-Host ''
         Write-Host "  Verdict: $verdict." -ForegroundColor Cyan
@@ -606,10 +617,6 @@ try {
     }
 
     dotnet $evidenceDll trend $historyPath --out (Join-Path $OutputDirectory 'trend.json')
-
-    $candidateResults = @($results | Where-Object { $_.Arm -eq 'candidate' })
-    $controlResults = @($results | Where-Object { $_.Arm -eq 'control' })
-    $pairs = @(Compare-PairedResults $candidateResults $controlResults)
 
     $machineResult = [ordered]@{
         SchemaVersion = 1

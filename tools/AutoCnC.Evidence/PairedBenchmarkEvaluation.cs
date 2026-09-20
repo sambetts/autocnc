@@ -95,6 +95,7 @@ namespace AutoCnC.Evidence
 		public string Benchmark { get; set; }
 		public string Batch { get; set; }
 		public string Difficulty { get; set; }
+		public int? MaxGameSeconds { get; set; }
 		public int ExpectedMatchesPerArm { get; set; }
 		public BenchmarkArmResult Candidate { get; set; }
 		public BenchmarkArmResult Control { get; set; }
@@ -129,6 +130,11 @@ namespace AutoCnC.Evidence
 				StringComparison.OrdinalIgnoreCase))
 				throw new InvalidDataException(
 					"Candidate and control were run at different difficulties.");
+			if (!candidate.MaxGameSeconds.HasValue ||
+				!control.MaxGameSeconds.HasValue ||
+				candidate.MaxGameSeconds != control.MaxGameSeconds)
+				throw new InvalidDataException(
+					"Candidate and control must declare the same match time limit.");
 			if (candidate.ExpectedMatchesPerArm <= 0 ||
 				candidate.ExpectedMatchesPerArm != control.ExpectedMatchesPerArm)
 				throw new InvalidDataException(
@@ -143,6 +149,7 @@ namespace AutoCnC.Evidence
 				Benchmark = candidate.Benchmark,
 				Batch = batch,
 				Difficulty = candidate.Difficulty,
+				MaxGameSeconds = candidate.MaxGameSeconds,
 				ExpectedMatchesPerArm = candidate.ExpectedMatchesPerArm,
 				Candidate = Clone(candidate.Candidate, "candidate"),
 				Control = Clone(control.Candidate ?? control.Control, "control"),
@@ -352,6 +359,9 @@ namespace AutoCnC.Evidence
 					document.Benchmark, document.Batch);
 			if (document.ExpectedMatchesPerArm <= 0)
 				return Undefined("The paired benchmark result has no expected match count.",
+					document.Benchmark, document.Batch);
+			if (!document.MaxGameSeconds.HasValue)
+				return Undefined("The paired benchmark result has no match time limit.",
 					document.Benchmark, document.Batch);
 
 			var matches = document.Matches ?? [];

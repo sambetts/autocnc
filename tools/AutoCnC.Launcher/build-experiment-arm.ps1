@@ -49,7 +49,8 @@ New-Item -ItemType Directory -Path $outputPath -Force | Out-Null
 dotnet build $projectPath -c $Configuration -v quiet --nologo `
     /p:AutoCnCPath="$repositoryPath" `
     /p:BattleBotInstallDirectory="$outputPath" `
-    /p:RestoreSources="$packages"
+    /p:RestoreAdditionalProjectSources="$packages" `
+    /p:RestoreIgnoreFailedSources=true
 if ($LASTEXITCODE -ne 0) { throw 'Immutable battle bot build failed.' }
 
 $target = (dotnet msbuild $projectPath -getProperty:TargetPath -nologo `

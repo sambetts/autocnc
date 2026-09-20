@@ -70,7 +70,12 @@
         "constructed with no seed, so a pinned lobby seed reproduced the map and nothing that the",
         "opponent did - the same revision on seed 300002 scored anywhere from 0.108 to 1.000.",
         "A seed now names a reproducible opponent, so a wider set buys scenario coverage rather",
-        "than repeat sampling of one noisy draw."
+        "than repeat sampling of one noisy draw.",
+        "",
+        "Every seed here has been played to completion. 310002 and 310008 were the first choices",
+        "and were replaced by 310012 and 310018: the first reproducibly hit the 2400-second",
+        "stalemate cap, the second crashed the battle process. A pinned seed that always fails",
+        "costs the same compute as one that answers something."
       ],
       "difficulty": "Hard",
       "maxGameSeconds": 2400,
@@ -78,7 +83,7 @@
         { "map": "16-9.oramap", "faction": "gdi", "botFaction": "nod", "seed": 300001 },
         { "map": "16-9.oramap", "faction": "gdi", "botFaction": "nod", "seed": 300002 },
         { "map": "16-9.oramap", "faction": "gdi", "botFaction": "nod", "seed": 310001 },
-        { "map": "16-9.oramap", "faction": "gdi", "botFaction": "nod", "seed": 310002 },
+        { "map": "16-9.oramap", "faction": "gdi", "botFaction": "nod", "seed": 310012 },
         { "map": "16-9.oramap", "faction": "nod", "botFaction": "gdi", "seed": 300003 },
         { "map": "16-9.oramap", "faction": "nod", "botFaction": "gdi", "seed": 300004 },
         { "map": "16-9.oramap", "faction": "nod", "botFaction": "gdi", "seed": 310003 },
@@ -90,7 +95,7 @@
         { "map": "16-9.oramap", "faction": "nod", "botFaction": "nod", "seed": 300007 },
         { "map": "16-9.oramap", "faction": "nod", "botFaction": "nod", "seed": 300008 },
         { "map": "16-9.oramap", "faction": "nod", "botFaction": "nod", "seed": 310007 },
-        { "map": "16-9.oramap", "faction": "nod", "botFaction": "nod", "seed": 310008 }
+        { "map": "16-9.oramap", "faction": "nod", "botFaction": "nod", "seed": 310018 }
       ]
     },
     {

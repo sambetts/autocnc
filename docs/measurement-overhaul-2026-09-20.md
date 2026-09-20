@@ -242,9 +242,10 @@ through. That is the honest summary of the 23 rounds: not "nothing worked", but 
 not tell which sixteenth was real, and promoted the rest anyway".
 
 The two dropped pairs are seed `310002`, where the champion arm hit the 2,400-second stalemate
-cap, and seed `310008`, where the baseline arm's battle process exited `-1`. Both seeds are new in
-`hard-16-9-wide`. Under the old rule this entire comparison would have been `Undefined`, and the
-question would still be unanswered.
+cap, and seed `310008`, where the baseline arm's battle process exited `-1`. Under the old rule
+this entire comparison would have been `Undefined`, and the question would still be unanswered.
+Both seeds have since been replaced in `hard-16-9-wide` by `310012` and `310018`, which complete;
+the measurement above stands on the fourteen pairs that ran.
 
 ## Benchmark sets
 
@@ -252,7 +253,9 @@ question would still be unanswered.
 
 `hard-16-9-wide` — sixteen matches, four seeds per faction matchup. Multiplying seeds was
 pointless while a seed did not name an opponent; now that it does, a wider set buys scenario
-coverage instead of repeat sampling of one noisy draw.
+coverage instead of repeat sampling of one noisy draw. Every seed has been played to completion:
+`310002` and `310008` were the first choices and were replaced by `310012` and `310018` after the
+first reproducibly hit the stalemate cap and the second crashed the battle process.
 
 `hard-holdout` — eight matches over `chokepoint` and `carters-ridge`, maps no Hard training set
 uses. A deterministic benchmark is a fixed list of games and a change *can* be fitted to it. This

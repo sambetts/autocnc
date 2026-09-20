@@ -159,6 +159,50 @@ Combined with the seeding fix, a candidate identical to the champion now produce
 ties on wins, fails the margin, and is restored. The false-promotion rate is no longer 50%; it is
 zero.
 
+## Defect 3: one failed match voided the sitting
+
+`benchmark-bot.ps1` ended with `if (any match failed) { exit 1 }`, and the launcher treats a
+non-zero exit as fatal — so the round was discarded before the evaluator ever ran. The evaluator
+agreed independently, requiring every arm to have played the full plan. Five of the 23 rounds
+ended `Undefined`, and a crashed sixteenth match threw away the fifteen that worked.
+
+### The fix
+
+An incomplete scenario is now dropped from **both arms together**, so what remains is still a
+paired comparison of the same games:
+
+- incompleteness (a failed run, an `Undefined` outcome, missing metrics) drops the pair and
+  increments a reported `droppedPairs`;
+- inconsistency (a pair naming another benchmark, batch or configuration, or a delta that
+  disagrees with its own arms) is still `Undefined`, because that is corrupt evidence rather than
+  absent evidence;
+- wins are recounted over the surviving pairs, so a win whose opposite arm never ran cannot
+  decide a comparison that never happened;
+- at least three quarters of the set must survive, or the verdict is `Undefined` anyway.
+
+### Verification
+
+A four-match probe was built from three `chokepoint` matches and the `blue-mountains` Nod mirror
+that fails reproducibly, and run with a control arm:
+
+```
+2 match(es) failed; 3 of 4 pair(s) survived, 3 required.
+SCRIPT EXIT CODE: 0
+```
+
+Feeding that real artifact to the evaluator:
+
+```
+Verdict : Restore
+Reason  : Wins were tied at 1; median paired fitness delta was 0 against a required +0.0025,
+          and the candidate was ahead in 0 pairs to 0.
+Pairs   : compared=3  dropped=1  expected=4
+Wins    : candidate=1  control=1
+```
+
+Before this change that sitting was `Undefined` and the whole round was thrown away. The median of
+`0` across the surviving pairs is the seeding fix showing up again on a second map set.
+
 ## Benchmark sets
 
 `hard-16-9` is unchanged, so existing results stay comparable. Two sets are added.
@@ -196,17 +240,19 @@ Honest limits, so the next round does not mistake them for solved problems.
 - **The agent is briefed on one training fight.** It reads a single `Faction=Random` match and is
   judged on eight pinned matchups. Pointing it at the champion's own benchmark evidence — the
   matchups it never wins — is the obvious next change.
-- **A single failed match still voids the sitting.** `benchmark-bot.ps1` exits 1 if any match
-  fails, and the evaluator maps that to `Undefined`, discarding the other fifteen. Retrying to
-  completion is the real fix; 5 of 23 rounds ended `Undefined`.
 - **Fitness excludes the win bit by design**, and empirically a win scores ~0.98 against a loss's
   ~0.34. The median of eight pairs therefore mostly compares loss against loss.
+- **`blue-mountains` still fails.** Its Nod mirror crashes the battle process reproducibly on a
+  pinned seed. Dropping the pair stops that voiding a sitting, but the underlying crash is
+  unexplained and the map is excluded rather than fixed.
 
 ## Validation
 
-- Evidence tests: 104 passed (4 added, 1 rewritten).
+- Evidence tests: 107 passed (7 added, 1 rewritten).
 - Core/SDK/Platform tests: 84 passed.
 - Launcher promotion/snapshot/experiment tests: 44 passed.
 - A/A benchmark on `hard-16-9`: 16 matches, 8 paired deltas, all exactly zero.
 - `hard-holdout` run end to end: 11 of 12 matches completed, which is how `blue-mountains` was cut.
+- Four-match failure probe with a control arm: script exited 0, evaluator returned `Restore` on
+  3 surviving pairs with 1 dropped.
 - `scripts/benchmarks.json` parses; 5 sets resolve. Mod YAML, Fluent, sequence and map lint passed.

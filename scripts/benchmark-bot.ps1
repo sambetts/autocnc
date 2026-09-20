@@ -594,19 +594,19 @@ try {
     $pairs = @(Compare-PairedResults $candidateResults $controlResults)
 
     if ($controlSummary -and $candidateSummary) {
-        $verdict = if ($candidateSummary.Undefined -gt 0 -or $controlSummary.Undefined -gt 0) { 'undefined because one or more matches failed' }
+        $completedPairs = @($pairs | Where-Object { $_.Status -eq 'Completed' })
+        $requiredPairs = [math]::Max(1, [math]::Ceiling($matchCount * 0.75))
+
+        $verdict = if ($completedPairs.Count -lt $requiredPairs) {
+            "undefined because only $($completedPairs.Count) of $matchCount pairs completed"
+        }
         elseif ($candidateSummary.Wins -gt $controlSummary.Wins) { 'candidate ahead on wins' }
         elseif ($candidateSummary.Wins -lt $controlSummary.Wins) { 'control ahead on wins' }
         else {
-            $completedPairs = @($pairs | Where-Object { $_.Status -eq 'Completed' })
-            if ($completedPairs.Count -ne $matchCount) {
-                'undefined because the paired rows are incomplete'
-            } else {
-                $medianDelta = Get-Median ($completedPairs | ForEach-Object { $_.FitnessDelta })
-                if ($medianDelta -gt 0.00015) { 'level on wins, candidate ahead on paired fitness' }
-                elseif ($medianDelta -lt -0.00015) { 'level on wins, control ahead on paired fitness' }
-                else { 'level on wins and paired fitness; control retained' }
-            }
+            $medianDelta = Get-Median ($completedPairs | ForEach-Object { $_.FitnessDelta })
+            if ($medianDelta -gt 0.0025) { 'level on wins, candidate ahead on paired fitness' }
+            elseif ($medianDelta -lt -0.0025) { 'level on wins, control ahead on paired fitness' }
+            else { 'level on wins and paired fitness; control retained' }
         }
 
         Write-Host ''
@@ -647,8 +647,31 @@ try {
     Write-Host "  Machine-readable result: $ResultPath" -ForegroundColor DarkGray
     $results | Format-Table Arm, Repeat, Scenario, Map, Faction, BotFaction, Seed, Outcome, Fitness, SpentPerSecond, Exchange, BuildingsKilled -AutoSize
 
-    if (@($results | Where-Object { -not $_.Succeeded }).Count -gt 0) {
-        exit 1
+    <#
+        A failed match costs its own pair, not the sitting.
+
+        Exiting non-zero here is fatal upstream: the launcher reports "the benchmark exited with
+        code 1" and the whole round is discarded, which is how a single crashed match used to
+        throw away the fifteen that worked. The evaluator now drops an incomplete pair from both
+        arms and decides on what survives, so the script only fails when too little survived for
+        that to mean anything.
+    #>
+    $failed = @($results | Where-Object { -not $_.Succeeded })
+    if ($failed.Count -gt 0) {
+        $completePairs = if ($Control) {
+            @($pairs | Where-Object { $_.Status -eq 'Completed' }).Count
+        } else {
+            @($results | Where-Object { $_.Succeeded }).Count
+        }
+        $required = [math]::Max(1, [math]::Ceiling($matchCount * 0.75))
+
+        Write-Host ("  {0} match(es) failed; {1} of {2} pair(s) survived, {3} required." -f `
+                $failed.Count, $completePairs, $matchCount, $required) -ForegroundColor Yellow
+
+        if ($completePairs -lt $required) {
+            Write-Host '  Too little of the set completed to decide anything.' -ForegroundColor Yellow
+            exit 1
+        }
     }
 }
 finally {

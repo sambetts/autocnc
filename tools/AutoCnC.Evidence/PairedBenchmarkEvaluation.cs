@@ -288,6 +288,17 @@ namespace AutoCnC.Evidence
 		public string Reason { get; set; }
 		public int PairsCompared { get; set; }
 		public int ExpectedMatchesPerArm { get; set; }
+
+		/// <summary>
+		/// Scenarios excluded because a run in one or both arms did not complete.
+		/// </summary>
+		/// <remarks>
+		/// A dropped scenario is removed from both arms together, so what remains is still a
+		/// paired comparison of the same games. It is reported rather than silently absorbed,
+		/// because a sitting resting on fewer scenarios is weaker evidence than a whole one.
+		/// </remarks>
+		public int DroppedPairs { get; set; }
+
 		public int CandidateWins { get; set; }
 		public int ControlWins { get; set; }
 		public int CandidateFitnessPairs { get; set; }
@@ -397,9 +408,9 @@ namespace AutoCnC.Evidence
 				return Undefined("Candidate and control did not run the same repeat/scenario set.",
 					document.Benchmark, document.Batch);
 
-			if (document.Candidate.Played != document.ExpectedMatchesPerArm ||
-				document.Control.Played != document.ExpectedMatchesPerArm)
-				return Undefined("Arm summaries do not describe the complete paired match set.",
+			if (document.Candidate.Played > document.ExpectedMatchesPerArm ||
+				document.Control.Played > document.ExpectedMatchesPerArm)
+				return Undefined("An arm summary claims more matches than the plan contains.",
 					document.Benchmark, document.Batch);
 
 			var candidateWins = candidate.Count(Won);
@@ -421,10 +432,7 @@ namespace AutoCnC.Evidence
 				GeneratedUtc = DateTime.UtcNow,
 				Benchmark = document.Benchmark,
 				Batch = document.Batch,
-				ExpectedMatchesPerArm = document.ExpectedMatchesPerArm,
-				PairsCompared = candidate.Count,
-				CandidateWins = candidateWins,
-				ControlWins = controlWins
+				ExpectedMatchesPerArm = document.ExpectedMatchesPerArm
 			};
 
 			foreach (var key in candidateByScenario.Keys.OrderBy(k => k.Repeat).ThenBy(k => k.Scenario))
@@ -433,6 +441,20 @@ namespace AutoCnC.Evidence
 				var controlMatch = controlByScenario[key];
 				var pair = pairedByScenario[key];
 
+				// A match that never finished is missing evidence, not evidence of anything. It
+				// is dropped from both arms together so the rest of the sitting survives: voiding
+				// fifteen good matches because a sixteenth crashed is how a fifth of this loop's
+				// compute was spent producing nothing.
+				if (Incomplete(candidateMatch) || Incomplete(controlMatch) || Incomplete(pair))
+				{
+					evaluation.DroppedPairs++;
+					continue;
+				}
+
+				// Inconsistency is different from incompleteness. A pair that names another
+				// benchmark, another batch, another configuration, or a delta that does not match
+				// its own arms is corrupt rather than absent, and nothing may be concluded from a
+				// sitting that contains one.
 				var invalid = ValidateScenario(document, candidateMatch, controlMatch, pair);
 				if (invalid != null)
 					return Undefined(invalid, document.Benchmark, document.Batch);
@@ -460,6 +482,20 @@ namespace AutoCnC.Evidence
 					FitnessDelta = Math.Round(delta, 4)
 				});
 			}
+
+			evaluation.PairsCompared = evaluation.Scenarios.Count;
+
+			var required = MinimumEvaluablePairs(document.ExpectedMatchesPerArm);
+			if (evaluation.PairsCompared < required)
+				return Undefined(
+					$"Only {evaluation.PairsCompared} of {document.ExpectedMatchesPerArm} paired " +
+					$"scenarios completed in both arms; {required} are required to decide.",
+					document.Benchmark, document.Batch);
+
+			// Counted over the surviving pairs rather than the whole plan, so a win in a scenario
+			// whose opposite arm failed cannot decide a comparison that never happened.
+			evaluation.CandidateWins = evaluation.Scenarios.Count(s => WonOutcome(s.CandidateOutcome));
+			evaluation.ControlWins = evaluation.Scenarios.Count(s => WonOutcome(s.ControlOutcome));
 
 			evaluation.MedianPairedFitnessDelta = Math.Round(
 				Median(evaluation.Scenarios.Select(s => s.FitnessDelta).ToArray()), 4);
@@ -551,16 +587,27 @@ namespace AutoCnC.Evidence
 				new UTF8Encoding(false));
 		}
 
+		/// <summary>
+		/// The share of a benchmark set that must survive for a verdict to be worth having.
+		/// </summary>
+		/// <remarks>
+		/// Dropping a pair keeps the comparison honest but makes it smaller, and a sitting that
+		/// lost most of its scenarios is not the benchmark anyone agreed to measure against. Three
+		/// quarters leaves room for the occasional crashed match without letting a verdict rest on
+		/// a remnant.
+		/// </remarks>
+		static int MinimumEvaluablePairs(int expectedMatchesPerArm) =>
+			Math.Max(1, (int)Math.Ceiling(expectedMatchesPerArm * 0.75));
+
+		/// <summary>A run that did not finish, or finished without the numbers to score it.</summary>
+		static bool Incomplete(BenchmarkMatchResult match) =>
+			!Complete(match) || !ValidOutcome(match.Outcome) || !CompleteMetrics(match);
+
+		static bool Incomplete(BenchmarkPairResult pair) => !CompleteMetrics(pair);
+
 		static string ValidateScenario(BenchmarkResultDocument document,
 			BenchmarkMatchResult candidate, BenchmarkMatchResult control, BenchmarkPairResult pair)
 		{
-			if (!Complete(candidate) || !Complete(control))
-				return $"Repeat {candidate.Repeat}, scenario {candidate.Scenario} contains a failed or incomplete run.";
-			if (!ValidOutcome(candidate.Outcome) || !ValidOutcome(control.Outcome))
-				return $"Repeat {candidate.Repeat}, scenario {candidate.Scenario} has an Undefined outcome.";
-			if (!CompleteMetrics(candidate) || !CompleteMetrics(control) ||
-				!CompleteMetrics(pair))
-				return $"Repeat {candidate.Repeat}, scenario {candidate.Scenario} has missing or non-finite metrics.";
 			if (!SameConfiguration(candidate, control) || !SameConfiguration(candidate, pair))
 				return $"Repeat {candidate.Repeat}, scenario {candidate.Scenario} was not paired on the same configuration.";
 			if (!SameOptional(document.Benchmark, candidate.Benchmark) ||
@@ -656,6 +703,9 @@ namespace AutoCnC.Evidence
 
 		static bool Won(BenchmarkMatchResult match) =>
 			string.Equals(match.Outcome, "Won", StringComparison.OrdinalIgnoreCase);
+
+		static bool WonOutcome(string outcome) =>
+			string.Equals(outcome, "Won", StringComparison.OrdinalIgnoreCase);
 
 		static bool Arm(BenchmarkMatchResult match, string arm) =>
 			string.Equals(match?.Arm, arm, StringComparison.OrdinalIgnoreCase);

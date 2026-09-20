@@ -157,6 +157,99 @@ namespace AutoCnC.Evidence.Tests
 		}
 
 		[Test]
+		public void AFailedMatchDropsItsPairInsteadOfVoidingTheSitting()
+		{
+			var scenarios = Enumerable.Range(0, 8)
+				.Select(index => (
+					CandidateOutcome: "Lost",
+					ControlOutcome: "Lost",
+					CandidateFitness: 0.50 + index / 1000d,
+					ControlFitness: 0.40 + index / 1000d))
+				.ToArray();
+			var result = Result(scenarios);
+			FailScenario(result, scenario: 3, arm: "candidate");
+
+			var evaluation = PairedBenchmarkEvaluator.Evaluate(result);
+
+			Assert.That(evaluation.DroppedPairs, Is.EqualTo(1));
+			Assert.That(evaluation.PairsCompared, Is.EqualTo(7));
+			Assert.That(evaluation.Verdict, Is.EqualTo(PromotionVerdicts.Promote));
+			Assert.That(evaluation.Scenarios.Any(s => s.Scenario == 3), Is.False,
+				"the dropped scenario must not appear on either side of the comparison");
+		}
+
+		[Test]
+		public void TooFewSurvivingPairsAreUndefined()
+		{
+			var scenarios = Enumerable.Range(0, 8)
+				.Select(index => (
+					CandidateOutcome: "Lost",
+					ControlOutcome: "Lost",
+					CandidateFitness: 0.50 + index / 1000d,
+					ControlFitness: 0.40 + index / 1000d))
+				.ToArray();
+			var result = Result(scenarios);
+			foreach (var scenario in new[] { 2, 4, 6 })
+				FailScenario(result, scenario, arm: "control");
+
+			var evaluation = PairedBenchmarkEvaluator.Evaluate(result);
+
+			Assert.That(evaluation.Verdict, Is.EqualTo(PromotionVerdicts.Undefined));
+			Assert.That(evaluation.Reason, Does.Contain("5 of 8"));
+		}
+
+		[Test]
+		public void AWinOppositeAFailedRunDoesNotCount()
+		{
+			var scenarios = Enumerable.Range(0, 8)
+				.Select(index => (
+					CandidateOutcome: index == 0 ? "Won" : "Lost",
+					ControlOutcome: "Lost",
+					CandidateFitness: index == 0 ? 0.99 : 0.30,
+					ControlFitness: 0.40))
+				.ToArray();
+			var result = Result(scenarios);
+			FailScenario(result, scenario: 1, arm: "control");
+
+			var evaluation = PairedBenchmarkEvaluator.Evaluate(result);
+
+			Assert.That(evaluation.DroppedPairs, Is.EqualTo(1));
+			Assert.That(evaluation.CandidateWins, Is.EqualTo(0),
+				"the candidate's only win was in the scenario whose control arm never ran");
+			Assert.That(evaluation.Verdict, Is.EqualTo(PromotionVerdicts.Restore));
+		}
+
+		static void FailScenario(BenchmarkResultDocument result, int scenario, string arm)
+		{
+			var match = result.Matches.Single(m => m.Arm == arm && m.Scenario == scenario);
+			match.Succeeded = false;
+			match.Status = "failed";
+			match.Error = "process exited";
+			match.Outcome = "Undefined";
+			match.Fitness = null;
+			match.EarnedPerSecond = null;
+			match.SpentPerSecond = null;
+			match.Exchange = null;
+			match.BuildingsKilled = null;
+			match.DurationSeconds = null;
+
+			var pair = result.Paired.Single(p => p.Scenario == scenario);
+			if (arm == "candidate")
+				pair.CandidateOutcome = "Undefined";
+			else
+				pair.ControlOutcome = "Undefined";
+			pair.FitnessDelta = null;
+			pair.EarnedPerSecondDelta = null;
+			pair.SpentPerSecondDelta = null;
+			pair.ExchangeDelta = null;
+			pair.BuildingsKilledDelta = null;
+
+			var summary = arm == "candidate" ? result.Candidate : result.Control;
+			summary.Played = result.Matches.Count(m => m.Arm == arm && m.Succeeded);
+			summary.Wins = result.Matches.Count(m => m.Arm == arm && m.Outcome == "Won");
+		}
+
+		[Test]
 		public void DifferentScenarioSetsAreUndefined()
 		{
 			var result = Result(("Won", "Lost", 0.7, 0.5));

@@ -31,15 +31,17 @@ namespace AutoCnC.Reference.Logic
 			// cells is one whose harvesters cannot.
 			ClaimRadiusCells: 12,
 
-			// How far the near edge walks inward between rungs. Matches
-			// BasePlacementLogic.LadderStepCells for the same reason it was chosen there: a
-			// ladder that descends in wide steps has two rungs, the ambition and the fallback,
-			// and falls past the frontier every time.
+			// How wide each band is, and how far the near edge walks outward between them. Thin
+			// bands rather than nested ones, because the caller verifies every cell a band
+			// offers: nested bands share a far edge, so each one is a superset of the last and
+			// several probes can return the same rejected cell. Two cells is the smallest step
+			// that still terminates quickly over the whole claim radius.
 			StepCells: 2,
 
-			// Ceiling on rungs, so the loop is bounded whatever the numbers do. ClaimRadius /
-			// Step + 1 = 7 is what the tuning above actually produces.
-			MaxRungs: 8);
+			// Ceiling on rungs, so the loop is bounded whatever the numbers do. The band walks
+			// from ClaimRadius short of the field to ClaimRadius past it in steps of StepCells,
+			// so 2 * ClaimRadius / StepCells = 12 is what the tuning above actually produces.
+			MaxRungs: 16);
 	}
 
 	/// <summary>
@@ -84,19 +86,26 @@ namespace AutoCnC.Reference.Logic
 	/// <para>
 	/// <b>What this can and cannot do.</b> <c>FindBuildLocation</c> takes a minimum and a maximum
 	/// range from the base centre and nothing else — there is no direction, no origin and no way
-	/// to say "over there". A ring is therefore all the precision the SDK offers, and a ring
-	/// through a field also passes through ground nowhere near it. What the ring does guarantee
-	/// is the thing the counter got wrong: the refinery is looked for at the distance the
-	/// tiberium actually is, rather than at six-cells-per-refinery-so-far. In practice the
-	/// buildable area is a contiguous blob grown from the structures already standing, so the
-	/// legal cells in a far annulus are the ones on the side the base has already reached.
+	/// to say "over there". A band is therefore all the precision the SDK offers on the way in,
+	/// and a band through a field also passes through ground nowhere near it. The direction is
+	/// recovered on the way <em>out</em> instead: the caller measures the cell the band actually
+	/// returned against the field it was asked for, using the same <see cref="IsClaimed"/> test a
+	/// standing refinery is judged by, and throws the cell away when it does not reach. So the
+	/// bands are a search and the check is the guarantee.
 	/// </para>
 	/// <para>
 	/// It is a preference with the old behaviour as its fallback. Returning no rungs when every
-	/// field is already served means <see cref="Modes.BuildBaseMode"/> uses exactly the ladder it
-	/// used before, and the rungs this does return are tried <em>before</em> that ladder rather
-	/// than instead of it — so a map this rule has nothing to say about builds the bot that
-	/// fought the last match.
+	/// field is already served — or returning only cells that fail the check — means
+	/// <see cref="Modes.BuildBaseMode"/> uses exactly the ladder it used before, and the cells
+	/// this does accept are taken <em>before</em> that ladder rather than instead of it, so a map
+	/// this rule has nothing to say about builds the bot that fought the last match.
+	/// </para>
+	/// <para>
+	/// <b>None of which mattered for a whole round, because nothing called it.</b> The mode's
+	/// placement path used <see cref="BasePlacementLogic.LadderFor"/> and only that, so every
+	/// word above described code the match never ran. See
+	/// <c>Modes.BuildBaseMode.RefineryRings</c>, and note the <c>economy.refinery-sited-on-field</c>
+	/// reason id that now proves it does.
 	/// </para>
 	/// <para>ZERO OpenRA dependencies by design — see <see cref="DefensiveLogic"/>.</para>
 	/// </remarks>
@@ -171,31 +180,42 @@ namespace AutoCnC.Reference.Logic
 		}
 
 		/// <summary>
-		/// The rings to try for a refinery meant to serve a field <paramref name="distanceCells"/>
-		/// from the base centre, furthest out first.
+		/// The bands to probe for a refinery meant to serve a field <paramref name="distanceCells"/>
+		/// from the base centre, nearest home first.
 		/// </summary>
 		/// <remarks>
-		/// The same shape as <see cref="BasePlacementLogic.Ladder"/> and for the same reason: the
-		/// near edge walks inward while the far edge stays put, so each rung contains the one
-		/// before it and the first rung that matches is the furthest-out band the base can
-		/// legally build in.
+		/// Composed with <see cref="ChooseField"/> and <see cref="IsClaimed"/> by
+		/// <see cref="Modes.BuildBaseMode"/>, which asks each band for a cell and then asks
+		/// <see cref="IsClaimed"/> whether a refinery on that cell would actually reach the
+		/// field. That last step is not optional. A ring has a radius and no direction, and
+		/// <b>this file spent a whole round being right and never being called</b>: placement
+		/// went through <see cref="BasePlacementLogic.LadderFor"/> alone, the two refineries on
+		/// 16:9 went up six and thirteen cells <em>west</em> of the yard while the only field
+		/// either harvester ever worked was east of it, and the side earned 2,100 credits in 977
+		/// seconds. A band whose cell fails the check is discarded and the caller's own ladder
+		/// answers, so the rule can only move a refinery towards tiberium and never away from
+		/// where the bot would otherwise have put it.
 		/// <para>
-		/// Both edges are set by <see cref="RefinerySitingTuning.ClaimRadiusCells"/>, so every
-		/// rung is a band from which the refinery would still claim the field. The near edge
-		/// stops there rather than sliding home — below it this has stopped being a refinery for
-		/// that field and is just another refinery in the base, which is what the caller's
-		/// existing ladder already asks for.
+		/// <b>Thin bands, and nearest home first — not the nested ladder the rest of this bot
+		/// uses.</b> A nested ladder shares its far edge, so every rung is a superset of the one
+		/// before it and several probes can hand back the same already-rejected cell; with a
+		/// verification step that wastes the probe. Each band here is
+		/// <see cref="RefinerySitingTuning.StepCells"/> wide, they tile the range from
+		/// <see cref="RefinerySitingTuning.ClaimRadiusCells"/> short of the field to the same
+		/// distance past it — every cell that could claim it lies in that range — and they are
+		/// walked outward so the first one that both offers a legal cell and passes the check is
+		/// the shortest haul from the base that still reaches the field.
 		/// </para>
 		/// <para>
-		/// Both edges are also clamped to <see cref="BasePlacementLogic.MaxSearchRangeCells"/>,
-		/// and that clamp is not cosmetic. <c>FindResourceFields</c> is deliberately uncapped —
-		/// that is the whole reason it exists — so <c>distanceCells</c> is whatever the map
-		/// offers, and on a large map a field 60 or 70 cells out is ordinary. The engine's tile
-		/// search throws above 50 rather than clamping, and a throw out of a mode's tick is a
+		/// Both edges are clamped to <see cref="BasePlacementLogic.MaxSearchRangeCells"/>, and
+		/// that clamp is not cosmetic. <c>FindResourceFields</c> is deliberately uncapped — that
+		/// is the whole reason it exists — so <c>distanceCells</c> is whatever the map offers,
+		/// and on a large map a field 60 or 70 cells out is ordinary. The engine's tile search
+		/// throws above 50 rather than clamping, and a throw out of a mode's tick is a
 		/// <c>BuildBaseMode</c> that silently stops building: <see cref="BasePlacementLogic.RingAt"/>
 		/// did exactly that on badland-ridges for the last 1,814 seconds of the match. A field
 		/// beyond the search limit therefore collapses to a single legal band rather than an
-		/// illegal request; it will simply fail to match and the caller's own ladder answers,
+		/// illegal request; it will simply fail the check and the caller's own ladder answers,
 		/// which is the neutral fallback this had before the siting rule existed.
 		/// </para>
 		/// </remarks>
@@ -206,49 +226,32 @@ namespace AutoCnC.Reference.Logic
 
 			var step = t.StepCells < 1 ? 1 : t.StepCells;
 			var claim = t.ClaimRadiusCells < 0 ? 0 : t.ClaimRadiusCells;
+			var ceiling = BasePlacementLogic.MaxSearchRangeCells;
 
 			var far = distanceCells + claim;
-			if (far > BasePlacementLogic.MaxSearchRangeCells)
-				far = BasePlacementLogic.MaxSearchRangeCells;
+			if (far > ceiling)
+				far = ceiling;
 
-			var floor = distanceCells - claim;
-			if (floor < BasePlacementLogic.DefaultMinRangeCells)
-				floor = BasePlacementLogic.DefaultMinRangeCells;
+			var near = distanceCells - claim;
+			if (near < BasePlacementLogic.DefaultMinRangeCells)
+				near = BasePlacementLogic.DefaultMinRangeCells;
 
-			// Never let the near edge pass the far one. Ordinarily it cannot — floor is
-			// distanceCells - claim and far is distanceCells + claim — but the clamp above can
-			// pull far below both, so both ends follow it down.
-			var near = distanceCells;
+			// The clamp above can pull the far edge below the near one on a field past the
+			// engine's search limit. Collapse rather than emit an inverted band.
 			if (near > far)
 				near = far;
 
-			if (floor > far)
-				floor = far;
-
 			var rungs = new List<PlacementRing>();
-			for (var min = near; min >= floor && rungs.Count < t.MaxRungs; min -= step)
-				rungs.Add(new PlacementRing(min, far));
+			for (var min = near; min < far && rungs.Count < t.MaxRungs; min += step)
+			{
+				var max = min + step;
+				rungs.Add(new PlacementRing(min, max > far ? far : max));
+			}
+
+			if (rungs.Count == 0 && far > 0)
+				rungs.Add(new PlacementRing(near, far));
 
 			return rungs.Count > 0 ? rungs : NoOpinion;
-		}
-
-		/// <summary>
-		/// Where to look for the next refinery, given the fields this side has explored and the
-		/// refineries it already owns. Empty means "no opinion" — use the existing ladder.
-		/// </summary>
-		public static IReadOnlyList<PlacementRing> LadderFor(
-			IReadOnlyList<FieldOption> fields,
-			IReadOnlyList<SiteCell> refineries,
-			in RefinerySitingTuning t)
-		{
-			var index = ChooseField(fields, refineries, t);
-			if (index < 0)
-				return NoOpinion;
-
-			// DistanceUnits is measured from whatever the scan was centred on, which for the
-			// construction yard is the base centre — the same origin FindBuildLocation measures
-			// its ring from. 1024 world units is one cell.
-			return RingsFor(fields[index].DistanceUnits / 1024, t);
 		}
 	}
 }

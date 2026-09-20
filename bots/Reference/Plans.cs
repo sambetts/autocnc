@@ -344,6 +344,14 @@ namespace AutoCnC.Reference
 		/// <summary>The name of the queue a barracks owns.</summary>
 		public const string InfantryQueue = "Infantry";
 
+		/// <summary>The name of the queue every defensive emplacement comes from.</summary>
+		/// <remarks>
+		/// Named here rather than in the one mode that drives it, because a second rule now has
+		/// to ask that queue what it can build: see <see cref="Modes.TrainUnitsMode"/> and the
+		/// 1,112 seconds of 16:9 this side spent with no gun standing at home.
+		/// </remarks>
+		public const string SupportQueue = "Support";
+
 		/// <summary>The cheap body, whose rifle is built for other infantry.</summary>
 		/// <remarks>
 		/// 1,875 damage a second against <c>None</c> armour, 500 against <c>Light</c> and 125
@@ -435,19 +443,87 @@ namespace AutoCnC.Reference
 		/// brownout throttles every queue at once; <see cref="Modes.BuildBaseMode"/>'s low-power
 		/// override is a rescue, not a plan.
 		/// </para>
+		/// <para>
+		/// <b>Tech is last of the earners, not last of the ladder, and that distinction cost
+		/// 16:9.</b> "Income leads tech" is still right and still why <c>hq</c> sits below three
+		/// refineries, the barracks and the factory — but it was reading as "tech leads nothing",
+		/// and a rung below the <em>fourth</em> refinery lands very late. On 16:9 the refineries
+		/// stood at 51s, 345s, 423s and 606s and <c>hq</c> only at <b>638s of a 1,024-second
+		/// match</b>. Until it stood, the Vehicle queue's entire catalogue was a 300-credit scout
+		/// buggy and a harvester, so the airfield spent 386 of its first 500 seconds buying the
+		/// worst unit on the field — <c>bggy</c>, 20 built, 20 lost, 667 credits a kill. Four
+		/// seconds after <c>hq</c> stood it ordered its first <c>ltnk</c>, which lived 183s and
+		/// killed 3,100 credits' worth for 750; the <c>arty</c> that followed killed 1,900 for
+		/// 600. Those are the only two units in this bot's reach that traded above 3:1, they are
+		/// both gated here, and mean army value finished at 586 against a reference of 6,000.
+		/// So <c>hq</c> moves one rung up, above the fourth refinery and below the third. The
+		/// economy keeps its lead — three refineries, a barracks and a factory all still precede
+		/// it — and the fourth refinery is displaced by 1,000 credits rather than by a doctrine.
+		/// </para>
+		/// <para>
+		/// <b>The second refinery now leads the barracks and the factory, because "the bank can
+		/// still fund it" stopped being true.</b> The argument above for opening the Vehicle
+		/// queue early is sound and is kept — but it assumed the 2,500 remaining after power,
+		/// refinery, power, barracks, factory was the second refinery's to spend. It is not:
+		/// <c>Infantry</c> and <c>Support</c> draw on the same cash in parallel, and on the
+		/// latest 16:9 they emptied the bank before the yard ever reached the rung. The whole
+		/// opening, in order: <c>nuke</c> 13s, <c>proc</c> 51s, <c>nuke</c> 65s, <c>hand</c>
+		/// 79s, four <c>e1</c> to 91s, <c>gtwr</c> 105s, four <c>e3</c> to 123s, <c>afld</c>
+		/// 129s, <c>sam</c> 134s, <c>bggy</c> 148s — <b>8,150 credits and one refinery</b>. The
+		/// second refinery could not be started until income alone had rebuilt its price and
+		/// stood at <b>249s</b>. The side therefore ran <b>one harvester from 51s to 249s</b>,
+		/// earned 3,955 credits in the whole match at <b>5.9 a second</b> against a prior median
+		/// of 28.6, and the <c>Vehicle</c> queue the factory had opened spent <b>470 seconds
+		/// waiting</b> for cash that was never going to exist.
+		/// </para>
+		/// <para>
+		/// So <c>proc</c> two moves above both. Power, refinery, power, refinery is 4,000 of the
+		/// 7,500 bank and needs nothing that is not already standing, and the second free
+		/// harvester roughly doubles income from about 90s — which buys the 2,000 factory back
+		/// inside a minute rather than deferring it. The barracks moves with the factory rather
+		/// than ahead of it, and that is deliberate: <c>gtwr</c> and <c>sam</c> both require a
+		/// barracks, so the <c>Support</c> queue cannot open a second front on the opening bank
+		/// until the economy has had its first two rungs.
+		/// <see cref="Logic.IncomeFirstLogic.ReserveOpeningBank"/> is what stops the other queues
+		/// taking the refinery's money once the barracks does stand.
+		/// </para>
+		/// <para>
+		/// <b>And the third refinery now leads the factory, because a reservation owned by a
+		/// queue does not choose what that queue buys.</b> The move above worked exactly as
+		/// written — the second refinery stood at <b>103s</b> rather than 249s — and the bank
+		/// still died, because the rung immediately underneath it was the 2,000-credit factory.
+		/// The yard ordered <c>afld</c> at <b>118s</b> and the reservation could not stop it:
+		/// <c>Building</c> <em>is</em> the reserving queue, so the 1,500 held for refinery three
+		/// was spent on the factory instead. <c>afld</c> landed at 167s and took cash to zero;
+		/// refinery three was ordered at 168s and was never paid for, the <c>sam</c> ordered at
+		/// 155s was never paid for, and the side finished on <b>two refineries, two harvesters
+		/// and 2,100 credits earned in 977 seconds</b> — 2.1 a second against a reference of 50.
+		/// Both free harvesters died to infantry at 197s and 208s, <b>822 seconds of the match
+		/// had no live harvester</b>, and between 176s and 944s the bot completed nothing at
+		/// all in any queue.
+		/// </para>
+		/// <para>
+		/// What the 2,000 bought: the <c>Vehicle</c> queue it opened issued <b>two</b> orders in
+		/// the 810 seconds that followed and delivered <b>one 300-credit buggy, at 966s</b>. A
+		/// <c>proc</c> is 1,500, needs only <c>anypower</c>, and ships a harvester with it, so
+		/// on the same bank it is both cheaper and the only rung here that raises income. The
+		/// factory keeps its place above <c>hq</c> and above refinery four — the failure that
+		/// argument was written for was a factory at 474s, behind four refineries and the tech,
+		/// and one rung of 1,500 does not reproduce it.
+		/// </para>
 		/// </remarks>
 		public static IReadOnlyList<BuildStep> Economy { get; } =
 		[
 			new(["powr", "nuke"], 1),          // power
 			new(["proc"], 1),                  // income before anything else
 			new(["powr", "nuke"], 2),
+			new(["proc"], 2),                  // the second free harvester, before anything that earns nothing
 			new(["pyle", "hand"], 1),          // barracks
+			new(["proc"], 3),                  // the third free harvester, while the opening bank lasts
 			new(["weap", "afld"], 1),          // ...and the means to replace a harvester that dies
-			new(["proc"], 2),                  // then the second free harvester
-			new(["proc"], 3),                  // ...and income again, while the opening bank lasts
 			new(["powr", "nuke"], 3),
+			new(["hq"], 1),                    // tech behind three earners: it unlocks ltnk and arty
 			new(["proc"], RefineryCore),       // four refineries is four harvesters, with no factory
-			new(["hq"], 1),                    // tech last: it unlocks, it does not earn
 		];
 
 		/// <summary>
@@ -650,7 +726,11 @@ namespace AutoCnC.Reference
 		/// <remarks>
 		/// <c>hq</c> earns nothing. It is worth having — <c>mtnk</c>, <c>ltnk</c>, <c>e2</c> and
 		/// <c>atwr</c> all need <c>anyhq</c> — but not at the price of the refinery it displaced
-		/// at 167s on badland-ridges. Income leads tech in every plan.
+		/// at 167s on badland-ridges. Income still leads tech in every plan: three refineries, a
+		/// barracks and a vehicle factory all precede it in <see cref="Economy"/>. What changed
+		/// after 16:9 is that it no longer trails the <em>fourth</em> refinery as well, because
+		/// the two units it unlocks were the only ones this bot built that traded above 3:1 and
+		/// they were unbuildable for the first 638 seconds of a 1,024-second match.
 		/// </remarks>
 		public static IReadOnlyList<string> TechStructures { get; } = ["hq", "eye", "tmpl"];
 

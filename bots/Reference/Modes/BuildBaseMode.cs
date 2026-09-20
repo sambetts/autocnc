@@ -22,6 +22,12 @@
 //  area and so the only affordable way to move the frontier at all.
 //  See BasePlacementLogic.
 //
+//  A ring counted off the refineries already standing still knows nothing about
+//  where the tiberium is, so refineries go up at the right distance in the wrong
+//  direction. RefinerySitingLogic answers that from the resource layer, and this
+//  mode asks it first for a refinery, falling through to the counted ladder when
+//  it has no opinion. See Place and RefineryRings.
+//
 //  Licence: GPL-3.0-or-later. See LICENSE and NOTICE.md.
 // ============================================================================
 
@@ -46,7 +52,7 @@ namespace AutoCnC.Reference.Modes
 		static readonly string[] ConstructionQueues = ["Building", SupportQueue];
 
 		/// <summary>The queue every defensive emplacement comes from.</summary>
-		const string SupportQueue = "Support";
+		const string SupportQueue = ReferencePlans.SupportQueue;
 
 		static readonly string[] PowerCandidates = [.. ReferencePlans.PowerPlants];
 
@@ -106,10 +112,25 @@ namespace AutoCnC.Reference.Modes
 		/// </remarks>
 		readonly ExpansionTuning expansion = ExpansionTuning.Default;
 
+		/// <summary>
+		/// How far a refinery may sit from the field it is meant to serve, and how the rings
+		/// that bracket that field are walked. See <see cref="RefinerySitingLogic"/>.
+		/// </summary>
+		readonly RefinerySitingTuning siting = RefinerySitingTuning.Default;
+
 		/// <summary>The production plan's existing release band for an understrength role.</summary>
 		readonly BalanceTuning balance = BalanceTuning.Default;
 
+		/// <summary>How long the harvester-recovery hold may wait before it has failed.</summary>
+		readonly RecoveryHoldTuning recoveryHold = RecoveryHoldTuning.Default;
+
 		readonly List<FieldOption> fields = [];
+
+		/// <summary>Where this side's refineries already stand, for <see cref="RefineryRings"/>.</summary>
+		readonly List<SiteCell> refinerySites = [];
+
+		/// <summary>The rings the resource layer asked for, per queue. Empty means "no opinion".</summary>
+		static readonly PlacementRing[] NoRings = [];
 
 		/// <summary>
 		/// Evaluations since the last map scan, so the scan is paid for on a clock rather than
@@ -132,7 +153,33 @@ namespace AutoCnC.Reference.Modes
 		readonly CPos?[] plannedLocation = new CPos?[ConstructionQueues.Length];
 		readonly string[] plannedItem = new string[ConstructionQueues.Length];
 
+		// The resource layer's opinion about where the current building goes, per queue. Scanned
+		// once when the item changes rather than on every evaluation: FindResourceFields walks
+		// every cell of the map.
+		readonly IReadOnlyList<PlacementRing>[] plannedRings =
+			new IReadOnlyList<PlacementRing>[ConstructionQueues.Length];
+
+		// The field those rings were asked for, so a cell the ring produced on the wrong side of
+		// the base can be rejected rather than believed.
+		readonly FieldOption[] plannedField = new FieldOption[ConstructionQueues.Length];
+		readonly bool[] plannedFieldKnown = new bool[ConstructionQueues.Length];
+
+		// A one-cell list, so a candidate site can be asked the same "does this claim the field"
+		// question a standing refinery is asked. Reused rather than allocated per probe.
+		readonly List<SiteCell> probe = [default];
+
+		// Whether the cell finally chosen came from those rings, so the decision trace can say
+		// so and a check can prove the branch ran.
+		readonly bool[] plannedOnField = new bool[ConstructionQueues.Length];
+
 		bool deferredConstructionForHarvester;
+
+		/// <summary>
+		/// What the recovery hold has seen the vehicle queue pay towards a harvester, so a hold
+		/// that has stopped funding one can end. Per-yard memory; see
+		/// <see cref="IncomeFirstLogic.TrackRecovery"/>.
+		/// </summary>
+		RecoveryHoldWatch recoveryWatch = RecoveryHoldWatch.Start;
 
 		public override void OnEnter(Actor self, ModeContext ctx)
 		{
@@ -140,11 +187,15 @@ namespace AutoCnC.Reference.Modes
 			{
 				plannedLocation[i] = null;
 				plannedItem[i] = null;
+				plannedRings[i] = NoRings;
+				plannedOnField[i] = false;
+				plannedFieldKnown[i] = false;
 			}
 
 			fields.Clear();
 			evaluationsSinceScan = int.MaxValue;
 			deferredConstructionForHarvester = false;
+			recoveryWatch = RecoveryHoldWatch.Start;
 		}
 
 		public override UnitDecision OnTick(Actor self, ModeContext ctx)
@@ -180,6 +231,9 @@ namespace AutoCnC.Reference.Modes
 				{
 					plannedItem[i] = null;
 					plannedLocation[i] = null;
+					plannedRings[i] = NoRings;
+					plannedOnField[i] = false;
+					plannedFieldKnown[i] = false;
 				}
 
 				queues[i] = new ConstructionQueueState(
@@ -215,14 +269,11 @@ namespace AutoCnC.Reference.Modes
 					$"{order.Reason}, placing first defensive anti-air from early release");
 			}
 
-			if (order.Action == ConstructionAction.Produce
-				&& Named(VehicleFactoryCandidates, order.Item)
-				&& ExpansionLogic.Standing(owned, VehicleFactoryCandidates) == 0
-				&& ExpansionLogic.Standing(owned, RefineryCandidates) == 1)
-			{
-				order = new ConstructionOrder(order.Action, order.Queue, order.Item,
-					$"{order.Reason}, opening replacement factory before second refinery");
-			}
+			// The factory rung used to be re-tagged here as "opening replacement factory before
+			// second refinery", from when it sat above that refinery in the ladder. It sits
+			// below it now — see ReferencePlans.Economy for the 8,150 credits and one refinery
+			// that paid for the move — so the condition can no longer be true and the tag would
+			// only describe a plan this bot no longer has.
 
 			// The doctrine's own ladder is finite and a map is not. When it has nothing left to
 			// ask for, ask the ground instead: every patch of tiberium this side has explored is
@@ -253,7 +304,9 @@ namespace AutoCnC.Reference.Modes
 			// visible, so exclude that item here: starting a harvester does not mean its income
 			// has arrived. TrainUnitsMode keeps the harvester rung first until that floor is
 			// restored. Finished structures still place, and emergency power remains available
-			// because a brownout would slow the harvester too.
+			// because a brownout would slow the harvester too. Two things the hold is not allowed
+			// to swallow are handled below: a refinery, which *is* harvester recovery, and a hold
+			// that has stopped paying for the harvester it names.
 			var standingHarvesters = ExpansionLogic.Standing(
 				ctx.OwnedUnitCounts(), HarvesterCandidates);
 			if (standingHarvesters > 0
@@ -266,6 +319,35 @@ namespace AutoCnC.Reference.Modes
 			var factoryBackedHarvesterRecovery =
 				standingHarvesters < harvesterRelease
 				&& ExpansionLogic.Standing(owned, VehicleFactoryCandidates) > 0;
+
+			// A deferral with no deadline is a deadlock. Measure the hold against the harvester
+			// it claims to be funding: the vehicle queue's remaining cost falls as the item is
+			// paid off, so a remaining cost that has not moved for a minute of game time is a
+			// harvester nothing is being spent on. On 16:9 the yard held 293 times, 149 of them
+			// in a window where lifetime earnings were frozen and cash read 0 at every sample —
+			// reserving credits that did not exist, while the Support queue went unasked and
+			// nothing was repaired. See IncomeFirstLogic.TrackRecovery.
+			var harvesterInProduction = Named(HarvesterCandidates, ctx.ProducingItem("Vehicle"));
+			var recovery = IncomeFirstLogic.TrackRecovery(
+				factoryBackedHarvesterRecovery,
+				harvesterInProduction,
+				harvesterInProduction ? VehicleRemainingCost(ctx) : int.MaxValue,
+				ctx.WorldTick,
+				recoveryWatch,
+				recoveryHold);
+
+			recoveryWatch = recovery.Watch;
+			if (recovery.Stalled)
+				factoryBackedHarvesterRecovery = false;
+
+			// Tag only the orders the hold would otherwise have swallowed, so the trace says what
+			// the release actually bought. Power was already exempt, so releasing it buys nothing.
+			var orderReasonId = recovery.Stalled
+				&& order.Action == ConstructionAction.Produce
+				&& !Named(PowerCandidates, order.Item)
+					? "economy.recovery-hold-stalled"
+					: null;
+
 			var fundingCriticalRefinery = IncomeFirstLogic.ShouldFundCriticalRefinery(
 				refineryCount,
 				Named(RefineryCandidates, ctx.ProducingItem("Building")));
@@ -280,7 +362,24 @@ namespace AutoCnC.Reference.Modes
 				return UnitDecision.Hold("support queue yielding shared cash to active critical refinery");
 			}
 
+			// A refinery is not something the recovery hold should be saving against — it is the
+			// recovery. proc carries FreeActor, so 1,500 credits buys an 1,100 credit harvester
+			// and the dock it has to reach, and it is the only harvester on offer at all once the
+			// war factory is dead. Three of this side's seven harvesters on 16:9 arrived that
+			// way against four bought. See IncomeFirstLogic.IsRecoveryRefinery.
+			var recoveryRefinery = order.Action == ConstructionAction.Produce
+				&& factoryBackedHarvesterRecovery
+				&& IncomeFirstLogic.IsRecoveryRefinery(order.Item, ReferencePlans.Refineries);
+
+			if (recoveryRefinery)
+			{
+				order = new ConstructionOrder(order.Action, order.Queue, order.Item,
+					$"{order.Reason} through harvester recovery: a refinery ships a harvester with it");
+				orderReasonId = "economy.refinery-is-recovery";
+			}
+
 			if (factoryBackedHarvesterRecovery
+				&& !recoveryRefinery
 				&& order.Action == ConstructionAction.Produce
 				&& !Named(PowerCandidates, order.Item))
 			{
@@ -310,7 +409,9 @@ namespace AutoCnC.Reference.Modes
 				&& order.Action == ConstructionAction.Produce)
 			{
 				order = new ConstructionOrder(order.Action, order.Queue, order.Item,
-					$"{order.Reason}, construction resumed after recovery harvester delivered");
+					recovery.Stalled
+						? $"{order.Reason}, construction resumed: the recovery harvester has not been paid towards for {recoveryHold.StallTicks} ticks"
+						: $"{order.Reason}, construction resumed after recovery harvester delivered");
 				deferredConstructionForHarvester = false;
 			}
 
@@ -321,11 +422,52 @@ namespace AutoCnC.Reference.Modes
 					return Place(ctx, order, owned);
 
 				case ConstructionAction.Produce:
-					return UnitDecision.Produce(order.Queue, order.Item, order.Reason);
+					return orderReasonId == null
+						? UnitDecision.Produce(order.Queue, order.Item, order.Reason)
+						: UnitDecision.Produce(order.Queue, order.Item, order.Reason, orderReasonId);
 
 				default:
+					// Plan complete, or nothing affordable yet. The yard's evaluation is going
+					// spare, so spend it keeping what is already standing: this bot issued no
+					// repair order at all on 16:9 and lost fourteen of its thirteen peak
+					// buildings. Asked last and only outside the economy holds, so income keeps
+					// the absolute priority every rule above it assumes. See
+					// BaseRepairLogic.RepairBelowHealthPercent for which structures qualify.
+					if (!fundingCriticalRefinery && !factoryBackedHarvesterRecovery)
+					{
+						var damaged = ctx.OwnedBuildingStates();
+						var repair = BaseRepairLogic.Choose(damaged, ctx.Cash);
+						if (repair != 0)
+							return UnitDecision.RepairBuilding(repair,
+								$"repairing {BaseRepairLogic.TypeOf(damaged, repair)} at {BaseRepairLogic.HealthOf(damaged, repair)}%: replacing it costs more than buying it back",
+								"defence.repair-building");
+					}
+
 					return UnitDecision.Continue;   // plan complete, or nothing affordable yet
 			}
+		}
+
+		/// <summary>
+		/// What the vehicle queue still owes on the item it is building, or
+		/// <see cref="int.MaxValue"/> when it is building nothing.
+		/// </summary>
+		/// <remarks>
+		/// Read and discarded in one pass: sensing collections are reused by the host, so nothing
+		/// from <c>QueueStates</c> is retained. This is the measurement
+		/// <see cref="IncomeFirstLogic.TrackRecovery"/> uses to tell a harvester being paid for
+		/// from one merely queued behind an economy that has stopped earning.
+		/// </remarks>
+		static int VehicleRemainingCost(ModeContext ctx)
+		{
+			var states = ctx.QueueStates();
+			if (states == null)
+				return int.MaxValue;
+
+			foreach (var state in states)
+				if (string.Equals(state.Queue, "Vehicle", System.StringComparison.OrdinalIgnoreCase))
+					return state.CurrentRemainingCost;
+
+			return int.MaxValue;
 		}
 
 		/// <summary>
@@ -465,10 +607,18 @@ namespace AutoCnC.Reference.Modes
 		{
 			var i = IndexOf(order.Queue);
 
-			if (plannedItem[i] != order.Item || plannedLocation[i] == null)
+			// The map scan is paid for once per structure, not once per evaluation: the rings
+			// only change when the item waiting to be placed does.
+			if (plannedItem[i] != order.Item)
 			{
 				plannedItem[i] = order.Item;
+				plannedLocation[i] = null;
+				plannedOnField[i] = false;
+				plannedRings[i] = RefineryRings(ctx, order.Item, out plannedField[i], out plannedFieldKnown[i]);
+			}
 
+			if (plannedLocation[i] == null)
+			{
 				// Income and the ground it needs expand outward, and so does the defence that
 				// covers them — a tower only defends what its weapon reaches, and the default
 				// ring puts every tower on the yard. The ring is an ambition and the ladder is
@@ -478,7 +628,28 @@ namespace AutoCnC.Reference.Modes
 				// ring, so a structure already paid for always has somewhere to go.
 				var ladder = BasePlacementLogic.LadderFor(order.Item, owned, ExpandingRoles, CoveringRoles);
 
+				// A refinery asks the ground first. These rungs bracket the distance of the
+				// nearest field no refinery is close enough to work — but a ring has a radius
+				// and no direction, so a cell it offers is only accepted when it really would
+				// claim that field. A rejected ring falls through to the counted ladder, which
+				// is exactly the behaviour this bot had before. See RefinerySitingLogic.
+				var sited = plannedRings[i];
 				CPos? chosen = null;
+				for (var rung = 0; rung < sited.Count && chosen == null; rung++)
+				{
+					var candidate = ctx.FindBuildLocation(
+						order.Item, sited[rung].MinRangeCells, sited[rung].MaxRangeCells);
+
+					if (candidate == null)
+						continue;
+
+					probe[0] = new SiteCell(candidate.Value.X, candidate.Value.Y);
+					if (RefinerySitingLogic.IsClaimed(plannedField[i], probe, siting.ClaimRadiusCells))
+						chosen = candidate;
+				}
+
+				plannedOnField[i] = chosen != null;
+
 				for (var rung = 0; rung < ladder.Count && chosen == null; rung++)
 					chosen = ctx.FindBuildLocation(order.Item, ladder[rung].MinRangeCells, ladder[rung].MaxRangeCells);
 
@@ -488,8 +659,76 @@ namespace AutoCnC.Reference.Modes
 			if (plannedLocation[i] == null)
 				return UnitDecision.Continue;   // nowhere to put it; try again next tick
 
-			return UnitDecision.PlaceBuilding(order.Queue, order.Item,
-				plannedLocation[i].Value.X, plannedLocation[i].Value.Y, order.Reason);
+			var cell = plannedLocation[i].Value;
+
+			return plannedOnField[i]
+				? UnitDecision.PlaceBuilding(order.Queue, order.Item, cell.X, cell.Y,
+					$"{order.Reason} beside the nearest field no refinery works",
+					"economy.refinery-sited-on-field")
+				: UnitDecision.PlaceBuilding(order.Queue, order.Item, cell.X, cell.Y, order.Reason);
+		}
+
+		/// <summary>
+		/// Where the resource layer says the next refinery belongs, or no opinion at all.
+		/// </summary>
+		/// <remarks>
+		/// <b><see cref="RefinerySitingLogic"/> was written to fix this and was never called.</b>
+		/// Placement went through <see cref="BasePlacementLogic.LadderFor"/> alone, which sizes a
+		/// ring from the number of refineries already standing and therefore knows the distance
+		/// the next one should be at and nothing whatever about the direction.
+		/// <para>
+		/// On 16:9 that put both refineries on the wrong side of the yard. The yard stood at
+		/// (76,19); <c>proc</c> one went up at (69,20) and <c>proc</c> two at (63,20) — six and
+		/// thirteen cells <em>west</em> — while the only tiberium either harvester ever worked
+		/// was east, and both harvest orders said so: "17 cells out" at 51s and "23 cells out"
+		/// at 103s. A <c>harv</c> moves 1.758 cells a game second and carries about 700 credits,
+		/// so those are round trips of 19 and 26 seconds of pure driving. The side earned
+		/// <b>2,100 credits in 977 seconds</b> — about 9.5 credits per harvester-second against
+		/// the 16.3 this bot's own notes call a healthy fleet — and a refinery 17 cells from its
+		/// field is also outside the 12-cell radius OpenRA's built-in harvester search will look
+		/// in, so nothing about it self-corrects.
+		/// </para>
+		/// <para>
+		/// Only refineries ask. Everything else keeps the counted ladder exactly as it was, and
+		/// a side with no resource layer, no explored field, or every field already claimed gets
+		/// an empty list and the behaviour it had before.
+		/// </para>
+		/// </remarks>
+		IReadOnlyList<PlacementRing> RefineryRings(
+			ModeContext ctx, string item, out FieldOption field, out bool known)
+		{
+			field = default;
+			known = false;
+
+			if (!Named(RefineryCandidates, item) || !ctx.HasResourceLayer)
+				return NoRings;
+
+			// Sensing buffers are reused by the host, so copy before anything else is sensed.
+			fields.Clear();
+			var found = ctx.FindResourceFields(expansion.MinFieldCells, expansion.MaxFieldsConsidered);
+			for (var i = 0; i < found.Count; i++)
+			{
+				var f = found[i];
+				fields.Add(new FieldOption(f.NearestX, f.NearestY, f.CenterX, f.CenterY, f.CellCount, f.TotalDensity, f.DistanceUnits));
+			}
+
+			refinerySites.Clear();
+			var standing = ctx.OwnedBuildingStates();
+			if (standing != null)
+				foreach (var b in standing)
+					if (Named(RefineryCandidates, b.ActorType))
+						refinerySites.Add(new SiteCell(b.CellX, b.CellY));
+
+			var index = RefinerySitingLogic.ChooseField(fields, refinerySites, siting);
+			if (index < 0)
+				return NoRings;
+
+			field = fields[index];
+			known = true;
+
+			// DistanceUnits is measured from whatever the scan was centred on — the yard, which
+			// is also the origin FindBuildLocation measures its ring from. 1024 units is a cell.
+			return RefinerySitingLogic.RingsFor(field.DistanceUnits / 1024, siting);
 		}
 
 		static int IndexOf(string queue)

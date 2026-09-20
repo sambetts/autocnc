@@ -1884,6 +1884,107 @@ dies. The towers were the better buy anyway — four `gtwr` cost 2,400 credits a
 worth 10,740, at **51 credits a kill against the infantry queue's 171** — and they were starved by
 the same bank.
 
+### The rule that was switched off for the first two minutes
+
+Both conditions above require a harvester to be *buildable*, and a harvester needs a vehicle
+factory. So between the yard landing and the factory landing, nothing arbitrated the shared bank at
+all — and that window is where the next `16:9` was lost. The whole opening, in order: `nuke` 13s,
+`proc` 51s, `nuke` 65s, `hand` 79s, four `e1` to 91s, `gtwr` 105s, four `e3` to 123s, `afld` 129s,
+`sam` 134s, `bggy` 148s. **8,150 credits by 148s, with one refinery standing.** The second
+refinery — at 1,500 the cheapest harvester on offer and the only one buyable without a factory —
+could not be started until income had rebuilt its price unaided, and stood at **249s**. One
+harvester worked from 51s to 249s; the match finished on 3,955 credits at **5.9 a second** against
+a prior median of 28.6, and the `Vehicle` queue the airfield had opened spent **470 seconds waiting**
+for cash that was never going to exist.
+
+Two changes, one idea — *the opening bank buys income*:
+
+- [`ReferencePlans.Economy`](Plans.cs) puts the second refinery above the barracks and the
+  2,000-credit factory. Power, refinery, power, refinery is 4,000 of the 7,500 bank and needs
+  nothing that is not already standing; the second free harvester roughly doubles income from about
+  90s, which buys the factory back inside a minute rather than deferring it. The barracks moving
+  with the factory is deliberate: `gtwr` and `sam` both require one, so the `Support` queue cannot
+  open a second front on the bank until the economy has had its first two rungs.
+- [`IncomeFirstLogic.ReserveOpeningBank`](Logic/IncomeFirstLogic.cs) is this bot's first use of
+  `IProductionBudgetBot.ReserveProductionBudget`. A rung reorder cannot fix a problem *between*
+  queues — the yard asks for one thing at a time while three other queues keep spending — so the
+  host arbitrates it centrally instead: one refinery's price is reserved for `Building`, and every
+  other queue's new `Produce` is suppressed when it would take live cash below what is left of it.
+  Marked `economy.bank-buys-income`.
+
+It is the narrowest reservation that covers the observed loss. **One refinery's price, never the
+whole ladder**, so against a 7,500 bank it is the *last* 1,500 that is defended and an opening
+garrison still gets bought. **Only below three refineries**, past which the side has a barracks and
+a factory too and the rules above take over. And **never while enemies are at the base**, because
+every hold in this file has at some point become a latch on a condition the opponent controls.
+
+### The exemption unblocked the plan and never unblocked the bank
+
+`IsOpeningEmplacement` exists so the yard's economy hold cannot swallow the base's first gun, and
+it works: the trace holds **55 `defence.opening-emplacement`** on the next `16:9`. The side still
+spent **1,112 of 1,350 seconds with nothing standing that shoots**. The first `gtwr` stood at 143s
+and died at 199s; the second was not ordered until roughly 440s and died at 518s; nothing replaced
+it in the remaining 832 seconds. `Support` was given **four orders in the whole match** and spent
+181 seconds waiting for cash. `Infantry` was given 23.
+
+Releasing a rung does not pay for it. A queue buying 100-credit bodies wins every race against a
+600-credit tower, and what it beat was the best trade on the field:
+
+|            | credits | kills       | credits a kill | dealt   | taken   |
+| ---------- | ------- | ----------- | -------------- | ------- | ------- |
+| `gtwr` ×2  | 1,200   | **11** of 30 | **109**       | 119,682 | 4,775   |
+| `e1` ×13   | 1,300   | 4           | 325            | 30,723  | 27,127  |
+| `e3` ×8    | 2,400   | 4           | 600            | 253,888 | 170,450 |
+
+Against enemy `e1` the towers dealt 35,406 and took **nothing** back. Seven of the bodies bought
+instead died **0 to 6 seconds** after leaving the barracks, to a jeep parked outside it.
+
+And it is not only a trade. Every retreat rule this bot owns sends its earners home — **314
+`runs-home`, 214 `escape-en-route` and 197 `sheltering`** of the 841 decisions the harvesters made
+— on the written premise that *home is where this side's guns are*. There were none, and **33 of
+the side's 44 losses fell inside one six-cell circle** on the base.
+
+[`IncomeFirstLogic.EmplacementBeforeBodies`](Logic/IncomeFirstLogic.cs) stands the unit queues down
+until that first gun is paid for. Marked `defence.emplacement-before-bodies`, and narrow on every
+axis so it cannot latch:
+
+- **Only at zero standing**, the same bound `IsOpeningEmplacement` already uses. One tower silences
+  it completely and depth stays behind the doctrine's own rungs, so it can never become a turtle.
+- **Only while `Support` can actually sell one.** No barracks, no power or no yard means the saved
+  credits would buy nothing — which is also what retires the rule when the yard dies.
+- **Only below 600 credits**, a ruleset price for both `gtwr` and `gun`. At a tower's price in hand
+  a rifleman costs the tower nothing and the hold lifts itself.
+- **Never over harvester recovery.** Income outranks a gun, because a gun bought with the last
+  credits of a dying economy is the last thing the side ever buys.
+
+### A deferral with no deadline is a deadlock
+
+The cross-queue hold above has a twin inside the construction yard, and that one had no release at
+all. [`BuildBaseMode`](Modes/BuildBaseMode.cs) holds construction cash whenever the fleet is below
+its release band and a war factory stands, so the vehicle queue can finish a harvester. On `16:9`
+the yard returned that hold on **293 of roughly 600 evaluations**, and **149 of them fell between
+600s and 731s** — a window in which lifetime earnings were frozen at 19,950 and cash read 0 at
+every sample. It was reserving credits that did not exist, for a harvester that could not be paid
+for. While it ran the yard issued nothing, reached neither the frontier nor the anti-air branch,
+and declined to repair: the `Support` queue was asked **nine times in the whole match** and
+delivered four emplacements against a plan that wants six towers and two anti-air. Those four were
+the best buy on the field — **2,800 credits for 13,100 killed**, where every rifleman built came to
+3,200 for 6,900.
+
+Two bounds, both in [`IncomeFirstLogic`](Logic/IncomeFirstLogic.cs):
+
+- `TrackRecovery` measures the hold against the thing it claims to fund. The vehicle queue's
+  `CurrentRemainingCost` falls as an item is paid off, so a harvester whose remaining cost has not
+  moved for a minute of game time is a harvester nothing is being spent on, and the hold ends. The
+  clock resets the moment it moves — indefinite on a healthy economy, bounded on a dead one, which
+  is the distinction the old rule could not draw. Marked `economy.recovery-hold-stalled`.
+- `IsRecoveryRefinery` exempts refineries outright. `proc` carries `FreeActor`: 1,500 credits buys
+  an 1,100-credit harvester *and* the dock it has to reach, and it is the only harvester on offer
+  once the war factory is dead. Three of this side's seven harvesters arrived that way against four
+  bought. Holding cash to help the vehicle queue buy one while refusing to build the structure that
+  hands one over is the rule working against its own purpose. Marked
+  `economy.refinery-is-recovery`.
+
 ### One reading lesson, written into `checks.json`
 
 Three of the previous round's ten checks were meaningless and looked decisive. `units.count(type=e1)`
@@ -1967,6 +2068,182 @@ A raiding party can simply die, and `valueExchangeRatio` was 0.722 with the army
 `aggression-does-not-just-feed-the-enemy` in `checks.json` is that risk written as a falsifiable
 floor. If it fails, the answer is to raise `AttackArmyValue` — not to abandon the probe, which is
 the thing that made the Attack doctrine reachable at all.
+
+## Fleeing was a ratchet, and the ratchet was the match
+
+On 16:9 at Hard the bot lost with **19.589 credits a second earned** against a prior median of
+28.319, a mean army of 480.9, and no enemy building destroyed. The economy series is the whole
+story: `earned` sat at exactly 15,400 from 540s to 720s — three minutes of nothing — with five
+harvesters and three refineries alive and none of them dead yet. Then every production mode
+returned `no change` **502 consecutive times from 520s to the end**, because there was no cash to
+gate on. The army never came back from its 2,600 peak and nothing the bot owned ever finished a
+structure.
+
+The harvesters were not stuck in the engine's search bubble. They were running away.
+
+`HarvesterLogic`'s escape rule has one entry that is not spent on use: health below
+`FleeBelowHealthPercent`. Nothing in this bot repairs a harvester, and `ThreatClearTicks` releases
+the shelter twelve seconds after the last contact — so a harvester that has once been shot below
+70% flees again on the *next* contact, and the one after that, forever. Against a side camped in
+the base that is every thirteen seconds. The decision trace says so directly: **72 withdrawal
+episodes across six harvesters, mean 17 seconds, 1,244 of 2,918 harvester-alive seconds spent
+withdrawing** — 43% — and 63 of the roughly 69 entries carried the unrepaired-escape reason, some
+of them at 1% health. Each withdrawal is a `MoveTo`, which cancels the harvest activity, so the
+partial load goes with it.
+
+It bought nothing. All six harvesters died anyway, three of them together in a map corner they had
+fled to.
+
+### A withdrawal has to pay for itself
+
+`HarvesterTuning.WorkCycleTicks` is now both bounds of the same rule, and the number is the
+delivery cycle rather than a taste: a harvester moves 1.758 cells a game second and measured 10.8
+credits a second over the good window, so a cycle is about 65 seconds. Sixty seconds is just
+inside one.
+
+* A withdrawal **ends** once it has run longer than the delivery it displaced
+  (`economy.harvester-withdrawal-timed-out`), resuming on ground away from whatever drove the
+  harvester off — the contested-field memory rule 2 already had.
+* Finishing one **guarantees** the harvester a full cycle of earning before another may begin
+  (`economy.harvester-work-window`), so contact lands on "keep cutting" instead of "cancel the
+  load and shelter for seventeen seconds".
+
+Worst case is now a 50% duty cycle by construction; at the episode lengths actually observed it is
+about 22%.
+
+### And the bot had never repaired anything
+
+Zero `RepairBuilding` orders in 913 seconds, while fourteen buildings died — about 14,900 of the
+31,900 credits lost — and `valueExchange` scored 0.524 against a reference of 2. The SDK has
+exposed the action the whole time; no mode had ever asked for one.
+
+[`BaseRepairLogic`](Logic/BaseRepairLogic.cs) is deliberately small, because repair has a losing
+mode too: a base under permanent attack can sink every credit into structures that die anyway.
+So `BuildBaseMode` asks it **last** — only on an evaluation where construction had nothing to
+order and neither economy hold was running — and it answers only for a structure already at or
+below half health, where the alternative to repairing is paying the full cost again rather than
+repairing later.
+
+## Nothing was ever concentrated on the thing already damaged
+
+16:9 again, at Hard, lost after 1,042 seconds: **27 buildings destroyed to 1**. Three separate
+symptoms, one shape.
+
+### The push spread 378,000 damage across a base and finished one building
+
+From the engagement matrix: 227,720 damage into construction yards, 55,920 into refineries that
+need about 72,000 each, 49,850 into guard towers, 28,875 into an advanced tower. One kill.
+`buildingsDestroyed` scored **0.125 of 1.0**, the worst component in the fight.
+
+[`AttackBaseLogic.SelectObjective`](Logic/AttackBaseLogic.cs) scored class and proximity and
+ignored `HealthPercent` outright, so every unit independently walked at whatever was nearest to
+*it* and a force arriving together still split its fire across a whole base — which the other side
+then repaired.
+
+Damage is the one signal that makes an uncoordinated force converge, because the force leaves it
+behind itself: missing health is now worth **40 points a percent**, which dominates the
+2,000-point gap between a production structure and a static defence, so a building at half health
+outranks a pristine one of any class. The objective a unit already holds keeps a **900-point**
+commitment bonus — enough to stop it swapping between two untouched buildings, never enough to
+keep it on an untouched one while the rest of the push is halfway through something else.
+
+Stickiness is suspended in exactly one case, and the two bounds on it are what keep the search off
+the hot path: an objective that is **untouched** *and* **out of weapon reach**. A unit in range is
+about to damage its own objective, and a unit whose objective is damaged has something invested;
+both commit, and neither rescans. `assault.join-damaged-objective` marks the swap and
+`assault.finish-damaged-objective` marks the shot that follows it.
+
+### The screen held the middle of a base that was dying at its edges
+
+`DefensiveMode` produced **16,377 `Hold` decisions against 3,033 `Attack` for `e1` alone** — 84% of
+its evaluations were *on post, no threats* — while losses clustered at seven places **8 to 17
+cells** from the construction yard. The mode anchors every unit on `ctx.BaseCenter` and tethers it
+within twice its own reach, which for a 4-cell rifle is 8 cells. The outer clusters were never
+inside anybody's leash, and the bot's best unit per credit spent the match standing still.
+
+The fix needs no extra units, no wider leash and no map knowledge. Own buildings are known
+exactly, so a health bar that **fell since the last look** is a precise report of where the enemy
+is — and it works against an 11-cell gun that no defender can see, which is what was doing the
+killing. [`BaseDamageWatch`](Modes/BaseDamageWatch.cs) takes that look once per tick for the whole
+side, [`BaseGuardLogic`](Logic/BaseGuardLogic.cs) decides which report to believe, and
+`DefensiveMode` points `ctx.Anchor` at it.
+
+Stickiness again, for the same reason: a screen that chased the most recent hit would flip between
+two raids every tick and arrive at neither. The post moves only to somewhere **strictly worse
+hurt**, stays hot while its building is still being shot, expires thirty seconds after that stops,
+and is dropped immediately if the building ceases to exist. Ties break on health and then actor
+id, so every unit reaches the same answer without coordinating. Immobile defences and unarmed
+units are excluded. `defence.guard-damaged-building` marks the walk.
+
+### And the repair band was narrower than the fight
+
+Repair was added last round and it ran — 12 orders. It was not enough, and the ordering was not
+why. The yard reached the branch that asks on roughly **900 evaluations** (591 `Continue`, 330
+`Hold`) and found a qualifying building on **24** of them. The opportunity was never the
+constraint; the 50% band was. A building under fire crosses half health and dies in the same few
+seconds, so a rule that only opens there opens after the race is lost.
+
+`RepairBelowHealthPercent` is now **75**. Widening it is nearly free because OpenRA charges repair
+by the hit point rather than by the order — topping a 1,500-credit refinery up from three-quarters
+costs roughly a twentieth of replacing it. What it buys is the case that actually decides a siege:
+chip damage between salvos and between air passes, where a fixed repair rate wins. The ordering is
+untouched, so income keeps the absolute priority every rule above it assumes.
+
+## The fleet learned it five times and never remembered it once
+
+16:9 at Hard, lost after 958 seconds: **23.017 credits a second earned** against a reference of 50
+and a prior median of 32.014, mean army 446 against a reference of 6,000, and no enemy building
+destroyed. Every failing check and every flagged regression is downstream of the first number —
+`armyValueIntegral` scored 0.0743 because there was never any money to buy an army with.
+
+The fleet was not stuck in the engine's search bubble, and it was not commuting: `MaxHaulCells`
+held, and the withdrawal bound from the previous round held too, taking withdrawal duty from 43%
+down to about a third. It was being shot, in the same place, over and over.
+
+`units.csv` names the place. Five of the seven harvesters built died inside a **four-cell circle** —
+(25,28), (28,29), (24,28), (25,28) and (28,30) — one after another between 538s and 676s, and
+`summary.lossClusters` carries them in a single 67-unit, 20,850-credit cluster running from 188s to
+949s. Across 2,041 harvester-alive seconds the side earned 10.8 credits per harvester-second
+against the 16.3 a working harvester manages, spent 28 withdrawal episodes and **663** follow-up
+`escape-en-route` and `sheltering` evaluations against only 42 `assign-field`, and left **335 of
+958 seconds with no live harvester at all**.
+
+### The memory was already there. It just died with the unit that had it
+
+`HarvesterWatchdog.ContestedX` records the field a harvester was shot off, and
+`SelectFieldAvoiding` already steers the next assignment away from it. Both live in the mode
+instance, and there is **one mode instance per unit**, reset in `OnEnter`.
+
+So the knowledge was destroyed at exactly the moment it was proven. The replacement harvester
+started with a blank sheet, asked `Score` which patch was best, and `Score` is a pure statement of
+what a patch holds — it cannot see the rocket infantry standing on it. The only thing that could
+see them was dead. Each harvester paid full price for the same lesson and took it to the grave.
+
+[`ContestedGround`](Modes/ContestedGround.cs) promotes the report to the side, keyed on the owning
+player like `BaseDamageWatch` and `EnemySightings`. One slot, most recent wins, mirroring the
+single slot it shadows: the question is "where did this side last get shot off", and a list would
+only let a stale entry outvote a live one. Nothing in it is map knowledge — every coordinate is a
+place one of this side's own harvesters was standing when it was shot.
+
+* A harvester with no report of its own, or an older one, **adopts** the side's
+  (`economy.harvester-inherits-contested`). A replacement now avoids the ambush on its first
+  assignment instead of discovering it.
+* A harvester already working a field the fleet was driven off **leaves before it is shot**,
+  through the eviction branch rule 2 already had.
+* First-hand reports win over inherited ones, and only first-hand reports are published, so a
+  seeded value can never be echoed back and refresh itself into a permanent exclusion.
+
+### Ground has to come back
+
+`ContestedMemoryTicks` is three work cycles. The floor is one — a field given up for less time than
+the delivery it displaces is not given up at all. The ceiling exists because tiberium is finite and
+raiders are not stationary, and ground abandoned forever is ground handed over one patch at a time.
+
+The number only governs how long after the shooting *stops*, because any harvester driven off the
+same field refreshes the entry: a patch still being camped stays excluded for as long as the
+camping lasts, and one whose attacker has left is retried three cycles later. And the avoidance it
+feeds is a soft preference with a fallback — it may refuse ground, but it can never refuse the last
+field on the map.
 
 ## Start your own
 

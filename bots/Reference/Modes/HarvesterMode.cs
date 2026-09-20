@@ -32,10 +32,12 @@ namespace AutoCnC.Reference.Modes
 		readonly HarvesterTuning tuning = HarvesterTuning.Default;
 		readonly List<FieldOption> fields = [];
 		HarvesterWatchdog watchdog = HarvesterWatchdog.Start;
+		int publishedContestedTick = int.MinValue;
 
 		public override void OnEnter(Actor self, ModeContext ctx)
 		{
 			watchdog = HarvesterWatchdog.Start;
+			publishedContestedTick = int.MinValue;
 			fields.Clear();
 		}
 
@@ -111,8 +113,54 @@ namespace AutoCnC.Reference.Modes
 			}
 
 			// --- Decide ------------------------------------------------------------
+
+			// Adopt the side's report of where it was last driven off, unless this harvester has
+			// a more recent one of its own. Seeding before the rule runs is what lets a harvester
+			// avoid an ambush it has not personally been shot by — the whole point of
+			// ContestedGround, which explains why a per-unit memory of this was worthless.
+			var hasReport = ContestedGround.TryGet(
+				self.Owner,
+				ctx.WorldTick,
+				tuning.ContestedMemoryTicks,
+				out var fleetX,
+				out var fleetY,
+				out var fleetTick);
+
+			if (hasReport && fleetTick > watchdog.ContestedTick)
+				watchdog = watchdog with
+				{
+					ContestedX = fleetX,
+					ContestedY = fleetY,
+					ContestedFromFleet = true,
+					ContestedTick = fleetTick
+				};
+			else if (!hasReport && watchdog.ContestedFromFleet)
+				// An inherited exclusion expires with the report that created it. A harvester
+				// that was never shot on that ground has no reason of its own to go on avoiding
+				// it, and ground that is never offered back is ground given away.
+				watchdog = watchdog with
+				{
+					ContestedX = int.MinValue,
+					ContestedY = int.MinValue,
+					ContestedFromFleet = false,
+					ContestedTick = int.MinValue
+				};
+
 			var outcome = HarvesterLogic.Decide(state, watchdog, tuning, fields);
 			watchdog = outcome.Watchdog;
+
+			// Publish only first-hand reports. A seeded value already carries the fleet's tick
+			// and is flagged as inherited, so it can never be echoed back and refresh itself
+			// into a permanent exclusion.
+			if (watchdog.HasContested
+				&& !watchdog.ContestedFromFleet
+				&& watchdog.ContestedTick > publishedContestedTick)
+			{
+				publishedContestedTick = watchdog.ContestedTick;
+				ContestedGround.Record(
+					self.Owner, watchdog.ContestedX, watchdog.ContestedY, watchdog.ContestedTick);
+			}
+
 			return outcome.Decision;
 		}
 
@@ -123,6 +171,7 @@ namespace AutoCnC.Reference.Modes
 				&& attacker.IsInWorld
 				&& !attacker.IsDead
 				&& self.Owner.RelationshipWith(attacker.Owner) == PlayerRelationship.Enemy)
+			{
 				HarvesterThreats.Record(
 					self.Owner,
 					self.ActorID,
@@ -131,6 +180,21 @@ namespace AutoCnC.Reference.Modes
 					attacker.Location.Y,
 					ModeContext.Classify(attacker),
 					ctx.WorldTick);
+
+				// ...and tell the rest of the side, not only this harvester's own escort. The
+				// four bodies the escort rung buys are not the screen; the screen is every idle
+				// rifleman standing on the base centre with nothing to shoot. See
+				// BaseGuardLogic.WorthGuarding.
+				EarnerUnderFire.Record(
+					self.Owner,
+					self.ActorID,
+					self.Info.Name,
+					self.Location.X,
+					self.Location.Y,
+					ctx.HealthPercent,
+					ctx.WorldTick,
+					GuardPostTuning.Default);
+			}
 
 			// Being shot is the one thing worth reacting to sooner than the next scheduled
 			// evaluation, both for this harvester's flee rule and for its escorts.

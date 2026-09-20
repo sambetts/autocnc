@@ -88,14 +88,33 @@ namespace AutoCnC.Reference.Modes
 		{
 			// --- Sense -------------------------------------------------------------
 			var objective = ctx.ResolveActor(objectiveId);
-			if (objective == null)
+
+			// Objective destroyed or never chosen: pick the next one. Deliberately sticky, so
+			// the force commits instead of re-evaluating every tick and drifting between
+			// buildings.
+			//
+			// Stickiness is suspended for exactly one case: an objective this unit has not yet
+			// put a mark on and is not yet close enough to. Nothing is invested in it, so there
+			// is nothing to lose by joining whatever the rest of the push has already damaged —
+			// and everything to gain, since on 16:9 this army spread 378,000 damage across an
+			// enemy base and destroyed one building. A unit already in range of an untouched
+			// objective is about to damage it, so it commits; and once its objective is damaged
+			// the scan stops entirely. Those two bounds are what keep the search off the hot
+			// path for a unit that is actually fighting.
+			var joiningDamaged = false;
+			if (objective == null || Uncommitted(ctx, objective))
 			{
-				// Objective destroyed or never chosen: pick the next one. Deliberately sticky, so
-				// the force commits instead of re-evaluating every tick and drifting between
-				// buildings.
 				var visible = ctx.SenseStructures(ObjectiveSearchRadius);
-				objectiveId = AttackBaseLogic.SelectObjective(visible) ?? 0;
-				objective = ctx.ResolveActor(objectiveId);
+				var chosen = AttackBaseLogic.SelectObjective(visible, objectiveId) ?? 0;
+				if (chosen != 0 && chosen != objectiveId)
+				{
+					var swappedFrom = objective;
+					objectiveId = chosen;
+					objective = ctx.ResolveActor(objectiveId);
+					joiningDamaged = swappedFrom != null
+						&& objective != null
+						&& ctx.Snapshot(objective).HealthPercent < 100;
+				}
 			}
 
 			// Anything we can see is worth remembering for the units that cannot. Recording every
@@ -147,8 +166,36 @@ namespace AutoCnC.Reference.Modes
 			if (outcome.Decision.HasValue)
 				return outcome.Decision.Value;
 
-			return AttackBaseLogic.Decide(state, tuning, objective != null ? ApproachOrders.None : Approach(self, ctx), role);
+			var decision = AttackBaseLogic.Decide(
+				state, tuning, objective != null ? ApproachOrders.None : Approach(self, ctx), role);
+
+			// Say so when this evaluation abandoned an untouched building to join one the rest
+			// of the push has already hurt. The order is the same either way; what changes is
+			// that the trace can prove the force converged rather than merely arrived.
+			if (joiningDamaged
+				&& decision.TargetActorId == objectiveId
+				&& (decision.Action == UnitAction.Attack || decision.Action == UnitAction.AdvanceToObjective))
+				decision = decision with
+				{
+					Reason = $"{decision.Reason}: joining the structure this side has already damaged",
+					ReasonId = "assault.join-damaged-objective"
+				};
+
+			return decision;
 		}
+		/// <summary>
+		/// Whether this unit has nothing invested in the objective it holds, so swapping to a
+		/// better one costs it nothing.
+		/// </summary>
+		/// <remarks>
+		/// Two conditions and they are both about sunk cost. A structure nobody has scratched is
+		/// worth no more than any other, and a unit still walking towards one has not spent a
+		/// shot on it. Either being false makes the objective sticky again, which is what stops
+		/// a force in contact from drifting between buildings.
+		/// </remarks>
+		static bool Uncommitted(ModeContext ctx, Actor objective) =>
+			ctx.Snapshot(objective).HealthPercent >= 100
+			&& ctx.DistanceTo(objective) > ctx.WeaponRangeUnits;
 
 		/// <summary>
 		/// What this unit can see about the muster: how far their base is, which leg it should

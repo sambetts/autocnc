@@ -33,7 +33,10 @@ namespace AutoCnC.Reference.Logic
 		int DistanceScaleUnits,
 		int SwitchScoreMultiplier,
 		int FieldMatchCells,
-		int MaxHaulCells)
+		int MaxHaulCells,
+		int WorkCycleTicks,
+		int ContestedMemoryTicks,
+		int CriticalHealthPercent)
 	{
 		public static HarvesterTuning Default { get; } = new(
 			PanicRadiusUnits: 7 * 1024,
@@ -137,7 +140,78 @@ namespace AutoCnC.Reference.Logic
 			// three, which began at 61. Thirty-six is the smallest number above the first and the
 			// largest below the second. It is a preference rather than a rule — see
 			// SelectFieldExcept — so a map with nothing inside it behaves exactly as before.
-			MaxHaulCells: 36);
+			MaxHaulCells: 36,
+
+			// How long one cut-and-deliver cycle takes, and therefore the longest a withdrawal
+			// can be worth making. It bounds the escape rule from both ends: a withdrawal ends
+			// when it has run this long, and the next one may not begin until the harvester has
+			// had this long to earn.
+			//
+			// The escape rule was a one-way ratchet without it, and on 16:9 that ratchet was the
+			// match. Entry needs health below FleeBelowHealthPercent, this bot has no path that
+			// repairs a harvester, and ThreatClearTicks releases the shelter after twelve
+			// seconds — so a harvester that has once been shot below 70% flees again on every
+			// contact for the rest of its life. Against a side camped in the base that is every
+			// thirteen seconds: 72 withdrawal episodes across six harvesters, mean 17 seconds,
+			// 1,244 of 2,918 harvester-alive seconds — 43% — spent withdrawing, and each one
+			// cancels the harvest activity so the partial load is thrown away too. Income went
+			// flat at 15,400 credits from 540s to 720s with five harvesters and three refineries
+			// alive; every production mode then returned "no change" 502 times from 520s to the
+			// end because there was no cash, the army never came back from 2,600, and the bot
+			// destroyed no enemy building. Sixty-three of the roughly sixty-nine entries carried
+			// the unrepaired-escape reason, some at 1% health, and all six harvesters died
+			// anyway — three of them together in a map corner they had fled to. The withdrawal
+			// bought no survival at all and cost nearly half the economy.
+			//
+			// Sixty seconds, at 25 ticks a second. The measured cycle over 300-840s was about
+			// 65 seconds at 10.8 credits a second per harvester, so this is just inside one
+			// delivery: the window expires with a load cut and on its way back rather than
+			// halfway through cutting, and a harvester that keeps working for it earns roughly
+			// 650 credits — more than half its own replacement cost — per cycle it would
+			// otherwise have spent parked.
+			WorkCycleTicks: 1500,
+
+			// How long the side keeps avoiding a field one of its harvesters was driven off.
+			// See Modes.ContestedGround for why that report has to belong to the side rather
+			// than to the harvester that filed it.
+			//
+			// Three work cycles. The floor is one: a field given up for less time than the
+			// delivery it displaces is not given up at all. The ceiling is that ground must come
+			// back, because tiberium is finite and raiders move on — and on 16:9 the fleet's own
+			// mean lifetime was 291 seconds, so anything much longer than this simply reads as
+			// "forever" to every harvester that will ever see it.
+			//
+			// The number governs only how long after the shooting *stops*, because any harvester
+			// driven off the same field refreshes the entry. A patch that is still being camped
+			// therefore stays excluded for as long as the camping lasts, whatever this says, and
+			// one whose attacker has left is retried three cycles later.
+			ContestedMemoryTicks: 3 * 1500,
+
+			// The health at which the earning window stops being a licence to keep working and
+			// becomes a licence to die.
+			//
+			// WorkCycleTicks above bounds the withdrawal so a scratched harvester cannot ratchet
+			// itself into permanent flight. It was written without a floor, and on the next 16:9
+			// that omission was the match. The window suppresses the withdrawal outright, so it
+			// suppressed it at *any* health: all 527 "working through contact inside its earning
+			// window" evaluations happened below FleeBelowHealthPercent, 264 of them below 40%,
+			// 130 below 20% and 61 below 10%. One harvester logged that reason at 10%, 9%, 8%
+			// and 2% in its last two seconds and died at (60,47), 43 cells from its refinery.
+			// All ten harvesters died, every one of them to enemy e3; 407 of 1,233 seconds had
+			// no harvester alive at all; lifetime earnings froze at 31,055 from 840s; and income
+			// came in at 25.2 credits a second against a prior median of 32.0.
+			//
+			// Fifty percent, from the arithmetic of the thing that was killing them. An e3
+			// rocket does 2,500 base at 140% against a harvester's Heavy armour — 3,500 a hit,
+			// one every 2.2 seconds, out to 6 cells. A harvester moves 1.76 cells a game second
+			// against the rocket soldier's 0.95, so it *can* break contact: it needs about four
+			// seconds to clear the launcher's 7.2-cell flight ceiling, which is two more rockets.
+			// The observed fleet took roughly 26,600 damage each from e3 before dying, so a
+			// rocket is about 13% of a harvester and the run costs about a quarter of one. Half
+			// its hit points is therefore the smallest margin that still covers the escape, and
+			// it leaves the window a 20-point band — 70% down to 50% — which is the scratch it
+			// was built to work through.
+			CriticalHealthPercent: 50);
 	}
 
 	/// <summary>One tiberium field, as the harvester rule needs to see it.</summary>
@@ -201,7 +275,11 @@ namespace AutoCnC.Reference.Logic
 		bool PreemptiveWithdrawalSpent,
 		int LastDangerTick,
 		int RetreatX,
-		int RetreatY)
+		int RetreatY,
+		int WithdrawalStartTick,
+		int ProtectedWorkUntilTick,
+		bool ContestedFromFleet,
+		int ContestedTick)
 	{
 		/// <summary>
 		/// A harvester we have never seen. The impossible cell counts as "moved", and the scan
@@ -212,7 +290,8 @@ namespace AutoCnC.Reference.Logic
 			new(
 				int.MinValue, int.MinValue, 0, 0, 0, int.MinValue, int.MaxValue,
 				int.MinValue, int.MinValue, int.MinValue, int.MinValue,
-				false, false, 0, int.MinValue, int.MinValue);
+				false, false, 0, int.MinValue, int.MinValue,
+				int.MinValue, int.MinValue, false, int.MinValue);
 
 		/// <summary>Whether this harvester has been told which field to work.</summary>
 		public bool HasAssignment => AssignedX != int.MinValue;
@@ -220,8 +299,35 @@ namespace AutoCnC.Reference.Logic
 		/// <summary>Whether this harvester has been shot off a field and remembers which one.</summary>
 		public bool HasContested => ContestedX != int.MinValue;
 
+		/// <summary>
+		/// Whether the contested field came from the side's shared report rather than from this
+		/// harvester being shot off it.
+		/// </summary>
+		/// <remarks>
+		/// Only the trace cares about the difference — the avoidance is identical either way.
+		/// It is recorded so a <c>reason-id:</c> check can tell an assignment that inherited the
+		/// fleet's lesson from one that learned it the expensive way. See
+		/// <see cref="Modes.ContestedGround"/>.
+		/// </remarks>
+		public bool InheritedContested => ContestedFromFleet && HasContested;
+
 		/// <summary>Whether this harvester has a stable tactical escape destination.</summary>
 		public bool HasRetreatTarget => RetreatX != int.MinValue;
+
+		/// <summary>
+		/// How long the withdrawal in progress has been running, or zero when none is.
+		/// </summary>
+		public int WithdrawalTicks(int worldTick) =>
+			WithdrawalStartTick == int.MinValue || worldTick < WithdrawalStartTick
+				? 0
+				: worldTick - WithdrawalStartTick;
+
+		/// <summary>
+		/// Whether this harvester is inside the earning window a finished withdrawal guarantees
+		/// it, during which another withdrawal may not begin.
+		/// </summary>
+		public bool WithinProtectedWork(int worldTick) =>
+			ProtectedWorkUntilTick != int.MinValue && worldTick < ProtectedWorkUntilTick;
 	}
 
 	/// <summary>A decision plus the watchdog state that produced it.</summary>
@@ -267,6 +373,37 @@ namespace AutoCnC.Reference.Logic
 	/// with 40,800 of army and 36 buildings still standing. So the field is now reviewed every
 	/// <c>ReviewEvaluations</c>, and a harvester moves when the ground it is on has stopped
 	/// being the best ground it can reach.
+	/// </para>
+	/// <para>
+	/// <b>And every retreat is bounded in time, in both directions.</b> Fleeing is worth paying
+	/// for only while it is buying something. Entry needs health below
+	/// <see cref="HarvesterTuning.FleeBelowHealthPercent"/>, nothing in this bot repairs a
+	/// harvester, and the shelter releases a few seconds after the last contact — so on its own
+	/// the rule is a ratchet: one bad minute puts a harvester permanently below the threshold and
+	/// it then flees from every contact for the rest of its life. On 16:9 that was 43% of all
+	/// harvester-alive time spent withdrawing, with every partial load thrown away, and it saved
+	/// none of the six harvesters. So a withdrawal now ends once it has run longer than the
+	/// delivery it displaced, and finishing one guarantees the harvester a full cycle of earning
+	/// before another may begin. <see cref="HarvesterTuning.WorkCycleTicks"/> is both bounds.
+	/// </para>
+	/// <para>
+	/// <b>And that bound needed a floor, because a window that suppresses the withdrawal
+	/// suppresses it at any health.</b> On the next 16:9 every one of the 527 "working through
+	/// contact inside its earning window" evaluations happened below the flee threshold, 130 of
+	/// them below 20% health and 61 below 10%; one harvester logged the reason at 2% in the
+	/// second before it died. All ten harvesters were lost, 407 of 1,233 seconds had no
+	/// harvester alive, and income came in at 25.2 credits a second against a prior median of
+	/// 32.0. So <see cref="HarvesterTuning.CriticalHealthPercent"/> now voids the window: below
+	/// it the harvester is the asset at risk rather than the load, and it leaves.
+	/// </para>
+	/// <para>
+	/// <b>And it leaves towards its own base, not along the threat vector.</b> The escape rule
+	/// picks a cell opposite the threat, which points away from home exactly when the raid is
+	/// between the harvester and its refinery — so the same match pushed one harvester from
+	/// (66,44) to (73,44) while it was being shot, and three died 40 to 56 cells from home
+	/// within seventeen seconds of each other. Home is the only ground this side owns guns on:
+	/// six guard towers killed 141 units there for 3,600 credits. See
+	/// <c>economy.harvester-runs-home</c>.
 	/// </para>
 	/// This type has ZERO OpenRA dependencies by design and is integer-only, so it is both
 	/// lockstep-safe and readable without booting the engine.
@@ -341,6 +478,18 @@ namespace AutoCnC.Reference.Logic
 
 			var awayFromRefinery = state.HasRefinery && state.DistanceToRefineryUnits > tuning.SafeDistanceUnits;
 			var lowHealthDanger = state.HealthPercent < tuning.FleeBelowHealthPercent;
+
+			// Past this point the harvester is not being scratched, it is being destroyed, and
+			// nothing below may hold it in place or send it further out. See
+			// HarvesterTuning.CriticalHealthPercent.
+			var criticallyDamaged = state.HealthPercent < tuning.CriticalHealthPercent;
+
+			// Where "away" is, once running away stops being the point. Home is the only ground
+			// this side keeps guns on, and the base centre stands in for a refinery that has
+			// already been destroyed — a harvester with nowhere to unload still has somewhere to
+			// survive.
+			var homeX = state.HasRefinery ? state.RefineryX : state.BaseX;
+			var homeY = state.HasRefinery ? state.RefineryY : state.BaseY;
 			var completedBoundedWithdrawal = false;
 
 			// 1. Leave concentrated immediate threats before sustained fire makes escape
@@ -371,22 +520,74 @@ namespace AutoCnC.Reference.Logic
 			//    attacker can still hit it at the endpoint, the next leg starts from the
 			//    harvester instead of the refinery; re-anchoring each leg to the refinery can
 			//    reverse the escape as the threat centre moves.
+			//
+			//    And the whole rule is bounded in time at both ends, because without that it is
+			//    a one-way ratchet. Entry needs health below FleeBelowHealthPercent, nothing
+			//    here repairs a harvester, and the shelter releases twelve seconds after the
+			//    last contact — so once a harvester has been shot below the threshold it flees
+			//    again on the next contact, forever. See HarvesterTuning.WorkCycleTicks for what
+			//    that cost on 16:9. A withdrawal therefore ends once it has run longer than the
+			//    delivery it is displacing, and the harvester that finishes one is guaranteed a
+			//    cycle of earning before another may begin.
+			var withdrawalOutlastedItsValue =
+				seen.Retreating && seen.WithdrawalTicks(state.WorldTick) >= tuning.WorkCycleTicks;
+
 			if (seen.Retreating)
 			{
 				var reachedTarget = seen.HasRetreatTarget
 					&& IsNear(state.X, state.Y, seen.RetreatX, seen.RetreatY);
-				var retreatStillActive = state.DangerNearby
-					|| state.WorldTick - seen.LastDangerTick <= tuning.ThreatClearTicks;
+				var retreatStillActive = !withdrawalOutlastedItsValue
+					&& (state.DangerNearby
+						|| state.WorldTick - seen.LastDangerTick <= tuning.ThreatClearTicks);
+
+				// A withdrawal chosen when the harvester could still afford one can degrade into
+				// a death on the way out. Re-aim it home the moment it does, rather than
+				// finishing a leg picked for a healthier harvester: on 16:9 the outward legs and
+				// the three harvesters that died 40 to 56 cells from home were the same units.
+				if (criticallyDamaged
+					&& retreatStillActive
+					&& (seen.RetreatX != homeX || seen.RetreatY != homeY))
+					return new HarvesterOutcome(
+						UnitDecision.MoveTo(homeX, homeY,
+							$"harvester re-aiming its withdrawal home at {state.HealthPercent}%",
+							"economy.harvester-runs-home"),
+						seen with
+						{
+							StillEvaluations = 0,
+							EvaluationsSinceScan = tuning.ReviewEvaluations,
+							RetreatX = homeX,
+							RetreatY = homeY
+						});
+
 				if (seen.HasRetreatTarget && !reachedTarget && retreatStillActive)
 					return new HarvesterOutcome(
-						UnitDecision.MoveTo(seen.RetreatX, seen.RetreatY, "harvester bounded threat escape en route"),
+						UnitDecision.MoveTo(seen.RetreatX, seen.RetreatY, "harvester bounded threat escape en route",
+							"economy.harvester-escape-en-route"),
 						seen with { StillEvaluations = 0, EvaluationsSinceScan = tuning.ReviewEvaluations });
 
-				if (reachedTarget && state.DangerNearby)
+				if (reachedTarget && state.DangerNearby && !withdrawalOutlastedItsValue)
 				{
+					// Extending the escape along the threat vector is how a harvester ends up
+					// deeper in enemy ground than it started. One went (66,44) then (73,44) on
+					// consecutive extensions and died at (68,49). Once it is this badly hurt the
+					// extension runs home instead.
+					if (criticallyDamaged)
+						return new HarvesterOutcome(
+							UnitDecision.MoveTo(homeX, homeY,
+								$"harvester running home under its own guns at {state.HealthPercent}%",
+								"economy.harvester-runs-home"),
+							seen with
+							{
+								StillEvaluations = 0,
+								EvaluationsSinceScan = tuning.ReviewEvaluations,
+								RetreatX = homeX,
+								RetreatY = homeY
+							});
+
 					var escape = ThreatEscapeCell(state, tuning, preserveRefineryAccess: false);
 					return new HarvesterOutcome(
-						UnitDecision.MoveTo(escape.X, escape.Y, "harvester extending escape while immediate threat remains"),
+						UnitDecision.MoveTo(escape.X, escape.Y, "harvester extending escape while immediate threat remains",
+							"economy.harvester-escape-extended"),
 						seen with
 						{
 							StillEvaluations = 0,
@@ -398,12 +599,23 @@ namespace AutoCnC.Reference.Logic
 
 				if (reachedTarget && retreatStillActive)
 					return new HarvesterOutcome(
-						UnitDecision.Hold("harvester sheltering after immediate threat clears"),
+						UnitDecision.Hold("harvester sheltering after immediate threat clears",
+							"economy.harvester-sheltering"),
 						seen with { StillEvaluations = 0, EvaluationsSinceScan = tuning.ReviewEvaluations });
 
+				// Whichever way it ended, the withdrawal is over: resume on ground away from
+				// whatever drove this harvester off, and start the earning window that keeps the
+				// next contact from cancelling the delivery a few seconds later.
 				completedBoundedWithdrawal =
-					reachedTarget && seen.PreemptiveWithdrawalSpent;
-				seen = seen with { Retreating = false, RetreatX = int.MinValue, RetreatY = int.MinValue };
+					withdrawalOutlastedItsValue || (reachedTarget && seen.PreemptiveWithdrawalSpent);
+				seen = seen with
+				{
+					Retreating = false,
+					RetreatX = int.MinValue,
+					RetreatY = int.MinValue,
+					WithdrawalStartTick = int.MinValue,
+					ProtectedWorkUntilTick = state.WorldTick + tuning.WorkCycleTicks
+				};
 			}
 
 			// The escape re-arms only after repair; the clear radius created by the retreat
@@ -420,17 +632,67 @@ namespace AutoCnC.Reference.Logic
 				&& !lowHealthDanger
 				&& state.NearbyThreatCount >= tuning.PreemptiveThreatCount
 				&& !seen.PreemptiveWithdrawalSpent;
-			if (state.DangerNearby
-				&& (lowHealthDanger || damageConfirmedDanger))
+			var wantsWithdrawal = state.DangerNearby && (lowHealthDanger || damageConfirmedDanger);
+
+			// The earning window buys one more delivery from a scratched harvester. It may not
+			// buy a delivery from a dying one: see HarvesterTuning.CriticalHealthPercent for the
+			// 527 evaluations that returned Continue below the flee threshold, 61 of them below
+			// 10% health. Voiding it is named separately from the run home so the trace can tell
+			// "the window let go" from "there was no window to let go of".
+			var earningWindowOpen = seen.WithinProtectedWork(state.WorldTick);
+			var abandonedEarningWindow = earningWindowOpen && criticallyDamaged;
+			var withinProtectedWork = earningWindowOpen && !criticallyDamaged;
+			var workedThroughContact = wantsWithdrawal && withinProtectedWork;
+			if (wantsWithdrawal && !withinProtectedWork)
 			{
 				var drivenOff = seen.HasAssignment
-					? seen with { ContestedX = seen.AssignedX, ContestedY = seen.AssignedY }
+					? seen with
+					{
+						ContestedX = seen.AssignedX,
+						ContestedY = seen.AssignedY,
+						ContestedFromFleet = false,
+						ContestedTick = state.WorldTick
+					}
 					: seen;
 				drivenOff = drivenOff with
 				{
 					PreemptiveWithdrawalSpent =
-						drivenOff.PreemptiveWithdrawalSpent || damageConfirmedDanger
+						drivenOff.PreemptiveWithdrawalSpent || damageConfirmedDanger,
+					WithdrawalStartTick = state.WorldTick
 				};
+
+				// A harvester below CriticalHealthPercent runs home, and that outranks the
+				// threat vector. The vector rule answers "where is the enemy not", which is the
+				// right question for a harvester that is merely being crowded and the wrong one
+				// for a harvester that is being killed: it points away from the base precisely
+				// when the raid sits between the harvester and its refinery. On 16:9 the
+				// unrepaired-escape branch walked one harvester from (66,44) to (73,44) while it
+				// was under fire and it died at (68,49); three died 40 to 56 cells from home
+				// inside seventeen seconds. Home is where this side's guns are — six guard
+				// towers killed 141 units for 3,600 credits, 64% of everything the bot destroyed
+				// all match — and it is also where the dock is, so the load in the bin still
+				// gets paid for.
+				//
+				// This is reached before the HasThreatCenter branch on purpose: that branch
+				// fires on the same condition DangerNearby does, so nothing below it has ever
+				// run while a threat was in range.
+				if (criticallyDamaged)
+					return new HarvesterOutcome(
+						UnitDecision.MoveTo(homeX, homeY,
+							abandonedEarningWindow
+								? $"harvester giving up its earning window and running home at {state.HealthPercent}%"
+								: $"harvester running home under its own guns at {state.HealthPercent}%",
+							abandonedEarningWindow
+								? "economy.harvester-window-void"
+								: "economy.harvester-runs-home"),
+						drivenOff with
+						{
+							StillEvaluations = 0,
+							EvaluationsSinceScan = tuning.ReviewEvaluations,
+							Retreating = true,
+							RetreatX = homeX,
+							RetreatY = homeY
+						});
 
 				if (state.HasThreatCenter)
 				{
@@ -455,7 +717,8 @@ namespace AutoCnC.Reference.Logic
 						UnitDecision.MoveTo(
 							escape.X,
 							escape.Y,
-							reason),
+							reason,
+							"economy.harvester-withdrawal"),
 						drivenOff with
 						{
 							StillEvaluations = 0,
@@ -483,14 +746,16 @@ namespace AutoCnC.Reference.Logic
 						UnitDecision.MoveTo(state.RefineryX, state.RefineryY,
 							damageConfirmedDanger
 								? $"damage-confirmed harvester withdrawal to refinery at {state.HealthPercent}%"
-								: $"hurt at {state.HealthPercent}%, running to the refinery"),
+								: $"hurt at {state.HealthPercent}%, running to the refinery",
+							"economy.harvester-withdrawal"),
 						retreating);
 
 				// Do not fall through to the due field scan while the same raid is still in
 				// range. That immediately replaces the flee order with Harvest and sends a
 				// critically damaged harvester back out before its escorts clear the threat.
 				return new HarvesterOutcome(
-					UnitDecision.MoveTo(state.RefineryX, state.RefineryY, "damaged harvester sheltering at refinery"),
+					UnitDecision.MoveTo(state.RefineryX, state.RefineryY, "damaged harvester sheltering at refinery",
+						"economy.harvester-withdrawal"),
 					retreating);
 			}
 
@@ -507,10 +772,16 @@ namespace AutoCnC.Reference.Logic
 				var contested = FindContested(fields, seen, tuning);
 				var best = SelectFieldAvoiding(fields, -1, contested, tuning);
 				var f = fields[best];
+				var resumed = withdrawalOutlastedItsValue
+					? $"{activeStallPrefix}harvester withdrawal outlasted the delivery it displaced, resuming on {f.CellCount} cells ({f.TotalDensity} left) {f.DistanceUnits / 1024} cells out"
+					: $"{activeStallPrefix}harvester resumed economy after bounded threat withdrawal, harvesting {f.CellCount} cells ({f.TotalDensity} left) {f.DistanceUnits / 1024} cells out";
 				return Assign(
 					f,
 					ordered,
-					$"{activeStallPrefix}harvester resumed economy after bounded threat withdrawal, harvesting {f.CellCount} cells ({f.TotalDensity} left) {f.DistanceUnits / 1024} cells out");
+					resumed,
+					reasonId: withdrawalOutlastedItsValue
+						? "economy.harvester-withdrawal-timed-out"
+						: "economy.harvester-resumed");
 			}
 
 			// 2. Choosing the ground. Only on a review, because this is the half that costs a scan.
@@ -526,7 +797,20 @@ namespace AutoCnC.Reference.Logic
 				{
 					var f = fields[best];
 					var why = watchdog.HasAssignment ? "field worked out" : "picking a field";
-					return Assign(f, ordered, $"{activeStallPrefix}{why}, harvesting {f.CellCount} cells ({f.TotalDensity} left) {f.DistanceUnits / 1024} cells out");
+
+					// A harvester that has never been shot at still knows where this side was
+					// last shot, because ContestedGround told it. Naming that separately is the
+					// only way the trace can distinguish a lesson inherited from one paid for.
+					var inherited = seen.InheritedContested && contested >= 0 && best != contested;
+					var avoided = inherited
+						? ", avoiding the field the fleet was last driven off"
+						: string.Empty;
+
+					return Assign(f, ordered,
+						$"{activeStallPrefix}{why}{avoided}, harvesting {f.CellCount} cells ({f.TotalDensity} left) {f.DistanceUnits / 1024} cells out",
+						reasonId: inherited
+							? "economy.harvester-inherits-contested"
+							: "economy.harvester-assign-field");
 				}
 
 				// Still there, but no longer worth staying on: something within reach holds enough
@@ -545,19 +829,25 @@ namespace AutoCnC.Reference.Logic
 				// because the exclusion travels with the harvester — after the switch the
 				// contested field is still excluded, so the pair can never swap back.
 				var evicted = assigned == contested;
+				var evictedByFleet = evicted && seen.InheritedContested;
 				var assignedScore = Score(fields[assigned], tuning);
 				var bestScore = Score(fields[best], tuning);
 				var comingHome = TooFarToHaul(fields[assigned], tuning) && !TooFarToHaul(fields[best], tuning);
 				if (best != assigned && (evicted || comingHome || bestScore >= (long)assignedScore * tuning.SwitchScoreMultiplier))
 				{
 					var f = fields[best];
-					var why = evicted
-						? $"driven off that field, working {f.TotalDensity} left {f.DistanceUnits / 1024} cells out instead"
-						: comingHome
-							? $"field {fields[assigned].DistanceUnits / 1024} cells out is past the {tuning.MaxHaulCells} cell haul limit, coming back to {f.TotalDensity} left {f.DistanceUnits / 1024} cells out"
-							: $"field thinning to {fields[assigned].TotalDensity}, crossing to {f.TotalDensity} left {f.DistanceUnits / 1024} cells out";
+					var why = evictedByFleet
+						? $"the fleet was driven off this field, leaving before we are, working {f.TotalDensity} left {f.DistanceUnits / 1024} cells out instead"
+						: evicted
+							? $"driven off that field, working {f.TotalDensity} left {f.DistanceUnits / 1024} cells out instead"
+							: comingHome
+								? $"field {fields[assigned].DistanceUnits / 1024} cells out is past the {tuning.MaxHaulCells} cell haul limit, coming back to {f.TotalDensity} left {f.DistanceUnits / 1024} cells out"
+								: $"field thinning to {fields[assigned].TotalDensity}, crossing to {f.TotalDensity} left {f.DistanceUnits / 1024} cells out";
 
-					return Assign(f, ordered, $"{activeStallPrefix}{why}");
+					return Assign(f, ordered, $"{activeStallPrefix}{why}",
+						reasonId: evictedByFleet
+							? "economy.harvester-inherits-contested"
+							: "economy.harvester-assign-field");
 				}
 
 				if (stalled)
@@ -594,8 +884,20 @@ namespace AutoCnC.Reference.Logic
 			}
 
 			// 4. Still earning, or not yet provably stopped: leave it alone.
+			//
+			//    Contact inside the earning window lands here rather than cancelling the load,
+			//    and is named so the trace can tell "the harvester kept working through fire"
+			//    from "nothing happened".
 			if (!stalled)
-				return new HarvesterOutcome(UnitDecision.Continue, seen);
+				return new HarvesterOutcome(
+					workedThroughContact
+						? UnitDecision.Continue with
+						{
+							Reason = $"harvester working through contact inside its earning window at {state.HealthPercent}%",
+							ReasonId = "economy.harvester-work-window"
+						}
+						: UnitDecision.Continue,
+					seen);
 
 			// 5. Stopped, and naming a field has not helped — either nothing was scanned this
 			//    evaluation, or nothing is known anywhere, or re-cutting the assigned field
@@ -635,8 +937,8 @@ namespace AutoCnC.Reference.Logic
 		/// to the far side. The <em>identity</em> we keep is the centre, because that is what
 		/// stays put between scans while the nearest cell walks in as the edge is cut away.
 		/// </remarks>
-		static HarvesterOutcome Assign(in FieldOption field, in HarvesterWatchdog seen, string reason, int probeIndex = 0) =>
-			new(UnitDecision.Harvest(field.NearestX, field.NearestY, reason),
+		static HarvesterOutcome Assign(in FieldOption field, in HarvesterWatchdog seen, string reason, int probeIndex = 0, string reasonId = "economy.harvester-assign-field") =>
+			new(UnitDecision.Harvest(field.NearestX, field.NearestY, reason, reasonId),
 				seen with { StillEvaluations = 0, ProbeIndex = probeIndex, AssignedX = field.CenterX, AssignedY = field.CenterY });
 
 		/// <summary>Picks a threat-opposite escape cell without abandoning a live refinery.</summary>

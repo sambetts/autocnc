@@ -79,18 +79,18 @@ namespace AutoCnC.Reference.Logic
 			//    inside weapon range, and the existing role scorer gives each weapon its job.
 			if (state.DistanceToObjectiveUnits <= state.WeaponRangeUnits)
 			{
+				var damaged = ObjectiveIsDamaged(state);
 				var screen = SelectObjectiveScreen(state, tuning, role);
-				if (screen.HasValue)
-				{
-					if (ObjectiveIsDamaged(state))
-						return UnitDecision.Attack(
-							state.ObjectiveActorId,
-							"finishing damaged objective despite immediate screen");
+				if (screen.HasValue && !damaged)
+					return UnitDecision.Attack(screen.Value.ActorId,
+						"screening immediate threat before objective",
+						"assault.screen-before-objective");
 
-					return UnitDecision.Attack(screen.Value.ActorId, "screening immediate threat before objective");
-				}
-
-				return UnitDecision.Attack(state.ObjectiveActorId, "objective in range");
+				return damaged
+					? UnitDecision.Attack(state.ObjectiveActorId,
+						"finishing damaged objective rather than starting another",
+						"assault.finish-damaged-objective")
+					: UnitDecision.Attack(state.ObjectiveActorId, "objective in range", "assault.objective-in-range");
 			}
 
 			// 3. Opportunistic fire only — strictly targets already inside weapon range, so
@@ -356,6 +356,57 @@ namespace AutoCnC.Reference.Logic
 		/// defence outrank storage, so a push degrades the enemy's ability to respond first.
 		/// </summary>
 		public static uint? SelectObjective(IReadOnlyList<ThreatSnapshot> candidates)
+			=> SelectObjective(candidates, 0);
+
+		/// <summary>
+		/// How much of a structure's missing health is worth, per percent, when choosing what to
+		/// shoot.
+		/// </summary>
+		/// <remarks>
+		/// Sized to dominate the class spread deliberately. The gap between a production
+		/// structure and a static defence is 2,000 points, so at 40 a point a building that has
+		/// already lost half of itself outranks a pristine one of any class — which is the whole
+		/// intent. A push that spreads its fire finishes nothing.
+		/// </remarks>
+		public const int DamageWeight = 40;
+
+		/// <summary>What the objective this unit already committed to is worth keeping.</summary>
+		/// <remarks>
+		/// Below one quarter of <see cref="DamageWeight"/>'s range on purpose: enough that a
+		/// unit does not swap between two untouched buildings of equal class and distance, and
+		/// never enough to keep it on an untouched one while the rest of the push is 40% of the
+		/// way through something else.
+		/// </remarks>
+		public const int CommitmentBonus = 900;
+
+		/// <summary>
+		/// Ranks candidate structures, preferring whatever this side has already hurt.
+		/// </summary>
+		/// <remarks>
+		/// <b>A push that picks the nearest building finishes none of them.</b> On 16:9 this
+		/// bot's army dealt <b>378,000 damage to enemy structures and destroyed one</b>: 227,720
+		/// spread over construction yards, 55,920 over refineries that need about 72,000 each,
+		/// 49,850 over guard towers and 28,875 over an advanced tower, all of which the other
+		/// side simply repaired. <c>buildingsDestroyed</c> scored <b>0.125 of 1.0</b>, the worst
+		/// component in the fight, and this method was why: it scored class and proximity and
+		/// ignored <c>HealthPercent</c> entirely, so every unit independently walked to whatever
+		/// was closest to it and a mixed force arriving from one direction still split its fire
+		/// across a whole base.
+		/// <para>
+		/// Damage is the one signal that makes an uncoordinated force converge, because it is
+		/// left behind by the force itself: the moment anybody scratches a refinery, every unit
+		/// that can see it agrees that is where the fire goes, and it keeps agreeing more
+		/// strongly as the building gets closer to falling. Nothing here needs a leader, a
+		/// shared target list or map knowledge — only <c>ThreatSnapshot.HealthPercent</c>, which
+		/// is visible to anything that can see the structure at all.
+		/// </para>
+		/// <para>
+		/// <paramref name="currentObjectiveId"/> is the objective this unit already holds, and 0
+		/// when it holds none. It only breaks ties among equally untouched candidates; see
+		/// <see cref="CommitmentBonus"/>.
+		/// </para>
+		/// </remarks>
+		public static uint? SelectObjective(IReadOnlyList<ThreatSnapshot> candidates, uint currentObjectiveId)
 		{
 			if (candidates == null || candidates.Count == 0)
 				return null;
@@ -379,6 +430,12 @@ namespace AutoCnC.Reference.Logic
 					ThreatKind.Defence => 1_000,
 					_ => 0,
 				};
+
+				// Finish what the push has started. See the remarks above.
+				score += (100 - Clamp(c.HealthPercent, 0, 100)) * DamageWeight;
+
+				if (c.ActorId == currentObjectiveId)
+					score += CommitmentBonus;
 
 				score += (64 * 1024 - Clamp(c.DistanceUnits, 0, 64 * 1024)) / 1024;
 

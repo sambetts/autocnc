@@ -61,5 +61,22 @@ namespace AutoCnC.Reference
 		/// </remarks>
 		public override DoctrineDecision Reassess(in BattleState state) =>
 			ReferenceBotLogic.Decide(state);
+
+		/// <summary>
+		/// Which queue gets first call on the shared bank, and how much of it.
+		/// </summary>
+		/// <remarks>
+		/// The only cross-queue arbitration this bot has that works before a vehicle factory
+		/// stands. Everything else it owns is either within one queue's rung order or gated on a
+		/// harvester being buildable, and the opening — where four queues spend one bank and the
+		/// cheapest item always wins — is neither. See
+		/// <see cref="ReferenceBotLogic.OpeningBankQueue"/> for why the reservation is owned by
+		/// the construction yard's economy queue, and
+		/// <see cref="Logic.IncomeFirstLogic.ReserveOpeningBank"/> for the fight that paid for
+		/// it.
+		/// </remarks>
+		public override ProductionBudget ReserveProductionBudget(in BattleState state) =>
+			IncomeFirstLogic.ReserveOpeningBank(
+				state, ReferenceBotLogic.OpeningBankQueue, OpeningBankTuning.Default);
 	}
 }

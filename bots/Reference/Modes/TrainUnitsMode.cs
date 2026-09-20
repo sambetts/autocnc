@@ -51,6 +51,54 @@ namespace AutoCnC.Reference.Modes
 		/// </summary>
 		readonly IncomeFirstTuning income = IncomeFirstTuning.Default;
 
+		/// <summary>
+		/// How many of a role may die, without its floor ever being met, before that floor stops
+		/// pinning this queue. See <see cref="AttritionLogic"/>.
+		/// </summary>
+		readonly AttritionTuning attrition = AttritionTuning.Default;
+
+		/// <summary>
+		/// This building's tally of light screen vehicles bought and lost since the screen floor
+		/// was last actually standing.
+		/// </summary>
+		/// <remarks>
+		/// Per building rather than per player, and reset on entry, so a factory built after the
+		/// last one was overrun is entitled to find out for itself whether a screen survives now.
+		/// </remarks>
+		FloorAttrition screenAttrition;
+
+		/// <summary>
+		/// This building's tally of line armour bought and lost since the armour floor was last
+		/// actually standing.
+		/// </summary>
+		/// <remarks>
+		/// The armour floor has the screen floor's failure shape and it cost 16:9 the match.
+		/// <c>DefenceTrain</c> asks for a pair of faction-equivalent tanks, softened by
+		/// <see cref="ArmyBalanceLogic"/> to one survivor. The five <c>mtnk</c> built lived
+		/// <b>69, 16, 24, 78 and 37 seconds</b>, so nothing was standing at nearly every
+		/// evaluation, zero is below one, and the rung was the Vehicle queue's first unmet step
+		/// for the rest of the game — with <see cref="ReferencePlans.SiegeVehicles"/> and the
+		/// harvester saturation rung sitting directly underneath it.
+		/// <para>
+		/// Three of those tanks were already dead by <b>617s</b> without the floor ever standing,
+		/// which is where this tally would have released it. Instead the queue bought two more
+		/// for 1,800 credits that killed 260 between them, and asked for a harvester <b>zero</b>
+		/// times between 377s and 960s. Eight of its forty-six orders were harvesters all match;
+		/// ten were tanks bought explicitly because the armour anchor came first. The fleet
+		/// peaked at seven against the opponent's thirteen, every one of them died between 939s
+		/// and 1,099s with a single 48-second replacement, and lifetime earnings finished at
+		/// <b>49,835 against the opponent's 135,845</b>. The side out-traded that opponent 1.44
+		/// to 1 on value and 232 kills to 130 losses, and lost anyway, because it was out-earned
+		/// nearly three to one.
+		/// </para>
+		/// <para>
+		/// Per building and reset on entry, for the same reason the screen tally is: a factory
+		/// built after the last one was overrun is entitled to find out for itself whether
+		/// armour survives now. The floor returns intact the moment the pair actually stands.
+		/// </para>
+		/// </remarks>
+		FloorAttrition armourAttrition;
+
 		// The scaled plan, kept until the refinery count changes. Sizing it is a cheap walk, but
 		// it allocates, and this ticks on every barracks and every factory the side owns.
 		IReadOnlyList<ProductionStep> scaledFrom;
@@ -62,6 +110,8 @@ namespace AutoCnC.Reference.Modes
 			scaledFrom = null;
 			scaled = null;
 			scaledRefineries = -1;
+			screenAttrition = default;
+			armourAttrition = default;
 		}
 
 		public override UnitDecision OnTick(Actor self, ModeContext ctx)
@@ -90,6 +140,23 @@ namespace AutoCnC.Reference.Modes
 			var buildings = ctx.OwnedBuildingCounts();
 			var refineries = ExpansionLogic.Standing(buildings, ReferencePlans.Refineries);
 			var factories = ExpansionLogic.Standing(buildings, ReferencePlans.VehicleFactories);
+
+			// What the base has standing that shoots on its own, and whether the yard could sell
+			// it another one. Both are read here, beside the other building counts, because the
+			// gun is bought from a queue this actor does not own and the only thing this actor
+			// controls about it is whether it spends the credits first. See
+			// IncomeFirstLogic.EmplacementBeforeBodies.
+			var emplacements = ExpansionLogic.Standing(buildings, ReferencePlans.GuardTowers);
+			var emplacementBuildable = false;
+			var supportBuildable = ctx.BuildableItems(ReferencePlans.SupportQueue);
+			if (supportBuildable != null)
+				foreach (var actorType in supportBuildable)
+					if (ArmyMixLogic.Names(ReferencePlans.GuardTowers, actorType))
+					{
+						emplacementBuildable = true;
+						break;
+					}
+
 			if (refineries != scaledRefineries || !ReferenceEquals(plan, scaledFrom))
 			{
 				scaledFrom = plan;
@@ -100,6 +167,34 @@ namespace AutoCnC.Reference.Modes
 			}
 
 			plan = scaled;
+
+			// A release band is a function of the floor's *target*, and that is the hole 16:9
+			// went through. ArmyBalanceLogic softens a screen of two to one survivor, but bggy
+			// lived a mean of 14.2 seconds across that match and about eight for the fourteen
+			// built after 580s, so zero were standing at nearly every evaluation, zero is below
+			// one, and the rung was the first unmet step of the Vehicle queue for the rest of
+			// the game: 20 of the 24 orders issued after the Defence switch were bggy, for 667
+			// credits a kill, while the armour and siege rungs beneath it fired once each.
+			//
+			// So the floor is also asked how many it has already bought and buried. Measured on
+			// the standing count rather than on orders issued, because an order repeats every
+			// evaluation until the host suppresses it and a drop in what is standing is one unit
+			// dying however often it is seen. Read from the doctrine's own plan, before any
+			// release has rewritten the target, so the tally is cleared only by genuinely
+			// meeting the floor the doctrine asked for.
+			var screenFloorRung = ExpansionLogic.FirstRungNaming(plan, ReferencePlans.ScreenVehicles);
+			var screenFloor = screenFloorRung >= 0 ? plan[screenFloorRung].DesiredCount : 0;
+			var standingScreenVehicles = ExpansionLogic.Standing(owned, ReferencePlans.ScreenVehicles);
+			screenAttrition.Observe(standingScreenVehicles, screenFloor);
+
+			// The line-armour floor is read the same way and for the same reason. Read from the
+			// doctrine's own plan before any release has rewritten the target, so a tally is
+			// cleared only by the pair the doctrine actually asked for standing together.
+			var armourFloorRung = ExpansionLogic.FirstRungNaming(
+				plan, ReferencePlans.DefenceArmourVehicles);
+			var armourFloor = armourFloorRung >= 0 ? plan[armourFloorRung].DesiredCount : 0;
+			var standingArmour = ExpansionLogic.Standing(owned, ReferencePlans.DefenceArmourVehicles);
+			armourAttrition.Observe(standingArmour, armourFloor);
 
 			// Sizing the rungs is a function of the refineries standing, so it is cached above.
 			// Whether a rung is *blocking* is a function of how many harvesters are alive right
@@ -179,6 +274,17 @@ namespace AutoCnC.Reference.Modes
 				: new FloorRelease(plan, 0, 0);
 			plan = defenceVehicleRelease.Plan;
 
+			// ...and that softening is not enough on its own when the screen is being farmed.
+			// Write the floor off entirely once it has cost three vehicles without once
+			// standing, so the durable rungs below it — armour, reach and income — are reachable
+			// while the base is under the pressure that is eating the screen. Kept before the
+			// screen's own cash reservation and recovery exemption below, so the whole apparatus
+			// that protects this floor stands down together with the floor itself.
+			var preAttrition = plan;
+			var screenAttritionRelease = AttritionLogic.Release(
+				plan, owned, ReferencePlans.ScreenVehicles, screenAttrition.Losses, attrition);
+			plan = screenAttritionRelease.Plan;
+
 			// One faction-equivalent tank gives the defensive screen a durable line unit without
 			// turning a dying two-tank floor into the next permanent Vehicle-queue blocker.
 			// Zero remains strict; one survivor releases the second slot to siege and income.
@@ -187,6 +293,20 @@ namespace AutoCnC.Reference.Modes
 					plan, owned, ReferencePlans.DefenceArmourVehicles, defenceScreenBalance)
 				: new FloorRelease(plan, 0, 0);
 			plan = defenceArmourRelease.Plan;
+
+			// ...and that softening is no more sufficient here than it was for the screen. A
+			// release band is computed from the floor's target, so it cannot reach a role that
+			// is being destroyed on sight: the tanks that died in 16, 24 and 37 seconds left
+			// zero standing, zero is below one, and the rung stayed the Vehicle queue's first
+			// unmet step with reach and income directly beneath it. Write the floor off once it
+			// has cost three tanks without once standing, so those rungs are reachable during
+			// exactly the pressure that is eating the armour. Kept out of the doctrine test on
+			// purpose: a role being farmed is being farmed whatever the side is doing, and the
+			// endless armour rung is never written off because AttritionLogic skips it.
+			var preArmourAttrition = plan;
+			var armourAttritionRelease = AttritionLogic.Release(
+				plan, owned, ReferencePlans.DefenceArmourVehicles, armourAttrition.Losses, attrition);
+			plan = armourAttritionRelease.Plan;
 
 			// The endless infantry rung is what every leftover credit buys for the rest of the
 			// match, and which body that should be is a property of the enemy rather than of the
@@ -219,7 +339,6 @@ namespace AutoCnC.Reference.Modes
 				? plan[screenVehicleRung].DesiredCount
 				: 0;
 			var screenVehicleShortBelow = ArmyBalanceLogic.ReleaseAt(screenVehicleTarget, balance);
-			var standingScreenVehicles = ExpansionLogic.Standing(owned, ReferencePlans.ScreenVehicles);
 			var screenVehicleBuildable = false;
 			foreach (var actorType in ctx.BuildableItems("Vehicle"))
 				if (ArmyMixLogic.Names(ReferencePlans.ScreenVehicles, actorType))
@@ -285,8 +404,7 @@ namespace AutoCnC.Reference.Modes
 			if (!ctx.OwnsQueue(choice.Queue))
 				return UnitDecision.Continue;
 
-			var standingDefenceArmour =
-				ExpansionLogic.Standing(owned, ReferencePlans.DefenceArmourVehicles);
+			var standingDefenceArmour = standingArmour;
 			var defenceArmourAnchorChoice =
 				ctx.Doctrine == ReferenceDoctrines.Defence
 					&& standingDefenceArmour < ArmyBalanceLogic.ReleaseAt(
@@ -298,6 +416,18 @@ namespace AutoCnC.Reference.Modes
 					&& ArmyMixLogic.Names(ReferencePlans.HarvesterUnits, choice.ActorType);
 			if (fundingCriticalRefinery && !harvesterRecoveryChoice)
 				return UnitDecision.Hold("unit queue yielding shared cash to active critical refinery");
+
+			// The base's first gun, bought before the next body, because nothing else this side
+			// can buy trades anywhere near as well and because every retreat rule it owns
+			// assumes that gun is there. Income still outranks it: a tower paid for with the
+			// last credits of a dying economy is the last thing the side ever buys.
+			if (IncomeFirstLogic.EmplacementBeforeBodies(
+					emplacements, emplacementBuildable, ctx.Cash, income)
+				&& !harvesterRecoveryChoice)
+				return UnitDecision.Hold(
+					$"unit queue yielding {ctx.Cash} shared cash to the base's first emplacement, "
+						+ $"which costs {income.EmplacementPrice} and has nothing standing",
+					"defence.emplacement-before-bodies");
 
 			// --- Act ---------------------------------------------------------------
 			var standingRifles = ExpansionLogic.Standing(owned, ReferencePlans.RifleBodies);
@@ -404,7 +534,92 @@ namespace AutoCnC.Reference.Modes
 				&& ArmyMixLogic.Names(ReferencePlans.HarvesterUnits, choice.ActorType))
 				why += ", reserving construction cash before harvester queue visibility";
 
-			return UnitDecision.Produce(choice.Queue, choice.ActorType, why);
+			// Claimed only when the write-off is what changed the answer, not merely when it was
+			// active. A Vehicle queue buying a tank looks identical whether the screen floor was
+			// written off or the screen simply happened to be standing, so the plan that still
+			// carries the floor is re-asked and the branch is claimed only if that plan would
+			// have bought another screen vehicle. The baseline carries the same funding caps and
+			// the same recovery exemption, both re-derived against the unreleased floor, so the
+			// comparison stays to one variable — otherwise a difference those caused would be
+			// reported as this rule's doing. One extra walk of thirteen steps, and only while the
+			// write-off is on.
+			var screenFloorWrittenOff = false;
+			if (screenAttritionRelease.Released
+				&& !ArmyMixLogic.Names(ReferencePlans.ScreenVehicles, choice.ActorType))
+			{
+				var floorRung = ExpansionLogic.FirstRungNaming(preAttrition, ReferencePlans.ScreenVehicles);
+				var floorShortBelow = ArmyBalanceLogic.ReleaseAt(
+					floorRung >= 0 ? preAttrition[floorRung].DesiredCount : 0, balance);
+
+				var baseline = IncomeFirstLogic.HoldForPriority(
+					preAttrition, ReferencePlans.InfantryQueue, ctx.Cash,
+					standingScreenVehicles, floorShortBelow,
+					screenVehicleBuildable, income.ScreenVehiclePrice, income).Plan;
+				baseline = IncomeFirstLogic.Hold(
+					baseline, ReferencePlans.InfantryQueue, ctx.Cash,
+					standingHarvesters, shortBelow, factories > 0, income).Plan;
+
+				var baselinePreservesScreen =
+					standingHarvesters > 0
+					&& standingHarvesters < shortBelow
+					&& standingScreenVehicles < floorShortBelow
+					&& screenVehicleBuildable;
+				if (!baselinePreservesScreen)
+					baseline = IncomeFirstLogic.PrioritizeRecovery(
+						baseline, ReferencePlans.HarvesterUnits,
+						standingHarvesters, shortBelow, factories > 0);
+
+				var before = UnitProductionLogic.ChooseNext(state, baseline);
+				screenFloorWrittenOff = before.IsValid
+					&& ArmyMixLogic.Names(ReferencePlans.ScreenVehicles, before.ActorType);
+			}
+
+			if (screenFloorWrittenOff)
+				why += $", light screen floor written off after {screenAttritionRelease.Losses} lost without {screenAttritionRelease.Target} standing";
+
+			// The armour floor claims its branch on the same terms, for the same reason: a
+			// Vehicle queue buying artillery or a harvester looks identical whether the tank
+			// floor stood down or the pair simply happened to be standing. Re-ask the plan that
+			// still carries the floor, carrying every rewrite that runs after it, and claim the
+			// branch only when that plan would have bought another tank.
+			var armourFloorWrittenOff = false;
+			if (armourAttritionRelease.Released
+				&& !ArmyMixLogic.Names(ReferencePlans.DefenceArmourVehicles, choice.ActorType))
+			{
+				var baseline = preArmourAttrition;
+				if (retargeted)
+					baseline = ArmyMixLogic.Retarget(
+						baseline, ReferencePlans.InfantryQueue,
+						ReferencePlans.RifleBodies, ReferencePlans.RocketBodies);
+
+				baseline = IncomeFirstLogic.HoldForPriority(
+					baseline, ReferencePlans.InfantryQueue, ctx.Cash,
+					standingScreenVehicles, screenVehicleShortBelow,
+					screenVehicleBuildable, income.ScreenVehiclePrice, income).Plan;
+				baseline = IncomeFirstLogic.Hold(
+					baseline, ReferencePlans.InfantryQueue, ctx.Cash,
+					standingHarvesters, shortBelow, factories > 0, income).Plan;
+				if (!preserveFirstScreen)
+					baseline = IncomeFirstLogic.PrioritizeRecovery(
+						baseline, ReferencePlans.HarvesterUnits,
+						standingHarvesters, shortBelow, factories > 0);
+
+				var before = UnitProductionLogic.ChooseNext(state, baseline);
+				armourFloorWrittenOff = before.IsValid
+					&& ArmyMixLogic.Names(ReferencePlans.DefenceArmourVehicles, before.ActorType);
+			}
+
+			if (armourFloorWrittenOff)
+				why += $", armour floor written off after {armourAttritionRelease.Losses} lost without {armourAttritionRelease.Target} standing";
+
+			if (screenFloorWrittenOff)
+				return UnitDecision.Produce(
+					choice.Queue, choice.ActorType, why, "production.screen-floor-written-off");
+
+			return armourFloorWrittenOff
+				? UnitDecision.Produce(
+					choice.Queue, choice.ActorType, why, "production.armour-floor-written-off")
+				: UnitDecision.Produce(choice.Queue, choice.ActorType, why);
 		}
 	}
 }

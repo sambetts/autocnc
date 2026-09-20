@@ -74,6 +74,19 @@ namespace AutoCnC.Reference.Logic
 
 	public static class ReferenceBotLogic
 	{
+		/// <summary>
+		/// The queue that buys income without a factory, and so the one the opening bank is
+		/// reserved for.
+		/// </summary>
+		/// <remarks>
+		/// <c>proc</c> is a <c>Building</c>-queue item that needs only <c>anypower</c>, costs
+		/// 1,500 and ships a harvester with it, so it is the only earner a side with no vehicle
+		/// factory can buy at all. Named here rather than in the reservation rule because it is
+		/// the same string <see cref="Modes.BuildBaseMode"/> drives, and the two must not drift:
+		/// a reservation naming a queue nothing produces from reserves cash for nobody.
+		/// </remarks>
+		public const string OpeningBankQueue = "Building";
+
 		public static DoctrineDecision Decide(in BattleState s) => Decide(s, ReferenceBotTuning.Default);
 
 		public static DoctrineDecision Decide(in BattleState s, ReferenceBotTuning t)

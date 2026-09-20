@@ -19,7 +19,7 @@ namespace AutoCnC.Evidence.Tests
 	public sealed class PairedBenchmarkEvaluationTests
 	{
 		[Test]
-		public void WinsRankAheadOfPairedFitness()
+		public void AWinAlongsideABroadFitnessRegressionIsRefused()
 		{
 			var result = Result(
 				("Won", "Lost", 0.10, 0.90),
@@ -28,11 +28,26 @@ namespace AutoCnC.Evidence.Tests
 
 			var evaluation = PairedBenchmarkEvaluator.Evaluate(result);
 
-			Assert.That(evaluation.Verdict, Is.EqualTo(PromotionVerdicts.Promote));
+			Assert.That(evaluation.Verdict, Is.EqualTo(PromotionVerdicts.Restore));
 			Assert.That(evaluation.Basis, Is.EqualTo("wins"));
 			Assert.That(evaluation.CandidateWins, Is.EqualTo(2));
 			Assert.That(evaluation.MedianPairedFitnessDelta, Is.LessThan(0),
-				"paired fitness is only the tie-break after wins");
+				"the extra win came with every pair scoring worse, so it is not an improvement");
+		}
+
+		[Test]
+		public void WinsRankAheadOfPairedFitnessWhenNothingRegressed()
+		{
+			var result = Result(
+				("Won", "Lost", 0.90, 0.10),
+				("Won", "Lost", 0.80, 0.20),
+				("Lost", "Won", 0.30, 0.70));
+
+			var evaluation = PairedBenchmarkEvaluator.Evaluate(result);
+
+			Assert.That(evaluation.Verdict, Is.EqualTo(PromotionVerdicts.Promote));
+			Assert.That(evaluation.Basis, Is.EqualTo("wins"));
+			Assert.That(evaluation.CandidateWins, Is.EqualTo(2));
 		}
 
 		[Test]
@@ -80,6 +95,39 @@ namespace AutoCnC.Evidence.Tests
 
 			Assert.That(evaluation.Verdict, Is.EqualTo(PromotionVerdicts.Restore));
 			Assert.That(evaluation.CanPromote, Is.False);
+		}
+
+		[Test]
+		public void APairedFitnessMedianInsideTheDeadbandIsRefused()
+		{
+			var result = Result(
+				("Lost", "Lost", 0.4004, 0.4000),
+				("Lost", "Lost", 0.5005, 0.5000),
+				("Lost", "Lost", 0.3006, 0.3000));
+
+			var evaluation = PairedBenchmarkEvaluator.Evaluate(result);
+
+			Assert.That(evaluation.MedianPairedFitnessDelta, Is.GreaterThan(0));
+			Assert.That(evaluation.Verdict, Is.EqualTo(PromotionVerdicts.Restore),
+				"a median a fraction above zero is what a neutral change produces half the time");
+		}
+
+		[Test]
+		public void AMedianCarriedByOneScenarioIsRefused()
+		{
+			var result = Result(
+				("Lost", "Lost", 0.70, 0.40),
+				("Lost", "Lost", 0.42, 0.40),
+				("Lost", "Lost", 0.39, 0.40),
+				("Lost", "Lost", 0.20, 0.60));
+
+			var evaluation = PairedBenchmarkEvaluator.Evaluate(result);
+
+			Assert.That(evaluation.MedianPairedFitnessDelta, Is.GreaterThan(0.0025));
+			Assert.That(evaluation.CandidateFitnessPairs, Is.EqualTo(2));
+			Assert.That(evaluation.ControlFitnessPairs, Is.EqualTo(2));
+			Assert.That(evaluation.Verdict, Is.EqualTo(PromotionVerdicts.Restore),
+				"a change that harms as many scenarios as it helps has not been shown to generalise");
 		}
 
 		[Test]

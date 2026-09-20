@@ -121,9 +121,19 @@ namespace AutoCnC.Platform.Server
 		/// The engine seeds a server from <c>DateTime.Now.ToBinary()</c> in its constructor, which
 		/// is long before any mod code runs and is why this is done here rather than earlier: by
 		/// the time a client has joined, the seed is still only lobby state, and lobby state is
-		/// exactly what a server trait is allowed to change. The world takes its
-		/// <c>SharedRandom</c> from this value when it is created, so changing it now reaches
-		/// every consumer of match randomness without the pinned engine submodule being touched.
+		/// exactly what a server trait is allowed to change. The world takes both its
+		/// <c>SharedRandom</c> and its <c>LocalRandom</c> from this value when it is created, so
+		/// changing it now reaches every consumer of match randomness — including the built-in
+		/// opponent, whose bot modules draw from <c>LocalRandom</c> rather than
+		/// <c>SharedRandom</c>.
+		/// </para>
+		/// <para>
+		/// That second stream had to be taught to listen. Until the engine derived
+		/// <c>LocalRandom</c> from the lobby seed it was constructed with no seed at all, so every
+		/// module the opponent runs — base building, squad management, harvesting, production —
+		/// was seeded from <c>Environment.TickCount</c>. A pinned seed reproduced the map and the
+		/// factions and nothing the opponent did with them, which is why the same revision on the
+		/// same pinned seed used to score anywhere from 0.108 to 1.000.
 		/// </para>
 		/// <para>
 		/// Synced explicitly rather than relying on the commands below, because a speed-only

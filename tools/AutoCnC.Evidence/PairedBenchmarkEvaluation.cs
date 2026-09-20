@@ -308,6 +308,17 @@ namespace AutoCnC.Evidence
 	{
 		const double DeltaTolerance = 0.00015;
 
+		/// <summary>
+		/// The paired median a candidate must clear to be promoted on fitness alone.
+		/// </summary>
+		/// <remarks>
+		/// <see cref="DeltaTolerance"/> is a floating-point deadband, not evidence. Promoting on
+		/// any median above it made "level on wins" a coin flip: half of all neutral candidates
+		/// produce a median fractionally above zero, so the gate accepted half of everything that
+		/// compiled. A candidate now has to clear a margin that is visible in the reported score.
+		/// </remarks>
+		const double MinimumPromotableDelta = 0.0025;
+
 		static readonly JsonSerializerOptions JsonOptions = new()
 		{
 			WriteIndented = true,
@@ -455,10 +466,29 @@ namespace AutoCnC.Evidence
 
 			if (evaluation.CandidateWins > evaluation.ControlWins)
 			{
-				evaluation.Verdict = PromotionVerdicts.Promote;
 				evaluation.Basis = "wins";
-				evaluation.Reason =
-					$"Candidate won {evaluation.CandidateWins} paired matches; control won {evaluation.ControlWins}.";
+
+				// A win alongside a broad fitness regression is the signature of a change that
+				// got one scenario over the line while making the rest worse. The benchmark is
+				// reproducible, so a negative median here is a measured regression rather than an
+				// unlucky draw, and taking the win would ratchet that regression into the
+				// champion.
+				if (evaluation.MedianPairedFitnessDelta < -DeltaTolerance)
+				{
+					evaluation.Verdict = PromotionVerdicts.Restore;
+					evaluation.Reason =
+						$"Candidate won {evaluation.CandidateWins} paired matches to " +
+						$"{evaluation.ControlWins}, but regressed the rest: median paired fitness " +
+						$"delta was {evaluation.MedianPairedFitnessDelta:+0.####;-0.####;0} over " +
+						$"{evaluation.PairsCompared} pairs.";
+				}
+				else
+				{
+					evaluation.Verdict = PromotionVerdicts.Promote;
+					evaluation.Reason =
+						$"Candidate won {evaluation.CandidateWins} paired matches; control won " +
+						$"{evaluation.ControlWins}, with no paired fitness regression.";
+				}
 			}
 			else if (evaluation.CandidateWins < evaluation.ControlWins)
 			{
@@ -470,12 +500,23 @@ namespace AutoCnC.Evidence
 			else
 			{
 				evaluation.Basis = "paired-fitness";
-				evaluation.Verdict = evaluation.MedianPairedFitnessDelta > DeltaTolerance
+
+				// Two conditions, because one scenario carrying the median is how a change that
+				// only suits a single pinned seed reaches the champion. Breadth is what
+				// distinguishes an improvement from a scenario-specific fit.
+				var clearsMargin = evaluation.MedianPairedFitnessDelta > MinimumPromotableDelta;
+				var improvesMorePairsThanItHarms =
+					evaluation.CandidateFitnessPairs > evaluation.ControlFitnessPairs;
+
+				evaluation.Verdict = clearsMargin && improvesMorePairsThanItHarms
 					? PromotionVerdicts.Promote
 					: PromotionVerdicts.Restore;
+
 				evaluation.Reason =
 					$"Wins were tied at {evaluation.CandidateWins}; median paired fitness delta was " +
-					$"{evaluation.MedianPairedFitnessDelta:+0.####;-0.####;0}.";
+					$"{evaluation.MedianPairedFitnessDelta:+0.####;-0.####;0} against a required " +
+					$"{MinimumPromotableDelta:+0.####}, and the candidate was ahead in " +
+					$"{evaluation.CandidateFitnessPairs} pairs to {evaluation.ControlFitnessPairs}.";
 			}
 
 			return evaluation;

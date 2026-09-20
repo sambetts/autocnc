@@ -74,24 +74,7 @@ namespace AutoCnC.Reference.Logic
 
 	public static class ReferenceBotLogic
 	{
-		const int HarvesterPrice = 1100;
-		const string HarvesterBudgetReasonId = "reference.production.harvester-recovery-budget";
-
 		public static DoctrineDecision Decide(in BattleState s) => Decide(s, ReferenceBotTuning.Default);
-
-		public static ProductionBudget ReserveProductionBudget(in BattleState s)
-		{
-			var desired = ExpansionLogic.DesiredHarvesters(
-				s.Refineries, 0, ExpansionTuning.Default);
-			var release = ArmyBalanceLogic.ReleaseAt(desired, BalanceTuning.Default);
-			return s.Harvesters < release
-				? ProductionBudget.Reserve(
-					HarvesterPrice,
-					"Vehicle",
-					$"reserving harvester recovery cash: {s.Harvesters} of {release} standing",
-					HarvesterBudgetReasonId)
-				: ProductionBudget.None;
-		}
 
 		public static DoctrineDecision Decide(in BattleState s, ReferenceBotTuning t)
 		{

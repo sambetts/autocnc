@@ -396,10 +396,13 @@ pre-agent champion `WorkspaceSnapshot`, independent verification, immutable cand
 assemblies, raw arm benchmark results, and a machine-readable promotion evaluation. Each arm is
 built into its own experiment directory, never the shared `engine/bin/bots` output, and the
 launcher verifies that the artifact paths and hashes differ before either is benchmarked.
-Candidate and control must cover the declared `ExpectedMatchesPerArm` with explicit successful
-rows over the same benchmark, combined batch, repeat, and scenario set. The decision ranks wins
-first and the median paired fitness delta second; check pass percentages never decide promotion.
-Missing, failed, mismatched, or `Undefined` runs produce an `Undefined` decision.
+Candidate and control must cover the declared `ExpectedMatchesPerArm` over the same benchmark,
+combined batch, repeat, and scenario set. The decision ranks wins first, but refuses a win that
+arrives with a negative median paired fitness delta; when wins tie it requires both a margin on
+the median and more improved pairs than harmed ones. Check pass percentages never decide
+promotion. A scenario that failed in either arm is dropped from both and reported as
+`droppedPairs`; mismatched or corrupt runs, and sittings that lose more than a quarter of their
+scenarios, produce an `Undefined` decision.
 
 The champion comes directly from the pre-agent snapshot, so a previously promoted but uncommitted
 workspace can be the next control. The candidate also runs from an immutable snapshot. The live

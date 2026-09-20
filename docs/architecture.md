@@ -426,8 +426,11 @@ Every pass records additive `TrainingRun.Experiment` metadata and keeps the exis
 `improved`; `ContinuousPromotionRunner` invokes `benchmark-bot.ps1`, reads its machine result
 through `AutoCnC.Evidence.PairedBenchmarkEvaluator`, and persists both raw and evaluated artifacts.
 Candidate and control must share benchmark, batch and repeat/scenario configurations. Wins rank
-first and median paired fitness is the tie-break. Failed, incomplete, mismatched, or `Undefined`
-evidence cannot promote and restores through `WorkspaceSnapshot`, never checkout/reset. The
+first, but a win carrying a negative median paired fitness delta restores instead of promoting;
+when wins tie, the median must clear an explicit margin and the candidate must be ahead in more
+pairs than the control. Mismatched or corrupt evidence cannot promote and restores through
+`WorkspaceSnapshot`, never checkout/reset. A scenario that failed in either arm is dropped from
+both, and the verdict is `Undefined` only when fewer than three quarters of the set survives. The
 runner materializes both the pre-agent champion and current candidate as immutable source copies,
 builds them into distinct artifact directories outside `engine/bin/bots`, and invokes the existing
 benchmark script once per prebuilt DLL. It combines those single-arm outputs into one batch only

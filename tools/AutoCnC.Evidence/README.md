@@ -124,18 +124,29 @@ An unresolvable query produces a failed result carrying an `Error`. It never thr
 `PairedBenchmarkEvaluator` reads the machine result written by `benchmark-bot.ps1`, including
 `expectedMatchesPerArm` and one explicit success/failure row for every planned match. It requires
 both arms to fill that count in the same combined batch and cover the same unique repeat/scenario
-configurations, then cross-checks the paired rows against the raw match rows. Symmetric omissions,
-missing arms, duplicate or mismatched scenarios, failed statuses, non-finite fitness, and outcomes
-other than `Won` or `Lost` produce an `Undefined` verdict, which cannot promote.
+configurations, then cross-checks the paired rows against the raw match rows. Missing arms,
+symmetric omissions from the plan, duplicate or mismatched scenarios, and pairs naming another
+benchmark, batch or configuration produce an `Undefined` verdict, which cannot promote.
 Failure rows may serialize null duration and metric values. Those fields are required and checked
 for finiteness only when `succeeded` is true.
 
-Complete evidence is ranked lexicographically: candidate wins against control wins first, then
-the median of per-scenario fitness deltas when wins tie. The result is written as
-`promotion-evaluation.json` with `Promote`, `Restore`, or `Undefined`, the basis, reason, aggregate
-counts, median paired delta, and every validated pair. The launcher composes two immutable
-single-arm runs into this paired batch, preserving their raw batch ids in the training manifest.
-It never uses check pass percentage.
+A scenario that did not complete in both arms — a failed status, an outcome other than `Won` or
+`Lost`, or non-finite metrics — is *dropped from both arms together* and counted in
+`droppedPairs`, so one crashed match no longer discards the rest of the sitting. Wins are counted
+over the surviving pairs, and the verdict is `Undefined` only when fewer than three quarters of
+`expectedMatchesPerArm` survive. Incompleteness is thereby distinguished from inconsistency: the
+first is absent evidence, the second is corrupt evidence and still voids the batch.
+
+Complete evidence is ranked as follows. Candidate wins against control wins first — but a win
+alongside a negative median paired fitness delta restores rather than promotes, because on a
+reproducible benchmark that is a measured regression the extra win does not pay for. When wins
+tie, the candidate must clear `MinimumPromotableDelta` (0.0025) on the median *and* be ahead in
+more pairs than the control; a median a fraction above zero is what a neutral change produces half
+the time, and one scenario carrying the median is how a change fitted to a single seed reaches the
+champion. The result is written as `promotion-evaluation.json` with `Promote`, `Restore`, or
+`Undefined`, the basis, reason, aggregate counts, dropped pairs, median paired delta, and every
+validated pair. The launcher composes two immutable single-arm runs into this paired batch,
+preserving their raw batch ids in the training manifest. It never uses check pass percentage.
 
 ### `history.json` and `trend.json` — `schemaVersion` 1
 

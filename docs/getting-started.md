@@ -588,9 +588,12 @@ For an unattended loop, keep **Execution** on its default **Headless** in Provin
 In **AI training**, check **Repeat: fight > analyze > improve > fight**, then press
 **Start AI training**. It repeats Fight -> candidate edit -> paired benchmark -> promote or restore
 until **Stop operation**, always improving from the battle just fought rather than an older manual
-selection. Wins rank first and median paired fitness is the tie-break; missing, failed, mismatched,
-or `Undefined` evidence restores the pre-agent snapshot and stops instead of treating an
-unmeasured edit as progress. Candidate and champion are copied from the live workspace and its
+selection. Wins rank first, except that a win carrying a broad paired-fitness regression restores
+instead; when wins tie, the candidate must clear a margin on the median *and* improve more
+scenarios than it harms. Mismatched or corrupt evidence restores the pre-agent snapshot and stops
+instead of treating an unmeasured edit as progress. A match that fails is dropped from both arms
+together rather than voiding the sitting, and only a sitting that loses more than a quarter of its
+scenarios is `Undefined`. Candidate and champion are copied from the live workspace and its
 pre-agent snapshot, built into separate immutable directories, and benchmarked from those copied
 assemblies. The default continuous gate is `hard-16-9` at `Hard`; both values are passed explicitly
 and the result must report them back. This also supports an uncommitted champion from a previous promotion. If the live

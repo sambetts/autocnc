@@ -12,10 +12,16 @@ flip, and it was promoting on the result anyway.
 
 Two defects did the damage. The opponent was never pinned, so a "pinned" benchmark scenario was a
 fresh game every time it ran. And the promotion gate accepted any candidate whose median landed a
-fraction above zero, which a neutral candidate does half the time.
+fraction above zero, which a neutral candidate does half the time. A third defect — one failed
+match voiding the whole sitting — threw away another five rounds.
 
-Both are fixed. The benchmark is now reproducible to the last decimal place, and a candidate that
-changes nothing is now refused rather than promoted on a coin flip.
+All three are fixed. The benchmark is now reproducible to the last decimal place, a candidate that
+changes nothing is refused rather than promoted on a coin flip, and a crashed match costs its own
+pair instead of the round.
+
+With that in place the original question is answerable. Measured against the revision the first
+round started from, 23 rounds and 12 promotions bought `+0.0319` median paired fitness and one
+extra win in fourteen — about **6.3%** of the `+0.5044` those promotions claimed between them.
 
 ## What the 23 rounds actually contained
 
@@ -203,6 +209,43 @@ Wins    : candidate=1  control=1
 Before this change that sitting was `Undefined` and the whole round was thrown away. The median of
 `0` across the surviving pairs is the seeding fix showing up again on a second map set.
 
+## Did the 23 rounds help? Now it can be measured
+
+The flat control-arm series was never proof of zero progress — at SD `0.092` per round it could
+not resolve a small cumulative gain either way. With the benchmark reproducible, the question is
+directly answerable: play the current champion against the revision the first round started from
+(`78d1b3c`) over the sixteen pinned scenarios.
+
+```
+Verdict : Promote (wins)
+Pairs   : compared=14  dropped=2  expected=16
+Wins    : champion=1   baseline=0
+MedianD : +0.0319      better=8  worse=6  tied=0
+```
+
+So the 23 rounds did buy something, and it is small. One extra win in fourteen, a median paired
+fitness delta of `+0.0319`, and a breadth of 8 pairs better against 6 worse — barely past a coin
+flip. The champion still loses 13 of 14.
+
+Set that against what was claimed at the time. The twelve promoted rounds reported median paired
+deltas summing to `+0.5044`. Fitness is bounded and these effects need not compose linearly, so
+that sum is an indication rather than an identity — but the order of magnitude is the point:
+
+| | Median paired fitness delta |
+| --- | ---: |
+| Claimed across 12 promotions | +0.5044 |
+| Measured against the baseline | +0.0319 |
+| Share that survived | **6.3%** |
+
+Roughly fifteen sixteenths of the claimed improvement was noise that the gate could not see
+through. That is the honest summary of the 23 rounds: not "nothing worked", but "the loop could
+not tell which sixteenth was real, and promoted the rest anyway".
+
+The two dropped pairs are seed `310002`, where the champion arm hit the 2,400-second stalemate
+cap, and seed `310008`, where the baseline arm's battle process exited `-1`. Both seeds are new in
+`hard-16-9-wide`. Under the old rule this entire comparison would have been `Undefined`, and the
+question would still be unanswered.
+
 ## Benchmark sets
 
 `hard-16-9` is unchanged, so existing results stay comparable. Two sets are added.
@@ -250,9 +293,11 @@ Honest limits, so the next round does not mistake them for solved problems.
 
 - Evidence tests: 107 passed (7 added, 1 rewritten).
 - Core/SDK/Platform tests: 84 passed.
-- Launcher promotion/snapshot/experiment tests: 44 passed.
+- Launcher promotion/snapshot/experiment/benchmark tests: 56 passed.
 - A/A benchmark on `hard-16-9`: 16 matches, 8 paired deltas, all exactly zero.
 - `hard-holdout` run end to end: 11 of 12 matches completed, which is how `blue-mountains` was cut.
 - Four-match failure probe with a control arm: script exited 0, evaluator returned `Restore` on
   3 surviving pairs with 1 dropped.
+- Champion versus pre-training baseline on `hard-16-9-wide`: 32 matches, 14 pairs compared,
+  2 dropped, verdict `Promote` at `+0.0319`.
 - `scripts/benchmarks.json` parses; 5 sets resolve. Mod YAML, Fluent, sequence and map lint passed.

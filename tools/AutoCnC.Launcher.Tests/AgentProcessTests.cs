@@ -11,6 +11,7 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -95,6 +96,76 @@ namespace AutoCnC.Launcher.Tests
 			Assert.That(result.Output, Does.Contain("missing-agent.exe"));
 			Assert.That(result.Output, Does.Not.Contain("exited with code 79"));
 			Assert.That(File.Exists(Path.Combine(directory, "verified.txt")), Is.False);
+		}
+
+		[Test]
+		public async Task AgentDirectoryGrantsRespectSavedConfiguration(
+			[Values("train-bot.ps1", "chat-bot.ps1")] string scriptName,
+			[Values("missing", "current", "previous", "without-session", "custom", "provider")] string configuration)
+		{
+			string[] previous =
+			[
+				"--session-id", "{sessionId}",
+				"--allow-all-tools",
+				"--no-ask-user",
+				"--no-custom-instructions",
+				"--no-remote-export",
+				"--add-dir", "{evidence}"
+			];
+			var arguments = configuration switch
+			{
+				"current" => TrainingAgent.DefaultArguments,
+				"without-session" => previous[2..],
+				"custom" => [.. previous, "--model", "custom-model"],
+				_ => previous
+			};
+			if (configuration != "missing")
+				File.WriteAllText(Path.Combine(directory, "agent-command.json"),
+					JsonSerializer.Serialize(new TrainingAgentConfiguration
+					{
+						Command = configuration == "provider" ? "other-agent" : "copilot",
+						Arguments = [.. arguments],
+						Stdin = "{prompt}"
+					}));
+
+			var repository = RepoLayout.Discover(null, [AppContext.BaseDirectory]);
+			var source = File.ReadAllText(Path.Combine(Path.GetDirectoryName(repository.LaunchScript), scriptName));
+			var start = source.IndexOf("$previousArguments = @(", StringComparison.Ordinal);
+			var end = source.IndexOf(scriptName == "train-bot.ps1" ? "\"=== Agent: " : "$transcript = Join-Path",
+				StringComparison.Ordinal);
+			Assert.That(start, Is.GreaterThanOrEqualTo(0));
+			Assert.That(end, Is.GreaterThan(start));
+
+			// Execute the real configuration code without deriving battle evidence or calling an agent.
+			var script = Path.Combine(directory, "configuration.ps1");
+			File.WriteAllText(script,
+				"$ErrorActionPreference = 'Stop'\n" +
+				"$repoRoot = Join-Path $PSScriptRoot 'checkout with spaces'\n" +
+				"$project = Join-Path $repoRoot 'bots\\Reference\\Bot.csproj'\n" +
+				"$workspace = Split-Path -Parent $project\n" +
+				"$run = $PSScriptRoot; $evidence = Join-Path $run 'evidence'\n" +
+				"$sessionId = 'pinned-session'; $prompt = $Message = 'test prompt'\n" +
+				"$promptFile = Join-Path $run 'prompt.txt'\n" +
+				source[start..end] +
+				"\n@{ arguments = @($agentArguments); input = $agentInput; workspace = $workspace } | " +
+				"ConvertTo-Json | Set-Content -LiteralPath (Join-Path $run 'expanded.json') -Encoding utf8\n");
+
+			var result = await RunWindowsPowerShell(script);
+			Assert.That(result.ExitCode, Is.Zero, result.Output);
+			using var expanded = JsonDocument.Parse(File.ReadAllText(Path.Combine(directory, "expanded.json")));
+			var actual = expanded.RootElement.GetProperty("arguments").EnumerateArray()
+				.Select(value => value.GetString()).ToArray();
+			var expected = (configuration is "custom" or "provider" ? arguments : TrainingAgent.DefaultArguments)
+				.Select(argument => argument.Replace("{repoRoot}", Path.Combine(directory, "checkout with spaces"))
+					.Replace("{evidence}", Path.Combine(directory, "evidence"))
+					.Replace("{sessionId}", "pinned-session")).ToArray();
+			if (scriptName == "chat-bot.ps1" && configuration != "provider")
+				expected = [.. expected, "--silent"];
+
+			Assert.That(actual, Is.EqualTo(expected));
+			Assert.That(expanded.RootElement.GetProperty("input").GetString(), Is.EqualTo("test prompt"));
+			Assert.That(expanded.RootElement.GetProperty("workspace").GetString(),
+				Is.EqualTo(Path.Combine(directory, "checkout with spaces", "bots", "Reference")));
 		}
 
 		[Test]

@@ -84,6 +84,9 @@ namespace AutoCnC.Launcher
 		public const string DefaultBenchmark = "hard-16-9";
 		public const string DefaultDifficulty = "Hard";
 
+		public static void ValidateSelection(RepoLayout repo, string benchmark, string difficulty) =>
+			ValidateBenchmarkSelection(repo, benchmark, difficulty);
+
 		static readonly JsonSerializerOptions BuildJsonOptions = new()
 		{
 			PropertyNameCaseInsensitive = true

@@ -429,12 +429,21 @@ the failed transcript and asks the agent to repair the current changes. **Restor
 iteration** remains the escape hatch back to the pre-agent snapshot.
 
 The agent command is provider-neutral and configurable as one argument per line, plus a standard
-input line. Both support the `{prompt}`, `{promptFile}`, `{project}`, `{workspace}`, `{evidence}`,
-and `{run}` placeholders. The prompt itself goes in on standard input: it inlines the mechanics
+input line. Both support the `{prompt}`, `{promptFile}`, `{project}`, `{workspace}`, `{repoRoot}`,
+`{evidence}`, `{sessionId}`, and `{run}` placeholders. The prompt itself goes in on standard input: it inlines the mechanics
 gospel, so it is already larger than the 32,767 characters Windows allows on a command line, and
-an agent asked to take it in `-p` never starts. The default Copilot command grants file access only
-to the bot workspace and `{evidence}`, keeping the restore snapshot outside the agent's allowed
-paths. The equivalent terminal entry point is `scripts/train-bot.ps1`.
+an agent asked to take it in `-p` never starts. The default Copilot command runs in the bot workspace
+and adds `{evidence}` and `{repoRoot}` (the AutoC&C checkout) as trusted directories. Tool approval
+alone does not grant path access: the checkout grant permits repository-root Git status/diff and
+SDK source inspection without unattended permission failures. It does not enable unrestricted
+filesystem access or add the whole training-run directory containing the restore snapshot.
+
+The prompt still permits edits only inside the selected bot workspace. Directory grants are not
+read-only permissions and do not enforce that editing boundary. Previous built-in settings are
+upgraded on launcher load; training and chat also recognize the former stdin-based defaults in
+saved run configurations. Customized argument lists and other providers are not broadened: add
+`--add-dir` and `{repoRoot}` as separate arguments to a customized Copilot configuration if checkout
+access is wanted. The equivalent terminal entry point is `scripts/train-bot.ps1`.
 
 ---
 

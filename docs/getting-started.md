@@ -635,6 +635,58 @@ And if you touch the mod's YAML or traits, validate the wiring:
 ./scripts/lint.ps1     # constructs every actor in the mod; catches what the compiler can't
 ```
 
+### PowerShell training loops (Windows)
+
+Run the same safeguarded cycle without opening the launcher:
+
+```powershell
+# Three complete fight -> improve/build -> evaluate rounds.
+./scripts/train-loop.ps1 -BattleBot Reference -Map 16-9.oramap -Difficulty Hard -Rounds 3
+
+# Keep going until Ctrl+C (Rounds defaults to 0).
+./scripts/train-loop.ps1 -BattleBot 'C:\bots\MyBot\MyBot.csproj'
+```
+
+Use Windows PowerShell 5.1 or PowerShell 7 on Windows, with the .NET 8 SDK and the usual
+engine/game-content setup. The script builds its console host automatically; `-NoBuild` skips
+only that host build, never the bot's build or verification. An authenticated Copilot CLI must be
+available on PATH unless you supply `-AgentConfiguration`. Training edits the selected bot's
+source and consumes the configured agent's account/quota. Preserve important work before starting.
+
+The defaults are **Headless**, `16-9.oramap`, **Hard**, one opponent and random factions.
+`-ExecutionMode Rendered -GameSpeed maximum` shows the training fights instead.
+`-Faction`, `-BotFaction`, `-Opponents`, `-Seed` and `-MaxGameSeconds` control those fights.
+The promotion gate is independently selected by `-Benchmark hard-16-9 -BenchmarkDifficulty Hard`;
+its fixed scenarios and time limit come from `scripts/benchmarks.json`. Evaluation stays headless.
+Each new round uses a fresh fight and source snapshot. A rejected candidate is restored before
+the next fight; an agent/build failure or invalid evaluation stops the loop with an error.
+
+By default the command uses Copilot CLI and `docs/agent-prompt-template.md`, **not** the launcher's
+saved agent settings or edited prompt. Pass `-AgentConfiguration 'C:\path\agent.json'` for the
+provider-neutral command/arguments/stdin JSON used by `train-bot.ps1`, and `-PromptTemplate` for
+a different prompt template file. Next-prompt proposals remain drafts for manual review.
+
+Every round prints `AUTOCNC_TRAINING_RUN=...`. Evidence, agent transcripts, snapshot and paired
+results are saved beneath `%LOCALAPPDATA%\AutoCnC\TrainingRuns`, where the launcher can find them.
+`-RunsRoot` selects another archive location outside the bot workspace; use that same location
+when restarting. Do not run UI operations on the same bot concurrently: both interfaces share
+the workspace lock.
+
+**Ctrl+C** stops the active worker and preserves its evidence and any unfinished candidate edits.
+Restarting the command resumes a verified candidate's evaluation before fighting again; this
+recovery evaluation does not count toward `-Rounds`. An interrupted improvement that was not
+verified blocks new fights until explicitly restored:
+
+```powershell
+./scripts/train-loop.ps1 -RestoreRun 'C:\path\to\the\saved-run' -WhatIf
+./scripts/train-loop.ps1 -RestoreRun 'C:\path\to\the\saved-run'
+```
+
+Restoration discards **all source edits since that run's snapshot**, including subsequent manual
+edits. It restores source only and exits; the next training command rebuilds it. Recovery also
+works if the candidate deleted its `.csproj`, but refuses while a worker still owns the run.
+Use `Get-Help ./scripts/train-loop.ps1 -Detailed` for parameter help.
+
 ---
 
 ## Troubleshooting

@@ -87,12 +87,21 @@ namespace AutoCnC.Launcher
 			"--no-ask-user",
 			"--no-custom-instructions",
 			"--no-remote-export",
-			"--add-dir", "{evidence}"
+			"--add-dir", "{evidence}",
+			"--add-dir", "{repoRoot}"
 		];
 
 		/// <summary>Copilot defaults from earlier rounds, newest first, upgraded on load.</summary>
 		static readonly string[][] SupersededDefaultArguments =
 		[
+			[
+				"--session-id", "{sessionId}",
+				"--allow-all-tools",
+				"--no-ask-user",
+				"--no-custom-instructions",
+				"--no-remote-export",
+				"--add-dir", "{evidence}"
+			],
 			[
 				"--allow-all-tools",
 				"--no-ask-user",

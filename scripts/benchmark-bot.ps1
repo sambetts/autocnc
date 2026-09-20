@@ -521,19 +521,23 @@ function Build-ArmBot([string]$bot, [string]$arm, [string]$revision) {
         Write-Verbose
     if ($LASTEXITCODE -ne 0) { throw "Could not build the bot at '$resolvedBot'." }
 
-    $project = if ([IO.Path]::GetExtension($resolvedBot) -eq '.csproj') {
-        $resolvedBot
-    } else {
-        (Get-ChildItem -LiteralPath $resolvedBot -Filter *.csproj -ErrorAction SilentlyContinue |
+    $project = if (Test-Path -LiteralPath $resolvedBot -PathType Container) {
+        (Get-ChildItem -LiteralPath $resolvedBot -Filter *.csproj -File -ErrorAction SilentlyContinue |
             Select-Object -First 1).FullName
+    } elseif ([IO.Path]::GetExtension($resolvedBot) -eq '.csproj') {
+        $resolvedBot
     }
 
     if (-not $project) { return $resolvedBot }
 
-    $target = (dotnet msbuild $project -getProperty:TargetPath -nologo `
+    $target = dotnet msbuild $project -getProperty:TargetPath -nologo `
             -p:Configuration=$Configuration -p:AutoCnCPath="$repoRoot" `
-            -p:BattleBotInstallDirectory="$installDirectory").Trim()
+            -p:BattleBotInstallDirectory="$installDirectory"
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($target)) {
+        throw "Could not determine the bot target path for '$project'."
+    }
 
+    $target = $target.Trim()
     if (-not (Test-Path -LiteralPath $target)) { throw "The build reported '$target', which does not exist." }
     return $target
 }

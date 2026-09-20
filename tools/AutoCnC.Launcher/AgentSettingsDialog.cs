@@ -100,7 +100,7 @@ namespace AutoCnC.Launcher
 			grid.Controls.Add(new Label
 			{
 				Text = "Use {prompt} or {promptFile}. Also available: {project}, {workspace}, " +
-					"{evidence}, {sessionId}, and {run}." + Environment.NewLine +
+					"{repoRoot}, {evidence}, {sessionId}, and {run}." + Environment.NewLine +
 					"A rendered prompt is far larger than Windows allows on a command line, so send it in on standard input." +
 					Environment.NewLine +
 					"{sessionId} keeps every round and every chat message in one agent conversation; " +

@@ -127,6 +127,62 @@ namespace AutoCnC.Reference.Logic
 	public static class IncomeFirstLogic
 	{
 		/// <summary>
+		/// Whether <paramref name="item"/> is the base's first emplacement of a defensive role it
+		/// does not yet have at all.
+		/// </summary>
+		/// <remarks>
+		/// The economy holds in <see cref="Modes.BuildBaseMode"/> already exempt power plants,
+		/// because a brownout slows the harvester they are saving for. A base with no emplacement
+		/// loses that harvester outright, which is strictly worse, and the hold that protects it
+		/// is keyed on a condition the <em>opponent</em> controls: harvesters below the release
+		/// band. Harvesters that are being hunted are permanently below it, so the hold stops
+		/// being a deferral and becomes a latch.
+		/// <para>
+		/// On 16:9 that latch froze the construction yard for 208 of its 593 evaluations, the
+		/// yard ordered nothing whatsoever between 129s and 242s, and the first and only tower of
+		/// the match was ordered at 399s and stood at 435s — 40 seconds <em>after</em> the assault
+		/// that ended the match had already begun. Nothing anti-air ever finished, and enemy
+		/// <c>heli</c> killed all four refineries. The one <c>gtwr</c> that did stand was the best
+		/// buy on the field by a wide margin: 600 credits for 1,400 killed, against 675 credits a
+		/// kill for <c>e1</c> and 750 for <c>e3</c>.
+		/// </para>
+		/// <para>
+		/// So the exemption is deliberately the narrowest one that fixes it: <b>one of each
+		/// role, and only while that role has nothing standing</b>. It cannot become a turtle,
+		/// because it stops answering the moment a ground tower and an anti-air tower both
+		/// exist; depth stays behind the hold where the doctrine's plan put it. Both roles are
+		/// candidate lists, so the rule reads the same for either faction, and a faction whose
+		/// anti-air is still behind tech simply builds the ground half and waits.
+		/// </para>
+		/// </remarks>
+		public static bool IsOpeningEmplacement(
+			string item,
+			IReadOnlyDictionary<string, int> owned,
+			IReadOnlyList<string> groundDefence,
+			IReadOnlyList<string> airDefence)
+		{
+			if (string.IsNullOrEmpty(item))
+				return false;
+
+			if (Names(groundDefence, item) && ExpansionLogic.Standing(owned, groundDefence) == 0)
+				return true;
+
+			return Names(airDefence, item) && ExpansionLogic.Standing(owned, airDefence) == 0;
+		}
+
+		static bool Names(IReadOnlyList<string> role, string item)
+		{
+			if (role == null)
+				return false;
+
+			for (var i = 0; i < role.Count; i++)
+				if (string.Equals(role[i], item, StringComparison.OrdinalIgnoreCase))
+					return true;
+
+			return false;
+		}
+
+		/// <summary>
 		/// Whether discretionary queues should yield to a refinery already being built.
 		/// </summary>
 		/// <remarks>

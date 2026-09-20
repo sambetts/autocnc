@@ -10,15 +10,16 @@
     Agent configuration is provider-neutral JSON:
       {
         "command": "copilot",
-        "arguments": ["--allow-all-tools", "--add-dir", "{evidence}"],
+        "arguments": ["--allow-all-tools", "--add-dir", "{evidence}", "--add-dir", "{repoRoot}"],
         "stdin": "{prompt}"
       }
 
-    Supported placeholders are {prompt}, {promptFile}, {project}, {workspace}, {evidence},
+    Supported placeholders are {prompt}, {promptFile}, {project}, {workspace}, {repoRoot}, {evidence},
     {sessionId}, and {run}, in both arguments and stdin. The rendered prompt is larger than Windows
     allows on a command line, so the built-in Copilot configuration sends it in on standard input.
-    The built-in configuration grants access to {evidence}, but not to the launcher's reversible
-    source snapshot stored elsewhere in the run.
+    The built-in configuration grants access to {evidence} and the AutoC&C checkout {repoRoot},
+    without adding the whole run directory containing the launcher's reversible source snapshot.
+    The prompt restricts edits to the bot; directory grants are not read-only permissions.
 
     {sessionId} pins one agent conversation per fight, so this round, any repair that follows it,
     and anything chat-bot.ps1 sends before or after share the same memory.
@@ -407,6 +408,18 @@ $trendReport
     Write-Host '    Appended the derived-evidence section: the saved prompt template predates it.' -ForegroundColor DarkGray
 }
 
+# Tool approval does not bypass Copilot's separate path checks. Trust the checkout for Git and
+# SDK inspection, but keep the prompt's bot-only editing boundary and avoid --allow-all-paths.
+$previousArguments = @(
+    '--allow-all-tools',
+    '--no-ask-user',
+    '--no-custom-instructions',
+    '--no-remote-export',
+    '--add-dir', '{evidence}'
+)
+$sessionArguments = @('--session-id', '{sessionId}') + $previousArguments
+$defaultArguments = $sessionArguments + @('--add-dir', '{repoRoot}')
+
 $configurationPath = if ($AgentConfiguration) {
     (Resolve-Path -LiteralPath $AgentConfiguration).Path
 } else {
@@ -418,14 +431,7 @@ if (Test-Path -LiteralPath $configurationPath) {
 } else {
     $agent = [pscustomobject]@{
         command = 'copilot'
-        arguments = @(
-            '--session-id', '{sessionId}',
-            '--allow-all-tools',
-            '--no-ask-user',
-            '--no-custom-instructions',
-            '--no-remote-export',
-            '--add-dir', '{evidence}'
-        )
+        arguments = $defaultArguments
 
         # Windows caps a command line at 32,767 characters and the rendered prompt is larger than
         # that on its own, so it goes in on standard input instead of in -p.
@@ -437,11 +443,19 @@ if (-not $agent.command) {
     throw 'Agent configuration has no command.'
 }
 
+# Saved runs can still carry the former defaults. Do not broaden a customised configuration.
+if ($agent.command -eq 'copilot' -and
+    ((@($agent.arguments) -join "`n") -ceq ($previousArguments -join "`n") -or
+     (@($agent.arguments) -join "`n") -ceq ($sessionArguments -join "`n"))) {
+    $agent.arguments = $defaultArguments
+}
+
 $replacements = [ordered]@{
     '{prompt}' = $prompt
     '{promptFile}' = $promptFile
     '{project}' = $project
     '{workspace}' = $workspace
+    '{repoRoot}' = $repoRoot
     '{run}' = $run
     '{evidence}' = $evidence
     '{sessionId}' = $sessionId

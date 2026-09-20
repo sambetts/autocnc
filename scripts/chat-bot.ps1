@@ -44,6 +44,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$repoRoot = Split-Path -Parent $PSScriptRoot
 $project = (Resolve-Path -LiteralPath $BattleBot).Path
 $run = (Resolve-Path -LiteralPath $RunDirectory).Path
 
@@ -81,6 +82,18 @@ if (-not $sessionId) {
     $manifest | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $manifestPath -Encoding utf8
 }
 
+# Tool approval does not bypass Copilot's separate path checks. Trust the checkout for Git and
+# SDK inspection, but keep the prompt's bot-only editing boundary and avoid --allow-all-paths.
+$previousArguments = @(
+    '--allow-all-tools',
+    '--no-ask-user',
+    '--no-custom-instructions',
+    '--no-remote-export',
+    '--add-dir', '{evidence}'
+)
+$sessionArguments = @('--session-id', '{sessionId}') + $previousArguments
+$defaultArguments = $sessionArguments + @('--add-dir', '{repoRoot}')
+
 $configurationPath = if ($AgentConfiguration) {
     $AgentConfiguration
 } else {
@@ -95,20 +108,20 @@ if (Test-Path -LiteralPath $configurationPath) {
 } else {
     $agent = [pscustomobject]@{
         command = 'copilot'
-        arguments = @(
-            '--session-id', '{sessionId}',
-            '--allow-all-tools',
-            '--no-ask-user',
-            '--no-custom-instructions',
-            '--no-remote-export',
-            '--add-dir', '{evidence}'
-        )
+        arguments = $defaultArguments
         stdin = '{prompt}'
     }
 }
 
 if (-not $agent.command) {
     throw 'Agent configuration has no command.'
+}
+
+# Saved runs can still carry the former defaults. Do not broaden a customised configuration.
+if ($agent.command -eq 'copilot' -and
+    ((@($agent.arguments) -join "`n") -ceq ($previousArguments -join "`n") -or
+     (@($agent.arguments) -join "`n") -ceq ($sessionArguments -join "`n"))) {
+    $agent.arguments = $defaultArguments
 }
 
 $workspace = Split-Path -Parent $project
@@ -148,6 +161,7 @@ $replacements = [ordered]@{
     '{promptFile}' = if ($MessageFile) { $resolvedMessageFile } else { '' }
     '{project}' = $project
     '{workspace}' = $workspace
+    '{repoRoot}' = $repoRoot
     '{run}' = $run
     '{evidence}' = $evidence
     '{sessionId}' = $sessionId

@@ -464,11 +464,23 @@ namespace AutoCnC.Reference
 		/// 159 losses on badland-ridges, and the Defence doctrine that owned the only AA step was
 		/// not entered until 770s of a 995-second game.
 		/// </para>
+		/// <para>
+		/// <b>The anti-air rung is interleaved rather than stacked behind the ground pair</b>, for
+		/// the reason <see cref="DefenceBuild"/> already writes down one rung lower: a two-tower
+		/// standing floor pins the only step that shoots upwards behind a step that is unmet for
+		/// as long as ground towers keep dying. On 16:9 the base finished with one <c>gtwr</c>
+		/// and no anti-air at all, and enemy <c>heli</c> killed <b>all four</b> refineries — the
+		/// single largest source of damage taken in the match at 232,227 against <c>proc</c>
+		/// alone, plus both airfields and the construction yard. The totals here are unchanged;
+		/// only the order in which a queue is offered them is, so one of each stands before the
+		/// second of either.
+		/// </para>
 		/// </remarks>
 		public static IReadOnlyList<BuildStep> HomeDefence { get; } =
 		[
-			new(["gtwr", "gun"], 2),           // a little static defence
-			new(["atwr", "sam"], 1),           // ...that can also shoot upwards
+			new(["gtwr", "gun"], 1),           // a little static defence
+			new(["atwr", "sam"], 1),           // ...that can also shoot upwards, before tower two
+			new(["gtwr", "gun"], 2),
 		];
 
 		/// <summary>The opening: an economy, and enough of an army not to die to a rush.</summary>
@@ -563,13 +575,17 @@ namespace AutoCnC.Reference
 		/// badland-ridges aircraft accounted for 67 of the 159 units lost, every one of them
 		/// unanswered, and 21 of the last 23.
 		/// </para>
+		/// <para>
+		/// The leading <c>gtwr</c>/AA pair this list used to carry itself is gone, because
+		/// <see cref="HomeDefence"/> now interleaves exactly that pair for every doctrine. A
+		/// cumulative "until N" rung that is already met is skipped silently, so the duplicate
+		/// was a no-op — but two places writing the same opening is how the two drift apart.
+		/// </para>
 		/// </remarks>
 		public static IReadOnlyList<BuildStep> DefenceBuild { get; } =
 		[
 			.. Economy,
-			new(["gtwr", "gun"], 1),           // answer the ground rush immediately
-			new(["atwr", "sam"], 1),           // do not pin AA behind a two-tower standing floor
-			.. HomeDefence,
+			.. HomeDefence,                    // one tower, then AA, then tower two
 			new(["gtwr", "gun"], 4),
 			new(["atwr", "sam"], 2),           // depth on the only thing that can hit aircraft
 			new(["powr", "nuke"], 4),

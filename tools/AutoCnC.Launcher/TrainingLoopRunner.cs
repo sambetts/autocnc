@@ -1,0 +1,350 @@
+#region Copyright & License Information
+/*
+ * Copyright (c) The AutoC&C Developers and Contributors
+ * This file is part of AutoC&C, which is free software. It is made
+ * available to you under the terms of the GNU General Public License
+ * as published by the Free Software Foundation, either version 3 or
+ * (at your option) any later version. For more information, see LICENSE.
+ */
+#endregion
+
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
+
+namespace AutoCnC.Launcher
+{
+	internal sealed record TrainingScriptResult(int ExitCode, IReadOnlyList<string> Output);
+
+	/// <summary>The unattended training workflow, without a window or a UI message queue.</summary>
+	public sealed class TrainingLoopRunner
+	{
+		static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
+		readonly TrainingLoopOptions options;
+		readonly Action<string> output;
+		readonly Func<ScriptJob, CancellationToken, TrainingScriptResult> execute;
+		readonly ContinuousPromotionRunner promotion = new();
+		RepoLayout repo;
+		TrainingRun activeRun;
+
+		public TrainingLoopRunner(TrainingLoopOptions options, Action<string> output)
+			: this(options, output, null) { }
+
+		internal TrainingLoopRunner(TrainingLoopOptions options, Action<string> output,
+			Func<ScriptJob, CancellationToken, TrainingScriptResult> execute)
+		{
+			this.options = options ?? throw new ArgumentNullException(nameof(options));
+			this.output = output ?? throw new ArgumentNullException(nameof(output));
+			this.execute = execute ?? ExecuteScript;
+		}
+
+		public void Run(CancellationToken cancellationToken)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			if (!string.IsNullOrWhiteSpace(options.RestoreRun))
+			{
+				Restore(options.RestoreRun);
+				return;
+			}
+
+			repo = RepoLayout.For(options.RepoRoot);
+			var project = options.Validate(repo);
+			var prompt = File.ReadAllText(options.PromptTemplate ?? repo.AgentPromptTemplate);
+			if (!TrainingAgent.ValidatePromptTemplate(prompt, out var error))
+				throw new ArgumentException(error);
+			var agent = ReadAgentConfiguration();
+			if (!repo.EngineFetched)
+				throw new InvalidOperationException("The engine is not fetched. Run ./scripts/setup.ps1 first.");
+
+			using var workspace = TrainingWorkspaceMutation.Acquire(Path.GetDirectoryName(project));
+			try
+			{
+				var unresolved = TrainingHistory.LoadUnresolved(project, options.RunsRoot);
+				if (unresolved.Count > 1)
+					throw new InvalidOperationException("Multiple unresolved experiments need explicit recovery: " +
+						string.Join(", ", unresolved.Select(run => run.RunDirectory)));
+				if (unresolved.Count == 1)
+				{
+					using (var mutation = TrainingRun.AcquireMutation(unresolved[0]))
+					{
+						var run = mutation.Run;
+						if (run.IsBusy || !run.CanResumeContinuousEvaluation)
+							throw new InvalidOperationException(
+								$"An unfinished experiment blocks training: {run.RunDirectory}. " +
+								"Wait for its worker, or use -RestoreRun to explicitly discard its edits.");
+						run.ResumeContinuousExperiment();
+						activeRun = run;
+					}
+					output($"Resuming paired evaluation: {activeRun.RunDirectory}");
+				}
+
+				if (!repo.EngineBuilt)
+					RequireSuccess(Execute(repo.BuildScript, ["-SkipBots"], "Building engine", cancellationToken));
+				if (activeRun != null)
+					Evaluate(cancellationToken);
+
+				for (long round = 1; options.Rounds == 0 || round <= options.Rounds; round++)
+				{
+					cancellationToken.ThrowIfCancellationRequested();
+					if (activeRun != null && !promotion.ValidateForNextFight(activeRun, out var invalidation))
+					{
+						output(invalidation);
+						Evaluate(cancellationToken);
+					}
+
+					activeRun = TrainingRun.Create(project, options.Battle(), options.RunsRoot);
+					output($"=== Training round {round}{(options.Rounds == 0 ? "" : $"/{options.Rounds}")} ===");
+					output($"AUTOCNC_TRAINING_RUN={activeRun.RunDirectory}");
+					promotion.CaptureChampion(activeRun);
+					Fight(project, cancellationToken);
+					RequireSuccess(Execute(repo.ExportAgentRulesScript,
+						["-Output", activeRun.GameRulesPath], "Exporting game rules", cancellationToken));
+					TrainingAgent.Prepare(activeRun, repo.AgentGameGuide, repo.AgentMechanics,
+						activeRun.GameRulesPath, prompt, agent.Command, agent.Arguments, agent.Stdin);
+					activeRun.ContinuousAgentStarted(agent.Command);
+					Improve(project, cancellationToken);
+					Evaluate(cancellationToken);
+					output($"Round {round}: {activeRun.Manifest.Status}. {activeRun.Manifest.Experiment.Reason}");
+				}
+
+				output("Training loop completed.");
+			}
+			catch
+			{
+				if (activeRun != null)
+				{
+					try
+					{
+						using var mutation = TrainingRun.AcquireMutation(activeRun);
+						activeRun = mutation.Run;
+						if (activeRun.HasUnresolvedContinuousExperiment)
+							activeRun.AbortContinuousExperiment(
+								"The PowerShell training loop stopped before a durable promotion decision.");
+						if (activeRun.Manifest.CompletedUtc == null)
+							FinishBattle(cancellationToken.IsCancellationRequested ? "stopped" : "failed");
+					}
+					catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
+						InvalidOperationException or JsonException)
+					{
+						output("Could not persist the interrupted run: " + ex.Message);
+					}
+					output($"Run saved: {activeRun.RunDirectory}");
+					if (activeRun.HasUnresolvedContinuousExperiment)
+						output("Rerun this command to resume a verified candidate, or use -RestoreRun with this directory to discard its edits.");
+				}
+				throw;
+			}
+		}
+
+		TrainingAgentConfiguration ReadAgentConfiguration()
+		{
+			var agent = options.AgentConfiguration == null
+				? new TrainingAgentConfiguration
+				{
+					Command = "copilot", Arguments = [.. TrainingAgent.DefaultArguments], Stdin = TrainingAgent.DefaultStdin
+				}
+				: JsonSerializer.Deserialize<TrainingAgentConfiguration>(
+					File.ReadAllText(options.AgentConfiguration), JsonOptions);
+			if (string.IsNullOrWhiteSpace(agent?.Command))
+				throw new ArgumentException("AgentConfiguration must specify a command.");
+			return agent;
+		}
+
+		void Fight(string project, CancellationToken token)
+		{
+			var run = activeRun;
+			var arguments = new List<string>
+			{
+				"-BattleBot", project, "-Map", options.Map, "-Difficulty", options.Difficulty,
+				"-Opponents", Number(options.Opponents), "-Faction", options.Faction,
+				"-BotFaction", options.BotFaction, "-ExecutionMode", options.ExecutionMode,
+				"-Seed", Number(options.Seed), "-MaxGameSeconds", Number(options.MaxGameSeconds),
+				"-Telemetry", run.TelemetryPath, "-BattleLog", run.BattleLogPath,
+				"-DecisionTrace", run.DecisionTracePath, "-MapFacts", run.MapFactsPath
+			};
+			if (run.Manifest.Battle.GameSpeed != null)
+				arguments.AddRange(["-GameSpeed", run.Manifest.Battle.GameSpeed]);
+			if (run.IsHeadless)
+				arguments.AddRange(["-CancellationFile", run.CancellationPath, "-PerformanceReport", run.PerformancePath]);
+
+			TrainingScriptResult result;
+			try
+			{
+				result = Execute(repo.RunBotScript, arguments, "Fighting", token,
+					run.IsHeadless ? run.CancellationPath : null);
+			}
+			catch
+			{
+				FinishBattle(token.IsCancellationRequested ? "stopped" : "failed");
+				throw;
+			}
+			FinishBattle(result.ExitCode == 0 ? "finished" : "failed");
+			RequireSuccess(result);
+			if (!run.HasImprovementEvidence || !run.HasRecordedBattle ||
+				!new[] { "Won", "Lost", "Draw" }.Contains(run.Manifest.Result.Outcome, StringComparer.OrdinalIgnoreCase))
+				throw new InvalidDataException("The battle did not produce complete, decided training evidence.");
+			CaptureReplay(run);
+		}
+
+		void FinishBattle(string status)
+		{
+			var match = new MatchLog();
+			match.Watch(activeRun.TelemetryPath);
+			match.Refresh();
+			var battle = new BattleEventLog();
+			battle.Watch(activeRun.BattleLogPath);
+			battle.Refresh();
+			activeRun.Finish(status, match, battle);
+			activeRun.ExportFightManifest();
+		}
+
+		void CaptureReplay(TrainingRun run)
+		{
+			try
+			{
+				var portable = Path.Combine(repo.EngineDir, "Support");
+				var support = Directory.Exists(portable) ? portable :
+					Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "OpenRA");
+				var directory = Path.Combine(support, "Replays", "autocnc");
+				var replay = Directory.Exists(directory)
+					? new DirectoryInfo(directory).EnumerateFiles("*.orarep", SearchOption.AllDirectories)
+						.Where(file => file.LastWriteTimeUtc >= run.Manifest.CreatedUtc)
+						.MaxBy(file => file.LastWriteTimeUtc)?.FullName
+					: null;
+				run.CaptureReplay(replay);
+			}
+			catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+			{
+				output("Could not capture the replay: " + ex.Message);
+			}
+		}
+
+		void Improve(string project, CancellationToken token)
+		{
+			TrainingScriptResult result;
+			try
+			{
+				result = Execute(repo.TrainBotScript,
+					["-BattleBot", project, "-RunDirectory", activeRun.RunDirectory], "Improving and building", token);
+			}
+			catch (OperationCanceledException)
+			{
+				activeRun = TrainingRun.FinishLatestAgent(activeRun, 1,
+					TrainingAgentResult.UnknownChangeCount, failurePhase: "cancelled",
+					failureMessage: "Stopped from PowerShell.", cancelled: true);
+				throw;
+			}
+
+			var status = activeRun.ReadAgentStatus();
+			activeRun = TrainingRun.FinishLatestAgent(activeRun, result.ExitCode,
+				WorkspaceSnapshot.Compare(activeRun).Count,
+				TrainingAgent.FindSuggestedNextPrompt(result.Output, activeRun),
+				result.ExitCode == 0 ? null : status?.Phase ?? "process",
+				result.ExitCode == 0 ? null : status?.Message ?? "The improvement worker failed.");
+			if (result.ExitCode != 0)
+			{
+				var failure = promotion.RecordFailedCandidate(activeRun,
+					activeRun.Manifest.Agent.FailureMessage);
+				promotion.ApplyDecision(activeRun, null, failure.Evaluation);
+				throw new InvalidOperationException("Improvement failed; training stopped. See agent-transcript.txt in the saved run.");
+			}
+		}
+
+		void Evaluate(CancellationToken token)
+		{
+			while (true)
+			{
+				token.ThrowIfCancellationRequested();
+				var plan = promotion.PrepareEvaluation(repo, activeRun, options.Benchmark, options.BenchmarkDifficulty);
+				activeRun = plan.Run;
+				if (plan.NoChanges)
+					return;
+				ContinuousEvaluationCompletion completion;
+				try
+				{
+					foreach (var arm in new[] { ContinuousEvaluationArm.Candidate, ContinuousEvaluationArm.Control })
+					{
+						var step = promotion.BuildArm(repo, plan, arm);
+						RequireSuccess(Execute(step.ScriptPath, step.Arguments, step.Title, token));
+						promotion.CaptureBuiltArm(activeRun, plan, arm);
+					}
+					foreach (var arm in new[] { ContinuousEvaluationArm.Candidate, ContinuousEvaluationArm.Control })
+					{
+						var step = promotion.BenchmarkArm(repo, activeRun, plan, arm);
+						RequireSuccess(Execute(step.ScriptPath, step.Arguments, step.Title, token));
+					}
+					completion = promotion.CompleteEvaluation(activeRun, plan, 0);
+				}
+				catch (Exception ex) when (ex is InvalidDataException or IOException or
+					UnauthorizedAccessException or InvalidOperationException or JsonException)
+				{
+					completion = promotion.FailEvaluation(activeRun, plan, ex.Message);
+				}
+
+				token.ThrowIfCancellationRequested();
+				var decision = completion.RequiresReevaluation
+					? ContinuousEvaluationDecision.Reevaluate
+					: promotion.ApplyDecision(activeRun, plan, completion.Evaluation);
+				output($"Evaluation: {decision}. {completion.InvalidationReason ?? completion.Evaluation.Reason}");
+				if (decision == ContinuousEvaluationDecision.Undefined)
+					throw new InvalidOperationException("Evaluation evidence was invalid. The champion was restored and training stopped.");
+				if (decision != ContinuousEvaluationDecision.Reevaluate)
+					return;
+			}
+		}
+
+		void Restore(string directory)
+		{
+			var run = TrainingRun.Load(directory) ?? throw new ArgumentException("No training run found: " + directory);
+			using var workspace = TrainingRun.AcquireWorkspaceMutation(run);
+			using var mutation = TrainingRun.AcquireMutation(run);
+			run = mutation.Run;
+			if (run.IsBusy)
+				throw new InvalidOperationException("An active worker still owns this run; stop it before restoring.");
+			if (!run.HasUnresolvedContinuousExperiment)
+				throw new InvalidOperationException("RestoreRun requires an unresolved continuous experiment.");
+			run.MarkContinuousRestoring();
+			WorkspaceSnapshot.Restore(run);
+			output($"Restored the pre-agent source snapshot: {run.Manifest.BotDirectory}");
+		}
+
+		TrainingScriptResult Execute(string script, IReadOnlyList<string> arguments, string title,
+			CancellationToken token, string cancellationFile = null)
+		{
+			token.ThrowIfCancellationRequested();
+			output($"==> {title}");
+			var result = execute(new ScriptJob
+			{
+				Title = title, ScriptPath = script, Arguments = arguments,
+				WorkerOwnershipFile = activeRun?.WorkerOwnershipPath, CancellationFile = cancellationFile
+			}, token);
+			token.ThrowIfCancellationRequested();
+			return result;
+		}
+
+		TrainingScriptResult ExecuteScript(ScriptJob job, CancellationToken token)
+		{
+			var runner = new ScriptRunner();
+			var finished = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+			runner.Output += line => output(line.PlainText);
+			runner.Finished += code => finished.TrySetResult(code);
+			runner.Start(job, repo.Root);
+			using var registration = token.Register(runner.Stop);
+			var code = finished.Task.GetAwaiter().GetResult();
+			return new TrainingScriptResult(code, runner.LastOutput);
+		}
+
+		static void RequireSuccess(TrainingScriptResult result)
+		{
+			if (result.ExitCode != 0)
+				throw new InvalidOperationException($"The script exited with code {result.ExitCode}; see the preceding output.");
+		}
+
+		static string Number(int value) => value.ToString(CultureInfo.InvariantCulture);
+	}
+}

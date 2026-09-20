@@ -1,181 +1,188 @@
 {
   "schemaVersion": 1,
-  "authoredForRevision": "7fdbc489c04f16b7289acb4d493d2af4d119efaa",
+  "authoredForRevision": "78d1b3c4bc1693b68049571bda4b1a566d2b0555",
   "checks": [
     {
-      "id": "cleared-base-assault-launch-runs",
-      "description": "The changed Defence exit launches a formed assault only after immediate base pressure has cleared.",
-      "query": "reason:launching cleared-base assault",
+      "id": "opening-emplacement-runs",
+      "description": "activation: the construction yard's economy hold now releases the base's first emplacement of a role it has none of.",
+      "query": "reason-id:defence.opening-emplacement",
       "operator": ">=",
       "value": "1"
     },
     {
-      "id": "unsafe-siege-lift-launch-retired",
-      "description": "The former Defence exit no longer launches merely because its dwell timer elapsed while the base may still be under attack.",
-      "query": "reason:siege lifted with army worth",
-      "operator": "absent",
-      "value": ""
+      "id": "opening-emplacement-reason-runs",
+      "description": "activation: the same branch is identifiable by its prose reason as well as its id.",
+      "query": "reason:emplacement ahead of harvester recovery",
+      "operator": ">=",
+      "value": "1"
+    },
+    {
+      "id": "recovery-hold-still-binds",
+      "description": "invariant: the exemption is bounded to the first emplacement of each role, so the harvester-recovery hold still refuses everything else.",
+      "query": "reason:construction cash held until recovery harvester delivery",
+      "operator": ">=",
+      "value": "1"
+    },
+    {
+      "id": "critical-refinery-yield-preserved",
+      "description": "invariant: the emplacement exemption is not granted while a critical refinery is in production, so that narrower hold still runs.",
+      "query": "reason:support queue yielding shared cash to active critical refinery",
+      "operator": ">=",
+      "value": "1"
+    },
+    {
+      "id": "support-queue-delivers-a-pair",
+      "description": "outcome: the Support queue finishes more than the single emplacement of the latest fight, faction-portably.",
+      "query": "summary.production[Support].delivered",
+      "operator": ">=",
+      "value": "2"
+    },
+    {
+      "id": "support-queue-ordered-more",
+      "description": "outcome: the unfrozen yard asks Support for more than the 2 orders it managed in the latest fight.",
+      "query": "summary.production[Support].ordersIssued",
+      "operator": ">",
+      "value": "2"
+    },
+    {
+      "id": "early-replacement-factory-still-runs",
+      "description": "invariant: the faction-portable Vehicle factory still opens before refinery two.",
+      "query": "reason:opening replacement factory before second refinery",
+      "operator": ">=",
+      "value": "1"
+    },
+    {
+      "id": "prequeue-harvester-reservation-still-runs",
+      "description": "invariant: an understrength Vehicle request still reserves shared cash before queue visibility updates.",
+      "query": "reason:reserving construction cash before harvester queue visibility",
+      "operator": ">=",
+      "value": "1"
     },
     {
       "id": "first-screened-withdrawal-still-runs",
-      "description": "The first damage-confirmed harvester withdrawal still uses the threat-opposite side of the refinery.",
+      "description": "invariant: the damage-confirmed harvester withdrawal still uses the threat-opposite side of the refinery.",
       "query": "reason:harvester threat-vector withdrawal preserving refinery access, damage-confirmed harvester withdrawal",
       "operator": ">=",
       "value": "1"
     },
     {
       "id": "undamaged-withdrawal-stays-gated",
-      "description": "Nearby contacts alone still do not trigger a damage-confirmed withdrawal at full health.",
+      "description": "invariant: nearby contacts alone still do not trigger a damage-confirmed withdrawal at full health.",
       "query": "reason:damage-confirmed harvester withdrawal at 100%",
       "operator": "absent",
       "value": ""
     },
     {
       "id": "bounded-escape-still-runs",
-      "description": "A threatened harvester retains its stable escape destination while travelling.",
+      "description": "invariant: a threatened harvester retains its stable escape destination while travelling.",
       "query": "reason:harvester bounded threat escape en route",
       "operator": ">=",
       "value": "1"
     },
     {
       "id": "active-threat-extension-still-runs",
-      "description": "A harvester reaching an escape point still extends away from a live immediate threat.",
+      "description": "invariant: a harvester reaching an escape point still extends away from a live immediate threat.",
       "query": "reason:harvester extending escape while immediate threat remains",
       "operator": ">=",
       "value": "1"
     },
     {
       "id": "first-screen-precedes-recovery",
-      "description": "One faction-portable light screen retains priority while a surviving harvester can fund recovery.",
+      "description": "invariant: one faction-portable light screen retains priority while a surviving harvester can fund recovery.",
       "query": "reason:first light screen before harvester recovery",
       "operator": ">=",
       "value": "1"
     },
     {
-      "id": "prequeue-harvester-reservation-still-runs",
-      "description": "An understrength Vehicle request still reserves shared cash before queue visibility updates.",
-      "query": "reason:reserving construction cash before harvester queue visibility",
-      "operator": ">=",
-      "value": "1"
-    },
-    {
-      "id": "early-replacement-factory-still-runs",
-      "description": "The faction-portable Vehicle factory still opens before refinery two.",
-      "query": "reason:opening replacement factory before second refinery",
-      "operator": ">=",
-      "value": "1"
-    },
-    {
       "id": "defensive-consolidation-still-runs",
-      "description": "Defenders facing a massed distant screen still enter the existing consolidation posture.",
+      "description": "invariant: defenders facing a massed distant screen still enter the existing consolidation posture.",
       "query": "reason:consolidating defensive line against",
       "operator": ">=",
       "value": "1"
     },
     {
       "id": "distributed-line-engages",
-      "description": "An in-tether defender under mass pressure engages instead of canceling its attack with Stop.",
+      "description": "invariant: an in-tether defender under mass pressure still engages rather than cancelling its attack.",
       "query": "reason:engaging from distributed defensive line under mass pressure",
       "operator": ">=",
       "value": "1"
     },
     {
-      "id": "distributed-line-no-longer-stops",
-      "description": "The superseded mass-pressure branch no longer cancels an attack with Hold.",
-      "query": "reason:holding distributed defensive line under mass pressure",
+      "id": "unsafe-siege-lift-launch-retired",
+      "description": "invariant: the retired Defence exit still does not launch merely because its dwell timer elapsed.",
+      "query": "reason:siege lifted with army worth",
       "operator": "absent",
       "value": ""
     },
     {
-      "id": "harvester-outage-improves",
-      "description": "Keeping the formed army on active defence shortens the latest fight's 499-second no-harvester interval.",
-      "query": "summary.economy.secondsWithNoHarvester",
-      "operator": "<",
-      "value": "499"
-    },
-    {
-      "id": "harvester-lifetime-gain-holds",
-      "description": "Preserve the latest fight's longest harvester lifetime while protecting the economy.",
-      "query": "units.max(lifetimeSeconds,type=harv)",
-      "operator": ">=",
-      "value": "994"
-    },
-    {
-      "id": "income-rate-improves",
-      "description": "Longer harvester survival raises income above the latest fight.",
-      "query": "summary.headline.creditsEarnedPerSecond",
+      "id": "value-exchange-improves",
+      "description": "outcome: emplacements were the best trade on the field at 120 credits a kill, so early ones raise the latest fight's 0.148 exchange.",
+      "query": "summary.headline.valueExchangeRatio",
       "operator": ">",
-      "value": "21.687"
+      "value": "0.148"
     },
     {
-      "id": "spending-rate-improves",
-      "description": "Sustained income raises spending above the latest fight.",
-      "query": "summary.headline.creditsSpentPerSecond",
+      "id": "credits-killed-improves",
+      "description": "outcome: a ground tower and an anti-air tower standing from the opening kill more than the latest fight's 4500.",
+      "query": "summary.headline.creditsKilled",
       "operator": ">",
-      "value": "26.717"
-    },
-    {
-      "id": "defender-lifetime-improves",
-      "description": "Avoiding a launch under fire raises core-infantry lifetime above the latest fight.",
-      "query": "summary.unitTypes[e1].meanLifetimeSeconds",
-      "operator": ">",
-      "value": "66.9"
+      "value": "4500"
     },
     {
       "id": "credits-lost-improves",
-      "description": "Defending through the live raid loses less value than the latest fight.",
+      "description": "outcome: covering the refineries that enemy aircraft took whole loses less than the latest fight's 30500.",
       "query": "summary.headline.creditsLost",
       "operator": "<",
-      "value": "46240"
+      "value": "30500"
     },
     {
-      "id": "value-exchange-gain-holds",
-      "description": "The delayed launch preserves the latest fight's improved value exchange.",
-      "query": "summary.headline.valueExchangeRatio",
+      "id": "buildings-lost-improves",
+      "description": "outcome: the base keeps more of its 12 lost structures once something shoots back at aircraft.",
+      "query": "summary.headline.buildingsLost",
+      "operator": "<",
+      "value": "12"
+    },
+    {
+      "id": "income-rate-improves",
+      "description": "outcome: refineries that survive keep earning past 540s, raising the latest fight's 22.511 credits a second.",
+      "query": "summary.headline.creditsEarnedPerSecond",
+      "operator": ">",
+      "value": "22.511"
+    },
+    {
+      "id": "survival-improves",
+      "description": "outcome: a defended base lasts longer than the latest fight's 695 seconds.",
+      "query": "summary.headline.durationSeconds",
+      "operator": ">",
+      "value": "695"
+    },
+    {
+      "id": "peak-army-clears-the-assault-bar",
+      "description": "outcome: the cleared-base assault never ran because army value peaked at 3900 against a 4000 bar; a surviving economy should clear it.",
+      "query": "summary.headline.peakArmyValue",
       "operator": ">=",
-      "value": "0.699"
+      "value": "4000"
     },
     {
-      "id": "credits-killed-gain-holds",
-      "description": "Waiting for a clear base does not sacrifice the latest fight's enemy value destroyed.",
-      "query": "summary.headline.creditsKilled",
-      "operator": ">=",
-      "value": "32300"
-    },
-    {
-      "id": "mean-army-value-improves",
-      "description": "Avoiding the rate-limited recall trap raises mean army value above the latest fight.",
+      "id": "mean-army-value-holds",
+      "description": "outcome: the 1250 credits of opening emplacements must not collapse the standing army below a floor well under the latest fight's 1590.1.",
       "query": "summary.headline.meanArmyValue",
       "operator": ">",
-      "value": "850.2"
+      "value": "1000"
     },
     {
-      "id": "buildings-killed-gain-holds",
-      "description": "The safer launch still destroys at least as many enemy buildings as the latest fight.",
-      "query": "summary.headline.buildingsKilled",
-      "operator": ">=",
-      "value": "2"
-    },
-    {
-      "id": "exploration-remains-saturated",
-      "description": "The delayed launch preserves the fully saturated exploration component.",
-      "query": "summary.headline.cellsExplored",
-      "operator": ">=",
-      "value": "300"
-    },
-    {
-      "id": "idle-time-improves",
-      "description": "A healthier army and economy reduce accumulated idle unit time from the latest fight.",
-      "query": "summary.headline.idleUnitSeconds",
+      "id": "harvester-outage-stays-short",
+      "description": "outcome: protecting the refineries must not lengthen the latest fight's 53-second no-harvester interval into an outage.",
+      "query": "summary.economy.secondsWithNoHarvester",
       "operator": "<",
-      "value": "8813"
+      "value": "150"
     },
     {
       "id": "fitness-improves",
-      "description": "Improved army retention and economy raise Hard fitness above the latest fight.",
+      "description": "outcome: unfreezing the yard should raise Hard fitness above the latest fight's 0.2604.",
       "query": "summary.fitness.total",
       "operator": ">",
-      "value": "0.423"
+      "value": "0.2604"
     }
   ]
 }

@@ -43,7 +43,10 @@ namespace AutoCnC.Reference.Modes
 		/// without a tower. A queue this yard does not own is skipped, so naming one that a
 		/// given faction or mod lacks costs nothing.
 		/// </remarks>
-		static readonly string[] ConstructionQueues = ["Building", "Support"];
+		static readonly string[] ConstructionQueues = ["Building", SupportQueue];
+
+		/// <summary>The queue every defensive emplacement comes from.</summary>
+		const string SupportQueue = "Support";
 
 		static readonly string[] PowerCandidates = [.. ReferencePlans.PowerPlants];
 
@@ -120,6 +123,10 @@ namespace AutoCnC.Reference.Modes
 		readonly List<string>[] buildable = NewBuffers();
 
 		readonly ConstructionQueueState[] queues = new ConstructionQueueState[ConstructionQueues.Length];
+
+		// A one-queue view of Support, so the opening-emplacement exemption can ask that queue
+		// what the plan wants from it without disturbing the shared buffer above.
+		readonly ConstructionQueueState[] supportOnly = new ConstructionQueueState[1];
 
 		// Where we decided to put the current building, per queue, so the choice doesn't wander.
 		readonly CPos?[] plannedLocation = new CPos?[ConstructionQueues.Length];
@@ -277,6 +284,22 @@ namespace AutoCnC.Reference.Modes
 				&& order.Action == ConstructionAction.Produce
 				&& !Named(PowerCandidates, order.Item))
 			{
+				// The rescue hold must not leave the base naked. It is keyed on a condition the
+				// opponent controls — harvesters below the release band — so against a side that
+				// hunts them it never releases, and the yard it freezes is the only thing that
+				// can build the emplacement that stops the hunting. Power is already exempt on
+				// the weaker argument that a brownout slows the harvester; losing the harvester
+				// outright is worse. Bounded to one emplacement of each role, so it can never
+				// become a turtle. See IncomeFirstLogic.IsOpeningEmplacement.
+				//
+				// Not granted while a critical refinery is in production: that hold is narrow,
+				// self-terminating, and protects the redundancy this base is rescued for.
+				var emplacement = fundingCriticalRefinery ? null : OpeningEmplacement(ctx, owned);
+				if (emplacement != null)
+					return UnitDecision.Produce(SupportQueue, emplacement,
+						$"first {emplacement} emplacement ahead of harvester recovery: base has no standing defence of that role",
+						"defence.opening-emplacement");
+
 				deferredConstructionForHarvester = true;
 				return UnitDecision.Hold(
 					"construction cash held until recovery harvester delivery");
@@ -389,6 +412,44 @@ namespace AutoCnC.Reference.Modes
 				? new ConstructionOrder(order.Action, order.Queue, order.Item,
 					$"{order.Item} covering {ExpansionLogic.StructuresWorthCovering(owned, DefenceStructures)} structures from the air")
 				: order;
+		}
+
+		/// <summary>
+		/// The emplacement the plan wants from <c>Support</c>, when the base has no standing
+		/// defence of that role and the economy hold would otherwise block it.
+		/// </summary>
+		/// <remarks>
+		/// Asked only after <see cref="BaseConstructionLogic.ChooseNext"/> has already chosen an
+		/// order the hold refuses. That order is usually a <c>Building</c> one — the yard is a
+		/// single decision per evaluation, so a blocked economy step hides the <c>Support</c>
+		/// queue behind it entirely — which is why this re-asks with a one-queue view rather
+		/// than inspecting the order it was handed.
+		/// <para>
+		/// The plan still decides what and whether: this routes the doctrine's own ladder rather
+		/// than naming an actor, so cash, power and buildability are gated exactly as they are on
+		/// the main path, and a rung whose candidates this faction cannot build yet is skipped
+		/// silently. The answer is then accepted only when it really is a first emplacement, so
+		/// a plan that offers depth instead falls through to the hold.
+		/// </para>
+		/// </remarks>
+		string OpeningEmplacement(ModeContext ctx, IReadOnlyDictionary<string, int> owned)
+		{
+			var support = queues[IndexOf(SupportQueue)];
+			if (!support.Owned || support.Busy || support.Buildable == null)
+				return null;
+
+			supportOnly[0] = support;
+
+			var order = BaseConstructionLogic.ChooseNext(
+				supportOnly, ctx.Cash, ctx.PowerBalance, owned, ctx.BuildPlan);
+
+			if (order.Action != ConstructionAction.Produce)
+				return null;
+
+			return IncomeFirstLogic.IsOpeningEmplacement(
+				order.Item, owned, GroundDefenceCandidates, AirDefenceCandidates)
+				? order.Item
+				: null;
 		}
 
 		static bool Named(string[] candidates, string item)

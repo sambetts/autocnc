@@ -120,6 +120,32 @@ namespace AutoCnC.Launcher.Tests
 		}
 
 		[Test]
+		public void SessionDefaultsUpgradeToScopedRepositoryAccess()
+		{
+			var previous = new[]
+			{
+				"--session-id", "{sessionId}",
+				"--allow-all-tools",
+				"--no-ask-user",
+				"--no-custom-instructions",
+				"--no-remote-export",
+				"--add-dir", "{evidence}"
+			};
+
+			var upgraded = TrainingAgent.UpgradeDefaultArguments("copilot", previous);
+			Assert.That(upgraded, Is.EqualTo(TrainingAgent.DefaultArguments));
+			Assert.That(upgraded.TakeLast(2), Is.EqualTo(new[] { "--add-dir", "{repoRoot}" }));
+			Assert.That(upgraded, Does.Not.Contain("--allow-all-paths"));
+			Assert.That(upgraded, Does.Not.Contain("--allow-all"));
+			Assert.That(upgraded, Does.Not.Contain("{run}"));
+			Assert.That(TrainingAgent.UpgradeDefaultArguments("copilot", upgraded), Is.EqualTo(upgraded));
+			Assert.That(TrainingAgent.UpgradeDefaultArguments("other-agent", previous), Is.EqualTo(previous));
+
+			var custom = previous.Concat(new[] { "--model", "custom-model" }).ToArray();
+			Assert.That(TrainingAgent.UpgradeDefaultArguments("copilot", custom), Is.EqualTo(custom));
+		}
+
+		[Test]
 		public void APromptEraDefaultAlsoUpgradesToAPinnedSession()
 		{
 			var promptOnCommandLine = new[]

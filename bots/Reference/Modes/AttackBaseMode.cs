@@ -50,9 +50,15 @@ namespace AutoCnC.Reference.Modes
 		AssaultTuning tuning = AssaultTuning.Default;
 		MusterTuning musterTuning = MusterTuning.Default;
 		CounterBatteryTuning counterBatteryTuning = CounterBatteryTuning.Default;
+		AssaultSweepTuning sweepTuning = AssaultSweepTuning.Default;
 		MusterWatchdog musterWatchdog = MusterWatchdog.Start;
 		WeaponRole role = WeaponRole.Unknown;
 		uint objectiveId;
+
+		// Whether this unit has already arrived somewhere and found nothing. Sticky, because the
+		// alternative oscillates: a unit that steps one cell off the remembered base to sweep is
+		// no longer "arrived", so the very next evaluation would order it back again.
+		bool sweeping;
 
 		// What last hit this unit from beyond its own reach, when, and how much of this unit's
 		// lifetime counter-battery allowance has been spent. The budget is deliberately not
@@ -66,6 +72,7 @@ namespace AutoCnC.Reference.Modes
 			tuning = AssaultTuning.Default;
 			musterTuning = MusterTuning.Default;
 			counterBatteryTuning = CounterBatteryTuning.Default;
+			sweepTuning = AssaultSweepTuning.Default;
 
 			// A new push is a new situation, so whatever was shelling the last one is not
 			// evidence about this one. The spent budget above survives on purpose.
@@ -82,6 +89,10 @@ namespace AutoCnC.Reference.Modes
 			// each time is what let one staging machine consume 78% of the assault's decisions.
 			musterWatchdog = musterWatchdog.ForNewPush();
 			objectiveId = 0;
+
+			// A fresh push starts by marching at what the side remembers, not by resuming the
+			// hunt the last one ended on. The side's rung is untouched: it is the side's.
+			sweeping = false;
 		}
 
 		public override UnitDecision OnTick(Actor self, ModeContext ctx)
@@ -121,7 +132,13 @@ namespace AutoCnC.Reference.Modes
 			// evaluation is also what corroborates the sighting against a unit that cannot see it
 			// — see EnemyBaseSightings.Forget.
 			if (objective != null)
+			{
 				EnemyBaseSightings.Record(self.Owner, objective.Location, ctx.WorldTick);
+
+				// There is something in front of this unit again, so whatever it was hunting for
+				// is answered. The side's rung stays where it got to.
+				sweeping = false;
+			}
 
 			var weaponRange = ctx.WeaponRangeUnits;
 			var state = new AssaultState(
@@ -147,7 +164,11 @@ namespace AutoCnC.Reference.Modes
 			// walking to a staging cell, or standing still — and in all three it is taking
 			// artillery fire entirely for free. On badland-ridges that was 113 e1 killed by
 			// arty for zero damage dealt back. See CounterBatteryLogic.
-			if (AttackBaseLogic.SelectLastStandTarget(state, role) == null)
+			//
+			// The same answer decides whether this unit may go hunting below: walking away from
+			// something already inside our own weapon range is never the better trade.
+			var inReach = AttackBaseLogic.SelectLastStandTarget(state, role) != null;
+			if (!inReach)
 			{
 				var counterBattery = CounterBattery(ctx, weaponRange);
 				if (counterBattery.HasValue)
@@ -167,7 +188,7 @@ namespace AutoCnC.Reference.Modes
 				return outcome.Decision.Value;
 
 			var decision = AttackBaseLogic.Decide(
-				state, tuning, objective != null ? ApproachOrders.None : Approach(self, ctx), role);
+				state, tuning, objective != null ? ApproachOrders.None : Approach(self, ctx, !inReach), role);
 
 			// Say so when this evaluation abandoned an untouched building to join one the rest
 			// of the push has already hurt. The order is the same either way; what changes is
@@ -281,15 +302,32 @@ namespace AutoCnC.Reference.Modes
 		/// method used to believe the blind one and cancel the assault for everybody. It now asks
 		/// <see cref="EnemyBaseSightings.Forget"/>, which only agrees once nobody on this side has
 		/// seen an enemy structure for fifteen seconds; the doctrine is only ended when the
-		/// sighting was genuinely discarded. Either way this unit is standing on the spot and has
-		/// nowhere left to march, so it falls through to the last-stand branch and shoots whatever
-		/// is in reach instead of walking onto its own cell.
+		/// sighting was genuinely discarded.
+		/// </para>
+		/// <para>
+		/// What it no longer does is <em>stop</em>. Returning no orders here is what put 62,649
+		/// <c>Hold("no objective assigned")</c> evaluations into one match and left 180 actors
+		/// standing in the other side's half of the map being shelled; a unit that has arrived and
+		/// found nothing now hunts instead. See <see cref="AssaultSweepLogic"/>.
 		/// </para>
 		/// </remarks>
-		static ApproachOrders Approach(Actor self, ModeContext ctx)
+		ApproachOrders Approach(Actor self, ModeContext ctx, bool nothingInReach)
 		{
+			// Nothing this method offers is any use to something that cannot walk, and a turret
+			// reporting that it is standing on the hunt's current cell would retire a rung the
+			// army has not been to. Static defences fall straight through to the last-stand
+			// scorer, exactly as they did before there was a hunt.
+			if (!ctx.CanMove)
+				return ApproachOrders.None;
+
+			// Already hunting. Sticky on purpose: the sweep cell is somewhere else by definition,
+			// so a unit that has taken one step towards it is no longer standing on the arrival
+			// radius below, and re-asking this question would march it straight back.
+			if (sweeping)
+				return nothingInReach ? Sweep(self, ctx) : ApproachOrders.None;
+
 			if (!EnemyBaseSightings.TryGetLastKnown(self.Owner, out var cell))
-				return Probe(ctx);
+				return Probe(self, ctx, nothingInReach);
 
 			// Arrived, and there is nothing here after all: if nobody else can see their base
 			// either, the sighting is stale, so drop it rather than hold the whole push in front
@@ -300,10 +338,12 @@ namespace AutoCnC.Reference.Modes
 				if (EnemyBaseSightings.Forget(self.Owner, ctx.WorldTick, SightingMemoryTuning.Default))
 					ctx.SwitchDoctrine(ReferenceDoctrines.Scout, "their base is not there any more, going looking");
 
-				return ApproachOrders.None;
+				// Something in our own reach outranks anywhere we could walk, so the last-stand
+				// scorer below gets this evaluation and the hunt waits for the next one.
+				return nothingInReach ? Sweep(self, ctx) : ApproachOrders.None;
 			}
 
-			return new ApproachOrders(true, cell.X, cell.Y, distance, null);
+			return new ApproachOrders(true, cell.X, cell.Y, distance, null, null);
 		}
 
 		/// <summary>
@@ -339,31 +379,66 @@ namespace AutoCnC.Reference.Modes
 		/// <para>
 		/// Standing on the guess and seeing nothing is the one honest way to learn the deduction
 		/// was wrong, and it hands over to the search ladder that has more rungs — the same
-		/// escape the stale-sighting branch above takes, for the same reason.
+		/// escape the stale-sighting branch above takes, for the same reason. The army does not
+		/// wait for the jeep to do it, though: it keeps walking the rest of that ladder itself.
 		/// </para>
 		/// </remarks>
-		static ApproachOrders Probe(ModeContext ctx)
+		ApproachOrders Probe(Actor self, ModeContext ctx, bool nothingInReach)
 		{
-			var bounds = ctx.World.Map.Bounds;
-			var home = ctx.BaseCenter;
-			var field = new ScoutField(
-				MinX: bounds.Left,
-				MinY: bounds.Top,
-				MaxX: bounds.Left + bounds.Width - 1,
-				MaxY: bounds.Top + bounds.Height - 1,
-				BaseX: home.X,
-				BaseY: home.Y);
-
+			var field = Field(ctx);
 			var (x, y) = ScoutSearchLogic.Objective(0, field, ScoutTuning.Default);
 			var distance = ctx.DistanceTo(new CPos(x, y));
 
 			if (distance <= ArrivedRadius.Length)
 			{
 				ctx.SwitchDoctrine(ReferenceDoctrines.Scout, "probed where their base should be, going looking");
-				return ApproachOrders.None;
+				return nothingInReach ? Sweep(self, ctx) : ApproachOrders.None;
 			}
 
-			return new ApproachOrders(true, x, y, distance, "probing their likely base, mirrored from ours");
+			return new ApproachOrders(true, x, y, distance, "probing their likely base, mirrored from ours",
+				"assault.probe-mirrored-base");
+		}
+
+		/// <summary>
+		/// Where to walk when this unit has arrived somewhere and found nothing there.
+		/// </summary>
+		/// <remarks>
+		/// The rung is read, the arrival tested against it, and the rung read again, because a
+		/// unit standing on the current rung is the evidence that retires it — and the cell it is
+		/// then given has to be the one the side has just moved on to rather than the one it has
+		/// already answered. Both reads are integer arithmetic on the map's bounds and our own
+		/// base cell; see <see cref="AssaultSweepLogic"/> for what the ladder costs and buys.
+		/// </remarks>
+		ApproachOrders Sweep(Actor self, ModeContext ctx)
+		{
+			sweeping = true;
+
+			var field = Field(ctx);
+			var standing = AssaultSweeps.Rung(self.Owner, ctx.WorldTick, false, sweepTuning);
+			var at = ScoutSearchLogic.Objective(standing, field, ScoutTuning.Default);
+			var arrived = ctx.DistanceTo(new CPos(at.X, at.Y)) <= ArrivedRadius.Length;
+
+			var rung = AssaultSweeps.Rung(self.Owner, ctx.WorldTick, arrived, sweepTuning);
+			if (rung != standing)
+				at = ScoutSearchLogic.Objective(rung, field, ScoutTuning.Default);
+
+			return new ApproachOrders(true, at.X, at.Y, ctx.DistanceTo(new CPos(at.X, at.Y)),
+				$"nothing left where we stand, sweeping rung {rung} at {at.X},{at.Y}",
+				"assault.sweep-for-targets");
+		}
+
+		/// <summary>The map and where on it we live, which is all the search ladder needs.</summary>
+		static ScoutField Field(ModeContext ctx)
+		{
+			var bounds = ctx.World.Map.Bounds;
+			var home = ctx.BaseCenter;
+			return new ScoutField(
+				MinX: bounds.Left,
+				MinY: bounds.Top,
+				MaxX: bounds.Left + bounds.Width - 1,
+				MaxY: bounds.Top + bounds.Height - 1,
+				BaseX: home.X,
+				BaseY: home.Y);
 		}
 
 		/// <summary>

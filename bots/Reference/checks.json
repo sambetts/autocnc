@@ -1,70 +1,62 @@
 {
   "schemaVersion": 1,
-  "authoredForRevision": "872898272c551703a52d84011b579f3e838a9ce1-dirty:a870b0d075ac95fe8a327c3ea78d7af1fb65538ce2e93ec25be27bcad4774d6b",
+  "authoredForRevision": "d680b2302dc7368ce67ae30c9c951f71d71af3fd",
   "checks": [
     {
-      "id": "emplacement-hold-runs",
+      "id": "the-push-hunts-instead-of-holding",
       "category": "activation",
-      "description": "activation: IncomeFirstLogic.EmplacementBeforeBodies is the new branch. It stands a unit queue down while the base has no ground emplacement standing, a tower is buildable from Support, and cash is below the 600 a gtwr/gun costs. Last match that state held for 1,112 of 1,350 seconds, so if this id is absent the branch never reached its gate rather than being wrong.",
-      "query": "reason-id:defence.emplacement-before-bodies",
+      "description": "activation: AttackBaseMode.Sweep is the new branch. A unit that has arrived at the remembered enemy base, or at the mirrored probe cell, and can see no structure now walks the next rung of the search ladder as an attack-move instead of returning no orders. Last match the no-orders path produced 62,649 Hold(\"no objective assigned\") evaluations across 180 actors, so if this id is absent the branch never reached its gate rather than being wrong.",
+      "query": "reason-id:assault.sweep-for-targets",
       "operator": ">=",
       "value": "1"
     },
     {
-      "id": "support-queue-gets-the-cash",
-      "category": "activation",
-      "description": "activation: the hold is only worth having if the credits it saves reach the queue that was waiting for them. Support was given 4 orders in 1,350 seconds and spent 181 of those seconds waiting for cash while Infantry was given 23. This is the direct measure of the transfer.",
-      "query": "summary.production[Support].ordersIssued",
-      "operator": ">=",
-      "value": "7"
-    },
-    {
-      "id": "the-barracks-is-not-silenced",
-      "category": "invariant",
-      "description": "invariant: every hold in IncomeFirstLogic has at some point become a latch. This one releases at one tower standing or 600 credits in hand, so the barracks must keep buying. If Infantry orders collapse below the 23 of last match by more than half, the release conditions are not being reached and the hold has swallowed the army.",
-      "query": "summary.production[Infantry].ordersIssued",
-      "operator": ">=",
-      "value": "12"
-    },
-    {
-      "id": "income-still-outranks-the-gun",
-      "category": "invariant",
-      "description": "invariant: harvester recovery is exempted from the hold on purpose, because a tower bought with the last credits of a dying economy is the last thing the side ever buys. 810 of 1,350 seconds had no live harvester last match. That must not get worse; if it does, the exemption is not firing.",
-      "query": "summary.economy.secondsWithNoHarvester",
+      "id": "standing-still-collapses",
+      "category": "outcome",
+      "description": "outcome: the flagged regression and the direct measure of the change. Idle unit time was 46,305 seconds against a prior median of 9,710, three quarters of it from assault units that had arrived somewhere and stopped: e1 29,651 no-objective holds, arty 8,280, e3 5,258. A push that hunts is a push that is moving, so this is what must fall.",
+      "query": "summary.headline.idleUnitSeconds",
       "operator": "<=",
-      "value": "700"
+      "value": "25000"
     },
     {
-      "id": "bodies-live-long-enough-to-shoot",
-      "category": "outcome",
-      "description": "outcome: e1 had a mean lifetime of 21.2 seconds and seven bodies died 0 to 6 seconds after leaving the barracks, to a jeep parked outside it. A gun covering the barracks is what a body needs to survive its first walk, so this is the most direct reading of whether the tower arrived in time.",
-      "query": "summary.unitTypes[e1].meanLifetimeSeconds",
-      "operator": ">=",
-      "value": "35"
-    },
-    {
-      "id": "value-exchange-recovers",
-      "category": "outcome",
-      "description": "outcome: 0.189 credits killed per credit lost against a prior Hard median of 0.739. Two guard towers took 11 of the side's 30 kills at 109 credits a kill, dealing 119,682 damage for 4,775 taken, while 3,700 credits of infantry took 8 at 325 and 600. Buying more of the first and fewer of the second is what this change is for.",
+      "id": "hunting-is-not-scattering",
+      "category": "invariant",
+      "description": "invariant: the sweep rung belongs to the side rather than the unit precisely so the army converges on one cell at a time. If that fails, units arrive alone and are killed piecemeal, and the first place it shows is the trade. 2.39 credits killed per credit lost last match against a fitness reference of 2.0; below the reference the change has bought movement with the army.",
       "query": "summary.headline.valueExchangeRatio",
       "operator": ">=",
-      "value": "0.45"
+      "value": "2"
     },
     {
-      "id": "the-economy-outlives-the-raid",
-      "category": "outcome",
-      "description": "outcome: earnings froze at 12,915 credits at 540s, 9.567 a second over the match against a prior Hard median of 25.187. The fleet was earning 23.9 a second while it was alive; it was killed at home, in the same six-cell circle that held 33 of the side's 44 losses, with no tower standing. A base that keeps one gun keeps earning.",
-      "query": "summary.headline.creditsEarnedPerSecond",
+      "id": "the-army-is-not-walked-away",
+      "category": "invariant",
+      "description": "invariant: a sweep is only ever what a unit does instead of nothing. It is pre-empted by anything already inside the unit's own weapon range, it is abandoned the instant a structure enters sensor range, and it never deletes the side's sighting memory. If it has instead become a way of walking the push off targets it had, the structures killed fall. 26 last match against a fitness reference of 8.",
+      "query": "summary.headline.buildingsKilled",
       "operator": ">=",
-      "value": "18"
+      "value": "8"
     },
     {
-      "id": "fitness-recovers-toward-the-median",
+      "id": "losses-do-not-run-away",
+      "category": "invariant",
+      "description": "invariant: credits lost already rose 67.6% to 33,350, and sending units to walk the map's rim is the obvious way to make that worse. Three of the four largest loss clusters were already deep in their half of the map, where the push had arrived and then stopped being shot at for free; movement should not cost more than standing did.",
+      "query": "summary.headline.creditsLost",
+      "operator": "<=",
+      "value": "40000"
+    },
+    {
+      "id": "the-hunt-finds-ground",
       "category": "outcome",
-      "description": "outcome: 0.3009 against a prior Hard median of 0.41, with valueExchange scoring 0.0945 and armyValueIntegral 0.0188. Both are downstream of a base that had no gun for 1,112 seconds, so both should move together if the diagnosis is right.",
+      "description": "outcome: exploration is permanent and shroud-filtered resource reads mean unexplored cells are unusable income, so an army walking the search ladder should see at least as much of the map as one that stood still. 610 cells last match against a prior median of 279 and a fitness reference of 300.",
+      "query": "summary.headline.cellsExplored",
+      "operator": ">=",
+      "value": "500"
+    },
+    {
+      "id": "the-match-is-still-won-well",
+      "category": "outcome",
+      "description": "outcome: every fitness component except survival scored 1.0 last match, and survival is match length, so the only way this change can raise the total is by not lowering it. 0.9738 last match against a prior median of 0.462. A total below 0.9 means a component that was capped has come off its cap.",
       "query": "summary.fitness.total",
       "operator": ">=",
-      "value": "0.37"
+      "value": "0.9"
     }
   ]
 }

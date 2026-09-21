@@ -2245,6 +2245,55 @@ camping lasts, and one whose attacker has left is retried three cycles later. An
 feeds is a soft preference with a fallback — it may refuse ground, but it can never refuse the last
 field on the map.
 
+## The push arrived, and then it stopped
+
+`16:9` at Hard was won — fitness 0.9738, with every component except match length at its cap — and
+it was still the most idle match this bot has played. **46,305 idle unit-seconds against a prior
+median of 9,710**, the one regression the harness flagged. The cause is a single branch.
+
+`AttackBaseMode.Approach` marched the army at the remembered enemy base. The moment a unit stood
+within five cells of it with no structure in sensor range, the method returned `ApproachOrders.None`
+— no orders at all — and `AttackBaseLogic` fell through to `Hold("no objective assigned")`. Nothing
+moved that unit again until somebody else refreshed the side's sighting to a different cell.
+
+| the trace | count |
+| --- | --- |
+| `Hold("no objective assigned")`, evaluated | **62,649** across 180 actors |
+| ...of which `e1` / `arty` / `e3` | 29,651 / 8,280 / 5,258 |
+| every other assault evaluation combined | about a third as many |
+
+It was priced, too. Standing in the other side's half of the map is where this army was shelled for
+free: 17 `e1` and 9 `e3` killed by enemy `arty`, `e1` returning **400 damage for 97,500 taken**, and
+three of the four largest loss clusters sitting deep in their territory rather than at home. The
+army banked 32,200 credits of which a mean of 9,745 was ever committed, and the other side was
+still alive with a building standing at 1,329s.
+
+### A push with nothing in front of it hunts
+
+[`AssaultSweepLogic`](Logic/AssaultSweepLogic.cs) is the fix, and it reuses a ladder that was
+already written. A unit that has arrived somewhere and found nothing walks the next rung of
+[`ScoutSearchLogic.Objective`](Logic/ScoutSearchLogic.cs) — the single-axis mirrors, then the map's
+rim — as an `AttackMoveTo`, so it fights through what it meets and explores permanently on the way.
+
+Three bounds keep it from becoming the opposite bug:
+
+- **The rung belongs to the side**, in [`AssaultSweeps`](Modes/AssaultSweeps.cs), keyed on the
+  player exactly as the sighting memory is. 180 units each running a private search would deliver
+  the army to 180 corners one unit at a time. It only ever advances, so a side that has swept half
+  the map carries on from there rather than re-walking what it has answered.
+- **It is pre-empted by anything already in reach.** A unit with a target inside its own weapon
+  range falls through to the last-stand scorer and shoots it; the hunt waits for the next
+  evaluation. Walking away from something you can already kill is never the better trade.
+- **It never deletes a sighting and never outranks an objective.** As soon as a structure enters
+  the 40-cell sensor radius the objective rules take over on their own. A sweep is only ever what a
+  unit does instead of nothing.
+
+A rung retires when somebody stands on it and still sees nothing, debounced by fifteen seconds so
+the fast half of a column cannot run the destination away from the slow half, or on a sixty-second
+clock, which is the only evidence available that a cell cannot be reached at all. Immobile actors
+are excluded from both: a guard tower reporting that it is standing on the hunt's current cell
+would retire a rung the army has never been to.
+
 ## Start your own
 
 

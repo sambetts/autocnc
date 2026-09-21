@@ -37,10 +37,11 @@ namespace AutoCnC.Reference.Logic
 	/// to march it holds, and an attack doctrine whose units all hold is indistinguishable from
 	/// no attack doctrine at all.
 	/// </remarks>
-	public readonly record struct ApproachOrders(bool HasTarget, int X, int Y, int DistanceUnits, string Why)
+	public readonly record struct ApproachOrders(
+		bool HasTarget, int X, int Y, int DistanceUnits, string Why, string WhyId)
 	{
 		/// <summary>Nowhere to go: this side has never seen an enemy structure.</summary>
-		public static ApproachOrders None { get; } = new(false, 0, 0, 0, null);
+		public static ApproachOrders None { get; } = new(false, 0, 0, 0, null, null);
 	}
 
 	/// <summary>
@@ -142,8 +143,11 @@ namespace AutoCnC.Reference.Logic
 					? "nothing in sight, closing on their base"
 					: approach.Why;
 
-				return UnitDecision.AttackMoveTo(approach.X, approach.Y,
-					$"{why}, {approach.DistanceUnits}u out");
+				return string.IsNullOrEmpty(approach.WhyId)
+					? UnitDecision.AttackMoveTo(approach.X, approach.Y,
+						$"{why}, {approach.DistanceUnits}u out")
+					: UnitDecision.AttackMoveTo(approach.X, approach.Y,
+						$"{why}, {approach.DistanceUnits}u out", approach.WhyId);
 			}
 
 			var target = SelectLastStandTarget(state, role);

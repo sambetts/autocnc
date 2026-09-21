@@ -1,70 +1,62 @@
 {
   "schemaVersion": 1,
-  "authoredForRevision": "0050c90e54dd82776d74485ab4b306b1e65e73d4-dirty:c72a9af0aedc651ef44d59749a847e8fd4fabfebc864eba49a7b2ccca70bdc33",
+  "authoredForRevision": "0050c90e54dd82776d74485ab4b306b1e65e73d4",
   "checks": [
     {
-      "id": "recovery-outranks-farmed-screen",
+      "id": "harvester-bank-arms",
       "category": "activation",
-      "description": "activation: TrainUnitsMode's screen-before-recovery exemption is now bounded by the screen attrition tally it already keeps. Last fight the Vehicle queue issued 8 orders in 1332s and 5 were bggy (218s, 244s, 427s, 458s, 477s), every one carrying 'first light screen before harvester recovery' - the literal that says recovery had chosen harv and the exemption overruled it. A 300-credit vehicle living a mean of 50.4s is never standing, so the exemption was permanently on. This id is emitted only when the tally is what changed the answer and a harvester came out.",
-      "query": "reason-id:economy.recovery-outranks-farmed-screen",
-      "operator": ">=",
-      "value": "1"
-    },
-    {
-      "id": "harvester-bank-is-reachable",
-      "category": "activation",
-      "description": "activation: the mid-game reservation recorded economy.bank-replaces-harvester at none of last fight's 267 assessments. Its floor of four refineries was not met until 455s and BaseUnderAttack read true at every assessment from 405s onward, so the rule was unreachable by construction. The floor now reads OpeningBankTuning.RefineryFloor so the handover is exact, and the release is proportionate (enemy value at the base above own army value there) rather than any sighting at all.",
+      "description": "activation: IncomeFirstLogic.ReserveHarvesterRecovery is the new branch. Once four refineries stand and the fleet is short of the docking places they provide, one harvester's price (1,100) is reserved for the Vehicle queue so the Infantry queue cannot spend the trickle first. The reservation policy is recorded on every assessment whether or not it suppresses anything, so an absent id means the gate was never reached rather than that the rule was wrong.",
       "query": "reason-id:economy.bank-replaces-harvester",
       "operator": ">=",
       "value": "1"
     },
     {
-      "id": "the-fleet-is-actually-bought",
+      "id": "the-fleet-is-replaced",
       "category": "outcome",
-      "description": "outcome: the direct measure. Six harvesters existed all match (three of them refinery free actors), the fleet peaked at five against the eight docking places four refineries provide, and the last harvester ordered before the collapse was at 344s - 940 seconds before the next one. Note units.count(type=harv) counts BOTH sides (14 last fight against this side's 6), which is why this reads the summary ledger instead.",
-      "query": "summary.unitTypes[harv].built",
+      "description": "outcome: the direct measure of the change. Nine harvesters were built last match and the last one was ordered at 747s, 690 seconds before the war factory died; the fleet then went 9, 6, 4, 1, 0 between 1,140s and 1,320s with cash sampled at 1, 0 and 157. If the reservation works, the side buys more harvesters than the nine it managed.",
+      "query": "units.count(type=harv)",
       "operator": ">=",
-      "value": "9"
+      "value": "12"
     },
     {
       "id": "income-does-not-die",
       "category": "outcome",
-      "description": "outcome: 862 of 1332 seconds had no live harvester and lifetime earnings froze at 15,435 credits from 480s. Every credit after that came from nowhere, so the side produced nothing at all for its last 840 seconds. If the fleet is replaced while it is being hunted, this is where it shows.",
-      "query": "summary.economy.secondsWithNoHarvester",
-      "operator": "<=",
-      "value": "300"
-    },
-    {
-      "id": "earnings-recover",
-      "category": "outcome",
-      "description": "outcome: 11.588 credits a second against a reference of 50 and a prior median of 35.573, the worst earning rate in the trend window. While harvesters lived the side earned roughly 40 a second, so this is a fleet-size problem rather than a harvesting problem: 15,435 credits earned in a match the opponent finished with an army worth 75,150.",
+      "description": "outcome: 585 seconds of the match had no live harvester and lifetime earnings froze at 55,930 credits from 1,260s, which is what produced 30.8 credits a second against a reference of 50 and a prior median of 38.5. Across the last ten runs the four highest incomes are exactly the four best fitness scores, so this is the metric the change is betting on.",
       "query": "summary.headline.creditsEarnedPerSecond",
       "operator": ">=",
-      "value": "25"
+      "value": "38.5"
     },
     {
       "id": "the-bank-still-buys-an-army",
       "category": "invariant",
-      "description": "invariant: a reservation that strangles the barracks is the failure mode both of these changes sit one step away from. Only the last 1,100 credits are defended, the reservation stands down for sixty seconds whenever it has not grown the fleet, and it releases outright when the enemy at the base outvalues the army standing in it. Spend was 17.218 a second last match against a prior median of 42.203; holding cash nothing spends would push it lower still.",
+      "description": "invariant: a reservation that starves the barracks is the failure mode this rule is one step away from. Only the last 1,100 credits are defended and the reservation stands down for sixty seconds whenever it has not grown the fleet, so total spend must not fall. 34.9 credits a second last match against a prior median of 43.8; below last match's own figure the reservation is holding cash nothing is spending.",
       "query": "summary.headline.creditsSpentPerSecond",
       "operator": ">=",
-      "value": "25"
+      "value": "35"
     },
     {
-      "id": "the-barracks-keeps-producing",
+      "id": "the-base-still-shoots-back",
       "category": "invariant",
-      "description": "invariant: the same risk measured on the queue rather than the rate. The Infantry queue issued 33 orders last match and its rungs are capped at four bodies while income is short, not silenced. A reservation that reached the barracks would show as this collapsing.",
-      "query": "summary.production[Infantry].ordersIssued",
-      "operator": ">=",
-      "value": "20"
+      "description": "invariant: the reservation is released while enemies are at the base precisely so it cannot trade the garrison for an earner during a raid. Losses were 71,120 credits last match, a 49% regression against a prior median of 47,680, and an economy rule that made that worse would be buying income with the base. This is the ceiling that says it has not.",
+      "query": "summary.headline.creditsLost",
+      "operator": "<=",
+      "value": "65000"
     },
     {
-      "id": "the-match-goes-better",
+      "id": "the-army-is-still-held",
       "category": "outcome",
-      "description": "outcome: fitness 0.268 against a prior median of 0.656, with economicRate 0.232, valueExchange 0.203 and armyValueIntegral 0.065 all near their floors. All three are paid for by income, so a working fleet should move the total rather than one component.",
+      "description": "outcome: mean army value was 1,802 against a reference of 6,000, the worst-scoring fitness component at 0.30, and every winning run in the last ten held between 8,966 and 22,088. Income is what pays for an army, so a working economy fix should show here as well as in the earnings; if income rises and this does not, the credits went somewhere other than the army.",
+      "query": "summary.headline.meanArmyValue",
+      "operator": ">=",
+      "value": "2500"
+    },
+    {
+      "id": "the-match-is-won-better",
+      "category": "outcome",
+      "description": "outcome: fitness was 0.6565, dead on the prior median of 0.658, with economicRate 0.62, valueExchange 0.49 and armyValueIntegral 0.30 the three components off their caps. Buildings, exploration and survival are already capped and have slack, so any real gain has to come from the economy half.",
       "query": "summary.fitness.total",
       "operator": ">=",
-      "value": "0.45"
+      "value": "0.72"
     }
   ]
 }

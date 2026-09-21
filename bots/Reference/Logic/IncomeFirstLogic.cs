@@ -120,29 +120,16 @@ namespace AutoCnC.Reference.Logic
 	/// only <c>proc</c>. It is what must be kept out of the other queues' reach, because it is
 	/// exactly the sum the vehicle queue has to hold at once and never does.
 	/// <para>
-	/// <paramref name="RefineryFloor"/> is <see cref="OpeningBankTuning.RefineryFloor"/>, read
-	/// from it rather than written down again, because the two reservations hand over to each
-	/// other and a handover expressed as two separate numbers is a hole.
-	/// <b>It used to be one higher, and the hole was 145 seconds of the only calm window 16:9
-	/// ever gave this bot.</b> The opening bank stood down when the third refinery landed at
-	/// 250s; the fourth did not stand until 455s. Across those 205 seconds neither reservation
-	/// was active, the fleet sat at two and three harvesters against the six docking places
-	/// three refineries provide, and cash read 0 at 32 of the 41 assessments in the window. The
-	/// harvester ordered at 344s took 91 seconds to deliver an 1,100-credit item out of that
-	/// trickle. By the time the floor of four was met the base had been under attack for fifty
-	/// seconds and stayed that way for the rest of the match, so
-	/// <c>economy.bank-replaces-harvester</c> was recorded at <b>none</b> of the 267
-	/// assessments: the rule was unreachable by construction rather than wrong.
-	/// </para>
-	/// <para>
-	/// The old argument for the gap was that <see cref="BattleState"/> cannot see a vehicle
-	/// factory, so handing over at three would arm the reservation in the window the yard needs
-	/// 2,000 credits clear to buy one. Two things answer it. A reservation naming a queue the
-	/// side does not own resolves as <em>unmatched</em> and suppresses nothing, so before a
-	/// factory stands this rule costs the yard nothing at all; and <paramref name="DutySeconds"/>
-	/// stands the reservation down for a full interval whenever it has not grown the fleet, so
-	/// even a reservation that somehow bit would be released half the time rather than latched.
-	/// A bounded worst case beats a guaranteed hole.
+	/// <paramref name="RefineryFloor"/> is one higher than
+	/// <see cref="OpeningBankTuning.RefineryFloor"/>, and the gap between them is deliberate.
+	/// <see cref="BattleState"/> cannot see whether a vehicle factory is standing, so plan order
+	/// is the only evidence available that a harvester is buyable at all:
+	/// <see cref="ReferencePlans.Economy"/> buys <c>weap</c>/<c>afld</c> at its seventh rung and
+	/// its fourth <c>proc</c> at its tenth, so a side with four refineries has already bought the
+	/// factory. Handing over at three instead would arm this reservation in the very window the
+	/// yard needs 2,000 credits clear to buy that factory — the reservation would delay the thing
+	/// that makes it useful. Between three refineries and four, neither reservation is active and
+	/// the yard spends freely.
 	/// </para>
 	/// <para>
 	/// <paramref name="HarvestersPerRefinery"/> is the docking ratio the rest of the bot already
@@ -170,10 +157,7 @@ namespace AutoCnC.Reference.Logic
 	{
 		public static HarvesterBankTuning Default { get; } = new(
 			HarvesterPrice: 1100,
-
-			// The opening reservation's own floor, so the handover is exact rather than
-			// approximately right in two places.
-			RefineryFloor: OpeningBankTuning.Default.RefineryFloor,
+			RefineryFloor: 4,
 			HarvestersPerRefinery: 2,
 			FleetCeiling: 8,
 
@@ -400,13 +384,10 @@ namespace AutoCnC.Reference.Logic
 		/// a factory that is standing and still not buying.
 		/// </para>
 		/// <para>
-		/// The three releases each have a different shape now, and the middle one is where the
-		/// last fight was lost. A base that is genuinely being overrun buys bodies rather than
-		/// income — but "overrun" is the enemy at the base outvaluing the army standing in it,
-		/// not merely a unit of theirs being visible, because the latter describes most of a
-		/// match against an opponent that raids. A side below the refinery floor is the opening
-		/// rule's business. And a fleet that has reached the docking places its refineries
-		/// provide is not short of anything.
+		/// The three releases are the same three the opening reservation argues for, and for the
+		/// same reasons: a base being overrun buys bodies rather than income; a side below the
+		/// refinery floor is the opening rule's business and has no factory anyway; and a fleet
+		/// that has reached the docking places its refineries provide is not short of anything.
 		/// </para>
 		/// </remarks>
 		public static HarvesterBankOutcome ReserveHarvesterRecovery(
@@ -415,27 +396,12 @@ namespace AutoCnC.Reference.Logic
 			if (string.IsNullOrEmpty(queue) || t.HarvesterPrice <= 0 || t.RefineryFloor <= 0)
 				return new HarvesterBankOutcome(ProductionBudget.None, HarvesterBankWatch.Idle);
 
-			// Bodies now beat income later once the base is actually losing the fight at home.
-			//
-			// "Any enemy near the base, or the base recently damaged" is not that test, and
-			// against an opponent that raids continuously it is not a test at all: on 16:9
-			// BaseUnderAttack read true at every one of the 186 assessments from 405s to the
-			// end of the match — 70% of the fight, and 100% of it after the refinery floor was
-			// met. A single sighted scout disarmed the only rule this bot has for keeping its
-			// economy alive, and kept it disarmed for the rest of the game.
-			//
-			// So the release is proportionate instead: it lifts when what is standing in the
-			// base is outvalued by what has come to kill it, which is when a rifleman bought
-			// this second genuinely beats a harvester bought in thirty. At 405s that read 650
-			// against 2,200 and the bank would have held; by 425s it read 3,750 against 2,400
-			// and the bank stands down, which is the fight this clause was written for. Both
-			// figures are ordinary visibility-filtered BattleState fields, so this knows no
-			// more about the enemy than the sighting that produced it.
-			if (s.EnemiesNearBase > 0 && s.EnemyValueNearBase > s.OwnArmyValueNearBase)
+			// Bodies now beat income later once they are already inside the base.
+			if (s.EnemiesNearBase > 0 || s.BaseUnderAttack)
 				return new HarvesterBankOutcome(ProductionBudget.None, HarvesterBankWatch.Idle);
 
-			// Below the floor the opening reservation owns the bank, and handing over at exactly
-			// its floor is what stops the two of them leaving a gap between them.
+			// Below the floor the opening reservation owns the bank, and plan order says the
+			// factory that would spend this one has not been bought yet.
 			if (s.Refineries < t.RefineryFloor)
 				return new HarvesterBankOutcome(ProductionBudget.None, HarvesterBankWatch.Idle);
 

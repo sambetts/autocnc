@@ -2294,6 +2294,65 @@ clock, which is the only evidence available that a cell cannot be reached at all
 are excluded from both: a guard tower reporting that it is standing on the hunt's current cell
 would retire a rung the army has never been to.
 
+## The fleet died with a factory still standing
+
+The next `16:9` at Hard was lost, and the reason is one number: **585 seconds — 32% of the match —
+with no live harvester**. Lifetime earnings froze at 55,930 credits at 1,260s and never moved
+again, which is what dragged income to 30.8 credits a second against a reference of 50 and a prior
+median of 38.5.
+
+The tempting reading is that the harvesters were badly handled. They were not. What happened is
+that nobody ever bought another one.
+
+| the fleet | |
+| --- | --- |
+| peak, at 780s | 9 |
+| 1,140s → 1,320s | 9, 6, 4, 1, **0** |
+| last `harv` ordered | **747s** |
+| war factories alive until | **1,437s** and **1,505s** |
+| cash sampled at 1,140s / 1,200s / 1,260s | 1, 0, 157 |
+| `Infantry` deliveries in that window | `e1` at 1,218s, `e3` at 1,440s |
+
+A harvester was buyable for 690 seconds after the last one was ordered. The `Vehicle` queue simply
+never held 1,100 credits at one time: a queue buying 100-credit riflemen out of a trickle always
+beats a queue saving for an 1,100-credit earner, and the barracks always has an unmet rung because
+infantry die.
+
+Across the last ten runs this is not a detail. Ranked by fitness, the four best runs are exactly
+the four highest incomes (57.0, 66.8, 68.0, 64.3 credits a second) and the six worst are exactly
+the six lowest (22.6 to 38.5). No other metric separates them.
+
+### A cap cannot stop a queue spending what it is already holding
+
+[`IncomeFirstLogic.Hold`](Logic/IncomeFirstLogic.cs) was already aimed at this race and cannot win
+it. It caps each `Infantry` rung at four bodies — and the plan has five rungs, so the barracks
+answers a cap with the next rung down and spends the same credits anyway.
+
+The host offers the thing that does work, and this bot was using it for the first 155 seconds of a
+match and then switching it off. `ReserveOpeningBank` holds a refinery's price for the construction
+yard while the side is below three refineries; past that, nothing arbitrated the shared bank at all.
+[`ReserveHarvesterRecovery`](Logic/IncomeFirstLogic.cs) is the other half: once four refineries
+stand, one harvester's price is held for the `Vehicle` queue whenever the fleet is short of the
+docking places those refineries provide.
+
+It is narrow on every axis, and each bound is a number the bot already had:
+
+- **Four refineries, not three.** `BattleState` cannot see a war factory, so plan order is the only
+  evidence that a harvester is buyable: `Economy` buys `weap`/`afld` at rung seven and its fourth
+  `proc` at rung ten. Handing over at three would arm the reservation in the exact window the yard
+  needs 2,000 credits clear to buy the factory that spends it.
+- **The fleet the refineries already standing were bought to feed**, two per refinery, capped at the
+  `Vehicle` plan's own saturation figure of eight. No new target is invented.
+- **Self-limiting by construction.** The host suppresses another queue's order only when its full
+  cost would take live cash *below* the reservation, so a side with 2,000 banked buys its rifleman
+  as usual. Only the last 1,100 is defended — which is the sum the vehicle queue was short of.
+- **Released while the base is overrun**, for the same reason the opening reservation is: bodies now
+  beat income later once they are already inside the base.
+- **Bounded in both directions.** It stands down after sixty seconds in which the fleet has not
+  grown, and re-arms sixty seconds later rather than permanently. The obvious stranding case — the
+  factory dying while the fleet is short — is handled by the host instead: a reservation naming a
+  queue this side does not own resolves as *unmatched* and suppresses nothing.
+
 ## Start your own
 
 

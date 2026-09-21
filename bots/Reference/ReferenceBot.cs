@@ -66,17 +66,46 @@ namespace AutoCnC.Reference
 		/// Which queue gets first call on the shared bank, and how much of it.
 		/// </summary>
 		/// <remarks>
-		/// The only cross-queue arbitration this bot has that works before a vehicle factory
-		/// stands. Everything else it owns is either within one queue's rung order or gated on a
-		/// harvester being buildable, and the opening — where four queues spend one bank and the
-		/// cheapest item always wins — is neither. See
-		/// <see cref="ReferenceBotLogic.OpeningBankQueue"/> for why the reservation is owned by
-		/// the construction yard's economy queue, and
-		/// <see cref="Logic.IncomeFirstLogic.ReserveOpeningBank"/> for the fight that paid for
-		/// it.
+		/// The only cross-queue arbitration this bot has. Everything else it owns is either
+		/// within one queue's rung order or a cap on a plan, and a cap cannot stop a queue
+		/// spending the credits it is already holding.
+		/// <para>
+		/// Two reservations, in the order the match needs them, and never both at once because
+		/// the host takes one. Before a vehicle factory the only earner on offer is a refinery,
+		/// so the construction yard's economy queue holds the bank — see
+		/// <see cref="ReferenceBotLogic.OpeningBankQueue"/> and
+		/// <see cref="Logic.IncomeFirstLogic.ReserveOpeningBank"/>. After it, the only earner on
+		/// offer is a harvester, so the vehicle queue does — see
+		/// <see cref="ReferenceBotLogic.HarvesterBankQueue"/> and
+		/// <see cref="Logic.IncomeFirstLogic.ReserveHarvesterRecovery"/> for the 585 seconds of
+		/// dead economy that paid for it.
+		/// </para>
+		/// <para>
+		/// The harvester reservation carries memory between assessments, so it lives here as a
+		/// field rather than being recomputed from a state that cannot see how long it has been
+		/// waiting. The opening reservation needs none and is cleared out of the way whenever it
+		/// is the one answering.
+		/// </para>
 		/// </remarks>
-		public override ProductionBudget ReserveProductionBudget(in BattleState state) =>
-			IncomeFirstLogic.ReserveOpeningBank(
+		public override ProductionBudget ReserveProductionBudget(in BattleState state)
+		{
+			var opening = IncomeFirstLogic.ReserveOpeningBank(
 				state, ReferenceBotLogic.OpeningBankQueue, OpeningBankTuning.Default);
+
+			if (opening.IsActive)
+			{
+				harvesterBank = HarvesterBankWatch.Idle;
+				return opening;
+			}
+
+			var recovery = IncomeFirstLogic.ReserveHarvesterRecovery(
+				state, ReferenceBotLogic.HarvesterBankQueue, harvesterBank,
+				HarvesterBankTuning.Default);
+
+			harvesterBank = recovery.Watch;
+			return recovery.Budget;
+		}
+
+		HarvesterBankWatch harvesterBank = HarvesterBankWatch.Idle;
 	}
 }

@@ -112,6 +112,95 @@ namespace AutoCnC.Reference.Logic
 		bool Hold, bool Stalled, RecoveryHoldWatch Watch);
 
 	/// <summary>
+	/// The prices and bounds the mid-game harvester reservation is written against.
+	/// </summary>
+	/// <remarks>
+	/// <paramref name="HarvesterPrice"/> is the same ruleset price
+	/// <see cref="IncomeFirstTuning.HarvesterPrice"/> carries: 1,100 for both factions, needing
+	/// only <c>proc</c>. It is what must be kept out of the other queues' reach, because it is
+	/// exactly the sum the vehicle queue has to hold at once and never does.
+	/// <para>
+	/// <paramref name="RefineryFloor"/> is <see cref="OpeningBankTuning.RefineryFloor"/>, read
+	/// from it rather than written down again, because the two reservations hand over to each
+	/// other and a handover expressed as two separate numbers is a hole.
+	/// <b>It used to be one higher, and the hole was 145 seconds of the only calm window 16:9
+	/// ever gave this bot.</b> The opening bank stood down when the third refinery landed at
+	/// 250s; the fourth did not stand until 455s. Across those 205 seconds neither reservation
+	/// was active, the fleet sat at two and three harvesters against the six docking places
+	/// three refineries provide, and cash read 0 at 32 of the 41 assessments in the window. The
+	/// harvester ordered at 344s took 91 seconds to deliver an 1,100-credit item out of that
+	/// trickle. By the time the floor of four was met the base had been under attack for fifty
+	/// seconds and stayed that way for the rest of the match, so
+	/// <c>economy.bank-replaces-harvester</c> was recorded at <b>none</b> of the 267
+	/// assessments: the rule was unreachable by construction rather than wrong.
+	/// </para>
+	/// <para>
+	/// The old argument for the gap was that <see cref="BattleState"/> cannot see a vehicle
+	/// factory, so handing over at three would arm the reservation in the window the yard needs
+	/// 2,000 credits clear to buy one. Two things answer it. A reservation naming a queue the
+	/// side does not own resolves as <em>unmatched</em> and suppresses nothing, so before a
+	/// factory stands this rule costs the yard nothing at all; and <paramref name="DutySeconds"/>
+	/// stands the reservation down for a full interval whenever it has not grown the fleet, so
+	/// even a reservation that somehow bit would be released half the time rather than latched.
+	/// A bounded worst case beats a guaranteed hole.
+	/// </para>
+	/// <para>
+	/// <paramref name="HarvestersPerRefinery"/> is the docking ratio the rest of the bot already
+	/// plans to — see <see cref="ExpansionTuning.HarvestersPerRefinery"/> — so the fleet this
+	/// defends is the one the refineries already standing were bought to feed, not a number
+	/// invented here.
+	/// </para>
+	/// <para>
+	/// <paramref name="FleetCeiling"/> is <c>ReferencePlans</c>' own saturation figure, so this
+	/// rule defends the fleet the <c>Vehicle</c> plan already asks for rather than a second,
+	/// larger target of its own. It is a ceiling rather than a goal: past it the vehicle queue is
+	/// free to buy whatever else it wants without this rule having an opinion.
+	/// </para>
+	/// <para>
+	/// <paramref name="DutySeconds"/> is the bound, and it runs in both directions on purpose.
+	/// See <see cref="IncomeFirstLogic.ReserveHarvesterRecovery"/>.
+	/// </para>
+	/// </remarks>
+	public readonly record struct HarvesterBankTuning(
+		int HarvesterPrice,
+		int RefineryFloor,
+		int HarvestersPerRefinery,
+		int FleetCeiling,
+		int DutySeconds)
+	{
+		public static HarvesterBankTuning Default { get; } = new(
+			HarvesterPrice: 1100,
+
+			// The opening reservation's own floor, so the handover is exact rather than
+			// approximately right in two places.
+			RefineryFloor: OpeningBankTuning.Default.RefineryFloor,
+			HarvestersPerRefinery: 2,
+			FleetCeiling: 8,
+
+			// Sixty game seconds, the same bound RecoveryHoldTuning.StallTicks uses for the
+			// construction-side hold and comfortably longer than an 1,100 credit delivery on a
+			// working economy.
+			DutySeconds: 60);
+	}
+
+	/// <summary>What the harvester reservation remembers between assessments.</summary>
+	/// <remarks>
+	/// Per-match memory, so it belongs in a field on the bot rather than a static. A reservation
+	/// is armed from the fleet count it was armed at, so "has this bought anything" is a
+	/// comparison rather than a guess.
+	/// </remarks>
+	public readonly record struct HarvesterBankWatch(
+		int ArmedSeconds, int ArmedFleet, int ReleasedUntilSeconds)
+	{
+		/// <summary>Nothing armed and nothing standing down: the next assessment decides freely.</summary>
+		public static HarvesterBankWatch Idle { get; } = new(int.MinValue, int.MinValue, int.MinValue);
+	}
+
+	/// <summary>The reservation to return, and what to remember for the next assessment.</summary>
+	public readonly record struct HarvesterBankOutcome(
+		ProductionBudget Budget, HarvesterBankWatch Watch);
+
+	/// <summary>
 	/// Stops the cheapest queue on the field from spending the credits the only queue that can
 	/// buy income is waiting for.
 	/// </summary>
@@ -253,6 +342,150 @@ namespace AutoCnC.Reference.Logic
 					+ $"and {s.Harvesters} harvester(s) working on {s.IncomeEarned} credits earned",
 				"economy.bank-buys-income");
 		}
+
+		/// <summary>
+		/// Keeps one harvester's price out of every other queue's reach while the fleet is
+		/// collapsing, for as long as that is buying a harvester and no longer.
+		/// </summary>
+		/// <remarks>
+		/// <b><see cref="ReserveOpeningBank"/> stops at three refineries, and 16:9 was lost
+		/// after it stopped.</b> The reservation it owns is the only cross-queue arbitration
+		/// this bot has, it is switched off for the remaining ninety per cent of the match, and
+		/// the race it was written for does not end when the opening does — it gets worse, because
+		/// by then the barracks has five unmet rungs instead of two.
+		/// <para>
+		/// The fight it is written from. The fleet peaked at nine harvesters at 780s and was
+		/// destroyed between 1,140s and 1,320s: nine, six, four, one, none. A war factory stood
+		/// until 1,437s and a second until 1,505s, so a harvester was buyable throughout — and
+		/// <b>the last <c>harv</c> of the match was ordered at 747s</b>, 690 seconds before the
+		/// factory died. Nothing declined to buy one. The <c>Vehicle</c> queue simply never had
+		/// 1,100 credits at once: cash sampled 1, 0 and 157 across that window while the
+		/// <c>Infantry</c> queue delivered <c>e1</c> at 1,218s and <c>e3</c> at 1,440s out of the
+		/// same trickle. Income froze at 55,930 credits from 1,260s, <b>585 seconds — 32% of the
+		/// match — had no live harvester</b>, and the side finished at 30.8 credits a second
+		/// against a reference of 50 and a prior median of 38.5.
+		/// </para>
+		/// <para>
+		/// <see cref="Hold"/> is aimed at the same race and cannot win it, which is why this is a
+		/// reservation rather than another cap. It caps each <c>Infantry</c> rung at
+		/// <see cref="IncomeFirstTuning.GarrisonBodies"/>, and the barracks answers with the next
+		/// rung: four rifles, four rockets, four tech infantry, four more rockets, four more
+		/// rifles. Infantry die, so every one of those rungs is unmet again within seconds and
+		/// the queue can always find a 100-credit item to spend the 100 credits that just
+		/// arrived on. Capping a queue cannot stop it spending what it has; only the host's
+		/// central arbitration can, and it already does exactly this.
+		/// </para>
+		/// <para>
+		/// It is self-limiting by construction and needs no cash threshold of its own. The host
+		/// suppresses another queue's new order only when that order's full cost would take live
+		/// cash <em>below</em> what is left of the reservation, so a side with 2,000 in the bank
+		/// buys its rifleman as usual and only the last 1,100 is defended — which is exactly the
+		/// sum the vehicle queue was short of.
+		/// </para>
+		/// <para>
+		/// Every hold in this file has at some point become a latch, so this one is bounded in
+		/// both directions before it is bounded on either. It stands down after
+		/// <see cref="HarvesterBankTuning.DutySeconds"/> in which the fleet has not grown —
+		/// evidence that the reservation is funding nothing — and it re-arms the same interval
+		/// later rather than permanently, because a fleet stuck at zero with a factory standing
+		/// is the case that most needs it. The side is therefore never frozen for more than one
+		/// interval at a time, and never gives up on its economy for more than one either.
+		/// </para>
+		/// <para>
+		/// The worst case is milder than that anyway, and the host is what makes it so: a
+		/// reservation naming a queue this side does not own resolves as <em>unmatched</em> and
+		/// suppresses nothing at all. So the obvious way for this rule to strand the bank — the
+		/// war factory dying while the fleet is short — cannot happen, because the queue the
+		/// reservation names dies with it. The duty cycle covers the case the host cannot see:
+		/// a factory that is standing and still not buying.
+		/// </para>
+		/// <para>
+		/// The three releases each have a different shape now, and the middle one is where the
+		/// last fight was lost. A base that is genuinely being overrun buys bodies rather than
+		/// income — but "overrun" is the enemy at the base outvaluing the army standing in it,
+		/// not merely a unit of theirs being visible, because the latter describes most of a
+		/// match against an opponent that raids. A side below the refinery floor is the opening
+		/// rule's business. And a fleet that has reached the docking places its refineries
+		/// provide is not short of anything.
+		/// </para>
+		/// </remarks>
+		public static HarvesterBankOutcome ReserveHarvesterRecovery(
+			in BattleState s, string queue, in HarvesterBankWatch watch, in HarvesterBankTuning t)
+		{
+			if (string.IsNullOrEmpty(queue) || t.HarvesterPrice <= 0 || t.RefineryFloor <= 0)
+				return new HarvesterBankOutcome(ProductionBudget.None, HarvesterBankWatch.Idle);
+
+			// Bodies now beat income later once the base is actually losing the fight at home.
+			//
+			// "Any enemy near the base, or the base recently damaged" is not that test, and
+			// against an opponent that raids continuously it is not a test at all: on 16:9
+			// BaseUnderAttack read true at every one of the 186 assessments from 405s to the
+			// end of the match — 70% of the fight, and 100% of it after the refinery floor was
+			// met. A single sighted scout disarmed the only rule this bot has for keeping its
+			// economy alive, and kept it disarmed for the rest of the game.
+			//
+			// So the release is proportionate instead: it lifts when what is standing in the
+			// base is outvalued by what has come to kill it, which is when a rifleman bought
+			// this second genuinely beats a harvester bought in thirty. At 405s that read 650
+			// against 2,200 and the bank would have held; by 425s it read 3,750 against 2,400
+			// and the bank stands down, which is the fight this clause was written for. Both
+			// figures are ordinary visibility-filtered BattleState fields, so this knows no
+			// more about the enemy than the sighting that produced it.
+			if (s.EnemiesNearBase > 0 && s.EnemyValueNearBase > s.OwnArmyValueNearBase)
+				return new HarvesterBankOutcome(ProductionBudget.None, HarvesterBankWatch.Idle);
+
+			// Below the floor the opening reservation owns the bank, and handing over at exactly
+			// its floor is what stops the two of them leaving a gap between them.
+			if (s.Refineries < t.RefineryFloor)
+				return new HarvesterBankOutcome(ProductionBudget.None, HarvesterBankWatch.Idle);
+
+			var docking = s.Refineries * t.HarvestersPerRefinery;
+			if (docking > t.FleetCeiling)
+				docking = t.FleetCeiling;
+
+			if (s.Harvesters >= docking)
+				return new HarvesterBankOutcome(ProductionBudget.None, HarvesterBankWatch.Idle);
+
+			// Standing down: wait out the rest of the interval before trying again.
+			if (watch.ReleasedUntilSeconds != int.MinValue)
+			{
+				if (s.Seconds < watch.ReleasedUntilSeconds)
+					return new HarvesterBankOutcome(ProductionBudget.None, watch);
+
+				return Arm(s, queue, docking, t);
+			}
+
+			if (watch.ArmedSeconds == int.MinValue)
+				return Arm(s, queue, docking, t);
+
+			// The fleet growing is the only evidence that the reservation is buying anything.
+			if (s.Harvesters > watch.ArmedFleet)
+				return Arm(s, queue, docking, t);
+
+			if (t.DutySeconds > 0 && s.Seconds - watch.ArmedSeconds >= t.DutySeconds)
+				return new HarvesterBankOutcome(
+					ProductionBudget.None,
+					new HarvesterBankWatch(int.MinValue, int.MinValue, s.Seconds + t.DutySeconds));
+
+			return new HarvesterBankOutcome(
+				Reserve(s, queue, docking, t),
+				watch);
+		}
+
+		static HarvesterBankOutcome Arm(
+			in BattleState s, string queue, int docking, in HarvesterBankTuning t) =>
+			new(Reserve(s, queue, docking, t),
+				new HarvesterBankWatch(s.Seconds, s.Harvesters, int.MinValue));
+
+		static ProductionBudget Reserve(
+			in BattleState s, string queue, int docking, in HarvesterBankTuning t) =>
+			ProductionBudget.Reserve(
+				t.HarvesterPrice,
+				queue,
+				$"bank held for harvester {s.Harvesters + 1}: {s.Harvesters} working the "
+					+ $"{docking} docking place(s) {s.Refineries} refinery(ies) provide, "
+					+ $"on {s.IncomeEarned} credits earned",
+				"economy.bank-replaces-harvester");
 
 		/// <summary>
 		/// Whether <paramref name="item"/> is the base's first emplacement of a defensive role it

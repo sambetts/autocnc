@@ -383,11 +383,39 @@ namespace AutoCnC.Reference.Modes
 			// cheap screen while an earner survives, however, so the replacement is not started
 			// behind the same unopposed pressure that killed the fleet. At zero harvesters,
 			// recovery remains immediate.
-			var preserveFirstScreen =
+			//
+			// ...but "one cheap screen" is what this was written to buy, and what it bought on
+			// 16:9 was a screen every time the last one died, forever, ahead of every harvester.
+			// The exemption is keyed on the screen *standing*, and a 300-credit vehicle that
+			// lives a mean of 50.4 seconds is not standing at almost any evaluation — so the
+			// exemption is permanently on for as long as one harvester survives, which is
+			// exactly the window in which recovery matters. It only lifts at zero harvesters,
+			// by which time the income that would pay for the replacement is already gone.
+			//
+			// The Vehicle queue issued eight orders in 1,332 seconds and five were bggy: 218s,
+			// 244s, 427s, 458s and 477s, every one of them carrying "first light screen before
+			// harvester recovery" — the literal that says the recovery plan had chosen harv and
+			// this exemption overruled it. The last three landed while the fleet stood at 3, 5
+			// and 5 of the 8 docking places four refineries provide and the base was being
+			// overrun. All five harvesters were dead eight seconds after the last of them, the
+			// next harvester was not ordered until 1284s on 27 cash, and lifetime earnings
+			// froze at 15,435 credits from 480s: 862 seconds of the match with no live
+			// harvester, 11.6 credits a second against a reference of 50. The five buggies
+			// bought 4 kills and 1,200 credits destroyed for 1,500 spent.
+			//
+			// So the screen leads recovery only while the screen has not already been bought
+			// and lost. That is the tally AttritionLogic already keeps for this exact role, and
+			// it clears itself the moment the screen floor actually stands — so a screen that
+			// survives keeps its place ahead of the economy and one that is being farmed does
+			// not. No new threshold: the write-off below still needs its three losses, because
+			// it silences the rung outright, where this only stops it outranking income.
+			var screenFarmed = screenAttrition.Losses > 0;
+			var screenLeadsRecovery =
 				standingHarvesters > 0
 				&& standingHarvesters < shortBelow
 				&& standingScreenVehicles < screenVehicleShortBelow
 				&& screenVehicleBuildable;
+			var preserveFirstScreen = screenLeadsRecovery && !screenFarmed;
 			var unprioritized = plan;
 			if (!preserveFirstScreen)
 				plan = IncomeFirstLogic.PrioritizeRecovery(
@@ -491,6 +519,20 @@ namespace AutoCnC.Reference.Modes
 					why += ", first light screen before harvester recovery";
 			}
 
+			// The mirror claim, and the one the next fight is measured on: recovery led because
+			// the screen has already been bought and lost, where the unbounded exemption would
+			// have bought another one instead. Claimed only when every other conjunct held, so
+			// the tally is what changed the answer rather than merely having been non-zero —
+			// a Vehicle queue buying a harvester looks identical whether this rule moved it or
+			// the screen simply happened to be standing.
+			var recoveryOutrankedFarmedScreen =
+				screenFarmed
+				&& screenLeadsRecovery
+				&& ArmyMixLogic.Names(ReferencePlans.HarvesterUnits, choice.ActorType);
+
+			if (recoveryOutrankedFarmedScreen)
+				why += $", harvester recovery ahead of a light screen already lost {screenAttrition.Losses} time(s): {standingHarvesters} of {shortBelow} earners";
+
 			if (!ReferenceEquals(plan, unprioritized)
 				&& ArmyMixLogic.Names(ReferencePlans.HarvesterUnits, choice.ActorType))
 			{
@@ -563,7 +605,8 @@ namespace AutoCnC.Reference.Modes
 					standingHarvesters > 0
 					&& standingHarvesters < shortBelow
 					&& standingScreenVehicles < floorShortBelow
-					&& screenVehicleBuildable;
+					&& screenVehicleBuildable
+					&& !screenFarmed;
 				if (!baselinePreservesScreen)
 					baseline = IncomeFirstLogic.PrioritizeRecovery(
 						baseline, ReferencePlans.HarvesterUnits,
@@ -611,6 +654,14 @@ namespace AutoCnC.Reference.Modes
 
 			if (armourFloorWrittenOff)
 				why += $", armour floor written off after {armourAttritionRelease.Losses} lost without {armourAttritionRelease.Target} standing";
+
+			// This one is claimed first because it is the narrowest of the three: it names both
+			// the rule that moved the plan and the actor that came out of it, where the two
+			// write-offs below only require the choice not to be the role they silenced. The
+			// prose still carries every fragment, so nothing is lost by the precedence.
+			if (recoveryOutrankedFarmedScreen)
+				return UnitDecision.Produce(
+					choice.Queue, choice.ActorType, why, "economy.recovery-outranks-farmed-screen");
 
 			if (screenFloorWrittenOff)
 				return UnitDecision.Produce(

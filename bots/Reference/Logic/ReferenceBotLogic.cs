@@ -87,6 +87,20 @@ namespace AutoCnC.Reference.Logic
 		/// </remarks>
 		public const string OpeningBankQueue = "Building";
 
+		/// <summary>
+		/// The queue that buys income once a factory stands, and so the one the mid-game
+		/// reservation is held for.
+		/// </summary>
+		/// <remarks>
+		/// <c>harv</c> is a <c>Vehicle</c>-queue item and the only replacement earner this bot
+		/// has after its refineries are built: a refinery hands out its free harvester exactly
+		/// once, so a fleet that is being hunted can only be restored by buying one. Named here
+		/// beside <see cref="OpeningBankQueue"/> because the two reservations hand over to each
+		/// other and a reservation naming a queue nothing produces from reserves cash for
+		/// nobody.
+		/// </remarks>
+		public const string HarvesterBankQueue = "Vehicle";
+
 		public static DoctrineDecision Decide(in BattleState s) => Decide(s, ReferenceBotTuning.Default);
 
 		public static DoctrineDecision Decide(in BattleState s, ReferenceBotTuning t)

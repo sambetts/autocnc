@@ -128,8 +128,8 @@ namespace AutoCnC.Platform.Server
 		/// <c>SharedRandom</c>.
 		/// </para>
 		/// <para>
-		/// That second stream had to be taught to listen. Until the engine derived
-		/// <c>LocalRandom</c> from the lobby seed it was constructed with no seed at all, so every
+		/// The tracked engine patch applied during setup/build seeds that second stream too.
+		/// Without it, <c>LocalRandom</c> is constructed with no seed at all, so every
 		/// module the opponent runs — base building, squad management, harvesting, production —
 		/// was seeded from <c>Environment.TickCount</c>. A pinned seed reproduced the map and the
 		/// factions and nothing the opponent did with them, which is why the same revision on the

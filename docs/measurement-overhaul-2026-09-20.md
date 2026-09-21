@@ -78,7 +78,8 @@ eight. The benchmark was an anecdote generator with a schema.
 
 ### The fix
 
-`engine/OpenRA.Game/World.cs` now derives `LocalRandom` from the lobby seed:
+`patches/openra-local-random.patch`, applied by setup and builds to the public upstream engine
+tag, makes `engine/OpenRA.Game/World.cs` derive `LocalRandom` from the lobby seed:
 
 ```csharp
 LocalRandom = new MersenneTwister(
@@ -87,6 +88,10 @@ LocalRandom = new MersenneTwister(
 
 The constant keeps the two streams from running in lockstep. Ordinary play is unaffected, because
 an unpinned lobby seed is still `DateTime.Now.ToBinary()`.
+
+The initial implementation pinned an unpublished engine commit (`75bdf886`), which fresh
+clones could not fetch from OpenRA. Keeping the patch here preserves the seeding behavior while
+the submodule points at the public `playtest-20260222` commit.
 
 ### Verification
 

@@ -25,14 +25,16 @@ available under the same terms.
 - **Licence:** GPL-3.0-or-later — [COPYING](https://github.com/OpenRA/OpenRA/blob/bleed/COPYING)
 - **Contributors:** [AUTHORS](https://github.com/OpenRA/OpenRA/blob/bleed/AUTHORS)
 
-The engine is included as a **git submodule pinned to tag `playtest-20260222`**. It is not
-modified and its source is not copied into this repository — running `git submodule update`
-fetches it from the upstream project.
+The engine is included as a **git submodule pinned to the public tag `playtest-20260222`**.
+Its full source is not copied into this repository. `scripts/setup.ps1` fetches it from the
+upstream project and applies `patches/openra-local-random.patch`, which makes the built-in
+opponent's local RNG reproducible from the lobby seed. The patch is GPL-3.0-or-later.
 
 ### Files in this repository derived from OpenRA
 
 | File | Derived from | Notes |
 |---|---|---|
+| `patches/openra-local-random.patch` | `OpenRA.Game/World.cs` | Seeds `LocalRandom` from the lobby seed for reproducible benchmarks. |
 | `mods/autocnc/mod.yaml` | `mods/cnc/mod.yaml` | Substantially copied, then modified: metadata, mod search paths, assemblies and rules list. |
 | `mods/autocnc/rules/units.yaml` | — | Original, but overrides trait templates defined in `mods/cnc/rules/defaults.yaml`. |
 | `src/AutoCnC.Mod/**` | — | Original code. Written against OpenRA's public trait, order and activity APIs, and follows its file-header and coding conventions. |

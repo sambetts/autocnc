@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    One-time setup: fetch the pinned OpenRA engine submodule.
+    One-time setup: fetch the pinned OpenRA engine and apply the required local patch.
 #>
 [CmdletBinding()]
 param()
@@ -20,8 +20,11 @@ finally {
 
 $engineDir = Join-Path $repoRoot 'engine'
 if (-not (Test-Path (Join-Path $engineDir 'OpenRA.sln'))) {
-    throw "Engine submodule looks empty: $engineDir. Try: git submodule update --init --force"
+    throw "Engine submodule looks empty: $engineDir. Check the submodule checkout and rerun ./scripts/setup.ps1."
 }
+
+. (Join-Path $PSScriptRoot 'engine-patch.ps1')
+$null = Initialize-EnginePatch $engineDir
 
 Write-Host ''
 Write-Host 'Setup complete. Next: ./scripts/build.ps1' -ForegroundColor Green

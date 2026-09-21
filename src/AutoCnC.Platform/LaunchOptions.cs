@@ -23,7 +23,7 @@ namespace AutoCnC.Platform
 	/// The engine parses a fixed set of <c>Launch.*</c> arguments into
 	/// <see cref="LaunchArguments"/> and silently ignores the rest, so a mod can add its own
 	/// simply by reading the process command line again. That keeps this feature entirely inside
-	/// the AutoC&amp;C assemblies — the pinned engine submodule stays untouched.
+	/// the AutoC&amp;C assemblies without changing the engine's command-line parser.
 	/// </para>
 	/// <para>
 	/// These are read by two very different consumers — the mode executor on the client and

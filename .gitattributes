@@ -13,6 +13,8 @@
 *.md      text eol=lf
 *.ps1     text eol=lf
 *.yml     text eol=lf
+# Unified-diff context lines require leading spaces, including on otherwise blank lines.
+*.patch   text eol=lf whitespace=-blank-at-eol,-space-before-tab
 
 *.png binary
 *.jpg binary

@@ -86,3 +86,4 @@ finally {
 }
 
 Write-Host 'Engine patch checks passed: missing checkout, LF/CRLF, repeat application, local edits, and conflicts.' -ForegroundColor Green
+exit 0

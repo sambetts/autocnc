@@ -502,7 +502,7 @@ namespace AutoCnC.Reference.Modes
 			for (var i = 0; i < found.Count; i++)
 			{
 				var f = found[i];
-				fields.Add(new FieldOption(f.NearestX, f.NearestY, f.CenterX, f.CenterY, f.CellCount, f.TotalDensity, f.DistanceUnits));
+				fields.Add(FieldOption.From(f));
 			}
 
 			var plan = ExpansionLogic.Expand(
@@ -709,7 +709,7 @@ namespace AutoCnC.Reference.Modes
 			for (var i = 0; i < found.Count; i++)
 			{
 				var f = found[i];
-				fields.Add(new FieldOption(f.NearestX, f.NearestY, f.CenterX, f.CenterY, f.CellCount, f.TotalDensity, f.DistanceUnits));
+				fields.Add(FieldOption.From(f));
 			}
 
 			refinerySites.Clear();

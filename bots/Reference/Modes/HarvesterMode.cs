@@ -106,9 +106,10 @@ namespace AutoCnC.Reference.Modes
 				var found = ctx.FindResourceFields(tuning.MinFieldCells, tuning.MaxFieldsConsidered, home);
 				for (var i = 0; i < found.Count; i++)
 				{
-					// Copied, not retained: sensing methods reuse their buffers.
-					var f = found[i];
-					fields.Add(new FieldOption(f.NearestX, f.NearestY, f.CenterX, f.CenterY, f.CellCount, f.TotalDensity, f.DistanceUnits));
+					// Copied, not retained: sensing methods reuse their buffers. From() also
+					// carries what the ground pays, so blue tiberium outranks a green patch of
+					// the same size in Score below.
+					fields.Add(FieldOption.From(found[i]));
 				}
 			}
 
@@ -167,9 +168,15 @@ namespace AutoCnC.Reference.Modes
 		public override void OnDamaged(Actor self, ModeContext ctx, AttackInfo e)
 		{
 			var attacker = e.Attacker;
+
+			// ModeContext.HasPosition, not a null check: a superweapon credits its damage to the
+			// firing player's PlayerActor, which is a real, live, enemy-owned actor that occupies
+			// no cell. Reading Location off it threw and took the whole match down the first time
+			// a nuke landed on a harvester.
 			if (attacker != null
 				&& attacker.IsInWorld
 				&& !attacker.IsDead
+				&& ModeContext.HasPosition(attacker)
 				&& self.Owner.RelationshipWith(attacker.Owner) == PlayerRelationship.Enemy)
 			{
 				HarvesterThreats.Record(

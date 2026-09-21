@@ -23,6 +23,10 @@ it as authoritative context alongside the source and the evidence from one compl
   the tiberium and stops it.
 - Refinery placement matters for the same reason. A refinery built next to a large field keeps its
   harvesters inside their own search bubble for far longer than one built in the middle of a base.
+- **Blue tiberium is worth more than green.** `Tiberium` pays 35 credits a unit and `BlueTiberium`
+  pays 60, so a blue field is worth roughly 1.7 green ones of the same size. `FindResourceFields`
+  reports each patch's type and its `TotalValue`, and a harvester that ranks ground by density
+  alone will pass up the better field.
 - **Resource reads respect shroud, so scouting is an economic act, not just a military one.** A
   cell the side has never explored reads as empty, exactly as it does for a human player. Measured
   on `tiberium-rift`, a side that never scouts has explored about 36 of the map's 366 tiberium

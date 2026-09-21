@@ -43,6 +43,8 @@ namespace AutoCnC.Sdk
 		readonly IResourceLayer resourceLayer;
 		readonly HarvesterInfo harvesterInfo;
 		readonly List<ThreatSnapshot> threatBuffer = [];
+		Player resourceValuesOwner;
+		IReadOnlyDictionary<string, int> resourceValues;
 
 		public World World { get; }
 
@@ -172,7 +174,7 @@ namespace AutoCnC.Sdk
 			(self.CenterPosition - World.Map.CenterOfCell(state.Anchor)).HorizontalLength;
 
 		public int DistanceTo(Actor other) =>
-			other == null ? int.MaxValue : (other.CenterPosition - self.CenterPosition).HorizontalLength;
+			HasPosition(other) ? (other.CenterPosition - self.CenterPosition).HorizontalLength : int.MaxValue;
 
 		public int DistanceTo(CPos cell) =>
 			(World.Map.CenterOfCell(cell) - self.CenterPosition).HorizontalLength;
@@ -275,6 +277,9 @@ namespace AutoCnC.Sdk
 		/// <summary>True if any of this unit's enabled armaments can engage the target.</summary>
 		public bool CanAttack(Actor target)
 		{
+			if (!HasPosition(target))
+				return false;
+
 			var t = Target.FromActor(target);
 			foreach (var ab in ActiveAttackBases)
 				if (ab.HasAnyValidWeapons(t))
@@ -282,6 +287,20 @@ namespace AutoCnC.Sdk
 
 			return false;
 		}
+
+		/// <summary>
+		/// True if this actor is a real thing standing somewhere on the map, so asking for its
+		/// cell or its distance is meaningful.
+		/// </summary>
+		/// <remarks>
+		/// The engine has actors that occupy no space, and it hands them to a mode as attackers.
+		/// A superweapon is the one that bites: <c>NukeLaunch</c> credits its damage to the
+		/// firing player's <c>PlayerActor</c>, which is a system actor with no position, so
+		/// <c>attacker.Location</c> inside <see cref="IUnitMode.OnDamaged"/> throws and takes the
+		/// match down with it. Check this before reading <c>Location</c> or <c>CenterPosition</c>
+		/// off anything the engine handed you rather than something you sensed.
+		/// </remarks>
+		public static bool HasPosition(Actor actor) => actor?.OccupiesSpace != null;
 
 		bool CanHitUs(Actor actor)
 		{
@@ -435,7 +454,38 @@ namespace AutoCnC.Sdk
 		public bool IsHarvester => harvesterInfo != null;
 
 		/// <summary>
-		/// What is in a cell: tiberium type and how much of it.
+		/// What one unit of <paramref name="resourceType"/> pays when it is delivered, in credits.
+		/// </summary>
+		/// <remarks>
+		/// <para>
+		/// The mod's own figure, not a guess: C&amp;C pays 35 a unit for green <c>Tiberium</c> and
+		/// 60 for blue <c>BlueTiberium</c>, so a blue cell is worth about 1.7 green ones and a
+		/// harvester that ranks ground by density alone is leaving most of that on the map.
+		/// </para>
+		/// <para>
+		/// 0 when this mod declares no value for the type. That is not "worthless" — it is "this
+		/// mod does not say" — so fall back to density rather than skipping the ground.
+		/// </para>
+		/// </remarks>
+		public int ResourceValue(string resourceType)
+		{
+			if (resourceType == null)
+				return 0;
+
+			// Resolved per owner rather than once, because a captured unit keeps its context and
+			// the values belong to the owning player's actor.
+			var owner = self.Owner;
+			if (!ReferenceEquals(owner, resourceValuesOwner))
+			{
+				resourceValuesOwner = owner;
+				resourceValues = owner?.PlayerActor?.Info.TraitInfoOrDefault<PlayerResourcesInfo>()?.ResourceValues;
+			}
+
+			return resourceValues != null && resourceValues.TryGetValue(resourceType, out var value) ? value : 0;
+		}
+
+		/// <summary>
+		/// What is in a cell: tiberium type, how much of it, and what it pays.
 		/// </summary>
 		/// <remarks>
 		/// <see cref="ResourceCell.Empty"/> for bare ground, for cells off the map, and for cells
@@ -454,7 +504,7 @@ namespace AutoCnC.Sdk
 			if (contents.Type == null || contents.Density == 0)
 				return ResourceCell.Empty;
 
-			return new ResourceCell(cell.X, cell.Y, contents.Type, contents.Density);
+			return new ResourceCell(cell.X, cell.Y, contents.Type, contents.Density, ResourceValue(contents.Type));
 		}
 
 		/// <summary>True if there is anything at all to cut in this cell.</summary>
@@ -477,6 +527,19 @@ namespace AutoCnC.Sdk
 		/// </summary>
 		bool IsFieldCell(CPos cell) =>
 			harvesterInfo != null ? CanHarvest(cell) : HasResource(cell);
+
+		/// <summary>
+		/// <see cref="IsFieldCell"/>, but it hands back what it read so a caller walking the map
+		/// does not pay for a second layer lookup to find out the type and the density.
+		/// </summary>
+		bool TryFieldCell(CPos cell, out ResourceCell contents)
+		{
+			contents = ResourceAt(cell);
+			if (!contents.HasResource)
+				return false;
+
+			return harvesterInfo == null || harvesterInfo.Resources.Contains(contents.ResourceType);
+		}
 
 		/// <summary>
 		/// The nearest harvestable cell, or null if there is none within
@@ -517,6 +580,13 @@ namespace AutoCnC.Sdk
 		/// harvester search is far too short to find one.
 		/// </para>
 		/// <para>
+		/// A field is one resource type throughout. The fill stops at a type boundary, so a blue
+		/// patch touching a green one comes back as two fields rather than one blended patch
+		/// reported under whichever type the scan happened to land on first — which is what makes
+		/// <see cref="ResourceField.ValuePerUnit"/> and <see cref="ResourceField.TotalValue"/>
+		/// true of every cell counted into them, and therefore safe to rank on.
+		/// </para>
+		/// <para>
 		/// It walks every cell on the map and flood-fills each patch, so it is a scan rather than
 		/// a lookup. Call it when a harvester has run out of work, not every tick.
 		/// </para>
@@ -535,25 +605,31 @@ namespace AutoCnC.Sdk
 
 			var from = origin ?? self.Location;
 			var fromPos = World.Map.CenterOfCell(from);
+
+			// Only cells claimed by a field go in here. A cell rejected as the wrong type for the
+			// patch being filled must stay unvisited, or the patch it does belong to would never
+			// get a seed of its own and would vanish from the scan entirely.
 			var visited = new HashSet<CPos>();
 			var pending = new Queue<CPos>();
 
 			foreach (var seed in World.Map.AllCells)
 			{
-				if (!visited.Add(seed))
+				if (visited.Contains(seed))
 					continue;
 
-				if (!IsFieldCell(seed))
+				if (!TryFieldCell(seed, out var seedContents))
 					continue;
 
+				var type = seedContents.ResourceType;
+				var valuePerUnit = seedContents.ValuePerUnit;
 				var cellCount = 0;
 				var totalDensity = 0;
 				var sumX = 0L;
 				var sumY = 0L;
 				var nearest = seed;
 				var nearestDistance = int.MaxValue;
-				string type = null;
 
+				visited.Add(seed);
 				pending.Enqueue(seed);
 
 				while (pending.Count > 0)
@@ -565,7 +641,6 @@ namespace AutoCnC.Sdk
 					totalDensity += contents.Density;
 					sumX += cell.X;
 					sumY += cell.Y;
-					type ??= contents.ResourceType;
 
 					var distance = (World.Map.CenterOfCell(cell) - fromPos).HorizontalLength;
 					if (distance < nearestDistance)
@@ -577,11 +652,17 @@ namespace AutoCnC.Sdk
 					foreach (var direction in CVec.Directions)
 					{
 						var neighbour = cell + direction;
-						if (!visited.Add(neighbour))
+						if (visited.Contains(neighbour))
 							continue;
 
-						if (IsFieldCell(neighbour))
-							pending.Enqueue(neighbour);
+						if (!TryFieldCell(neighbour, out var neighbourContents))
+							continue;
+
+						if (neighbourContents.ResourceType != type)
+							continue;
+
+						visited.Add(neighbour);
+						pending.Enqueue(neighbour);
 					}
 				}
 
@@ -594,7 +675,9 @@ namespace AutoCnC.Sdk
 						DistanceUnits: nearestDistance,
 						CellCount: cellCount,
 						TotalDensity: totalDensity,
-						ResourceType: type));
+						ResourceType: type,
+						ValuePerUnit: valuePerUnit,
+						TotalValue: totalDensity * valuePerUnit));
 			}
 
 			fields.Sort(static (a, b) => a.DistanceUnits.CompareTo(b.DistanceUnits));

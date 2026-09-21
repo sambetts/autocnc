@@ -471,6 +471,13 @@ public sealed class StandStillMode : UnitMode
 | `OnDamaged` | Immediately on taking damage, between evaluations |
 | `OnExit` | Once, when the unit leaves this mode |
 
+> **`e.Attacker` is not always something standing on the map.** A superweapon credits its damage
+> to the firing player's `PlayerActor`, which is alive, in the world, enemy-owned — and occupies
+> no cell, so `attacker.Location` throws and takes the match down with it. Null, `IsDead` and
+> `IsInWorld` checks do not catch it. Gate on `ModeContext.HasPosition(attacker)` before reading
+> `Location` or `CenterPosition` off anything the engine handed you. `DistanceTo` and `CanAttack`
+> already do.
+
 **One instance per unit**, created on entry and dropped on exit, so instance fields are safe
 per-unit memory. `static` mutable fields are shared by every unit — almost never what you want.
 
@@ -596,7 +603,8 @@ declare, so the rule and the shipped strategy cannot drift apart.
 
 | Member | Notes |
 |---|---|
-| `ResourceAt(cell)` | Tiberium type and density in one cell; `Empty` for bare ground or unexplored shroud |
+| `ResourceAt(cell)` | Tiberium type, density, and credits per unit in one cell; `Empty` for bare ground or unexplored shroud |
+| `ResourceValue(type)` | What the mod pays per unit of a resource type. `0` means the mod names no value, not that it is worthless |
 | `HasResource(cell)` / `CanHarvest(cell)` | Anything there / anything *this* unit can cut |
 | `FindNearestResource(radiusCells)` | Nearest harvestable cell. Cheap, but capped at 50 cells by the engine's tile search |
 | `FindResourceFields(minCells, maxFields)` | **Every tiberium field on the map**, nearest first, no radius cap |
@@ -604,10 +612,18 @@ declare, so the rule and the shipped strategy cannot drift apart.
 | `HasResourceLayer`, `ResourcesExhausted`, `IsHarvester` | Capability and map checks |
 
 A `ResourceField` gives you `NearestX`/`NearestY` (the cell to send a harvester to), `CenterX`/
-`CenterY`, `DistanceUnits`, `CellCount`, and `TotalDensity`. Aim at **`NearestX`/`NearestY`**;
-aiming at the centre drives the harvester through the field to the far side. `TotalDensity` is
-what is actually left, so a field mined down to a rind has a big `CellCount` and a small
-`TotalDensity`.
+`CenterY`, `DistanceUnits`, `CellCount`, `TotalDensity`, and `ResourceType` with its
+`ValuePerUnit` and `TotalValue`. Aim at **`NearestX`/`NearestY`**; aiming at the centre drives the
+harvester through the field to the far side. `TotalDensity` is what is actually left, so a field
+mined down to a rind has a big `CellCount` and a small `TotalDensity`.
+
+> **Rank on `TotalValue`, not `TotalDensity`.** C&C has two kinds of tiberium and they are not
+> worth the same: green `Tiberium` pays 35 credits a unit, blue `BlueTiberium` pays 60. A
+> harvester that picks ground by density drives past a blue field to a green one worth 40% less.
+> A field is one type throughout — a blue patch touching a green one is two fields, not one — so
+> `ValuePerUnit` is true of every cell counted into `TotalValue`. Both are `0` on a mod that
+> declares no value for the type, which means "this mod does not say"; fall back to
+> `TotalDensity` there rather than skipping the ground.
 
 > **Why this matters.** OpenRA's own harvester search is radius-capped and never widens: 12 cells
 > from the last cell it cut, or 24 from the refinery. When the tiberium inside that bubble is

@@ -63,14 +63,28 @@ namespace AutoCnC.Core
 	/// What one cell holds, as a mode sees it. <see cref="Empty"/> when there is nothing to cut.
 	/// </summary>
 	/// <remarks>
+	/// <para>
 	/// Cell coordinates rather than world units, because every order a harvester can be given
 	/// names a cell.
+	/// </para>
+	/// <para>
+	/// Not all tiberium is worth the same. C&amp;C ships two kinds — green <c>Tiberium</c> and blue
+	/// <c>BlueTiberium</c> — and the blue is worth substantially more per unit, so
+	/// <see cref="Density"/> alone does not say what a cell is worth.
+	/// <see cref="ValuePerUnit"/> is the mod's own credits-per-unit figure for
+	/// <see cref="ResourceType"/>, and <see cref="Value"/> is what this cell would actually pay.
+	/// It is 0 when the mod declares no value for the type, so a mode that cares must fall back
+	/// to <see cref="Density"/> rather than treat the cell as empty.
+	/// </para>
 	/// </remarks>
-	public readonly record struct ResourceCell(int X, int Y, string ResourceType, int Density)
+	public readonly record struct ResourceCell(int X, int Y, string ResourceType, int Density, int ValuePerUnit)
 	{
 		public static ResourceCell Empty { get; } = default;
 
 		public bool HasResource => ResourceType != null && Density > 0;
+
+		/// <summary>Credits this cell is worth if it is cut and delivered.</summary>
+		public int Value => Density * ValuePerUnit;
 	}
 
 	/// <summary>
@@ -88,6 +102,14 @@ namespace AutoCnC.Core
 	/// actually left rather than how wide the patch once was. A field that has been mined out to
 	/// a thin rind has a large <see cref="CellCount"/> and a small <see cref="TotalDensity"/>.
 	/// </para>
+	/// <para>
+	/// A field is one <see cref="ResourceType"/> throughout — a blue patch touching a green one
+	/// is two fields, not one — so <see cref="ValuePerUnit"/> applies to every cell in it and
+	/// <see cref="TotalValue"/> is what the whole patch would pay. Rank on
+	/// <see cref="TotalValue"/> rather than <see cref="TotalDensity"/> to prefer blue tiberium
+	/// over green, and fall back to density when it is 0, which is what a mod that declares no
+	/// value for the type produces.
+	/// </para>
 	/// </remarks>
 	public readonly record struct ResourceField(
 		int CenterX,
@@ -97,7 +119,9 @@ namespace AutoCnC.Core
 		int DistanceUnits,
 		int CellCount,
 		int TotalDensity,
-		string ResourceType);
+		string ResourceType,
+		int ValuePerUnit,
+		int TotalValue);
 
 	/// <summary>An owned live building, flattened into engine-free repair state.</summary>
 	public readonly record struct OwnedBuildingState(

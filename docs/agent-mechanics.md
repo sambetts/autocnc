@@ -179,6 +179,15 @@ permitted way to know where anything is.
 - Aim at a field's `NearestX`/`NearestY`, not its centre; the centre drives the harvester through
   the field to the far side. `TotalDensity` is what is actually left, so a field mined down to a
   rind has a large `CellCount` and a small `TotalDensity`.
+- **Not all tiberium is worth the same, and density does not say so.** C&C has two kinds: green
+  `Tiberium` pays 35 credits a unit and blue `BlueTiberium` pays 60, so blue ground is worth about
+  1.7 times green ground cell for cell. `ResourceField.TotalValue` is what a patch actually pays
+  and `ValuePerUnit` is the mod's own figure for its type; rank on `TotalValue`, not
+  `TotalDensity`, or a harvester will drive past a blue field to a green one worth less. Both are
+  0 on a mod that declares no value for the type — that means "this mod does not say", so fall
+  back to density rather than treating the ground as worthless.
+- A field is one resource type throughout: a blue patch touching a green one comes back as two
+  fields, not one blended patch, so `ValuePerUnit` is true of every cell counted into it.
 - `FindResourceFields` walks every cell and flood-fills each patch, so it is a scan rather than a
   lookup. Call it when a harvester has run out of work, not every tick.
 - Refinery placement matters for the same reason. A refinery built next to a large field keeps its
@@ -218,6 +227,13 @@ permitted way to know where anything is.
 ## Decisions and common semantics
 
 - `UnitDecision.Continue` means leave the unit's current activity alone.
+- **`OnDamaged`'s `e.Attacker` is not always something standing on the map.** A superweapon
+  credits its damage to the firing player's `PlayerActor`: alive, in the world, enemy-owned, and
+  occupying no cell. `attacker.Location` on it throws, and an exception raised inside a damage
+  notification takes the whole match down rather than losing one reaction. Null, `IsDead` and
+  `IsInWorld` checks do not catch this. Gate on `ModeContext.HasPosition(attacker)` before reading
+  `Location` or `CenterPosition` off anything the engine handed you; `ctx.DistanceTo` and
+  `ctx.CanAttack` already refuse such actors themselves.
 - `UnitDecision.Hold` stops an idle combat unit; using it on a working harvester can prevent useful
   default behavior.
 - Attack, movement, retreat, deploy, production, cancellation, building repair, support-power
@@ -337,6 +353,7 @@ ResourceField? FindNearestResourceField(int minCells = 4, CPos? origin = null)
 Actor FindRefinery()
 Actor FindRepairBay()
 IReadOnlyList<ResourceField> FindResourceFields(int minCells = 4, int maxFields = 16, CPos? origin = null)
+static bool HasPosition(Actor actor)
 bool HasResource(CPos cell)
 static bool IsVisibleEnemy(Player viewer, Actor actor)
 string ItemReadyToPlace(string category)
@@ -350,6 +367,7 @@ IReadOnlyCollection<ProductionQueueState> QueueStates()
 void RequestReevaluation()
 Actor ResolveActor(uint actorId)
 ResourceCell ResourceAt(CPos cell)
+int ResourceValue(string resourceType)
 IEnumerable<Actor> SenseAllies(WDist radius, string actorType = null)
 IReadOnlyList<ThreatSnapshot> SenseStructures(WDist radius)
 IReadOnlyList<ThreatSnapshot> SenseThreats(WDist radius)
@@ -545,6 +563,8 @@ int Density { get; init }
 static ResourceCell Empty { get }
 bool HasResource { get }
 string ResourceType { get; init }
+int Value { get }
+int ValuePerUnit { get; init }
 int X { get; init }
 int Y { get; init }
 ```
@@ -560,6 +580,8 @@ int NearestX { get; init }
 int NearestY { get; init }
 string ResourceType { get; init }
 int TotalDensity { get; init }
+int TotalValue { get; init }
+int ValuePerUnit { get; init }
 ```
 
 ### ThreatSnapshot

@@ -817,10 +817,15 @@ So the field is now **chosen on a clock, not recovered after a crash**:
 - **The scan is centred on the refinery, not the harvester.** What a field costs to work is the
   round trip to the refinery — a `harv` moves 1.758 cells a game second — and not how near the
   harvester happens to be when the question is asked.
-- **A field is worth what is left in it, discounted by the drive.** `Score` is
-  `TotalDensity × Scale / (Scale + DistanceUnits)` with `Scale` at 12 cells, so a field three times
-  as far must hold four times as much to win. It is scale-free in density on purpose: nothing here
-  knows what a full cell is worth in this mod, so no threshold pretends to.
+- **A field is worth what it pays, discounted by the drive.** `Score` is
+  `TotalValue × Scale / (Scale + DistanceUnits)` with `Scale` at 12 cells, so a field three times
+  as far must be worth four times as much to win. It is credits rather than density because in
+  C&C the two are not the same number: green `Tiberium` pays 35 a unit and blue `BlueTiberium`
+  pays 60, so ranking on density sends a harvester to the nearest green patch while blue ground
+  worth 1.7 times as much per cell sits beside it. `FindResourceFields` stops each fill at a type
+  boundary, so a blue patch touching a green one is two fields and the value quoted for each is
+  true of every cell in it. It stays scale-free: `FieldOption.From` falls back to density on a mod
+  that declares no value for the type, so no threshold pretends to know what a full cell is worth.
 - **A field is worked out when the scan stops returning it.** `FindResourceFields` only reports
   patches of at least `MinFieldCells`, so a patch ground down to scattered cells simply disappears,
   which is a mod-independent way of noticing that the ground under a harvester has gone. That, and

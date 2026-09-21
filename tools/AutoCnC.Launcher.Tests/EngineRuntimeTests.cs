@@ -137,13 +137,19 @@ namespace AutoCnC.Launcher.Tests
 			Assert.That(string.Join('\n', result.Output), Does.Contain(expectedError));
 		}
 
-		[TestCase("win-x64")]
-		[TestCase("linux-arm64")]
-		[TestCase("osx-arm64")]
-		public void EngineBuildUsesTheSdkButPassesTheSelectedNativeTarget(string target)
+		[TestCase("win-x64", false, false)]
+		[TestCase("linux-arm64", false, false)]
+		[TestCase("osx-arm64", false, false)]
+		[TestCase("win-x64", true, false)]
+		[TestCase("win-x64", true, true)]
+		public void EngineBuildUsesTheSdkButPassesTheSelectedNativeTarget(
+			string target, bool skipEngine, bool patchApplied)
 		{
 			CopyScript("build.ps1");
 			Write("engine\\OpenRA.sln", "");
+			Write("scripts\\engine-patch.ps1", $$"""
+				function Initialize-EnginePatch($EngineDirectory) { ${{patchApplied.ToString().ToLowerInvariant()}} }
+				""");
 			Write("scripts\\engine-runtime.ps1", $$"""
 				function Get-EngineRuntime {
 				    [pscustomobject]@{ DotNetPath = 'Invoke-EngineOnly'; TargetPlatform = '{{target}}' }
@@ -151,18 +157,21 @@ namespace AutoCnC.Launcher.Tests
 				function Invoke-EngineOnly { throw 'An engine-only runtime cannot compile projects.' }
 				""");
 
-			var result = Probe("""
+			var result = Probe($$"""
 				function global:dotnet {
 				    "SDK_ARGS=$($args -join '|')"
 				    $global:LASTEXITCODE = 0
 				}
 				$env:NUGET_PACKAGES = Join-Path $PSScriptRoot 'test-package-cache'
-				& (Join-Path $PSScriptRoot 'scripts\build.ps1') -SkipBots
+				& (Join-Path $PSScriptRoot 'scripts\build.ps1') -SkipBots -SkipEngine:${{skipEngine.ToString().ToLowerInvariant()}}
 				""");
 
-			Assert.That(result.ExitCode, Is.Zero);
-			Assert.That(string.Join('\n', result.Output), Does.Contain($"|-p:TargetPlatform={target}"));
-			Assert.That(string.Join('\n', result.Output), Does.Contain("SDK_ARGS=pack|"));
+			var output = string.Join('\n', result.Output);
+			Assert.That(result.ExitCode, Is.Zero, output);
+			Assert.That(output, skipEngine && !patchApplied
+				? Does.Not.Contain("OpenRA.sln")
+				: Does.Contain($"|-p:TargetPlatform={target}"));
+			Assert.That(output, Does.Contain("SDK_ARGS=pack|"));
 		}
 
 		[TestCase("launch.ps1", 0)]

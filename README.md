@@ -230,7 +230,8 @@ sends an order when your intent actually changes. Returning the same decision ev
 **The engine is a pinned git submodule. We do not fork it.**
 
 ```
-engine/        →  github.com/OpenRA/OpenRA @ playtest-20260222   (submodule, untouched)
+engine/        →  github.com/OpenRA/OpenRA @ playtest-20260222   (upstream submodule)
+patches/       →  reproducible engine changes applied by setup/build
 src/           →  our assemblies
 player-modes/  →  your assembly
 mods/          →  YAML wiring
@@ -248,13 +249,18 @@ download the freeware C&C assets on first run.
 Pinned to tag **`playtest-20260222`** (.NET 8, C# 12). The last *stable* tag is on end-of-life
 .NET 6 / C# 9.
 
+Setup and builds apply [`patches/openra-local-random.patch`](patches/openra-local-random.patch)
+to seed the built-in opponent's local RNG from the lobby seed. The submodule still points at
+the public upstream commit; the patch lives here rather than in an unpublished engine commit.
+
 ---
 
 ## Repository layout
 
 ```
 autocnc/
-├── engine/                          # ← git submodule: OpenRA (never edited)
+├── engine/                          # ← git submodule: public OpenRA tag
+├── patches/                         #   required engine patches, applied by setup/build
 │
 ├── src/                             # THE PLATFORM — infrastructure, zero strategy
 │   ├── AutoCnC.Core/                #   engine-free: decisions, plans, planners, BattleState
@@ -301,13 +307,13 @@ the SDK and graphical launcher can stay ARM64. See [ARM64 setup](docs/getting-st
 ```powershell
 git clone --recursive https://github.com/sambetts/autocnc.git
 cd autocnc
-./scripts/setup.ps1      # fetch the engine submodule
+./scripts/setup.ps1      # fetch and patch the engine submodule
 ./scripts/build.ps1      # build engine, mod and the reference bot
 ./scripts/install-content.ps1 # install free C&C base assets without a game window
 ./scripts/launcher.ps1   # pick your code, pick an opponent, play
 ```
 
-Cloned without `--recursive`? `git submodule update --init --depth 1`
+Cloned without `--recursive`? `./scripts/setup.ps1` fetches and patches the engine for you.
 
 ### Headless setup over Remote Desktop
 
@@ -470,7 +476,8 @@ Contributors, licensed [GPL-3.0-or-later](https://github.com/OpenRA/OpenRA/blob/
 See their [AUTHORS](https://github.com/OpenRA/OpenRA/blob/bleed/AUTHORS) for the people who made
 it possible.
 
-The engine is a pinned submodule, unmodified and not copied into this repository.
+The engine is a pinned upstream submodule with a small GPL-licensed patch kept in `patches/`;
+the full engine source is not copied into this repository.
 `mods/autocnc/mod.yaml` is derived from OpenRA's `mods/cnc/mod.yaml` and carries an attribution
 header.
 

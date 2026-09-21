@@ -6,7 +6,8 @@
     Build configuration. Defaults to Release.
 
 .PARAMETER SkipEngine
-    Skip the engine build. Use for fast iteration once the engine is already built.
+    Skip the engine build unless a required source patch was just applied.
+    Use for fast iteration once the patched engine is already built.
 
 .PARAMETER SkipBots
     Build only the platform, not the battle bots. -SkipDoctrines still works.
@@ -28,7 +29,13 @@ if (-not (Test-Path (Join-Path $engineDir 'OpenRA.sln'))) {
     throw 'Engine submodule not found. Run ./scripts/setup.ps1 first.'
 }
 
-if (-not $SkipEngine) {
+. (Join-Path $PSScriptRoot 'engine-patch.ps1')
+$enginePatched = Initialize-EnginePatch $engineDir
+if ($enginePatched -and $SkipEngine) {
+    Write-Host '==> Engine sources were patched; rebuilding despite -SkipEngine' -ForegroundColor Cyan
+}
+
+if (-not $SkipEngine -or $enginePatched) {
     . (Join-Path $PSScriptRoot 'engine-runtime.ps1')
     $engineRuntime = Get-EngineRuntime
     Write-Host "==> Building OpenRA engine ($Configuration)" -ForegroundColor Cyan

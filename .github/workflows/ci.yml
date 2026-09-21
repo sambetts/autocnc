@@ -59,8 +59,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
+
+      - name: Fetch and patch the pinned OpenRA engine
+        shell: pwsh
+        run: ./scripts/setup.ps1
+
+      - name: Check engine patch handling
+        shell: pwsh
+        run: ./scripts/check-engine-patch.ps1
 
       - uses: actions/setup-dotnet@v4
         with:

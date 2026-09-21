@@ -1,0 +1,13 @@
+diff --git a/OpenRA.Game/World.cs b/OpenRA.Game/World.cs
+--- a/OpenRA.Game/World.cs
++++ b/OpenRA.Game/World.cs
+@@ -197,7 +197,8 @@
+ 			Timestep = ReplayTimestep = GameSpeed.Timestep;
+ 
+ 			SharedRandom = new MersenneTwister(orderManager.LobbyInfo.GlobalSettings.RandomSeed);
+-			LocalRandom = new MersenneTwister();
++			LocalRandom = new MersenneTwister(
++				unchecked(orderManager.LobbyInfo.GlobalSettings.RandomSeed ^ 0x5f356495));
+ 
+ 			var worldActorType = type == WorldType.Editor ? SystemActors.EditorWorld : SystemActors.World;
+ 			WorldActor = CreateActor(worldActorType.ToString(), []);

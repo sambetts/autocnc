@@ -58,11 +58,19 @@ cd autocnc
 ./scripts/build.ps1
 ```
 
-`--recursive` matters: it fetches the pinned OpenRA engine. If you forgot it, `setup.ps1` will
-fetch the submodule for you.
+`--recursive` fetches the pinned public OpenRA engine. If you forgot it, `setup.ps1` will
+fetch the submodule for you. Setup also applies `patches/openra-local-random.patch`, which
+makes the built-in opponent reproducible from the lobby seed. Re-running setup is safe: an
+already-applied patch is left alone, and conflicting engine edits stop setup rather than being
+overwritten. `engine/OpenRA.Game/World.cs` showing as modified after setup is expected; do not
+commit that change inside the submodule or replace its public commit with a local-only commit.
 
 The first build compiles the whole engine and takes a couple of minutes. Later builds skip it
 (`./scripts/build.ps1 -SkipEngine`) and take seconds.
+
+Builds also apply the patch if setup was skipped after a recursive clone. If this changes the
+engine source, the engine is rebuilt even with `-SkipEngine`. After updating the engine or its
+patch, run a full build without `-SkipEngine`, even if setup has already applied the patch.
 
 Expect to finish with:
 
@@ -74,7 +82,9 @@ Build complete. Next: ./scripts/launch.ps1
 
 | Message | Cause |
 |---|---|
-| `Engine submodule not found` | Run `git submodule update --init --depth 1` |
+| `Engine submodule not found` | Run `./scripts/setup.ps1` |
+| `not our ref 75bdf886617cb3edce7617d18a07242ffaf5d76e` | Update AutoC&C to a revision with the public engine pin, then rerun `./scripts/setup.ps1`. That old pin referred to an unpublished engine commit; a deeper fetch cannot recover it. |
+| `Could not apply the required engine patch` | Inspect `git -C engine diff`, preserve your own edits, resolve the conflict, and rerun setup. Do not force-reset the engine. |
 | `OpenRA engine not built` | Run `./scripts/build.ps1` without `-SkipEngine` |
 | `OpenRA on Windows ARM64 requires the .NET 8 x64 runtime` | Install the Windows x64 .NET 8 Runtime alongside ARM64 .NET; see [ARM64](#arm64). |
 | `The file is locked by: ".NET Host"` | The game is running. Close it and rebuild. |

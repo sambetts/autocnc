@@ -255,13 +255,21 @@ are told not to spend their budget writing unit tests.
 
 ## Engine integration
 
-The engine is a git submodule pinned to tag `playtest-20260222`, never edited. Our assemblies
+The engine is a git submodule pinned to the public tag `playtest-20260222`. Setup and builds
+apply `patches/openra-local-random.patch` to derive `LocalRandom` from the lobby seed, keeping
+built-in opponent behavior reproducible without relying on an unpublished engine commit.
+The patch is maintained in this repository; the submodule pointer stays on upstream history.
+Our assemblies
 reference `engine/bin/*.dll` as prebuilt binaries rather than by `ProjectReference`, following
 the OpenRA Mod SDK convention, so bumping the engine tag never drags its internal project layout
 into our build. Both mod assemblies output into `engine/bin/`, because OpenRA resolves the
 assemblies named in `mod.yaml` relative to that directory.
 
-To upgrade: bump the submodule, rebuild, run the lint, fix what breaks.
+To upgrade: preserve any local engine edits, reverse the tracked patch with
+`git -C engine apply --reverse ../patches/openra-local-random.patch`, then bump the submodule.
+Rebase the patch onto the new engine, run setup and a full build, and run the lint and
+`scripts/check-engine-patch.ps1`. Never commit the applied patch inside the engine submodule
+and point AutoC&C at that unpublished commit.
 
 ### Launching straight into a battle
 
@@ -310,8 +318,9 @@ instead of waiting for the rendered results panel's 1.5-second wall-clock notifi
 
 OpenRA does not expose `World.OrderManager`, so the adapter resolves that one internal field by
 name from the deliberately pinned engine build and fails explicitly if it changes. Everything it
-invokes is a public engine API; the submodule remains untouched. This is the compatibility seam to
-revalidate when bumping OpenRA. The null platform also assumes a launched local AutoC&C battle:
+invokes is a public engine API; headless execution needs no additional engine patch. This is
+the compatibility seam to revalidate when bumping OpenRA. The null platform also assumes a
+launched local AutoC&C battle:
 interactive UI, remote multiplayer, editor, and rendering diagnostics belong on the Rendered path.
 
 The platform is chosen by `Game.Platform`, and that is a **saved setting rather than a command

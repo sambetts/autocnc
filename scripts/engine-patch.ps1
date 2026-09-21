@@ -13,7 +13,7 @@ function Initialize-EnginePatch([string]$EngineDirectory) {
         throw 'Engine submodule not found. Run ./scripts/setup.ps1 first.'
     }
 
-    $git = (Get-Command git -CommandType Application -ErrorAction Stop).Source
+    $git = (Get-Command git -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
     # Windows PowerShell treats redirected native stderr as errors, including an expected
     # reverse-check failure on clean source. Native exit codes are written to global scope.
     $ErrorActionPreference = 'Continue'

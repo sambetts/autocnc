@@ -8,6 +8,7 @@ param()
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot 'engine-patch.ps1')
+$gitApplication = Get-Command git -CommandType Application -ErrorAction Stop | Select-Object -First 1
 
 $sourceLines = @(git -C (Join-Path $repoRoot 'engine') show HEAD:OpenRA.Game/World.cs)
 if ($LASTEXITCODE -ne 0) { throw 'Could not read the pinned upstream World.cs. Run ./scripts/setup.ps1 first.' }
@@ -47,6 +48,8 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'Could not stage the patch test fixture.' }
 
         $changed = & {
+            # Linux PATH can expose both /usr/bin/git and /bin/git.
+            function Get-Command { $gitApplication; $gitApplication }
             $LASTEXITCODE = 123
             $PSNativeCommandUseErrorActionPreference = $true
             Initialize-EnginePatch $engine

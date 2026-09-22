@@ -97,11 +97,7 @@ namespace AutoCnC.Reference.Logic
 			// returns nearest first, so a low cap drops the far fields — including, if it were
 			// low enough, the one this harvester is currently assigned to, which would read as
 			// "worked out" and drag it back inside the bubble it was sent out of.
-			//
-			// Raised from 16 when the scan began splitting patches by resource type. A blue patch
-			// touching a green one used to come back as one field and now comes back as two, so
-			// the same map yields more of them and a fixed cap reaches less far across it.
-			MaxFieldsConsidered: 24,
+			MaxFieldsConsidered: 16,
 
 			// How far a harvester travels before distance costs it half its throughput. A
 			// harvester cycles field to refinery and back at 1.758 cells a game second, so the
@@ -224,13 +220,6 @@ namespace AutoCnC.Reference.Logic
 	/// nothing here may retain one, and because the judgement below has to stay engine-free.
 	/// <c>DistanceUnits</c> is measured from whatever origin the scan was centred on — the
 	/// refinery, for a harvester that has one.
-	/// <para>
-	/// <c>TotalValue</c> is what the patch pays, not how much of it there is. The two are not the
-	/// same number: blue tiberium is worth 60 credits a unit against green's 35, so a blue patch
-	/// beats a green one nearly twice its size. The mode fills this in, and falls back to density
-	/// on a mod that declares no values, so this is never 0 for a field that still holds
-	/// something.
-	/// </para>
 	/// </remarks>
 	public readonly record struct FieldOption(
 		int NearestX,
@@ -239,30 +228,7 @@ namespace AutoCnC.Reference.Logic
 		int CenterY,
 		int CellCount,
 		int TotalDensity,
-		int DistanceUnits,
-		int TotalValue)
-	{
-		/// <summary>
-		/// The SDK's field as this bot's rules need to see it, with the one judgement the
-		/// conversion involves made in a single place.
-		/// </summary>
-		/// <remarks>
-		/// <c>ResourceField.TotalValue</c> is 0 when the mod declares no credits-per-unit for the
-		/// resource type. That means "this mod does not say", not "this ground is worthless", and
-		/// scoring it as worthless would park every harvester on a mod that never names a value.
-		/// Density is the honest fallback there, and it is what this rule ranked on before values
-		/// existed, so such a mod behaves exactly as it always did.
-		/// </remarks>
-		public static FieldOption From(in ResourceField field) => new(
-			field.NearestX,
-			field.NearestY,
-			field.CenterX,
-			field.CenterY,
-			field.CellCount,
-			field.TotalDensity,
-			field.DistanceUnits,
-			field.TotalValue > 0 ? field.TotalValue : field.TotalDensity);
-	}
+		int DistanceUnits);
 
 	/// <summary>Everything the harvester rule needs, with no engine types in it.</summary>
 	public readonly record struct HarvesterState(
@@ -876,7 +842,7 @@ namespace AutoCnC.Reference.Logic
 							? $"driven off that field, working {f.TotalDensity} left {f.DistanceUnits / 1024} cells out instead"
 							: comingHome
 								? $"field {fields[assigned].DistanceUnits / 1024} cells out is past the {tuning.MaxHaulCells} cell haul limit, coming back to {f.TotalDensity} left {f.DistanceUnits / 1024} cells out"
-								: $"field thinning to {fields[assigned].TotalValue} worth against {f.TotalValue}, crossing to {f.TotalDensity} left {f.DistanceUnits / 1024} cells out";
+								: $"field thinning to {fields[assigned].TotalDensity}, crossing to {f.TotalDensity} left {f.DistanceUnits / 1024} cells out";
 
 					return Assign(f, ordered, $"{activeStallPrefix}{why}",
 						reasonId: evictedByFleet
@@ -1017,22 +983,16 @@ namespace AutoCnC.Reference.Logic
 		}
 
 		/// <summary>
-		/// What a field is worth to a harvester: what it pays, discounted by how far the round
-		/// trip is.
+		/// What a field is worth to a harvester: what is left in it, discounted by how far the
+		/// round trip is.
 		/// </summary>
 		/// <remarks>
-		/// Credits, not density. Density alone treats every cell as the same cell, and in C&amp;C
-		/// it is not: blue tiberium pays 60 a unit against green's 35, so ranking on density sends
-		/// a harvester to the nearest green patch while a blue one worth 1.7 times as much per
-		/// cell sits beside it. <c>TotalValue</c> already carries the mod's own figure, and the
-		/// mode falls back to density where a mod names none, so this stays scale-free either way
-		/// — a hard "is it empty yet" threshold would still be a guess.
-		/// <para>
-		/// The discount is a hyperbola rather than a cliff: a field at
+		/// Deliberately scale-free in density, because nothing here knows what a full cell is
+		/// worth in this mod and a hard "is it empty yet" threshold would be a guess. The
+		/// discount is a hyperbola rather than a cliff: a field at
 		/// <see cref="HarvesterTuning.DistanceScaleUnits"/> is worth half its tiberium, one at
-		/// three times that a quarter — so a field three times as far has to be worth four times
-		/// as much to win, which is about the trade a unit moving 1.758 cells a second is making.
-		/// </para>
+		/// three times that a quarter — so a field three times as far has to hold four times as
+		/// much to win, which is about the trade a unit moving 1.758 cells a second is making.
 		/// <para>
 		/// A hyperbola discounts distance and never refuses it, which is how this rule once sent
 		/// harvesters 62 cells to mine beside the enemy refinery. The refusal lives in
@@ -1042,12 +1002,12 @@ namespace AutoCnC.Reference.Logic
 		/// </remarks>
 		public static int Score(in FieldOption field, in HarvesterTuning tuning)
 		{
-			if (field.TotalValue <= 0)
+			if (field.TotalDensity <= 0)
 				return 0;
 
 			var scale = tuning.DistanceScaleUnits;
 			var distance = field.DistanceUnits < 0 ? 0 : field.DistanceUnits;
-			return (int)((long)field.TotalValue * scale / (scale + distance));
+			return (int)((long)field.TotalDensity * scale / (scale + distance));
 		}
 
 		/// <summary>The best field to be working. Never returns -1 for a non-empty list.</summary>

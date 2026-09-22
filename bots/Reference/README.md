@@ -2401,11 +2401,75 @@ It is narrow on every axis, and each bound is a number the bot already had:
   cost would take live cash *below* the reservation, so a side with 2,000 banked buys its rifleman
   as usual. Only the last 1,100 is defended — which is the sum the vehicle queue was short of.
 - **Released while the base is overrun**, for the same reason the opening reservation is: bodies now
-  beat income later once they are already inside the base.
+  beat income later once they are already inside the base — *unless the fleet has already
+  collapsed*. See "Bodies bought out of a dead bank are not defence" below.
 - **Bounded in both directions.** It stands down after sixty seconds in which the fleet has not
   grown, and re-arms sixty seconds later rather than permanently. The obvious stranding case — the
   factory dying while the fleet is short — is handled by the host instead: a reservation naming a
   queue this side does not own resolves as *unmatched* and suppresses nothing.
+
+## Bodies bought out of a dead bank are not defence
+
+The next `16:9` at Hard was lost with the whole base still standing at 1,200s, and the evidence
+puts the whole of it in one window. **From 780s to the end of a 1,379-second match, every
+assessment reported `units 0`, `armyValue 0` and `cash 0`** — 599 seconds, 43% of the match — while
+a war factory stood until 1,359s, a barracks until 1,363s and a refinery until 1,379s. Lifetime
+earnings froze at 42,880 credits at 780s and never moved again. The side did not lose an army; it
+lost the ability to buy one.
+
+Two rules produced that, and they are the same mistake written twice: **the bot suspends its
+economy exactly when the base is under attack, and the suspension is what ends the match.**
+
+### The withdrawal was driving harvesters into the raid
+
+`HarvesterLogic`'s escape rule aims every withdrawal at the refinery or the base centre, on the
+argument that home is the only ground this side keeps guns on. That argument stops being true the
+moment the raid *is* the base:
+
+| the withdrawal, on 16:9 | |
+| --- | --- |
+| withdrawal `MoveTo` orders issued | **1,235** |
+| ...naming a cell within 5 cells of this side's own yard | **751 (61%)** |
+| `enemiesNearBase` over the same window | **16 → 75** |
+| `economy.harvester-sheltering` — a `Hold`, at the dock | **205** |
+| harvester evaluations that were withdrawal or shelter | **973 of 1,199** |
+| harvesters built / lost | **9 / 9**, eight of them to enemy `e3` |
+| credits earned from 780s | **0**, with eight harvesters and five refineries alive |
+
+A `MoveTo` cancels the harvest activity and throws away the partial load, and `Hold` on a harvester
+suppresses the engine's own delivery behaviour outright. So the rule bought no survival at all —
+the whole fleet died anyway — and cost the entire economy.
+
+**Arriving is the end of a withdrawal, because there is nowhere further back to go.** Once the
+harvester is inside `SafeDistanceUnits` of its refinery the rule has delivered everything it can: a
+second order to the same cell moves it nowhere. It now ends there, starts its earning window, and
+goes back to work (`economy.harvester-works-the-raid`); and it may not start a withdrawal from
+there either. A harvester that keeps working is no easier to kill than one parked on the same cell,
+and the load it delivers is the only thing that buys its replacement.
+
+### ...and the one rule that could rebuild the fleet was switched off
+
+`ReserveHarvesterRecovery` is the bot's only defence against a `Vehicle` queue that never holds
+1,100 credits at once. The `production-budget` trace reads `inactive`, `reservedCash 0` at
+**every** assessment from 690s to the end of the match, for two reasons that were both permanently
+true:
+
+| release | assessments after 600s where it held |
+| --- | --- |
+| `EnemiesNearBase > 0 \|\| BaseUnderAttack` | **151 of 156** |
+| `Refineries < 4` (the third refinery fell at 813s) | **113 of 156** |
+
+Both releases describe the situation the rule exists for. "Bodies now beat income later" is true of
+a raid on a working economy and false of a side that has none: a hundred-credit rifleman bought out
+of a dead bank is not defence, it is the reason the eleven hundred never accumulates. And the
+refinery floor is a hand-over to `ReserveOpeningBank` that is only correct *on the way up* — a side
+that has lost refineries back through the floor has a factory, and the opening rule stops at three
+and will never cover it.
+
+So a fleet at or below `FamineFleet` with a refinery still standing now overrides all three
+releases and the duty cycle with them, under `economy.bank-restarts-income`. It is self-terminating
+— buying one harvester leaves the famine band and the ordinary releases resume — and self-limiting
+when it is not, because a side earning nothing has nothing for the reservation to suppress.
 
 ## Start your own
 

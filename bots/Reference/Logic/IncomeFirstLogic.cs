@@ -153,7 +153,8 @@ namespace AutoCnC.Reference.Logic
 		int RefineryFloor,
 		int HarvestersPerRefinery,
 		int FleetCeiling,
-		int DutySeconds)
+		int DutySeconds,
+		int FamineFleet)
 	{
 		public static HarvesterBankTuning Default { get; } = new(
 			HarvesterPrice: 1100,
@@ -164,7 +165,15 @@ namespace AutoCnC.Reference.Logic
 			// Sixty game seconds, the same bound RecoveryHoldTuning.StallTicks uses for the
 			// construction-side hold and comfortably longer than an 1,100 credit delivery on a
 			// working economy.
-			DutySeconds: 60);
+			DutySeconds: 60,
+
+			// The fleet size at or below which none of the releases apply at all. See
+			// IncomeFirstLogic.ReserveHarvesterRecovery.
+			//
+			// One, not zero, because the last harvester is already dying: on 16:9 the fleet went
+			// 8, 7, 4, 1, 0 across 800s to 880s and a reservation that waits for the zero waits
+			// for the refineries to be the only thing left worth reserving for.
+			FamineFleet: 1);
 	}
 
 	/// <summary>What the harvester reservation remembers between assessments.</summary>
@@ -389,6 +398,33 @@ namespace AutoCnC.Reference.Logic
 		/// refinery floor is the opening rule's business and has no factory anyway; and a fleet
 		/// that has reached the docking places its refineries provide is not short of anything.
 		/// </para>
+		/// <para>
+		/// <b>And the first two of those releases lost the next 16:9, because the situation they
+		/// describe and the situation this rule exists for are the same situation.</b> The fleet
+		/// was hunted down between 745s and 867s; from 665s the base was permanently contested,
+		/// so <c>EnemiesNearBase &gt; 0 || BaseUnderAttack</c> held at <b>151 of the 156
+		/// assessments after 600s</b>, and once the third refinery fell at 813s
+		/// <c>Refineries &lt; 4</c> held at <b>113</b> of them. The <c>production-budget</c>
+		/// trace reads <c>inactive</c>, <c>reservedCash 0</c> at <em>every</em> assessment from
+		/// 690s to the end of the match — while a war factory stood until 1,359s, a refinery
+		/// until 1,379s, and the side's cash sat at 0 with the barracks turning every hundred
+		/// credits that arrived into a rifleman. Income froze at 42,880 credits from 780s,
+		/// <b>599 seconds — 43% of the match — were played at zero income</b>, and from 780s the
+		/// side held <b>zero</b> units and <b>zero</b> army value for the rest of the game. It
+		/// did not lose an army; it lost the ability to buy one.
+		/// </para>
+		/// <para>
+		/// So a fleet at or below <see cref="HarvesterBankTuning.FamineFleet"/> with a refinery
+		/// still standing overrides all three releases and the duty cycle with it. "Bodies now
+		/// beat income later" is true of a raid on a working economy and false of a side that
+		/// has no economy at all: a hundred-credit rifleman bought out of a dead bank is not
+		/// defence, it is the reason the eleven hundred never accumulates. The override is
+		/// self-terminating by construction — the moment one harvester is bought the fleet
+		/// leaves the famine band and the ordinary releases resume — and self-limiting when it
+		/// is not, because a side earning nothing has nothing for the reservation to suppress.
+		/// A famine reservation is named <c>economy.bank-restarts-income</c> so the trace can
+		/// tell it from the ordinary top-up.
+		/// </para>
 		/// </remarks>
 		public static HarvesterBankOutcome ReserveHarvesterRecovery(
 			in BattleState s, string queue, in HarvesterBankWatch watch, in HarvesterBankTuning t)
@@ -396,13 +432,20 @@ namespace AutoCnC.Reference.Logic
 			if (string.IsNullOrEmpty(queue) || t.HarvesterPrice <= 0 || t.RefineryFloor <= 0)
 				return new HarvesterBankOutcome(ProductionBudget.None, HarvesterBankWatch.Idle);
 
-			// Bodies now beat income later once they are already inside the base.
-			if (s.EnemiesNearBase > 0 || s.BaseUnderAttack)
+			// A collapsed fleet with somewhere left to unload. Nothing below may release the
+			// bank while this holds: see the remarks above for the 599 seconds it cost.
+			var famine = s.Refineries > 0 && s.Harvesters <= t.FamineFleet;
+
+			// Bodies now beat income later once they are already inside the base — but only
+			// while there is still an income for them to be preferred over.
+			if (!famine && (s.EnemiesNearBase > 0 || s.BaseUnderAttack))
 				return new HarvesterBankOutcome(ProductionBudget.None, HarvesterBankWatch.Idle);
 
 			// Below the floor the opening reservation owns the bank, and plan order says the
-			// factory that would spend this one has not been bought yet.
-			if (s.Refineries < t.RefineryFloor)
+			// factory that would spend this one has not been bought yet. That hand-over is only
+			// true on the way up: a side that has *lost* refineries back through the floor has a
+			// factory, and the opening rule stops at three refineries and will never cover it.
+			if (!famine && s.Refineries < t.RefineryFloor)
 				return new HarvesterBankOutcome(ProductionBudget.None, HarvesterBankWatch.Idle);
 
 			var docking = s.Refineries * t.HarvestersPerRefinery;
@@ -411,6 +454,9 @@ namespace AutoCnC.Reference.Logic
 
 			if (s.Harvesters >= docking)
 				return new HarvesterBankOutcome(ProductionBudget.None, HarvesterBankWatch.Idle);
+
+			if (famine)
+				return Arm(s, queue, docking, t, famine: true);
 
 			// Standing down: wait out the rest of the interval before trying again.
 			if (watch.ReleasedUntilSeconds != int.MinValue)
@@ -439,19 +485,23 @@ namespace AutoCnC.Reference.Logic
 		}
 
 		static HarvesterBankOutcome Arm(
-			in BattleState s, string queue, int docking, in HarvesterBankTuning t) =>
-			new(Reserve(s, queue, docking, t),
+			in BattleState s, string queue, int docking, in HarvesterBankTuning t, bool famine = false) =>
+			new(Reserve(s, queue, docking, t, famine),
 				new HarvesterBankWatch(s.Seconds, s.Harvesters, int.MinValue));
 
 		static ProductionBudget Reserve(
-			in BattleState s, string queue, int docking, in HarvesterBankTuning t) =>
+			in BattleState s, string queue, int docking, in HarvesterBankTuning t, bool famine = false) =>
 			ProductionBudget.Reserve(
 				t.HarvesterPrice,
 				queue,
-				$"bank held for harvester {s.Harvesters + 1}: {s.Harvesters} working the "
-					+ $"{docking} docking place(s) {s.Refineries} refinery(ies) provide, "
-					+ $"on {s.IncomeEarned} credits earned",
-				"economy.bank-replaces-harvester");
+				famine
+					? $"bank restarting income: {s.Harvesters} harvester(s) left working the "
+						+ $"{docking} docking place(s) {s.Refineries} refinery(ies) provide, "
+						+ $"on {s.IncomeEarned} credits earned"
+					: $"bank held for harvester {s.Harvesters + 1}: {s.Harvesters} working the "
+						+ $"{docking} docking place(s) {s.Refineries} refinery(ies) provide, "
+						+ $"on {s.IncomeEarned} credits earned",
+				famine ? "economy.bank-restarts-income" : "economy.bank-replaces-harvester");
 
 		/// <summary>
 		/// Whether <paramref name="item"/> is the base's first emplacement of a defensive role it

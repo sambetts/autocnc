@@ -492,6 +492,30 @@ namespace AutoCnC.Reference.Logic
 			var homeY = state.HasRefinery ? state.RefineryY : state.BaseY;
 			var completedBoundedWithdrawal = false;
 
+			// Whether this harvester is already standing in the base it would be withdrawing to.
+			//
+			// <b>Arriving is the end of a withdrawal, and it has to be, because there is nowhere
+			// further back to go.</b> Every escape below aims at the refinery or the base centre,
+			// so once the harvester is inside SafeDistanceUnits of it the rule has delivered
+			// everything it can: a second order to the same cell moves the harvester nowhere and
+			// cancels the harvest activity anyway, and the shelter that used to answer here was
+			// a Hold — which on a harvester suppresses the engine's own delivery behaviour and
+			// earns exactly nothing.
+			//
+			// On 16:9 that was the match. 751 of the 1,235 withdrawal move orders named a cell
+			// within five cells of this side's own construction yard while enemiesNearBase ran
+			// 16 -> 75, so "escaping" meant driving into the largest concentration of enemies on
+			// the map; 205 evaluations answered Hold at the dock. Income froze at 42,880 credits
+			// from 780s with eight harvesters and five refineries still standing, and the last
+			// 599 seconds of a 1,379-second match were played at zero income and zero army. The
+			// withdrawal saved nobody either: all nine harvesters died, eight of them to e3.
+			//
+			// A harvester that keeps working is no easier to kill than one parked on the same
+			// cell, and the load it delivers is the only thing that buys its replacement. So
+			// home is where a withdrawal ends rather than where it waits.
+			var standingInBase = state.HasRefinery
+				&& state.DistanceToRefineryUnits <= tuning.SafeDistanceUnits;
+
 			// 1. Leave concentrated immediate threats before sustained fire makes escape
 			//    impossible. The short panic radius limits this to enemies that can hit the
 			//    harvester, while the health threshold keeps the existing response to one
@@ -531,6 +555,48 @@ namespace AutoCnC.Reference.Logic
 			//    cycle of earning before another may begin.
 			var withdrawalOutlastedItsValue =
 				seen.Retreating && seen.WithdrawalTicks(state.WorldTick) >= tuning.WorkCycleTicks;
+
+			// The withdrawal has arrived. See standingInBase above: there is no further back,
+			// so this is where it ends and the earning window starts, whatever the raid that
+			// followed it home is doing.
+			if (seen.Retreating && standingInBase)
+			{
+				seen = seen with
+				{
+					Retreating = false,
+					RetreatX = int.MinValue,
+					RetreatY = int.MinValue,
+					WithdrawalStartTick = int.MinValue,
+					ProtectedWorkUntilTick = state.WorldTick + tuning.WorkCycleTicks,
+					StillEvaluations = 0,
+					EvaluationsSinceScan = tuning.ReviewEvaluations
+				};
+
+				// Restart on the ground this harvester already knows about — unless that ground
+				// is the ground it was just driven off, in which case the forced scan on the
+				// next evaluation picks somewhere else. The next evaluation scans either way,
+				// because EvaluationsSinceScan is wound forward above, and re-aims at the
+				// field's nearest live cell; naming the remembered centre here costs at most one
+				// review window and is the difference between a harvester that is working and
+				// one that is standing still.
+				var drivenOffThisField = seen.HasContested
+					&& seen.ContestedX == seen.AssignedX
+					&& seen.ContestedY == seen.AssignedY;
+				if (seen.HasAssignment && !drivenOffThisField)
+					return new HarvesterOutcome(
+						UnitDecision.Harvest(seen.AssignedX, seen.AssignedY,
+							$"harvester back in the base at {state.HealthPercent}% and working rather than sheltering",
+							"economy.harvester-works-the-raid"),
+						seen);
+
+				return new HarvesterOutcome(
+					UnitDecision.Continue with
+					{
+						Reason = $"harvester back in the base at {state.HealthPercent}%, withdrawal over pending new ground",
+						ReasonId = "economy.harvester-works-the-raid"
+					},
+					seen);
+			}
 
 			if (seen.Retreating)
 			{
@@ -632,7 +698,14 @@ namespace AutoCnC.Reference.Logic
 				&& !lowHealthDanger
 				&& state.NearbyThreatCount >= tuning.PreemptiveThreatCount
 				&& !seen.PreemptiveWithdrawalSpent;
-			var wantsWithdrawal = state.DangerNearby && (lowHealthDanger || damageConfirmedDanger);
+			// A withdrawal that begins where it would end is not a withdrawal. Every branch
+			// below aims at the refinery or an escape cell anchored on it, so a harvester
+			// already standing there can only be ordered onto the cell it occupies — which
+			// cancels the harvest activity, throws away the partial load and moves it out of
+			// nothing's range. See standingInBase.
+			var wantsWithdrawal = state.DangerNearby
+				&& (lowHealthDanger || damageConfirmedDanger)
+				&& !standingInBase;
 
 			// The earning window buys one more delivery from a scratched harvester. It may not
 			// buy a delivery from a dying one: see HarvesterTuning.CriticalHealthPercent for the

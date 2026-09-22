@@ -1,62 +1,62 @@
 {
   "schemaVersion": 1,
-  "authoredForRevision": "0050c90e54dd82776d74485ab4b306b1e65e73d4",
+  "authoredForRevision": "873d90da355c9469ca9a5171c9b3bdcff9b03056",
   "checks": [
     {
-      "id": "harvester-bank-arms",
+      "id": "counter-battery-runs-in-defence",
       "category": "activation",
-      "description": "activation: IncomeFirstLogic.ReserveHarvesterRecovery is the new branch. Once four refineries stand and the fleet is short of the docking places they provide, one harvester's price (1,100) is reserved for the Vehicle queue so the Infantry queue cannot spend the trickle first. The reservation policy is recorded on every assessment whether or not it suppresses anything, so an absent id means the gate was never reached rather than that the rule was wrong.",
-      "query": "reason-id:economy.bank-replaces-harvester",
+      "description": "activation: DefensiveMode.CounterBattery is the new branch, fed by the side-scoped ShellingReports registry. Until now CounterBatteryLogic was reachable only from AttackBaseMode, and the Attack doctrine ran for zero seconds of a 1,400-second match (no assault.* id appears anywhere in the trace), so the rule was correct and unreachable. An absent id means the screen still never walked at a gun it could not see.",
+      "query": "reason-id:defence.counter-battery",
       "operator": ">=",
       "value": "1"
     },
     {
-      "id": "the-fleet-is-replaced",
+      "id": "the-artillery-is-answered",
       "category": "outcome",
-      "description": "outcome: the direct measure of the change. Nine harvesters were built last match and the last one was ordered at 747s, 690 seconds before the war factory died; the fleet then went 9, 6, 4, 1, 0 between 1,140s and 1,320s with cash sampled at 1, 0 and 157. If the reservation works, the side buys more harvesters than the nine it managed.",
-      "query": "units.count(type=harv)",
+      "description": "outcome: the direct measure. msam killed 28 of this side's 82 losses, 17,400 credits, 47% of everything lost, and took ZERO damage in return across the whole match: every msam row in the engagement matrix reads damageDealt 0. Value killed was 11,920 against a prior median of 45,400. If riflemen now close on the guns instead of holding position, this is where it shows.",
+      "query": "summary.headline.creditsKilled",
       "operator": ">=",
-      "value": "12"
+      "value": "25000"
     },
     {
-      "id": "income-does-not-die",
+      "id": "the-trade-improves",
       "category": "outcome",
-      "description": "outcome: 585 seconds of the match had no live harvester and lifetime earnings froze at 55,930 credits from 1,260s, which is what produced 30.8 credits a second against a reference of 50 and a prior median of 38.5. Across the last ten runs the four highest incomes are exactly the four best fitness scores, so this is the metric the change is betting on.",
-      "query": "summary.headline.creditsEarnedPerSecond",
+      "description": "outcome: valueExchange scored 0.1595 of a 2.0 reference and is the heaviest fitness component at weight 0.25. The ratio was 0.319 against a prior median of 0.947. Killing a 900-credit rocket launcher with 100-credit riflemen is the single best trade available on this field, and e1 already returns 105 credits per kill.",
+      "query": "summary.headline.valueExchangeRatio",
       "operator": ">=",
-      "value": "38.5"
+      "value": "0.6"
     },
     {
-      "id": "the-bank-still-buys-an-army",
+      "id": "the-screen-is-not-thrown-away",
       "category": "invariant",
-      "description": "invariant: a reservation that starves the barracks is the failure mode this rule is one step away from. Only the last 1,100 credits are defended and the reservation stands down for sixty seconds whenever it has not grown the fleet, so total spend must not fall. 34.9 credits a second last match against a prior median of 43.8; below last match's own figure the reservation is holding cash nothing is spending.",
-      "query": "summary.headline.creditsSpentPerSecond",
-      "operator": ">=",
-      "value": "35"
-    },
-    {
-      "id": "the-base-still-shoots-back",
-      "category": "invariant",
-      "description": "invariant: the reservation is released while enemies are at the base precisely so it cannot trade the garrison for an earner during a raid. Losses were 71,120 credits last match, a 49% regression against a prior median of 47,680, and an economy rule that made that worse would be buying income with the base. This is the ceiling that says it has not.",
+      "description": "invariant: this rule walks defenders off their post, which is the failure mode it is one step away from. It fires only when the unit has nothing at all inside its own leash, the target must be within 12 cells of the unit itself, and the allowance is 24 evaluations for a unit's entire life and is never refilled by a doctrine switch. Losses were 37,400 credits; a screen that marched into the enemy army would blow through this ceiling.",
       "query": "summary.headline.creditsLost",
       "operator": "<=",
-      "value": "65000"
+      "value": "48000"
     },
     {
-      "id": "the-army-is-still-held",
+      "id": "the-base-lives-longer",
       "category": "outcome",
-      "description": "outcome: mean army value was 1,802 against a reference of 6,000, the worst-scoring fitness component at 0.30, and every winning run in the last ten held between 8,966 and 22,088. Income is what pays for an army, so a working economy fix should show here as well as in the earnings; if income rises and this does not, the credits went somewhere other than the army.",
-      "query": "summary.headline.meanArmyValue",
+      "description": "outcome: 18 buildings were lost and 1 was left standing, 28 of the losses to artillery that was never touched. Production died with them: the barracks at 602s, the airstrip at 668s, after which the side ordered 141 credits of anything in 732 remaining seconds. Buildings lost is the cleanest proxy for whether the siege was answered at all.",
+      "query": "summary.headline.buildingsLost",
+      "operator": "<=",
+      "value": "14"
+    },
+    {
+      "id": "the-economy-does-not-hard-lock",
+      "category": "outcome",
+      "description": "outcome: earnings froze at 24,270 credits from 600s and 791 seconds of a 1,400-second match had no live harvester, because msam killed six of nine harvesters and then the airstrip, leaving no queue that could replace them. 17.3 credits a second against a reference of 50 and a prior median of 32.9. A base that answers the guns keeps the fleet that pays for it.",
+      "query": "summary.headline.creditsEarnedPerSecond",
       "operator": ">=",
-      "value": "2500"
+      "value": "30"
     },
     {
-      "id": "the-match-is-won-better",
+      "id": "fitness-recovers-to-the-median",
       "category": "outcome",
-      "description": "outcome: fitness was 0.6565, dead on the prior median of 0.658, with economicRate 0.62, valueExchange 0.49 and armyValueIntegral 0.30 the three components off their caps. Buildings, exploration and survival are already capped and have slack, so any real gain has to come from the economy half.",
+      "description": "outcome: fitness was 0.247 against a prior median of 0.504, with valueExchange 0.16, armyValueIntegral 0.06 and buildingsDestroyed 0.00 the three components at the floor. All three are downstream of an unanswered siege, so a working counter-battery should lift the total back to the median rather than one component.",
       "query": "summary.fitness.total",
       "operator": ">=",
-      "value": "0.72"
+      "value": "0.5"
     }
   ]
 }

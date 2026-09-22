@@ -2175,6 +2175,60 @@ and is dropped immediately if the building ceases to exist. Ties break on health
 id, so every unit reaches the same answer without coordinating. Immobile defences and unarmed
 units are excluded. `defence.guard-damaged-building` marks the walk.
 
+### Then it stood on the target and held position anyway
+
+The screen arrived. That was not the same as answering anything. On the next 16:9 — lost after
+1,400 seconds, fitness 0.247 — `DefensiveMode` returned `Hold("on post, no threats")` **7,368
+times** while GDI rocket launchers took the base apart from **eleven cells**, and the whole of
+this side's reply to them was **zero damage, all match**: every `msam` row in the engagement
+matrix reads `damageDealt 0`. Those guns killed **28 of 82 losses, 17,400 credits, 47% of
+everything the side lost** — the airstrip, the construction yard, both barracks, three refineries,
+two towers and six of nine harvesters. Production ended with the buildings, and the last 732
+seconds bought 141 credits of anything.
+
+Nothing on this side reaches eleven cells. `e1`, `bggy` and `ltnk` reach 4, `e3` and `gtwr` 6. A
+piece parked at its own maximum range is, to everything this bot fields, a weapon that cannot be
+answered — and it sits in fog, so `SenseThreats` returns nothing to answer it with.
+
+[`CounterBatteryLogic`](Logic/CounterBatteryLogic.cs) has been the answer to exactly this since
+badland-ridges. It was wired into `AttackBaseMode` only, and the `Attack` doctrine ran for **zero
+seconds** of that match: the army peaked at 2,200 credits against a 4,000 commitment bar, so not
+one `assault.*` id appears anywhere in the trace. A rule that is right and unreachable is worth
+what a rule that is wrong is worth.
+
+Two things changed, and neither is a new idea:
+
+* `DefensiveMode` now consults it — last, after the ordinary rules, and only when the unit has
+  **nothing at all inside its own leash** and is not withdrawing for repair. A unit that already
+  has something it can hurt is never pulled off it. `defence.counter-battery` marks the walk.
+* The report is **side-scoped**. Of the 863,494 damage those guns dealt, roughly 13,000 landed on
+  something with a weapon; the rest went into refineries, power plants and harvesters, none of
+  which can shoot back and three of which cannot move. A memory written only by the unit that was
+  hit hears almost none of a siege, so [`ShellingReports`](Modes/ShellingReports.cs) keeps one
+  slot for the whole side — the fifth sibling of `BaseDamageWatch`, `EarnerUnderFire`,
+  `ContestedGround` and `EnemySightings`, and written from the same damage notification
+  `HarvesterThreats` already relies on.
+
+Stickiness again, and the ranking is the interesting part: of two live reports the one that came
+from **furthest out** wins. Standoff is the whole complaint. Something shooting a refinery from
+four cells is already inside the reach of the riflemen standing on it and the ordinary scorers
+will take it; something shooting it from eleven is what nothing on this side has ever touched.
+
+The bounds are unchanged and they are what keep this from becoming the chase every defensive rule
+exists to refuse. Twelve cells from the reading unit — the longest mobile reach in the ruleset
+plus a cell — so nothing further away can be walked at. Twelve seconds of memory, so a gun that
+has displaced or stopped firing is forgotten rather than followed. Twenty-four evaluations for a
+unit's **entire life**, never refilled, and pointedly not reset by `OnEnter`, because this mode is
+re-entered on every doctrine change and a budget a doctrine switch refills is not a budget.
+
+A gun still in fog cannot be given as a target at all, which is the ordinary case rather than the
+exception, so the rule attack-moves at the cell it fired from instead — the same answer
+`HarvesterEscortMode` already gives a harvester's unseen attacker, and it ends in a shot for the
+same reason: the unit arrives with the gun inside its own reach and the scorers take over. And
+`ModeContext.HasPosition` gates every attacker before its location is read, because a superweapon
+credits its damage to the firing player's actor, this side lost a refinery to one on 16:9, and an
+exception raised inside a damage notification ends the match rather than the reaction.
+
 ### And the repair band was narrower than the fight
 
 Repair was added last round and it ran — 12 orders. It was not enough, and the ordering was not

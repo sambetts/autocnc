@@ -170,6 +170,12 @@ namespace AutoCnC.Reference.Modes
 			if (attacker != null
 				&& attacker.IsInWorld
 				&& !attacker.IsDead
+				// A superweapon credits its damage to the firing player's actor: alive, in the
+				// world, enemy-owned and occupying no cell. Reading Location off one throws, and
+				// an exception raised inside a damage notification takes the whole match down
+				// rather than losing one reaction. This side lost a refinery to exactly such a
+				// hit on 16:9, so the case is not hypothetical here.
+				&& ModeContext.HasPosition(attacker)
 				&& self.Owner.RelationshipWith(attacker.Owner) == PlayerRelationship.Enemy)
 			{
 				HarvesterThreats.Record(
@@ -194,6 +200,26 @@ namespace AutoCnC.Reference.Modes
 					ctx.HealthPercent,
 					ctx.WorldTick,
 					GuardPostTuning.Default);
+
+				// A harvester has no reach at all, so everything that shoots it outranges it and
+				// every hit is a candidate report. That matters more than it sounds: msam killed
+				// six of the nine harvesters on 16:9 while the screen it was standing next to
+				// held position, because nothing told the screen the gun existed. See
+				// ShellingReports, which keeps whichever gun is furthest out.
+				if (ModeContext.Classify(attacker) != ThreatKind.Aircraft)
+				{
+					var standoff = ctx.DistanceTo(attacker);
+					if (CounterBatteryLogic.ShouldReport(
+						standoff, ctx.WeaponRangeUnits, CounterBatteryTuning.Default))
+						ShellingReports.Record(
+							self.Owner,
+							attacker.ActorID,
+							attacker.Location.X,
+							attacker.Location.Y,
+							standoff,
+							ctx.WorldTick,
+							CounterBatteryTuning.Default);
+				}
 			}
 
 			// Being shot is the one thing worth reacting to sooner than the next scheduled

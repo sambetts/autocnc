@@ -30,9 +30,16 @@ namespace AutoCnC.Reference.Modes
 	{
 		DefensiveTuning tuning = DefensiveTuning.Default;
 		GuardPostTuning guardTuning = GuardPostTuning.Default;
+		CounterBatteryTuning counterBatteryTuning = CounterBatteryTuning.Default;
 		WeaponRole role = WeaponRole.Unknown;
 		bool recovering;
 		bool consolidating;
+
+		// How much of this unit's lifetime counter-battery allowance has been spent. Not cleared
+		// by OnEnter, and that is the point: this mode is entered again on every doctrine change,
+		// and a budget a doctrine switch refills is not a budget. See
+		// CounterBatteryTuning.MaxEvaluations.
+		int counterBatteryEvaluations;
 
 		public override void OnEnter(Actor self, ModeContext ctx)
 		{
@@ -52,6 +59,7 @@ namespace AutoCnC.Reference.Modes
 			role = WeaponMatchLogic.RoleOf(self.Info.Name);
 
 			guardTuning = GuardPostTuning.Default;
+			counterBatteryTuning = CounterBatteryTuning.Default;
 			recovering = false;
 			consolidating = false;
 
@@ -143,7 +151,72 @@ namespace AutoCnC.Reference.Modes
 						: "defence.guard-damaged-building"
 				};
 
+			// Answer the gun that is taking the base apart from beyond everybody's reach.
+			//
+			// Last, so it can never displace a shot: a unit that came out of the rules above
+			// with an Attack already has something it can hurt, and one that came out with a
+			// Retreat is going to be repaired. What is left is the case this bot has never had
+			// an answer to — a defender standing on a building that is being destroyed, with
+			// nothing inside its own four cells, holding position. That was 7,368 decisions on
+			// 16:9 while msam killed 28 of this side's 82 losses and took no damage at all. The
+			// arithmetic and every bound are in CounterBatteryLogic: the leash is twelve cells
+			// from this unit, the memory twelve seconds, and the whole mechanism is capped for
+			// this unit's entire life.
+			if (decision.Action != UnitAction.Attack
+				&& decision.Action != UnitAction.Retreat
+				&& DefensiveLogic.SelectTarget(state, active, role) == null)
+			{
+				var counterBattery = CounterBattery(ctx);
+				if (counterBattery.HasValue)
+				{
+					counterBatteryEvaluations++;
+					return counterBattery.Value;
+				}
+			}
+
 			return decision;
+		}
+
+		/// <summary>
+		/// Close on whatever is shelling this side from beyond the reach of what it is hitting,
+		/// or null if there is nothing to answer.
+		/// </summary>
+		/// <remarks>
+		/// The arithmetic lives in <see cref="CounterBatteryLogic"/>; this only resolves the
+		/// reported actor and measures it. A gun that cannot be given as a target — which is the
+		/// ordinary case, because a piece parked eleven cells out sits in fog this side has no
+		/// eyes on — is answered by walking at the cell it fired from instead, measured from
+		/// there rather than from an actor nobody can see.
+		/// </remarks>
+		UnitDecision? CounterBattery(ModeContext ctx)
+		{
+			if (!ShellingReports.TryGet(ctx.Owner, ctx.WorldTick, counterBatteryTuning, out var report))
+				return null;
+
+			var shooter = ctx.ResolveActor(report.AttackerId);
+			var canAttack = shooter != null
+				&& !shooter.IsDead
+				&& shooter.IsInWorld
+				&& ModeContext.HasPosition(shooter)
+				&& ctx.CanAttack(shooter);
+
+			return CounterBatteryLogic.Decide(
+				new CounterBatteryState(
+					HasShellingTarget: true,
+					ShellingActorId: report.AttackerId,
+					TargetX: canAttack ? shooter.Location.X : report.X,
+					TargetY: canAttack ? shooter.Location.Y : report.Y,
+					CanAttackTarget: canAttack,
+					DistanceUnits: canAttack
+						? ctx.DistanceTo(shooter)
+						: ctx.DistanceTo(new CPos(report.X, report.Y)),
+					WeaponRangeUnits: ctx.WeaponRangeUnits,
+					TicksSinceHit: ctx.WorldTick - report.Tick,
+					SpentEvaluations: counterBatteryEvaluations,
+					CanMove: ctx.CanMove,
+					HasWeapon: ctx.HasWeapon),
+				counterBatteryTuning,
+				"defence.counter-battery");
 		}
 
 		/// <summary>
@@ -220,11 +293,55 @@ namespace AutoCnC.Reference.Modes
 			if (self.Owner.RelationshipWith(attacker.Owner) != PlayerRelationship.Enemy)
 				return;
 
+			// Before the CanAttack gate below, and deliberately so. This mode is assigned ToAll,
+			// so it is also what a refinery, a power plant and a construction yard run — and
+			// those are what artillery actually shoots. None of them can attack anything, so a
+			// report written after that gate would be written by nobody who is being shelled.
+			Report(self, ctx, attacker);
+
 			if (!ctx.CanAttack(attacker))
 				return;
 
 			// Bring forward the next evaluation by clearing our record of what we last did.
 			ctx.RequestReevaluation();
+		}
+
+		/// <summary>
+		/// Tell the side about a gun that hit this actor from further out than this actor could
+		/// answer.
+		/// </summary>
+		/// <remarks>
+		/// <see cref="ModeContext.HasPosition"/> first, because a superweapon credits its damage
+		/// to the firing player's actor: alive, in the world, enemy-owned and standing on no
+		/// cell. This side lost a refinery to exactly that on 16:9, and reading a location off
+		/// such an actor inside a damage notification throws, which takes the whole match down
+		/// rather than losing one reaction.
+		/// <para>
+		/// Aircraft are dropped for the reason <see cref="DefensiveLogic"/> already refuses
+		/// them: every aircraft in the ruleset outruns every ground unit this side fields, so a
+		/// step taken toward one ends with the aircraft somewhere else.
+		/// </para>
+		/// </remarks>
+		static void Report(Actor self, ModeContext ctx, Actor attacker)
+		{
+			if (!ModeContext.HasPosition(attacker))
+				return;
+
+			if (ModeContext.Classify(attacker) == ThreatKind.Aircraft)
+				return;
+
+			var standoff = ctx.DistanceTo(attacker);
+			if (!CounterBatteryLogic.ShouldReport(standoff, ctx.WeaponRangeUnits, CounterBatteryTuning.Default))
+				return;
+
+			ShellingReports.Record(
+				self.Owner,
+				attacker.ActorID,
+				attacker.Location.X,
+				attacker.Location.Y,
+				standoff,
+				ctx.WorldTick,
+				CounterBatteryTuning.Default);
 		}
 
 		WDist SenseRadius(ModeContext ctx)

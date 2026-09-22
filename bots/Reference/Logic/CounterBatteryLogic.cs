@@ -51,15 +51,43 @@ namespace AutoCnC.Reference.Logic
 	}
 
 	/// <summary>Everything the counter-battery rule needs, with no engine types in it.</summary>
+	/// <remarks>
+	/// <paramref name="CanAttackTarget"/> is the difference between a gun that can be shot at
+	/// and one that is still sitting in fog. Both are worth answering and they are answered
+	/// differently: see <see cref="CounterBatteryLogic.Decide"/>.
+	/// </remarks>
 	public readonly record struct CounterBatteryState(
 		bool HasShellingTarget,
 		uint ShellingActorId,
+		int TargetX,
+		int TargetY,
+		bool CanAttackTarget,
 		int DistanceUnits,
 		int WeaponRangeUnits,
 		int TicksSinceHit,
 		int SpentEvaluations,
 		bool CanMove,
 		bool HasWeapon);
+
+	/// <summary>
+	/// A gun that hit one of this side's actors from further away than that actor could answer.
+	/// </summary>
+	/// <remarks>
+	/// <paramref name="StandoffUnits"/> is how far the shot came from, measured from the thing
+	/// it hit. It is what ranks two live reports against each other — see
+	/// <see cref="CounterBatteryLogic.Prefer"/> — because the report worth keeping is the one
+	/// nothing standing there can answer.
+	/// </remarks>
+	public readonly record struct ShellingReport(
+		bool HasReport,
+		uint AttackerId,
+		int X,
+		int Y,
+		int StandoffUnits,
+		int Tick)
+	{
+		public static ShellingReport None { get; } = default;
+	}
 
 	/// <summary>
 	/// What to do about something that is shooting us from further away than we can shoot back.
@@ -96,6 +124,26 @@ namespace AutoCnC.Reference.Logic
 	/// about one gun that hit it, and forgets after <see cref="CounterBatteryTuning.MemoryTicks"/>.
 	/// </para>
 	/// <para>
+	/// <b>It was wired into the wrong mode, and 16:9 priced that too.</b> Until this round the
+	/// only caller was <see cref="Modes.AttackBaseMode"/>, and the Attack doctrine ran for
+	/// <b>zero seconds</b> of that 1,400-second match: the army peaked at 2,200 credits against
+	/// a 4,000 commitment bar, so not one <c>assault.*</c> decision appears anywhere in the
+	/// trace. The side spent <b>1,215 of 1,400 seconds in Defence</b>, where
+	/// <see cref="Modes.DefensiveMode"/> returned <c>Hold("on post, no threats")</c>
+	/// <b>7,368 times</b> while <c>msam</c> took the base apart from eleven cells. The rule was
+	/// right and unreachable, which is worth exactly as much as being wrong.
+	/// </para>
+	/// <para>
+	/// <b>The screen is not who gets shelled.</b> Of the 863,494 damage those guns dealt, about
+	/// 13,000 landed on something with a weapon; the rest went into refineries, power plants,
+	/// the airstrip, the construction yard and six harvesters. A per-unit memory written only by
+	/// the victim therefore hears almost none of the siege, so the report is side-scoped — see
+	/// <see cref="Modes.ShellingReports"/> — exactly as
+	/// <see cref="Modes.HarvesterThreats"/> already is, and under the same bound: one gun, one
+	/// standoff, forgotten in twelve seconds, and useless to any unit that is not already within
+	/// twelve cells of it.
+	/// </para>
+	/// <para>
 	/// <b>This does not break the never-chase rule.</b> The caller only consults it when nothing
 	/// at all is inside the unit's weapon range, so it can never displace a shot; the leash is
 	/// re-checked every evaluation against <see cref="CounterBatteryTuning.ReachUnits"/>, so the
@@ -123,10 +171,79 @@ namespace AutoCnC.Reference.Logic
 				&& distanceUnits <= t.ReachUnits;
 
 		/// <summary>
-		/// Close on the gun, or null if this rule has no opinion and the normal assault rules
-		/// should answer instead.
+		/// Whether a hit on one of this side's actors is worth telling the screen about.
 		/// </summary>
-		public static UnitDecision? Decide(in CounterBatteryState s, in CounterBatteryTuning t)
+		/// <remarks>
+		/// The same two bounds as <see cref="ShouldRecord"/>, minus its requirement that the
+		/// victim be armed — and that omission is the point. On 16:9 <c>msam</c> killed
+		/// <b>28 of this side's 82 losses, 17,400 credits, 47% of everything it lost</b>, and
+		/// took <b>zero damage in return all match</b>. Of the 863,494 damage those guns dealt,
+		/// only about 13,000 landed on a unit with a weapon: the rest went into refineries,
+		/// power plants, the airstrip, the construction yard and the harvester fleet, none of
+		/// which can shoot back and three of which cannot even move. A predicate that only
+		/// listens to armed victims is deaf to the entire siege.
+		/// <para>
+		/// An unarmed victim has a reach of zero, so everything outranges it and every hit on it
+		/// is reportable. That is not as loose as it sounds, because the report is only a
+		/// candidate: <see cref="Prefer"/> keeps the one that came from furthest out, and the
+		/// unit that reads it re-tests the distance against <em>its own</em> reach before moving
+		/// a step. A rifleman standing next to the jeep that is shooting the refinery therefore
+		/// declines, and the ordinary scorers handle it as they always did.
+		/// </para>
+		/// </remarks>
+		public static bool ShouldReport(int distanceUnits, int victimWeaponRangeUnits, in CounterBatteryTuning t)
+			=> distanceUnits > victimWeaponRangeUnits
+				&& distanceUnits <= t.ReachUnits;
+
+		/// <summary>Whether a remembered gun is recent enough to still be worth answering.</summary>
+		public static bool StillHot(in ShellingReport report, int nowTick, in CounterBatteryTuning t) =>
+			report.HasReport && nowTick >= report.Tick && nowTick - report.Tick <= t.MemoryTicks;
+
+		/// <summary>
+		/// Which of two shelling reports a side should be answering.
+		/// </summary>
+		/// <remarks>
+		/// Sticky for the reason every other report in this bot is: a base under siege is hit
+		/// several times a second, and a rule that simply took the latest hit would re-aim the
+		/// whole screen every tick and deliver it nowhere. The same gun firing again is this
+		/// siege continuing, so it refreshes rather than competes.
+		/// </remarks>
+		public static ShellingReport Choose(
+			in ShellingReport held, in ShellingReport candidate, int nowTick, in CounterBatteryTuning t)
+		{
+			if (!candidate.HasReport)
+				return StillHot(held, nowTick, t) ? held : ShellingReport.None;
+
+			if (!StillHot(held, nowTick, t))
+				return candidate;
+
+			if (candidate.AttackerId == held.AttackerId)
+				return candidate;
+
+			return Prefer(candidate, held) ? candidate : held;
+		}
+
+		/// <summary>
+		/// Which of two guns is the one worth walking at. Further out wins, then the lower actor
+		/// id, so the ordering is total and every unit on the side agrees on it.
+		/// </summary>
+		/// <remarks>
+		/// Further out, rather than closer or more recent, because standoff is the whole
+		/// complaint. Something shooting a refinery from four cells is already inside the reach
+		/// of the riflemen standing on it and will be shot by the ordinary scorers; something
+		/// shooting it from eleven is not, and it is the one nothing on this side has ever
+		/// touched.
+		/// </remarks>
+		public static bool Prefer(in ShellingReport candidate, in ShellingReport held) =>
+			candidate.StandoffUnits != held.StandoffUnits
+				? candidate.StandoffUnits > held.StandoffUnits
+				: candidate.AttackerId < held.AttackerId;
+
+		/// <summary>
+		/// Close on the gun, or null if this rule has no opinion and the normal rules should
+		/// answer instead.
+		/// </summary>
+		public static UnitDecision? Decide(in CounterBatteryState s, in CounterBatteryTuning t, string reasonId)
 		{
 			if (!s.HasShellingTarget || !s.HasWeapon || !s.CanMove)
 				return null;
@@ -150,8 +267,20 @@ namespace AutoCnC.Reference.Logic
 			if (s.DistanceUnits > t.ReachUnits)
 				return null;
 
+			// A gun that is still in fog cannot be given as a target at all, and that is the
+			// ordinary case rather than the exception: an eleven-cell piece parked outside
+			// everything this side can see is exactly what this rule exists for. Walking at the
+			// cell it fired from is the same answer HarvesterEscortMode already gives, and it
+			// ends in a shot for the same reason — the unit arrives with the gun inside its own
+			// reach and the ordinary scorers take over.
+			if (!s.CanAttackTarget)
+				return UnitDecision.AttackMoveTo(s.TargetX, s.TargetY,
+					$"counter-battery, advancing {s.DistanceUnits}u on where the shelling came from",
+					reasonId);
+
 			return UnitDecision.Attack(s.ShellingActorId,
-				$"counter-battery, closing {s.DistanceUnits}u on what outranges us");
+				$"counter-battery, closing {s.DistanceUnits}u on what outranges us",
+				reasonId);
 		}
 	}
 }

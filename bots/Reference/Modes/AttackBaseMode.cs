@@ -456,7 +456,7 @@ namespace AutoCnC.Reference.Modes
 				return null;
 
 			var shooter = ctx.ResolveActor(shellingActorId);
-			if (shooter == null || !ctx.CanAttack(shooter))
+			if (shooter == null || !ModeContext.HasPosition(shooter) || !ctx.CanAttack(shooter))
 			{
 				shellingActorId = 0;
 				return null;
@@ -466,13 +466,17 @@ namespace AutoCnC.Reference.Modes
 				new CounterBatteryState(
 					HasShellingTarget: true,
 					ShellingActorId: shellingActorId,
+					TargetX: shooter.Location.X,
+					TargetY: shooter.Location.Y,
+					CanAttackTarget: true,
 					DistanceUnits: ctx.DistanceTo(shooter),
 					WeaponRangeUnits: weaponRange,
 					TicksSinceHit: ctx.WorldTick - shellingTick,
 					SpentEvaluations: counterBatteryEvaluations,
 					CanMove: ctx.CanMove,
 					HasWeapon: ctx.HasWeapon),
-				counterBatteryTuning);
+				counterBatteryTuning,
+				"assault.counter-battery");
 		}
 
 		public override void OnDamaged(Actor self, ModeContext ctx, AttackInfo e)

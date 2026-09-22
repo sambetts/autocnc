@@ -35,6 +35,12 @@ namespace AutoCnC.Launcher
 		public string PromptTemplate { get; set; }
 		public string RestoreRun { get; set; }
 
+		/// <summary>Commit the bot workspace whenever the paired gate promotes a candidate.</summary>
+		public bool Commit { get; set; } = true;
+
+		/// <summary>Forward the agent's own colours to the console.</summary>
+		public bool Color { get; set; } = true;
+
 		internal string Validate(RepoLayout repo)
 		{
 			if (repo?.SupportsTraining != true)

@@ -22,12 +22,24 @@ namespace AutoCnC.Launcher
 	public sealed class TerminalLine
 	{
 		public string PlainText { get; }
+
+		/// <summary>The line with its original colour codes, and nothing else, for a terminal.</summary>
+		/// <remarks>
+		/// A console can render what the window renders, but only colour is safe to forward: the
+		/// agent also emits cursor moves, title changes and progress redraws that mean nothing
+		/// once each line has been separated out, and would arrive as noise in a scrolling log.
+		/// The select-graphic-rendition codes are kept verbatim rather than rebuilt from
+		/// <see cref="Spans"/>, so a terminal's own palette still decides what "red" looks like.
+		/// </remarks>
+		public string AnsiText { get; }
+
 		public IReadOnlyList<TerminalSpan> Spans { get; }
 
-		public TerminalLine(string plainText, IReadOnlyList<TerminalSpan> spans)
+		public TerminalLine(string plainText, IReadOnlyList<TerminalSpan> spans, string ansiText = null)
 		{
 			PlainText = plainText;
 			Spans = spans;
+			AnsiText = ansiText ?? plainText;
 		}
 
 		public static TerminalLine Plain(string text) =>
@@ -70,6 +82,8 @@ namespace AutoCnC.Launcher
 			raw ??= "";
 			var spans = new List<TerminalSpan>();
 			var text = new StringBuilder();
+			var ansi = new StringBuilder();
+			var colored = false;
 
 			void Flush()
 			{
@@ -90,7 +104,12 @@ namespace AutoCnC.Launcher
 
 					Flush();
 					if (raw[final] == 'm')
+					{
 						ApplySgr(raw[(i + 2)..final]);
+						ansi.Append(raw, i, final - i + 1);
+						colored = true;
+					}
+
 					i = final + 1;
 					continue;
 				}
@@ -103,7 +122,15 @@ namespace AutoCnC.Launcher
 
 					Flush();
 					if (raw[final] == 'm')
+					{
 						ApplySgr(raw[(i + 1)..final]);
+
+						// Normalised to the seven-bit form, because the eight-bit introducer is
+						// not decoded as a control byte once the stream is read as UTF-8.
+						ansi.Append("\x1B[").Append(raw, i + 1, final - i - 1).Append('m');
+						colored = true;
+					}
+
 					i = final + 1;
 					continue;
 				}
@@ -118,7 +145,13 @@ namespace AutoCnC.Launcher
 				if (raw[i] == '\b')
 				{
 					if (text.Length > 0)
+					{
+						var erased = text[^1];
 						text.Length--;
+						if (ansi.Length > 0 && ansi[^1] == erased)
+							ansi.Length--;
+					}
+
 					i++;
 					continue;
 				}
@@ -129,11 +162,18 @@ namespace AutoCnC.Launcher
 					continue;
 				}
 
+				ansi.Append(raw[i]);
 				text.Append(raw[i++]);
 			}
 
 			Flush();
-			return new TerminalLine(string.Concat(spans.Select(s => s.Text)), spans);
+
+			// Closed off per line so an unterminated colour cannot leak into whatever the host
+			// writes next, which is how a crashed agent used to leave a terminal tinted.
+			if (colored)
+				ansi.Append("\x1B[0m");
+
+			return new TerminalLine(string.Concat(spans.Select(s => s.Text)), spans, ansi.ToString());
 		}
 
 		void ApplySgr(string parameters)

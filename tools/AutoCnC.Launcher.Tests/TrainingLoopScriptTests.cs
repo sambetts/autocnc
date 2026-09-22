@@ -59,6 +59,22 @@ namespace AutoCnC.Launcher.Tests
 				Assert.That(options.GetProperty("RunsRoot").GetString(), Is.EqualTo(Path.Combine(root, "new runs")));
 				Assert.That(options.GetProperty("Benchmark").GetString(), Is.EqualTo("hard-16-9"));
 				Assert.That(options.GetProperty("BenchmarkDifficulty").GetString(), Is.EqualTo("Hard"));
+				Assert.That(options.GetProperty("Commit").GetBoolean(), Is.True);
+				Assert.That(options.GetProperty("Color").GetBoolean(), Is.True);
+			});
+			AssertTemporaryOptionsDeleted();
+		}
+
+		[Test]
+		public async Task NoCommitAndNoColorAreForwardedAsTheirOppositeOptions()
+		{
+			var result = await Invoke("-Rounds 1 -NoCommit -NoColor");
+			Assert.That(result.ExitCode, Is.Zero, result.Output);
+			using var captured = JsonDocument.Parse(File.ReadAllText(Path.Combine(root, "captured.json")));
+			Assert.Multiple(() =>
+			{
+				Assert.That(captured.RootElement.GetProperty("Commit").GetBoolean(), Is.False);
+				Assert.That(captured.RootElement.GetProperty("Color").GetBoolean(), Is.False);
 			});
 			AssertTemporaryOptionsDeleted();
 		}

@@ -165,6 +165,10 @@ namespace AutoCnC.Launcher.Tests
 				var colored = lines.Find(line => line.PlainText == "colored progress");
 				Assert.That(colored, Is.Not.Null);
 				Assert.That(colored.Spans[0].Style.Foreground, Is.Not.Null);
+
+				// The console host forwards this string, so colour surviving a real child
+				// process is what stops the training loop printing a monochrome transcript.
+				Assert.That(colored.AnsiText, Is.EqualTo("\x1B[36;1mcolored progress\x1B[0m\x1B[0m"));
 			}
 			finally
 			{

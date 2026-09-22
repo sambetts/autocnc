@@ -9,6 +9,11 @@
 	An invalid evaluation or failed improvement stops the loop rather than accepting an
 	unmeasured edit. Ctrl+C stops the worker process tree and retains recovery evidence.
 
+	A promoted bot is committed to the bot workspace, because a champion that exists only as
+	an uncommitted working tree is one manual edit away from being lost, and has been. Only
+	the workspace is staged, so the engine submodule's applied patch never rides along. Use
+	-NoCommit to leave version control alone.
+
 	This edits bot source and uses the configured agent's account and quota. Defaults to
 	Copilot CLI and the repository prompt, not the launcher's saved agent/prompt settings.
 	Run setup.ps1 and install the game content and an authenticated coding agent first.
@@ -54,12 +59,26 @@
 	and restore that snapshot, then exit. This also discards subsequent manual source edits.
 	Refuses to restore while another worker owns the run. Supports -WhatIf.
 
+.PARAMETER NoCommit
+	Do not commit promoted bots. By default every promotion is committed to the bot workspace,
+	so an improvement the paired gate measured survives the next round instead of living only
+	in the working tree. Nothing else in the checkout is staged, and a restore never commits.
+
+.PARAMETER NoColor
+	Print the agent and script output without colour. Colour is on by default and is dropped
+	automatically when output is redirected, when NO_COLOR is set, or on a console that cannot
+	render it.
+
 .PARAMETER NoBuild
 	Use the existing Release build of the console host instead of rebuilding it. Bot builds
 	and verification still run on every round.
 
 .EXAMPLE
 	./scripts/train-loop.ps1 -BattleBot Reference -Rounds 3
+
+.EXAMPLE
+	./scripts/train-loop.ps1 -BattleBot Reference -Rounds 5 -NoCommit
+	Trains without touching version control, leaving promotions in the working tree.
 
 .EXAMPLE
 	./scripts/train-loop.ps1 -BattleBot C:\bots\MyBot\MyBot.csproj -Map 16-9.oramap -Difficulty Hard
@@ -112,6 +131,9 @@ param(
 	[string]$AgentConfiguration,
 	[Parameter(ParameterSetName = 'Loop')]
 	[string]$PromptTemplate,
+	[Parameter(ParameterSetName = 'Loop')]
+	[switch]$NoCommit,
+	[switch]$NoColor,
 	[Parameter(Mandatory, ParameterSetName = 'Restore')]
 	[string]$RestoreRun,
 	[switch]$NoBuild
@@ -156,6 +178,8 @@ $options = @{
 	AgentConfiguration = Resolve-OptionalFile $AgentConfiguration
 	PromptTemplate = Resolve-OptionalFile $PromptTemplate
 	RestoreRun = Resolve-OptionalFile $RestoreRun
+	Commit = -not $NoCommit
+	Color = -not $NoColor
 }
 
 if (-not $NoBuild) {

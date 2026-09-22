@@ -47,6 +47,10 @@ namespace AutoCnC.Training
 				var options = JsonSerializer.Deserialize<TrainingLoopOptions>(File.ReadAllText(args[1]),
 					new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ??
 					throw new ArgumentException("Training options cannot be null.");
+
+				// Asked for and available are different questions, and only the console can
+				// answer the second one.
+				options.Color = options.Color && ConsoleAnsi.TryEnable();
 				new TrainingLoopRunner(options, Console.WriteLine).Run(cancellation.Token);
 				return 0;
 			}

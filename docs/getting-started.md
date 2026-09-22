@@ -685,6 +685,18 @@ results are saved beneath `%LOCALAPPDATA%\AutoCnC\TrainingRuns`, where the launc
 when restarting. Do not run UI operations on the same bot concurrently: both interfaces share
 the workspace lock.
 
+A promotion is committed to the bot workspace as it happens, so a bot the paired gate measured
+as better is in version control before the next round can replace it. A champion that lives only
+in an uncommitted working tree is one manual edit away from being lost, which is exactly how the
+best bot of 21 September was displaced by hand-written commits that scored worse. Only the
+workspace pathspec is staged, so the engine submodule's applied patch and any unrelated work
+elsewhere in the checkout stay out of it, and a restored candidate is never committed. The commit
+message carries the wins, median paired delta and pair breadth that allowed the promotion. Pass
+`-NoCommit` to leave version control alone; nothing is ever pushed.
+
+Agent and script output keeps its colour. Pass `-NoColor`, set `NO_COLOR`, or redirect the output
+to turn that off.
+
 **Ctrl+C** stops the active worker and preserves its evidence and any unfinished candidate edits.
 Restarting the command resumes a verified candidate's evaluation before fighting again; this
 recovery evaluation does not count toward `-Rounds`. An interrupted improvement that was not

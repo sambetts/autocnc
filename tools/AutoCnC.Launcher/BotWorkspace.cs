@@ -126,7 +126,66 @@ namespace AutoCnC.Launcher
 			return Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
 		}
 
+		/// <summary>Whether a commit was made, and the revision or the reason there was none.</summary>
+		public readonly record struct CommitOutcome(bool Committed, string Revision, string Reason);
+
+		/// <summary>Records the bot workspace in Git so a measured improvement outlives the tree.</summary>
+		/// <remarks>
+		/// Both the staging and the commit are confined to the workspace pathspec. The engine
+		/// submodule carries an applied source patch at all times and unrelated work may already
+		/// be staged elsewhere in the checkout; neither may ride along with a promotion just
+		/// because it happened to be dirty when the benchmark finished.
+		/// <para>
+		/// A checkout without Git, or a workspace that already matches HEAD, is reported rather
+		/// than thrown: training has done its job by then, and refusing to continue because the
+		/// bookkeeping step found nothing to record would throw away a promotion that succeeded.
+		/// </para>
+		/// </remarks>
+		public static CommitOutcome Commit(string root, string message)
+		{
+			if (string.IsNullOrWhiteSpace(message))
+				throw new ArgumentException("A commit message is required.", nameof(message));
+			if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
+				return new CommitOutcome(false, null, "the bot workspace does not exist");
+
+			if (Run(root, "rev-parse", "--is-inside-work-tree").ExitCode != 0)
+				return new CommitOutcome(false, null, "the bot workspace is not inside a Git working tree");
+
+			var staged = Run(root, "add", "--all", "--", ".");
+			if (staged.ExitCode != 0)
+				return new CommitOutcome(false, null, Explain("the workspace could not be staged", staged));
+
+			// --quiet turns this into a question: it exits 0 when nothing is staged under the
+			// pathspec and 1 when something is, so an empty promotion is recognised before a
+			// commit that git would refuse anyway.
+			if (Run(root, "diff", "--cached", "--quiet", "--", ".").ExitCode == 0)
+				return new CommitOutcome(false, null, "the bot workspace already matches the last commit");
+
+			var committed = Run(root, "commit", "--message", message, "--", ".");
+			if (committed.ExitCode != 0)
+				return new CommitOutcome(false, null, Explain("git commit failed", committed));
+
+			return new CommitOutcome(true, Git(root, "rev-parse", "--short", "HEAD"), null);
+		}
+
+		static string Explain(string summary, (int ExitCode, string Output, string Error) result)
+		{
+			var detail = result.Error?.Trim();
+			if (string.IsNullOrEmpty(detail))
+				detail = result.Output?.Trim();
+			if (string.IsNullOrEmpty(detail))
+				return summary;
+
+			return summary + ": " + detail.Split('\n')[0].Trim();
+		}
+
 		static string Git(string root, params string[] arguments)
+		{
+			var result = Run(root, arguments);
+			return result.ExitCode == 0 ? result.Output.Trim() : null;
+		}
+
+		static (int ExitCode, string Output, string Error) Run(string root, params string[] arguments)
 		{
 			try
 			{
@@ -146,13 +205,17 @@ namespace AutoCnC.Launcher
 					start.ArgumentList.Add(argument);
 
 				using var process = Process.Start(start);
+
+				// Drained concurrently, because a commit that fails writes enough to standard
+				// error to fill its pipe, and a reader waiting on the other stream would deadlock.
+				var error = process.StandardError.ReadToEndAsync();
 				var output = process.StandardOutput.ReadToEnd();
 				process.WaitForExit();
-				return process.ExitCode == 0 ? output.Trim() : null;
+				return (process.ExitCode, output, error.GetAwaiter().GetResult());
 			}
 			catch (System.ComponentModel.Win32Exception)
 			{
-				return null;
+				return (-1, "", "git is not installed, or not on PATH.");
 			}
 		}
 	}

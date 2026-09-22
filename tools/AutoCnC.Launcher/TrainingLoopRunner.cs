@@ -13,9 +13,11 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using AutoCnC.Evidence;
 
 namespace AutoCnC.Launcher
 {
@@ -293,9 +295,69 @@ namespace AutoCnC.Launcher
 				output($"Evaluation: {decision}. {completion.InvalidationReason ?? completion.Evaluation.Reason}");
 				if (decision == ContinuousEvaluationDecision.Undefined)
 					throw new InvalidOperationException("Evaluation evidence was invalid. The champion was restored and training stopped.");
+				if (decision == ContinuousEvaluationDecision.Promote)
+					CommitPromotion(completion.Evaluation);
 				if (decision != ContinuousEvaluationDecision.Reevaluate)
 					return;
 			}
+		}
+
+		/// <summary>Puts a promoted bot in version control, where the next round cannot lose it.</summary>
+		/// <remarks>
+		/// Only the paired gate reaches this, so the evidence for the commit is the same evidence
+		/// that allowed the promotion. Committing is bookkeeping rather than training: a failure
+		/// here is reported and the loop carries on, because the promotion itself was already
+		/// measured, applied and recorded in the run.
+		/// </remarks>
+		void CommitPromotion(PairedBenchmarkEvaluation evaluation)
+		{
+			if (!options.Commit)
+				return;
+
+			var workspace = activeRun?.Manifest.BotDirectory;
+			BotWorkspace.CommitOutcome result;
+			try
+			{
+				result = BotWorkspace.Commit(workspace, PromotionCommitMessage(evaluation));
+			}
+			catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
+				InvalidOperationException)
+			{
+				output("Promoted, but the commit failed: " + ex.Message);
+				return;
+			}
+
+			output(result.Committed
+				? $"Committed the promoted bot as {result.Revision}."
+				: $"Promoted, but not committed, because {result.Reason}.");
+		}
+
+		internal static string PromotionCommitMessage(PairedBenchmarkEvaluation evaluation)
+		{
+			ArgumentNullException.ThrowIfNull(evaluation);
+			var benchmark = string.IsNullOrWhiteSpace(evaluation.Benchmark) ? "the paired benchmark" : evaluation.Benchmark;
+			var message = new StringBuilder();
+			message.Append(CultureInfo.InvariantCulture, $"Promote the bot {benchmark} preferred\n\n");
+			message.Append(CultureInfo.InvariantCulture,
+				$"{evaluation.Reason}\n\n");
+			message.Append(CultureInfo.InvariantCulture,
+				$"  wins             {evaluation.CandidateWins} - {evaluation.ControlWins}\n");
+			message.Append(CultureInfo.InvariantCulture,
+				$"  median delta     {evaluation.MedianPairedFitnessDelta:+0.####;-0.####;0}\n");
+			message.Append(CultureInfo.InvariantCulture,
+				$"  pairs            {evaluation.CandidateFitnessPairs} better, " +
+				$"{evaluation.ControlFitnessPairs} worse, {evaluation.TiedFitnessPairs} tied\n");
+			message.Append(CultureInfo.InvariantCulture,
+				$"  compared         {evaluation.PairsCompared}");
+			if (evaluation.DroppedPairs > 0)
+				message.Append(CultureInfo.InvariantCulture, $", {evaluation.DroppedPairs} dropped");
+			message.Append('\n');
+			if (!string.IsNullOrWhiteSpace(evaluation.Batch))
+				message.Append(CultureInfo.InvariantCulture, $"  batch            {evaluation.Batch}\n");
+
+			message.Append("\nPromoted by scripts/train-loop.ps1 against the reigning champion, so this is a\n");
+			message.Append("measured improvement rather than an edit that merely compiled.\n");
+			return message.ToString();
 		}
 
 		void Restore(string directory)
@@ -321,6 +383,10 @@ namespace AutoCnC.Launcher
 			var result = execute(new ScriptJob
 			{
 				Title = title, ScriptPath = script, Arguments = arguments,
+				// The agent decides whether to colour its output by what the environment tells
+				// it, and a redirected pipe alone reads as "not a terminal". Without this the
+				// loop showed a monochrome transcript of a tool that had colour all along.
+				PreserveColor = options.Color,
 				WorkerOwnershipFile = activeRun?.WorkerOwnershipPath, CancellationFile = cancellationFile
 			}, token);
 			token.ThrowIfCancellationRequested();
@@ -331,7 +397,7 @@ namespace AutoCnC.Launcher
 		{
 			var runner = new ScriptRunner();
 			var finished = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
-			runner.Output += line => output(line.PlainText);
+			runner.Output += line => output(options.Color ? line.AnsiText : line.PlainText);
 			runner.Finished += code => finished.TrySetResult(code);
 			runner.Start(job, repo.Root);
 			using var registration = token.Register(runner.Stop);

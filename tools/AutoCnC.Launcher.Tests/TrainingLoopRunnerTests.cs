@@ -30,6 +30,7 @@ namespace AutoCnC.Launcher.Tests
 		readonly List<ScriptJob> jobs = [];
 		readonly List<string> runDirectories = [];
 		readonly List<string> foughtSources = [];
+		readonly List<string> messages = [];
 		Func<ScriptJob, int?> intercept;
 		Action improve;
 		int improvements;
@@ -74,6 +75,7 @@ namespace AutoCnC.Launcher.Tests
 			jobs.Clear();
 			runDirectories.Clear();
 			foughtSources.Clear();
+			messages.Clear();
 			intercept = null;
 			improve = null;
 			improvements = 0;
@@ -135,6 +137,106 @@ namespace AutoCnC.Launcher.Tests
 				Assert.That(Argument(job, "-Benchmark"), Is.EqualTo("hard-16-9"));
 				Assert.That(Argument(job, "-Difficulty"), Is.EqualTo("Hard"));
 			}
+		}
+
+		[Test]
+		public void PromotionIsCommittedToTheBotWorkspaceAndNothingElse()
+		{
+			RequireGitCheckout();
+			var outside = Path.Combine(repo.Root, "docs", "agent-game-guide.md");
+			File.WriteAllText(outside, "edited while training ran");
+			improve = () => File.WriteAllText(source, "candidate-" + improvements);
+
+			Run();
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(Git("show", "--name-only", "--format=", "HEAD").Split('\n')
+					.Select(line => line.Trim()).Where(line => line.Length > 0),
+					Is.EqualTo(new[] { "bots/Reference/Strategy.cs" }),
+					"An applied engine patch or an unrelated edit must not ride along with a promotion.");
+				Assert.That(Git("log", "-1", "--format=%s"), Is.EqualTo("Promote the bot hard-16-9 preferred"));
+				Assert.That(Git("show", "HEAD:bots/Reference/Strategy.cs"), Is.EqualTo("candidate-1"));
+				Assert.That(Git("status", "--porcelain", "--", "docs"), Does.Contain("agent-game-guide.md"));
+				Assert.That(messages, Has.Some.Contains("Committed the promoted bot as"));
+			});
+		}
+
+		[Test]
+		public void ARestoredCandidateIsNeverCommitted()
+		{
+			RequireGitCheckout();
+			candidateWins = false;
+			improve = () => File.WriteAllText(source, "candidate");
+
+			Run();
+
+			Assert.That(Git("log", "--format=%s"), Is.EqualTo("checkout"));
+			Assert.That(File.ReadAllText(source), Is.EqualTo("champion"));
+		}
+
+		[Test]
+		public void NoCommitLeavesVersionControlAloneButStillPromotes()
+		{
+			RequireGitCheckout();
+			options.Commit = false;
+			improve = () => File.WriteAllText(source, "candidate");
+
+			Run();
+
+			Assert.That(Git("log", "--format=%s"), Is.EqualTo("checkout"));
+			Assert.That(File.ReadAllText(source), Is.EqualTo("candidate"));
+			Assert.That(messages, Has.None.Contains("Committed"));
+		}
+
+		[Test]
+		public void APromotionThatCannotBeCommittedIsReportedAndTrainingContinues()
+		{
+			options.Rounds = 2;
+			improve = () => File.WriteAllText(source, "candidate-" + improvements);
+
+			Run();
+
+			Assert.That(improvements, Is.EqualTo(2),
+				"Bookkeeping cannot stop a loop whose promotion was already measured and applied.");
+			Assert.That(messages, Has.Some.Contains("Promoted, but not committed, because"));
+		}
+
+		[Test]
+		public void ThePromotionCommitMessageCarriesTheEvidenceThatAllowedIt()
+		{
+			var message = TrainingLoopRunner.PromotionCommitMessage(new PairedBenchmarkEvaluation
+			{
+				Benchmark = "hard-16-9", Batch = "promotion-01",
+				Verdict = PromotionVerdicts.Promote,
+				Reason = "Candidate won 2 paired matches; control won 1, with no paired fitness regression.",
+				CandidateWins = 2, ControlWins = 1,
+				CandidateFitnessPairs = 5, ControlFitnessPairs = 2, TiedFitnessPairs = 1,
+				MedianPairedFitnessDelta = 0.0126, PairsCompared = 8, DroppedPairs = 1
+			});
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(message, Does.StartWith("Promote the bot hard-16-9 preferred\n\n"));
+				Assert.That(message, Does.Contain("Candidate won 2 paired matches"));
+				Assert.That(message, Does.Contain("wins             2 - 1"));
+				Assert.That(message, Does.Contain("median delta     +0.0126"));
+				Assert.That(message, Does.Contain("5 better, 2 worse, 1 tied"));
+				Assert.That(message, Does.Contain("compared         8, 1 dropped"));
+				Assert.That(message, Does.Contain("promotion-01"));
+			});
+		}
+
+		[TestCase(true)]
+		[TestCase(false)]
+		public void ScriptJobsCarryTheChosenColourSetting(bool color)
+		{
+			options.Color = color;
+
+			Run();
+
+			Assert.That(jobs, Is.Not.Empty);
+			Assert.That(jobs.Select(job => job.PreserveColor), Is.All.EqualTo(color));
 		}
 
 		[Test]
@@ -373,7 +475,7 @@ namespace AutoCnC.Launcher.Tests
 		}
 
 		void Run(CancellationToken token = default) =>
-			new TrainingLoopRunner(options, _ => { }, Execute).Run(token);
+			new TrainingLoopRunner(options, messages.Add, Execute).Run(token);
 
 		TrainingScriptResult Execute(ScriptJob job, CancellationToken token)
 		{
@@ -422,6 +524,47 @@ namespace AutoCnC.Launcher.Tests
 
 		static string Argument(ScriptJob job, string name) =>
 			job.Arguments[job.Arguments.ToList().IndexOf(name) + 1];
+
+		/// <summary>Turns the fake checkout into a real repository, so commits can be asserted.</summary>
+		void RequireGitCheckout()
+		{
+			if (Git("init", "--quiet") == null)
+				Assert.Ignore("Git is not available on this machine.");
+
+			Git("config", "user.email", "training@autocnc.test");
+			Git("config", "user.name", "AutoC&C Training Tests");
+			Git("config", "commit.gpgsign", "false");
+			Git("add", "--all", "--", ".");
+			if (Git("commit", "--message", "checkout") == null)
+				Assert.Ignore("Git could not commit in this environment.");
+		}
+
+		string Git(params string[] arguments)
+		{
+			try
+			{
+				var start = new System.Diagnostics.ProcessStartInfo
+				{
+					FileName = "git", WorkingDirectory = repo.Root, UseShellExecute = false,
+					CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true
+				};
+				start.ArgumentList.Add("-C");
+				start.ArgumentList.Add(repo.Root);
+				foreach (var argument in arguments)
+					start.ArgumentList.Add(argument);
+
+				using var process = System.Diagnostics.Process.Start(start);
+				var error = process.StandardError.ReadToEndAsync();
+				var output = process.StandardOutput.ReadToEnd();
+				process.WaitForExit();
+				error.GetAwaiter().GetResult();
+				return process.ExitCode == 0 ? output.Trim() : null;
+			}
+			catch (System.ComponentModel.Win32Exception)
+			{
+				return null;
+			}
+		}
 
 		static void WriteBenchmark(string path, bool won)
 		{

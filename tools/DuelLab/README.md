@@ -36,7 +36,9 @@ Two deliberate differences from a normal AutoC&C match, both in `map/rules.yaml`
   attack order on something the attacker's side has never seen. A scouted structure also stays
   targetable under fog, which is what the attacker would be relying on in a real game.
 
-`results/` holds the run behind `docs/unit-matchups.md`. The duels are deterministic for a given
-engine build and rules, so regenerate them whenever either changes. Results are one fight per
-pairing from a fixed formation on open ground, with engine targeting rather than a bot's
-micro-management. Treat a margin near zero as an even trade, not a ranking.
+`results/` holds the run behind `docs/unit-matchups.md`, three seeds of every duel. A single seed is
+exactly reproducible for a given engine build and rules, so regenerate whenever either changes.
+Every fight starts from a fixed formation on open ground and uses engine targeting, not a bot's
+micro-management. A margin is also a massed, equal-cost result: one unit bought at a time
+trickles into a fight and can lose one the table says it wins. Treat a margin near zero as an
+even trade, not a ranking.

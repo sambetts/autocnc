@@ -139,7 +139,16 @@ it as authoritative context alongside the source and the evidence from one compl
 - `game-rules.json` is generated from OpenRA's resolved runtime rules. Query it for actor health,
   armor, movement, sight, build data and armaments, plus weapon reload, burst, fire cycle,
   shots-per-game-second, range, projectile, damage, target, and armor-modifier fields. Tiberian
-  Dawn has no universal shield stat; defensive mechanics appear as armor and actor traits.
+  Dawn has no universal shield stat; defensive mechanics appear as armor and actor traits. Its
+  `targetTypes` ignore conditions: an airborne aircraft is only an `Air` target, although the
+  export also lists the `Ground` types it has while landed. Weapon ids are lower case, but the
+  armament weapon names that refer to them are not.
+- `docs/unit-matchups.md` is what the rules export cannot tell you. It is every combat unit fought
+  against every other by the engine: one of each, equal cost, equal cost with full vision, against
+  each powered tower, and raiding a harvester or refinery. Splash, crushing, minimum range,
+  missile inaccuracy and sight all count. Use it before reasoning about counters from the
+  per-shot numbers. `scripts/duel-lab.ps1` regenerates it, and `scripts/export-bot-matchups.ps1`
+  writes the same results into a bot as `Logic/MatchupTable.cs`.
 - `telemetry.csv` is an omniscient after-match record of army, economy, losses, and result. Use it
   to locate turning points, never as information the runtime bot could have read.
 - `battle.csv` records what the local side could observe: sightings, damage, losses, kills,

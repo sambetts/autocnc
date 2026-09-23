@@ -1,0 +1,2 @@
+-- scripts/duel-lab.ps1 overwrites this for each run to narrow the lab (LabMobile, LabScenarios)
+-- or to replace it with a LabDebug() investigation. Empty means every duel.

@@ -1,0 +1,53 @@
+MapFormat: 12
+
+RequiresMod: autocnc
+
+Title: AutoC&C Duel Lab
+
+Author: AutoC&C
+
+Tileset: TEMPERAT
+
+MapSize: 72,170
+
+Bounds: 1,1,70,168
+
+Visibility: MissionSelector
+
+Categories: Lab
+
+LockPreview: True
+
+Players:
+	PlayerReference@Neutral:
+		Name: Neutral
+		OwnsWorld: True
+		NonCombatant: True
+		Faction: gdi
+	PlayerReference@Lab:
+		Name: Lab
+		Playable: True
+		AllowBots: False
+		Required: True
+		LockFaction: True
+		Faction: gdi
+		LockColor: True
+		Color: FFFFFF
+		LockSpawn: True
+		LockTeam: True
+	PlayerReference@Blue:
+		Name: Blue
+		Faction: gdi
+		Color: 2050FF
+		Enemies: Red
+	PlayerReference@Red:
+		Name: Red
+		Faction: nod
+		Color: FF2020
+		Enemies: Blue
+
+Actors:
+
+Rules: cnc|rules/campaign-maprules.yaml, rules.yaml
+
+FluentMessages: cnc|fluent/lua.ftl, map.ftl

@@ -1,0 +1,2264 @@
+{
+  "schemaVersion": 1,
+  "generatedUtc": "2026-09-23T18:16:47.2444833Z",
+  "seeds": [
+    "1",
+    "2",
+    "3"
+  ],
+  "marginDefinition": "share of opponent value destroyed minus share of own value destroyed, -1..+1, mean over seeds",
+  "units": [
+    "e1",
+    "e2",
+    "e3",
+    "e4",
+    "e5",
+    "rmbo",
+    "jeep",
+    "apc",
+    "mtnk",
+    "htnk",
+    "msam",
+    "bggy",
+    "bike",
+    "ltnk",
+    "ftnk",
+    "stnk",
+    "arty",
+    "mlrs",
+    "orca",
+    "heli"
+  ],
+  "oneVsOne": {
+    "e1": {
+      "e2": -0.001,
+      "e3": 0.72,
+      "e4": -0.665,
+      "e5": -0.833,
+      "rmbo": -1.0,
+      "jeep": -0.958,
+      "apc": -0.929,
+      "mtnk": -0.961,
+      "htnk": -0.996,
+      "msam": -0.7,
+      "bggy": -0.922,
+      "bike": -0.224,
+      "ltnk": -0.93,
+      "ftnk": -0.997,
+      "stnk": -0.733,
+      "arty": -0.715,
+      "mlrs": 0.348,
+      "orca": -1.0,
+      "heli": -1.0
+    },
+    "e2": {
+      "e1": 0.001,
+      "e3": 0.834,
+      "e4": -0.758,
+      "e5": -1.0,
+      "rmbo": -1.0,
+      "jeep": -1.0,
+      "apc": -0.471,
+      "mtnk": -0.735,
+      "htnk": -0.981,
+      "msam": -0.271,
+      "bggy": -0.831,
+      "bike": 0.556,
+      "ltnk": -0.521,
+      "ftnk": -1.0,
+      "stnk": -0.291,
+      "arty": -0.904,
+      "mlrs": 1.0,
+      "orca": -1.0,
+      "heli": -1.0
+    },
+    "e3": {
+      "e1": -0.72,
+      "e2": -0.834,
+      "e4": -0.95,
+      "e5": -0.96,
+      "rmbo": -1.0,
+      "jeep": -0.782,
+      "apc": -0.078,
+      "mtnk": -0.611,
+      "htnk": -0.933,
+      "msam": 0.087,
+      "bggy": -0.71,
+      "bike": 0.477,
+      "ltnk": -0.235,
+      "ftnk": -0.87,
+      "stnk": -0.2,
+      "arty": -0.067,
+      "mlrs": 0.398,
+      "orca": 0.294,
+      "heli": -1.0
+    },
+    "e4": {
+      "e1": 0.665,
+      "e2": 0.758,
+      "e3": 0.95,
+      "e5": -0.023,
+      "rmbo": -1.0,
+      "jeep": -0.75,
+      "apc": -0.79,
+      "mtnk": -0.884,
+      "htnk": -0.986,
+      "msam": 0.905,
+      "bggy": -0.667,
+      "bike": 0.797,
+      "ltnk": -0.812,
+      "ftnk": -0.985,
+      "stnk": 0.498,
+      "arty": 0.85,
+      "mlrs": 1.0,
+      "orca": -1.0,
+      "heli": -1.0
+    },
+    "e5": {
+      "e1": 0.833,
+      "e2": 1.0,
+      "e3": 0.96,
+      "e4": 0.023,
+      "rmbo": -1.0,
+      "jeep": -0.625,
+      "apc": 0.557,
+      "mtnk": 0.327,
+      "htnk": -0.862,
+      "msam": 0.85,
+      "bggy": -0.5,
+      "bike": 0.81,
+      "ltnk": 0.567,
+      "ftnk": -0.778,
+      "stnk": 0.48,
+      "arty": 0.194,
+      "mlrs": 0.444,
+      "orca": -1.0,
+      "heli": -1.0
+    },
+    "rmbo": {
+      "e1": 1.0,
+      "e2": 1.0,
+      "e3": 1.0,
+      "e4": 1.0,
+      "e5": 1.0,
+      "jeep": -1.0,
+      "apc": -1.0,
+      "mtnk": -1.0,
+      "htnk": -1.0,
+      "msam": -1.0,
+      "bggy": -1.0,
+      "bike": -1.0,
+      "ltnk": -1.0,
+      "ftnk": -1.0,
+      "stnk": -0.417,
+      "arty": -1.0,
+      "mlrs": 0.0,
+      "orca": -1.0,
+      "heli": -1.0
+    },
+    "jeep": {
+      "e1": 0.958,
+      "e2": 1.0,
+      "e3": 0.782,
+      "e4": 0.75,
+      "e5": 0.625,
+      "rmbo": 1.0,
+      "apc": -0.848,
+      "mtnk": -0.952,
+      "htnk": -0.993,
+      "msam": 0.915,
+      "bggy": 0.356,
+      "bike": 0.225,
+      "ltnk": -0.91,
+      "ftnk": -0.954,
+      "stnk": -0.428,
+      "arty": 0.99,
+      "mlrs": 1.0,
+      "orca": -1.0,
+      "heli": -1.0
+    },
+    "apc": {
+      "e1": 0.929,
+      "e2": 0.471,
+      "e3": 0.078,
+      "e4": 0.79,
+      "e5": -0.557,
+      "rmbo": 1.0,
+      "jeep": 0.848,
+      "mtnk": -0.892,
+      "htnk": -0.977,
+      "msam": 0.286,
+      "bggy": 0.9,
+      "bike": 0.347,
+      "ltnk": -0.779,
+      "ftnk": -0.593,
+      "stnk": -0.45,
+      "arty": 0.944,
+      "mlrs": 1.0,
+      "orca": 0.558,
+      "heli": 0.79
+    },
+    "mtnk": {
+      "e1": 0.961,
+      "e2": 0.735,
+      "e3": 0.611,
+      "e4": 0.884,
+      "e5": -0.327,
+      "rmbo": 1.0,
+      "jeep": 0.952,
+      "apc": 0.892,
+      "htnk": -0.801,
+      "msam": 0.922,
+      "bggy": 0.968,
+      "bike": 0.747,
+      "ltnk": 0.495,
+      "ftnk": 0.688,
+      "stnk": 0.52,
+      "arty": 0.971,
+      "mlrs": 0.667,
+      "orca": -1.0,
+      "heli": -1.0
+    },
+    "htnk": {
+      "e1": 0.996,
+      "e2": 0.981,
+      "e3": 0.933,
+      "e4": 0.986,
+      "e5": 0.862,
+      "rmbo": 1.0,
+      "jeep": 0.993,
+      "apc": 0.977,
+      "mtnk": 0.801,
+      "msam": 0.925,
+      "bggy": 0.997,
+      "bike": 0.941,
+      "ltnk": 0.899,
+      "ftnk": 0.915,
+      "stnk": 0.876,
+      "arty": 0.974,
+      "mlrs": 0.999,
+      "orca": 0.855,
+      "heli": 0.954
+    },
+    "msam": {
+      "e1": 0.7,
+      "e2": 0.271,
+      "e3": -0.087,
+      "e4": -0.905,
+      "e5": -0.85,
+      "rmbo": 1.0,
+      "jeep": -0.915,
+      "apc": -0.286,
+      "mtnk": -0.922,
+      "htnk": -0.925,
+      "bggy": 0.883,
+      "bike": 1.0,
+      "ltnk": -0.932,
+      "ftnk": -0.927,
+      "stnk": 0.056,
+      "arty": 1.0,
+      "mlrs": 1.0,
+      "orca": -1.0,
+      "heli": -1.0
+    },
+    "bggy": {
+      "e1": 0.922,
+      "e2": 0.831,
+      "e3": 0.71,
+      "e4": 0.667,
+      "e5": 0.5,
+      "rmbo": 1.0,
+      "jeep": -0.356,
+      "apc": -0.9,
+      "mtnk": -0.968,
+      "htnk": -0.997,
+      "msam": -0.883,
+      "bike": -0.3,
+      "ltnk": -0.951,
+      "ftnk": -0.985,
+      "stnk": -0.922,
+      "arty": 0.511,
+      "mlrs": 1.0,
+      "orca": -1.0,
+      "heli": -1.0
+    },
+    "bike": {
+      "e1": 0.224,
+      "e2": -0.556,
+      "e3": -0.477,
+      "e4": -0.797,
+      "e5": -0.81,
+      "rmbo": 1.0,
+      "jeep": -0.225,
+      "apc": -0.347,
+      "mtnk": -0.747,
+      "htnk": -0.941,
+      "msam": -1.0,
+      "bggy": 0.3,
+      "ltnk": -0.612,
+      "ftnk": -0.77,
+      "stnk": -0.724,
+      "arty": -0.724,
+      "mlrs": 1.0,
+      "orca": -0.38,
+      "heli": -0.504
+    },
+    "ltnk": {
+      "e1": 0.93,
+      "e2": 0.521,
+      "e3": 0.235,
+      "e4": 0.812,
+      "e5": -0.567,
+      "rmbo": 1.0,
+      "jeep": 0.91,
+      "apc": 0.779,
+      "mtnk": -0.495,
+      "htnk": -0.899,
+      "msam": 0.932,
+      "bggy": 0.951,
+      "bike": 0.612,
+      "ftnk": 0.371,
+      "stnk": 0.104,
+      "arty": 0.952,
+      "mlrs": 0.991,
+      "orca": -1.0,
+      "heli": -1.0
+    },
+    "ftnk": {
+      "e1": 0.997,
+      "e2": 1.0,
+      "e3": 0.87,
+      "e4": 0.985,
+      "e5": 0.778,
+      "rmbo": 1.0,
+      "jeep": 0.954,
+      "apc": 0.593,
+      "mtnk": -0.688,
+      "htnk": -0.915,
+      "msam": 0.927,
+      "bggy": 0.985,
+      "bike": 0.77,
+      "ltnk": -0.371,
+      "stnk": 0.6,
+      "arty": 0.757,
+      "mlrs": 1.0,
+      "orca": -1.0,
+      "heli": -1.0
+    },
+    "stnk": {
+      "e1": 0.733,
+      "e2": 0.291,
+      "e3": 0.2,
+      "e4": -0.498,
+      "e5": -0.48,
+      "rmbo": 0.417,
+      "jeep": 0.428,
+      "apc": 0.45,
+      "mtnk": -0.52,
+      "htnk": -0.876,
+      "msam": -0.056,
+      "bggy": 0.922,
+      "bike": 0.724,
+      "ltnk": -0.104,
+      "ftnk": -0.6,
+      "arty": 0.502,
+      "mlrs": 1.0,
+      "orca": 0.689,
+      "heli": -0.04
+    },
+    "arty": {
+      "e1": 0.715,
+      "e2": 0.904,
+      "e3": 0.067,
+      "e4": -0.85,
+      "e5": -0.194,
+      "rmbo": 1.0,
+      "jeep": -0.99,
+      "apc": -0.944,
+      "mtnk": -0.971,
+      "htnk": -0.974,
+      "msam": -1.0,
+      "bggy": -0.511,
+      "bike": 0.724,
+      "ltnk": -0.952,
+      "ftnk": -0.757,
+      "stnk": -0.502,
+      "mlrs": 0.35,
+      "orca": -1.0,
+      "heli": -1.0
+    },
+    "mlrs": {
+      "e1": -0.348,
+      "e2": -1.0,
+      "e3": -0.398,
+      "e4": -1.0,
+      "e5": -0.444,
+      "rmbo": 0.0,
+      "jeep": -1.0,
+      "apc": -1.0,
+      "mtnk": -0.667,
+      "htnk": -0.999,
+      "msam": -1.0,
+      "bggy": -1.0,
+      "bike": -1.0,
+      "ltnk": -0.991,
+      "ftnk": -1.0,
+      "stnk": -1.0,
+      "arty": -0.35,
+      "orca": 0.688,
+      "heli": 0.5
+    },
+    "orca": {
+      "e1": 1.0,
+      "e2": 1.0,
+      "e3": -0.294,
+      "e4": 1.0,
+      "e5": 1.0,
+      "rmbo": 1.0,
+      "jeep": 1.0,
+      "apc": -0.558,
+      "mtnk": 1.0,
+      "htnk": -0.855,
+      "msam": 1.0,
+      "bggy": 1.0,
+      "bike": 0.38,
+      "ltnk": 1.0,
+      "ftnk": 1.0,
+      "stnk": -0.689,
+      "arty": 1.0,
+      "mlrs": -0.688,
+      "heli": 0.12
+    },
+    "heli": {
+      "e1": 1.0,
+      "e2": 1.0,
+      "e3": 1.0,
+      "e4": 1.0,
+      "e5": 1.0,
+      "rmbo": 1.0,
+      "jeep": 1.0,
+      "apc": -0.79,
+      "mtnk": 1.0,
+      "htnk": -0.954,
+      "msam": 1.0,
+      "bggy": 1.0,
+      "bike": 0.504,
+      "ltnk": 1.0,
+      "ftnk": 1.0,
+      "stnk": 0.04,
+      "arty": 1.0,
+      "mlrs": -0.5,
+      "orca": -0.12
+    }
+  },
+  "cost": {
+    "e1": {
+      "e2": 0.237,
+      "e3": 0.922,
+      "e4": 0.583,
+      "e5": 0.706,
+      "rmbo": 0.861,
+      "jeep": -0.531,
+      "apc": 0.596,
+      "mtnk": 0.675,
+      "htnk": -0.533,
+      "msam": 0.434,
+      "bggy": -0.343,
+      "bike": 0.865,
+      "ltnk": 0.769,
+      "ftnk": -0.884,
+      "stnk": 0.876,
+      "arty": -0.015,
+      "mlrs": 0.64,
+      "orca": -0.585,
+      "heli": -0.369
+    },
+    "e2": {
+      "e1": -0.237,
+      "e3": 0.857,
+      "e4": 0.452,
+      "e5": 0.591,
+      "rmbo": 0.731,
+      "jeep": -0.19,
+      "apc": 0.779,
+      "mtnk": 0.828,
+      "htnk": 0.386,
+      "msam": 0.153,
+      "bggy": -0.137,
+      "bike": 0.854,
+      "ltnk": 0.874,
+      "ftnk": -0.422,
+      "stnk": 0.841,
+      "arty": -0.297,
+      "mlrs": 0.365,
+      "orca": -0.877,
+      "heli": -0.647
+    },
+    "e3": {
+      "e1": -0.922,
+      "e2": -0.857,
+      "e4": -0.905,
+      "e5": -0.858,
+      "rmbo": -0.717,
+      "jeep": -0.582,
+      "apc": 0.747,
+      "mtnk": 0.785,
+      "htnk": 0.022,
+      "msam": -0.304,
+      "bggy": -0.617,
+      "bike": 0.752,
+      "ltnk": 0.842,
+      "ftnk": -0.458,
+      "stnk": 0.692,
+      "arty": -0.539,
+      "mlrs": 0.534,
+      "orca": 0.883,
+      "heli": 0.574
+    },
+    "e4": {
+      "e1": -0.583,
+      "e2": -0.452,
+      "e3": 0.905,
+      "e5": 0.509,
+      "rmbo": 0.611,
+      "jeep": 0.036,
+      "apc": 0.462,
+      "mtnk": 0.537,
+      "htnk": -0.662,
+      "msam": 0.617,
+      "bggy": 0.129,
+      "bike": 0.826,
+      "ltnk": 0.604,
+      "ftnk": -0.895,
+      "stnk": 0.895,
+      "arty": 0.179,
+      "mlrs": 0.465,
+      "orca": -0.452,
+      "heli": -0.738
+    },
+    "e5": {
+      "e1": -0.706,
+      "e2": -0.591,
+      "e3": 0.858,
+      "e4": -0.509,
+      "rmbo": 0.47,
+      "jeep": -0.45,
+      "apc": 0.845,
+      "mtnk": 0.886,
+      "htnk": 0.612,
+      "msam": 0.577,
+      "bggy": -0.347,
+      "bike": 0.847,
+      "ltnk": 0.915,
+      "ftnk": -0.416,
+      "stnk": 0.828,
+      "arty": -0.451,
+      "mlrs": 0.282,
+      "orca": -0.442,
+      "heli": -0.874
+    },
+    "rmbo": {
+      "e1": -0.861,
+      "e2": -0.731,
+      "e3": 0.717,
+      "e4": -0.611,
+      "e5": -0.47,
+      "jeep": -1.0,
+      "apc": -0.995,
+      "mtnk": -0.991,
+      "htnk": -0.977,
+      "msam": -0.988,
+      "bggy": -1.0,
+      "bike": -0.969,
+      "ltnk": -0.995,
+      "ftnk": -0.989,
+      "stnk": -0.813,
+      "arty": -0.663,
+      "mlrs": -0.667,
+      "orca": -1.0,
+      "heli": -1.0
+    },
+    "jeep": {
+      "e1": 0.531,
+      "e2": 0.19,
+      "e3": 0.582,
+      "e4": -0.036,
+      "e5": 0.45,
+      "rmbo": 1.0,
+      "apc": -0.812,
+      "mtnk": -0.869,
+      "htnk": -0.923,
+      "msam": -0.071,
+      "bggy": -0.242,
+      "bike": 0.514,
+      "ltnk": -0.84,
+      "ftnk": -0.926,
+      "stnk": 0.527,
+      "arty": 0.23,
+      "mlrs": 0.913,
+      "orca": -1.0,
+      "heli": -1.0
+    },
+    "apc": {
+      "e1": -0.596,
+      "e2": -0.779,
+      "e3": -0.747,
+      "e4": -0.462,
+      "e5": -0.845,
+      "rmbo": 0.995,
+      "jeep": 0.812,
+      "mtnk": -0.832,
+      "htnk": -0.899,
+      "msam": 0.354,
+      "bggy": 0.781,
+      "bike": 0.317,
+      "ltnk": -0.758,
+      "ftnk": -0.569,
+      "stnk": 0.489,
+      "arty": 0.349,
+      "mlrs": 0.97,
+      "orca": 0.83,
+      "heli": 0.882
+    },
+    "mtnk": {
+      "e1": -0.675,
+      "e2": -0.828,
+      "e3": -0.785,
+      "e4": -0.537,
+      "e5": -0.886,
+      "rmbo": 0.991,
+      "jeep": 0.869,
+      "apc": 0.832,
+      "htnk": -0.566,
+      "msam": 0.521,
+      "bggy": 0.834,
+      "bike": 0.464,
+      "ltnk": 0.429,
+      "ftnk": 0.497,
+      "stnk": 0.478,
+      "arty": 0.527,
+      "mlrs": 0.988,
+      "orca": -1.0,
+      "heli": -0.619
+    },
+    "htnk": {
+      "e1": 0.533,
+      "e2": -0.386,
+      "e3": -0.022,
+      "e4": 0.662,
+      "e5": -0.612,
+      "rmbo": 0.977,
+      "jeep": 0.923,
+      "apc": 0.899,
+      "mtnk": 0.566,
+      "msam": 0.533,
+      "bggy": 0.901,
+      "bike": 0.64,
+      "ltnk": 0.621,
+      "ftnk": 0.726,
+      "stnk": 0.576,
+      "arty": 0.539,
+      "mlrs": 0.99,
+      "orca": 0.779,
+      "heli": 0.878
+    },
+    "msam": {
+      "e1": -0.434,
+      "e2": -0.153,
+      "e3": 0.304,
+      "e4": -0.617,
+      "e5": -0.577,
+      "rmbo": 0.988,
+      "jeep": 0.071,
+      "apc": -0.354,
+      "mtnk": -0.521,
+      "htnk": -0.533,
+      "bggy": 0.041,
+      "bike": 0.433,
+      "ltnk": -0.383,
+      "ftnk": -0.353,
+      "stnk": 0.333,
+      "arty": -0.194,
+      "mlrs": 0.668,
+      "orca": -1.0,
+      "heli": -1.0
+    },
+    "bggy": {
+      "e1": 0.343,
+      "e2": 0.137,
+      "e3": 0.617,
+      "e4": -0.129,
+      "e5": 0.347,
+      "rmbo": 1.0,
+      "jeep": 0.242,
+      "apc": -0.781,
+      "mtnk": -0.834,
+      "htnk": -0.901,
+      "msam": -0.041,
+      "bike": 0.545,
+      "ltnk": -0.836,
+      "ftnk": -0.902,
+      "stnk": 0.605,
+      "arty": -0.205,
+      "mlrs": 0.909,
+      "orca": -0.95,
+      "heli": -0.978
+    },
+    "bike": {
+      "e1": -0.865,
+      "e2": -0.854,
+      "e3": -0.752,
+      "e4": -0.826,
+      "e5": -0.847,
+      "rmbo": 0.969,
+      "jeep": -0.514,
+      "apc": -0.317,
+      "mtnk": -0.464,
+      "htnk": -0.64,
+      "msam": -0.433,
+      "bggy": -0.545,
+      "ltnk": -0.28,
+      "ftnk": -0.471,
+      "stnk": 0.021,
+      "arty": -0.426,
+      "mlrs": 0.86,
+      "orca": 0.563,
+      "heli": 0.619
+    },
+    "ltnk": {
+      "e1": -0.769,
+      "e2": -0.874,
+      "e3": -0.842,
+      "e4": -0.604,
+      "e5": -0.915,
+      "rmbo": 0.995,
+      "jeep": 0.84,
+      "apc": 0.758,
+      "mtnk": -0.429,
+      "htnk": -0.621,
+      "msam": 0.383,
+      "bggy": 0.836,
+      "bike": 0.28,
+      "ftnk": 0.277,
+      "stnk": 0.399,
+      "arty": 0.432,
+      "mlrs": 0.976,
+      "orca": -0.937,
+      "heli": -0.746
+    },
+    "ftnk": {
+      "e1": 0.884,
+      "e2": 0.422,
+      "e3": 0.458,
+      "e4": 0.895,
+      "e5": 0.416,
+      "rmbo": 0.989,
+      "jeep": 0.926,
+      "apc": 0.569,
+      "mtnk": -0.497,
+      "htnk": -0.726,
+      "msam": 0.353,
+      "bggy": 0.902,
+      "bike": 0.471,
+      "ltnk": -0.277,
+      "stnk": 0.391,
+      "arty": 0.271,
+      "mlrs": 0.945,
+      "orca": -1.0,
+      "heli": -0.941
+    },
+    "stnk": {
+      "e1": -0.876,
+      "e2": -0.841,
+      "e3": -0.692,
+      "e4": -0.895,
+      "e5": -0.828,
+      "rmbo": 0.813,
+      "jeep": -0.527,
+      "apc": -0.489,
+      "mtnk": -0.478,
+      "htnk": -0.576,
+      "msam": -0.333,
+      "bggy": -0.605,
+      "bike": -0.021,
+      "ltnk": -0.399,
+      "ftnk": -0.391,
+      "arty": -0.611,
+      "mlrs": 0.923,
+      "orca": 0.625,
+      "heli": 0.55
+    },
+    "arty": {
+      "e1": 0.015,
+      "e2": 0.297,
+      "e3": 0.539,
+      "e4": -0.179,
+      "e5": 0.451,
+      "rmbo": 0.663,
+      "jeep": -0.23,
+      "apc": -0.349,
+      "mtnk": -0.527,
+      "htnk": -0.539,
+      "msam": 0.194,
+      "bggy": 0.205,
+      "bike": 0.426,
+      "ltnk": -0.432,
+      "ftnk": -0.271,
+      "stnk": 0.611,
+      "mlrs": 0.581,
+      "orca": -1.0,
+      "heli": -1.0
+    },
+    "mlrs": {
+      "e1": -0.64,
+      "e2": -0.365,
+      "e3": -0.534,
+      "e4": -0.465,
+      "e5": -0.282,
+      "rmbo": 0.667,
+      "jeep": -0.913,
+      "apc": -0.97,
+      "mtnk": -0.988,
+      "htnk": -0.99,
+      "msam": -0.668,
+      "bggy": -0.909,
+      "bike": -0.86,
+      "ltnk": -0.976,
+      "ftnk": -0.945,
+      "stnk": -0.923,
+      "arty": -0.581,
+      "orca": 0.854,
+      "heli": 0.839
+    },
+    "orca": {
+      "e1": 0.585,
+      "e2": 0.877,
+      "e3": -0.883,
+      "e4": 0.452,
+      "e5": 0.442,
+      "rmbo": 1.0,
+      "jeep": 1.0,
+      "apc": -0.83,
+      "mtnk": 1.0,
+      "htnk": -0.779,
+      "msam": 1.0,
+      "bggy": 0.95,
+      "bike": -0.563,
+      "ltnk": 0.937,
+      "ftnk": 1.0,
+      "stnk": -0.625,
+      "arty": 1.0,
+      "mlrs": -0.854,
+      "heli": 0.039
+    },
+    "heli": {
+      "e1": 0.369,
+      "e2": 0.647,
+      "e3": -0.574,
+      "e4": 0.738,
+      "e5": 0.874,
+      "rmbo": 1.0,
+      "jeep": 1.0,
+      "apc": -0.882,
+      "mtnk": 0.619,
+      "htnk": -0.878,
+      "msam": 1.0,
+      "bggy": 0.978,
+      "bike": -0.619,
+      "ltnk": 0.746,
+      "ftnk": 0.941,
+      "stnk": -0.55,
+      "arty": 1.0,
+      "mlrs": -0.839,
+      "orca": -0.039
+    }
+  },
+  "costSpotted": {
+    "e1": {
+      "e2": 0.348,
+      "e3": 0.936,
+      "e4": 0.607,
+      "e5": 0.701,
+      "rmbo": 0.889,
+      "jeep": -0.563,
+      "apc": 0.599,
+      "mtnk": 0.673,
+      "htnk": -0.526,
+      "msam": 0.374,
+      "bggy": -0.361,
+      "bike": 0.871,
+      "ltnk": 0.777,
+      "ftnk": -0.888,
+      "stnk": 0.885,
+      "arty": -0.21,
+      "mlrs": 0.662,
+      "orca": -0.566,
+      "heli": -0.508
+    },
+    "e2": {
+      "e1": -0.348,
+      "e3": 0.863,
+      "e4": 0.477,
+      "e5": 0.58,
+      "rmbo": 0.67,
+      "jeep": -0.055,
+      "apc": 0.795,
+      "mtnk": 0.835,
+      "htnk": 0.398,
+      "msam": 0.13,
+      "bggy": -0.146,
+      "bike": 0.878,
+      "ltnk": 0.874,
+      "ftnk": -0.371,
+      "stnk": 0.842,
+      "arty": -0.263,
+      "mlrs": 0.392,
+      "orca": -0.638,
+      "heli": -0.556
+    },
+    "e3": {
+      "e1": -0.936,
+      "e2": -0.863,
+      "e4": -0.913,
+      "e5": -0.854,
+      "rmbo": -0.663,
+      "jeep": -0.603,
+      "apc": 0.751,
+      "mtnk": 0.789,
+      "htnk": 0.052,
+      "msam": -0.753,
+      "bggy": -0.696,
+      "bike": 0.773,
+      "ltnk": 0.84,
+      "ftnk": -0.244,
+      "stnk": 0.672,
+      "arty": -0.896,
+      "mlrs": 0.635,
+      "orca": 0.885,
+      "heli": 0.48
+    },
+    "e4": {
+      "e1": -0.607,
+      "e2": -0.477,
+      "e3": 0.913,
+      "e5": 0.54,
+      "rmbo": 0.672,
+      "jeep": 0.082,
+      "apc": 0.473,
+      "mtnk": 0.531,
+      "htnk": -0.653,
+      "msam": 0.575,
+      "bggy": -0.071,
+      "bike": 0.827,
+      "ltnk": 0.608,
+      "ftnk": -0.925,
+      "stnk": 0.895,
+      "arty": 0.034,
+      "mlrs": 0.447,
+      "orca": -0.299,
+      "heli": -0.738
+    },
+    "e5": {
+      "e1": -0.701,
+      "e2": -0.58,
+      "e3": 0.854,
+      "e4": -0.54,
+      "rmbo": 0.34,
+      "jeep": -0.427,
+      "apc": 0.838,
+      "mtnk": 0.887,
+      "htnk": 0.58,
+      "msam": 0.434,
+      "bggy": -0.304,
+      "bike": 0.842,
+      "ltnk": 0.913,
+      "ftnk": -0.553,
+      "stnk": 0.841,
+      "arty": -0.37,
+      "mlrs": 0.359,
+      "orca": -0.557,
+      "heli": -0.933
+    },
+    "rmbo": {
+      "e1": -0.889,
+      "e2": -0.67,
+      "e3": 0.663,
+      "e4": -0.672,
+      "e5": -0.34,
+      "jeep": -1.0,
+      "apc": -0.995,
+      "mtnk": -0.993,
+      "htnk": -0.973,
+      "msam": -0.966,
+      "bggy": -1.0,
+      "bike": -0.958,
+      "ltnk": -0.995,
+      "ftnk": -0.987,
+      "stnk": -0.834,
+      "arty": -0.721,
+      "mlrs": -0.333,
+      "orca": -1.0,
+      "heli": -1.0
+    },
+    "jeep": {
+      "e1": 0.563,
+      "e2": 0.055,
+      "e3": 0.603,
+      "e4": -0.082,
+      "e5": 0.427,
+      "rmbo": 1.0,
+      "apc": -0.811,
+      "mtnk": -0.871,
+      "htnk": -0.922,
+      "msam": 0.366,
+      "bggy": -0.312,
+      "bike": 0.548,
+      "ltnk": -0.84,
+      "ftnk": -0.925,
+      "stnk": 0.6,
+      "arty": 0.201,
+      "mlrs": 0.924,
+      "orca": -1.0,
+      "heli": -1.0
+    },
+    "apc": {
+      "e1": -0.599,
+      "e2": -0.795,
+      "e3": -0.751,
+      "e4": -0.473,
+      "e5": -0.838,
+      "rmbo": 0.995,
+      "jeep": 0.811,
+      "mtnk": -0.829,
+      "htnk": -0.896,
+      "msam": 0.331,
+      "bggy": 0.78,
+      "bike": 0.289,
+      "ltnk": -0.778,
+      "ftnk": -0.578,
+      "stnk": 0.492,
+      "arty": 0.383,
+      "mlrs": 0.973,
+      "orca": 0.832,
+      "heli": 0.879
+    },
+    "mtnk": {
+      "e1": -0.673,
+      "e2": -0.835,
+      "e3": -0.789,
+      "e4": -0.531,
+      "e5": -0.887,
+      "rmbo": 0.993,
+      "jeep": 0.871,
+      "apc": 0.829,
+      "htnk": -0.508,
+      "msam": 0.4,
+      "bggy": 0.831,
+      "bike": 0.44,
+      "ltnk": 0.458,
+      "ftnk": 0.48,
+      "stnk": 0.534,
+      "arty": 0.364,
+      "mlrs": 0.989,
+      "orca": -1.0,
+      "heli": -0.537
+    },
+    "htnk": {
+      "e1": 0.526,
+      "e2": -0.398,
+      "e3": -0.052,
+      "e4": 0.653,
+      "e5": -0.58,
+      "rmbo": 0.973,
+      "jeep": 0.922,
+      "apc": 0.896,
+      "mtnk": 0.508,
+      "msam": 0.452,
+      "bggy": 0.898,
+      "bike": 0.647,
+      "ltnk": 0.629,
+      "ftnk": 0.737,
+      "stnk": 0.576,
+      "arty": 0.447,
+      "mlrs": 0.989,
+      "orca": 0.782,
+      "heli": 0.879
+    },
+    "msam": {
+      "e1": -0.374,
+      "e2": -0.13,
+      "e3": 0.753,
+      "e4": -0.575,
+      "e5": -0.434,
+      "rmbo": 0.966,
+      "jeep": -0.366,
+      "apc": -0.331,
+      "mtnk": -0.4,
+      "htnk": -0.452,
+      "bggy": -0.182,
+      "bike": 0.781,
+      "ltnk": -0.48,
+      "ftnk": -0.414,
+      "stnk": 0.875,
+      "arty": 0.328,
+      "mlrs": 0.865,
+      "orca": -1.0,
+      "heli": -1.0
+    },
+    "bggy": {
+      "e1": 0.361,
+      "e2": 0.146,
+      "e3": 0.696,
+      "e4": 0.071,
+      "e5": 0.304,
+      "rmbo": 1.0,
+      "jeep": 0.312,
+      "apc": -0.78,
+      "mtnk": -0.831,
+      "htnk": -0.898,
+      "msam": 0.182,
+      "bike": 0.6,
+      "ltnk": -0.837,
+      "ftnk": -0.916,
+      "stnk": 0.624,
+      "arty": 0.199,
+      "mlrs": 0.913,
+      "orca": -1.0,
+      "heli": -0.98
+    },
+    "bike": {
+      "e1": -0.871,
+      "e2": -0.878,
+      "e3": -0.773,
+      "e4": -0.827,
+      "e5": -0.842,
+      "rmbo": 0.958,
+      "jeep": -0.548,
+      "apc": -0.289,
+      "mtnk": -0.44,
+      "htnk": -0.647,
+      "msam": -0.781,
+      "bggy": -0.6,
+      "ltnk": -0.345,
+      "ftnk": -0.401,
+      "stnk": -0.064,
+      "arty": -0.644,
+      "mlrs": 0.892,
+      "orca": 0.55,
+      "heli": 0.614
+    },
+    "ltnk": {
+      "e1": -0.777,
+      "e2": -0.874,
+      "e3": -0.84,
+      "e4": -0.608,
+      "e5": -0.913,
+      "rmbo": 0.995,
+      "jeep": 0.84,
+      "apc": 0.778,
+      "mtnk": -0.458,
+      "htnk": -0.629,
+      "msam": 0.48,
+      "bggy": 0.837,
+      "bike": 0.345,
+      "ftnk": 0.28,
+      "stnk": 0.399,
+      "arty": 0.307,
+      "mlrs": 0.975,
+      "orca": -1.0,
+      "heli": -0.898
+    },
+    "ftnk": {
+      "e1": 0.888,
+      "e2": 0.371,
+      "e3": 0.244,
+      "e4": 0.925,
+      "e5": 0.553,
+      "rmbo": 0.987,
+      "jeep": 0.925,
+      "apc": 0.578,
+      "mtnk": -0.48,
+      "htnk": -0.737,
+      "msam": 0.414,
+      "bggy": 0.916,
+      "bike": 0.401,
+      "ltnk": -0.28,
+      "stnk": 0.395,
+      "arty": 0.214,
+      "mlrs": 0.959,
+      "orca": -0.977,
+      "heli": -1.0
+    },
+    "stnk": {
+      "e1": -0.885,
+      "e2": -0.842,
+      "e3": -0.672,
+      "e4": -0.895,
+      "e5": -0.841,
+      "rmbo": 0.834,
+      "jeep": -0.6,
+      "apc": -0.492,
+      "mtnk": -0.534,
+      "htnk": -0.576,
+      "msam": -0.875,
+      "bggy": -0.624,
+      "bike": 0.064,
+      "ltnk": -0.399,
+      "ftnk": -0.395,
+      "arty": -0.768,
+      "mlrs": 0.877,
+      "orca": 0.654,
+      "heli": 0.533
+    },
+    "arty": {
+      "e1": 0.21,
+      "e2": 0.263,
+      "e3": 0.896,
+      "e4": -0.034,
+      "e5": 0.37,
+      "rmbo": 0.721,
+      "jeep": -0.201,
+      "apc": -0.383,
+      "mtnk": -0.364,
+      "htnk": -0.447,
+      "msam": -0.328,
+      "bggy": -0.199,
+      "bike": 0.644,
+      "ltnk": -0.307,
+      "ftnk": -0.214,
+      "stnk": 0.768,
+      "mlrs": 0.793,
+      "orca": -1.0,
+      "heli": -1.0
+    },
+    "mlrs": {
+      "e1": -0.662,
+      "e2": -0.392,
+      "e3": -0.635,
+      "e4": -0.447,
+      "e5": -0.359,
+      "rmbo": 0.333,
+      "jeep": -0.924,
+      "apc": -0.973,
+      "mtnk": -0.989,
+      "htnk": -0.989,
+      "msam": -0.865,
+      "bggy": -0.913,
+      "bike": -0.892,
+      "ltnk": -0.975,
+      "ftnk": -0.959,
+      "stnk": -0.877,
+      "arty": -0.793,
+      "orca": 0.854,
+      "heli": 0.869
+    },
+    "orca": {
+      "e1": 0.566,
+      "e2": 0.638,
+      "e3": -0.885,
+      "e4": 0.299,
+      "e5": 0.557,
+      "rmbo": 1.0,
+      "jeep": 1.0,
+      "apc": -0.832,
+      "mtnk": 1.0,
+      "htnk": -0.782,
+      "msam": 1.0,
+      "bggy": 1.0,
+      "bike": -0.55,
+      "ltnk": 1.0,
+      "ftnk": 0.977,
+      "stnk": -0.654,
+      "arty": 1.0,
+      "mlrs": -0.854,
+      "heli": -0.028
+    },
+    "heli": {
+      "e1": 0.508,
+      "e2": 0.556,
+      "e3": -0.48,
+      "e4": 0.738,
+      "e5": 0.933,
+      "rmbo": 1.0,
+      "jeep": 1.0,
+      "apc": -0.879,
+      "mtnk": 0.537,
+      "htnk": -0.879,
+      "msam": 1.0,
+      "bggy": 0.98,
+      "bike": -0.614,
+      "ltnk": 0.898,
+      "ftnk": 1.0,
+      "stnk": -0.533,
+      "arty": 1.0,
+      "mlrs": -0.869,
+      "orca": 0.028
+    }
+  },
+  "towers": {
+    "e1": {
+      "atwr": {
+        "result": "lost",
+        "seconds": 44.7,
+        "valueLost": 2400.0,
+        "count": 24
+      },
+      "gtwr": {
+        "result": "lost",
+        "seconds": 29.3,
+        "valueLost": 2400.0,
+        "count": 24
+      },
+      "gun": {
+        "result": "won",
+        "seconds": 30.6,
+        "valueLost": 276.0,
+        "count": 24
+      },
+      "obli": {
+        "result": "won",
+        "seconds": 50.9,
+        "valueLost": 1200.0,
+        "count": 24
+      },
+      "sam": {
+        "result": "won",
+        "seconds": 43.2,
+        "valueLost": 0.0,
+        "count": 24
+      }
+    },
+    "e2": {
+      "atwr": {
+        "result": "won",
+        "seconds": 17.5,
+        "valueLost": 1226.0,
+        "count": 15
+      },
+      "gtwr": {
+        "result": "won",
+        "seconds": 18.0,
+        "valueLost": 2022.0,
+        "count": 15
+      },
+      "gun": {
+        "result": "won",
+        "seconds": 15.4,
+        "valueLost": 155.0,
+        "count": 15
+      },
+      "obli": {
+        "result": "won",
+        "seconds": 17.7,
+        "valueLost": 530.0,
+        "count": 15
+      },
+      "sam": {
+        "result": "won",
+        "seconds": 18.0,
+        "valueLost": 0.0,
+        "count": 15
+      }
+    },
+    "e3": {
+      "atwr": {
+        "result": "won",
+        "seconds": 26.8,
+        "valueLost": 1866.0,
+        "count": 8
+      },
+      "gtwr": {
+        "result": "lost",
+        "seconds": 26.5,
+        "valueLost": 2400.0,
+        "count": 8
+      },
+      "gun": {
+        "result": "won",
+        "seconds": 23.4,
+        "valueLost": 484.0,
+        "count": 8
+      },
+      "obli": {
+        "result": "won",
+        "seconds": 30.4,
+        "valueLost": 1600.0,
+        "count": 8
+      },
+      "sam": {
+        "result": "won",
+        "seconds": 26.0,
+        "valueLost": 0.0,
+        "count": 8
+      }
+    },
+    "e4": {
+      "atwr": {
+        "result": "won",
+        "seconds": 20.3,
+        "valueLost": 727.0,
+        "count": 12
+      },
+      "gtwr": {
+        "result": "won",
+        "seconds": 19.8,
+        "valueLost": 952.0,
+        "count": 12
+      },
+      "gun": {
+        "result": "won",
+        "seconds": 18.3,
+        "valueLost": 109.0,
+        "count": 12
+      },
+      "obli": {
+        "result": "won",
+        "seconds": 19.0,
+        "valueLost": 400.0,
+        "count": 12
+      },
+      "sam": {
+        "result": "won",
+        "seconds": 19.4,
+        "valueLost": 0.0,
+        "count": 12
+      }
+    },
+    "e5": {
+      "atwr": {
+        "result": "won",
+        "seconds": 20.4,
+        "valueLost": 903.0,
+        "count": 8
+      },
+      "gtwr": {
+        "result": "won",
+        "seconds": 20.0,
+        "valueLost": 1094.0,
+        "count": 8
+      },
+      "gun": {
+        "result": "won",
+        "seconds": 18.3,
+        "valueLost": 192.0,
+        "count": 8
+      },
+      "obli": {
+        "result": "won",
+        "seconds": 20.4,
+        "valueLost": 900.0,
+        "count": 8
+      },
+      "sam": {
+        "result": "won",
+        "seconds": 19.6,
+        "valueLost": 0.0,
+        "count": 8
+      }
+    },
+    "rmbo": {
+      "atwr": {
+        "result": "unresolved",
+        "seconds": 45.0,
+        "valueLost": 0.0,
+        "count": 2
+      },
+      "gtwr": {
+        "result": "unresolved",
+        "seconds": 45.0,
+        "valueLost": 0.0,
+        "count": 2
+      },
+      "gun": {
+        "result": "unresolved",
+        "seconds": 45.0,
+        "valueLost": 0.0,
+        "count": 2
+      },
+      "obli": {
+        "result": "unresolved",
+        "seconds": 45.0,
+        "valueLost": 0.0,
+        "count": 2
+      },
+      "sam": {
+        "result": "unresolved",
+        "seconds": 45.0,
+        "valueLost": 0.0,
+        "count": 2
+      }
+    },
+    "jeep": {
+      "atwr": {
+        "result": "lost",
+        "seconds": 22.5,
+        "valueLost": 2400.0,
+        "count": 6
+      },
+      "gtwr": {
+        "result": "lost",
+        "seconds": 29.3,
+        "valueLost": 2400.0,
+        "count": 6
+      },
+      "gun": {
+        "result": "lost",
+        "seconds": 23.4,
+        "valueLost": 2400.0,
+        "count": 6
+      },
+      "obli": {
+        "result": "lost",
+        "seconds": 23.9,
+        "valueLost": 2400.0,
+        "count": 6
+      },
+      "sam": {
+        "result": "won",
+        "seconds": 45.0,
+        "valueLost": 0.0,
+        "count": 6
+      }
+    },
+    "apc": {
+      "atwr": {
+        "result": "lost",
+        "seconds": 21.1,
+        "valueLost": 2400.0,
+        "count": 4
+      },
+      "gtwr": {
+        "result": "won",
+        "seconds": 23.8,
+        "valueLost": 1013.0,
+        "count": 4
+      },
+      "gun": {
+        "result": "lost",
+        "seconds": 21.6,
+        "valueLost": 2400.0,
+        "count": 4
+      },
+      "obli": {
+        "result": "lost",
+        "seconds": 17.8,
+        "valueLost": 2400.0,
+        "count": 4
+      },
+      "sam": {
+        "result": "won",
+        "seconds": 36.6,
+        "valueLost": 0.0,
+        "count": 4
+      }
+    },
+    "mtnk": {
+      "atwr": {
+        "result": "won",
+        "seconds": 19.0,
+        "valueLost": 945.0,
+        "count": 3
+      },
+      "gtwr": {
+        "result": "won",
+        "seconds": 17.4,
+        "valueLost": 213.0,
+        "count": 3
+      },
+      "gun": {
+        "result": "won",
+        "seconds": 17.4,
+        "valueLost": 798.0,
+        "count": 3
+      },
+      "obli": {
+        "result": "won",
+        "seconds": 28.6,
+        "valueLost": 2524.0,
+        "count": 3
+      },
+      "sam": {
+        "result": "won",
+        "seconds": 23.6,
+        "valueLost": 0.0,
+        "count": 3
+      }
+    },
+    "htnk": {
+      "atwr": {
+        "result": "won",
+        "seconds": 26.6,
+        "valueLost": 869.0,
+        "count": 1
+      },
+      "gtwr": {
+        "result": "won",
+        "seconds": 24.4,
+        "valueLost": 149.0,
+        "count": 1
+      },
+      "gun": {
+        "result": "won",
+        "seconds": 24.4,
+        "valueLost": 745.0,
+        "count": 1
+      },
+      "obli": {
+        "result": "lost",
+        "seconds": 25.2,
+        "valueLost": 1800.0,
+        "count": 1
+      },
+      "sam": {
+        "result": "won",
+        "seconds": 31.0,
+        "valueLost": 0.0,
+        "count": 1
+      }
+    },
+    "msam": {
+      "atwr": {
+        "result": "won",
+        "seconds": 17.3,
+        "valueLost": 0.0,
+        "count": 3
+      },
+      "gtwr": {
+        "result": "won",
+        "seconds": 16.1,
+        "valueLost": 0.0,
+        "count": 3
+      },
+      "gun": {
+        "result": "won",
+        "seconds": 16.2,
+        "valueLost": 0.0,
+        "count": 3
+      },
+      "obli": {
+        "result": "won",
+        "seconds": 20.7,
+        "valueLost": 0.0,
+        "count": 3
+      },
+      "sam": {
+        "result": "won",
+        "seconds": 21.4,
+        "valueLost": 0.0,
+        "count": 3
+      }
+    },
+    "bggy": {
+      "atwr": {
+        "result": "lost",
+        "seconds": 21.7,
+        "valueLost": 2400.0,
+        "count": 8
+      },
+      "gtwr": {
+        "result": "lost",
+        "seconds": 31.7,
+        "valueLost": 2400.0,
+        "count": 8
+      },
+      "gun": {
+        "result": "lost",
+        "seconds": 23.0,
+        "valueLost": 2400.0,
+        "count": 8
+      },
+      "obli": {
+        "result": "lost",
+        "seconds": 30.6,
+        "valueLost": 2400.0,
+        "count": 8
+      },
+      "sam": {
+        "result": "won",
+        "seconds": 39.0,
+        "valueLost": 0.0,
+        "count": 8
+      }
+    },
+    "bike": {
+      "atwr": {
+        "result": "lost",
+        "seconds": 13.7,
+        "valueLost": 2500.0,
+        "count": 5
+      },
+      "gtwr": {
+        "result": "won",
+        "seconds": 11.6,
+        "valueLost": 1474.0,
+        "count": 5
+      },
+      "gun": {
+        "result": "won",
+        "seconds": 11.3,
+        "valueLost": 1728.0,
+        "count": 5
+      },
+      "obli": {
+        "result": "won",
+        "seconds": 17.4,
+        "valueLost": 2033.0,
+        "count": 5
+      },
+      "sam": {
+        "result": "won",
+        "seconds": 12.6,
+        "valueLost": 0.0,
+        "count": 5
+      }
+    },
+    "ltnk": {
+      "atwr": {
+        "result": "won",
+        "seconds": 23.1,
+        "valueLost": 1745.0,
+        "count": 3
+      },
+      "gtwr": {
+        "result": "won",
+        "seconds": 17.6,
+        "valueLost": 361.0,
+        "count": 3
+      },
+      "gun": {
+        "result": "won",
+        "seconds": 19.2,
+        "valueLost": 1383.0,
+        "count": 3
+      },
+      "obli": {
+        "result": "lost",
+        "seconds": 15.9,
+        "valueLost": 2250.0,
+        "count": 3
+      },
+      "sam": {
+        "result": "won",
+        "seconds": 23.4,
+        "valueLost": 0.0,
+        "count": 3
+      }
+    },
+    "ftnk": {
+      "atwr": {
+        "result": "won",
+        "seconds": 12.8,
+        "valueLost": 691.0,
+        "count": 4
+      },
+      "gtwr": {
+        "result": "won",
+        "seconds": 12.4,
+        "valueLost": 160.0,
+        "count": 4
+      },
+      "gun": {
+        "result": "won",
+        "seconds": 12.4,
+        "valueLost": 567.0,
+        "count": 4
+      },
+      "obli": {
+        "result": "lost",
+        "seconds": 19.6,
+        "valueLost": 2400.0,
+        "count": 4
+      },
+      "sam": {
+        "result": "won",
+        "seconds": 15.4,
+        "valueLost": 0.0,
+        "count": 4
+      }
+    },
+    "stnk": {
+      "atwr": {
+        "result": "won",
+        "seconds": 14.8,
+        "valueLost": 2518.0,
+        "count": 3
+      },
+      "gtwr": {
+        "result": "won",
+        "seconds": 11.9,
+        "valueLost": 0.0,
+        "count": 3
+      },
+      "gun": {
+        "result": "won",
+        "seconds": 11.9,
+        "valueLost": 0.0,
+        "count": 3
+      },
+      "obli": {
+        "result": "unresolved",
+        "seconds": 43.2,
+        "valueLost": 2100.0,
+        "count": 3
+      },
+      "sam": {
+        "result": "won",
+        "seconds": 13.7,
+        "valueLost": 0.0,
+        "count": 3
+      }
+    },
+    "arty": {
+      "atwr": {
+        "result": "won",
+        "seconds": 18.5,
+        "valueLost": 0.0,
+        "count": 4
+      },
+      "gtwr": {
+        "result": "won",
+        "seconds": 16.7,
+        "valueLost": 0.0,
+        "count": 4
+      },
+      "gun": {
+        "result": "won",
+        "seconds": 17.0,
+        "valueLost": 0.0,
+        "count": 4
+      },
+      "obli": {
+        "result": "won",
+        "seconds": 20.3,
+        "valueLost": 0.0,
+        "count": 4
+      },
+      "sam": {
+        "result": "won",
+        "seconds": 19.2,
+        "valueLost": 0.0,
+        "count": 4
+      }
+    },
+    "mlrs": {
+      "atwr": {
+        "result": "unresolved",
+        "seconds": 45.0,
+        "valueLost": 0.0,
+        "count": 4
+      },
+      "gtwr": {
+        "result": "unresolved",
+        "seconds": 45.0,
+        "valueLost": 0.0,
+        "count": 4
+      },
+      "gun": {
+        "result": "unresolved",
+        "seconds": 45.0,
+        "valueLost": 0.0,
+        "count": 4
+      },
+      "obli": {
+        "result": "unresolved",
+        "seconds": 45.0,
+        "valueLost": 0.0,
+        "count": 4
+      },
+      "sam": {
+        "result": "unresolved",
+        "seconds": 45.0,
+        "valueLost": 0.0,
+        "count": 4
+      }
+    },
+    "orca": {
+      "atwr": {
+        "result": "lost",
+        "seconds": 8.8,
+        "valueLost": 2400.0,
+        "count": 2
+      },
+      "gtwr": {
+        "result": "won",
+        "seconds": 34.8,
+        "valueLost": 0.0,
+        "count": 2
+      },
+      "gun": {
+        "result": "won",
+        "seconds": 34.8,
+        "valueLost": 0.0,
+        "count": 2
+      },
+      "obli": {
+        "result": "won",
+        "seconds": 66.8,
+        "valueLost": 0.0,
+        "count": 2
+      },
+      "sam": {
+        "result": "lost",
+        "seconds": 9.5,
+        "valueLost": 2400.0,
+        "count": 2
+      }
+    },
+    "heli": {
+      "atwr": {
+        "result": "lost",
+        "seconds": 10.0,
+        "valueLost": 2400.0,
+        "count": 2
+      },
+      "gtwr": {
+        "result": "won",
+        "seconds": 104.0,
+        "valueLost": 0.0,
+        "count": 2
+      },
+      "gun": {
+        "result": "won",
+        "seconds": 106.8,
+        "valueLost": 0.0,
+        "count": 2
+      },
+      "obli": {
+        "result": "unresolved",
+        "seconds": 180.0,
+        "valueLost": 0.0,
+        "count": 2
+      },
+      "sam": {
+        "result": "lost",
+        "seconds": 9.1,
+        "valueLost": 2400.0,
+        "count": 2
+      }
+    }
+  },
+  "raids": {
+    "e1": {
+      "harv": {
+        "result": "won",
+        "seconds": 56.8,
+        "count": 12
+      },
+      "proc": {
+        "result": "won",
+        "seconds": 37.4,
+        "count": 12
+      }
+    },
+    "e2": {
+      "harv": {
+        "result": "won",
+        "seconds": 23.1,
+        "count": 8
+      },
+      "proc": {
+        "result": "won",
+        "seconds": 22.6,
+        "count": 8
+      }
+    },
+    "e3": {
+      "harv": {
+        "result": "won",
+        "seconds": 29.4,
+        "count": 4
+      },
+      "proc": {
+        "result": "won",
+        "seconds": 38.0,
+        "count": 4
+      }
+    },
+    "e4": {
+      "harv": {
+        "result": "won",
+        "seconds": 72.4,
+        "count": 6
+      },
+      "proc": {
+        "result": "won",
+        "seconds": 23.6,
+        "count": 6
+      }
+    },
+    "e5": {
+      "harv": {
+        "result": "won",
+        "seconds": 22.0,
+        "count": 4
+      },
+      "proc": {
+        "result": "won",
+        "seconds": 38.8,
+        "count": 4
+      }
+    },
+    "rmbo": {
+      "harv": {
+        "result": "unresolved",
+        "seconds": 45.0,
+        "count": 1
+      },
+      "proc": {
+        "result": "unresolved",
+        "seconds": 45.0,
+        "count": 1
+      }
+    },
+    "jeep": {
+      "harv": {
+        "result": "won",
+        "seconds": 64.4,
+        "count": 3
+      },
+      "proc": {
+        "result": "won",
+        "seconds": 99.4,
+        "count": 3
+      }
+    },
+    "apc": {
+      "harv": {
+        "result": "won",
+        "seconds": 51.6,
+        "count": 2
+      },
+      "proc": {
+        "result": "won",
+        "seconds": 78.4,
+        "count": 2
+      }
+    },
+    "mtnk": {
+      "harv": {
+        "result": "won",
+        "seconds": 36.0,
+        "count": 1
+      },
+      "proc": {
+        "result": "won",
+        "seconds": 50.2,
+        "count": 1
+      }
+    },
+    "htnk": {
+      "harv": {
+        "result": "won",
+        "seconds": 28.4,
+        "count": 1
+      },
+      "proc": {
+        "result": "won",
+        "seconds": 32.2,
+        "count": 1
+      }
+    },
+    "msam": {
+      "harv": {
+        "result": "won",
+        "seconds": 39.1,
+        "count": 1
+      },
+      "proc": {
+        "result": "won",
+        "seconds": 43.4,
+        "count": 1
+      }
+    },
+    "bggy": {
+      "harv": {
+        "result": "won",
+        "seconds": 56.2,
+        "count": 4
+      },
+      "proc": {
+        "result": "won",
+        "seconds": 86.6,
+        "count": 4
+      }
+    },
+    "bike": {
+      "harv": {
+        "result": "won",
+        "seconds": 19.2,
+        "count": 2
+      },
+      "proc": {
+        "result": "won",
+        "seconds": 34.4,
+        "count": 2
+      }
+    },
+    "ltnk": {
+      "harv": {
+        "result": "won",
+        "seconds": 25.2,
+        "count": 2
+      },
+      "proc": {
+        "result": "won",
+        "seconds": 36.0,
+        "count": 2
+      }
+    },
+    "ftnk": {
+      "harv": {
+        "result": "won",
+        "seconds": 34.6,
+        "count": 2
+      },
+      "proc": {
+        "result": "won",
+        "seconds": 20.0,
+        "count": 2
+      }
+    },
+    "stnk": {
+      "harv": {
+        "result": "won",
+        "seconds": 23.9,
+        "count": 1
+      },
+      "proc": {
+        "result": "won",
+        "seconds": 42.6,
+        "count": 1
+      }
+    },
+    "arty": {
+      "harv": {
+        "result": "won",
+        "seconds": 25.2,
+        "count": 2
+      },
+      "proc": {
+        "result": "won",
+        "seconds": 22.9,
+        "count": 2
+      }
+    },
+    "mlrs": {
+      "harv": {
+        "result": "unresolved",
+        "seconds": 45.0,
+        "count": 2
+      },
+      "proc": {
+        "result": "unresolved",
+        "seconds": 45.0,
+        "count": 2
+      }
+    },
+    "orca": {
+      "harv": {
+        "result": "won",
+        "seconds": 55.0,
+        "count": 1
+      },
+      "proc": {
+        "result": "won",
+        "seconds": 67.0,
+        "count": 1
+      }
+    },
+    "heli": {
+      "harv": {
+        "result": "won",
+        "seconds": 168.8,
+        "count": 1
+      },
+      "proc": {
+        "result": "won",
+        "seconds": 87.4,
+        "count": 1
+      }
+    }
+  },
+  "reach": {
+    "e1": {
+      "blindLongestCells": 4.1,
+      "spottedLongestCells": 4.2
+    },
+    "jeep": {
+      "blindLongestCells": 3.6,
+      "spottedLongestCells": 4.1
+    },
+    "e3": {
+      "blindLongestCells": 5.0,
+      "spottedLongestCells": 6.0
+    },
+    "mtnk": {
+      "blindLongestCells": 4.0,
+      "spottedLongestCells": 4.1
+    },
+    "rmbo": {
+      "blindLongestCells": 2.2,
+      "spottedLongestCells": 2.4000000000000004
+    },
+    "ftnk": {
+      "blindLongestCells": 4.0,
+      "spottedLongestCells": 4.1
+    },
+    "htnk": {
+      "blindLongestCells": 4.05,
+      "spottedLongestCells": 4.2
+    },
+    "heli": {
+      "blindLongestCells": 4.0,
+      "spottedLongestCells": 4.1
+    },
+    "apc": {
+      "blindLongestCells": 4.1,
+      "spottedLongestCells": 5.0
+    },
+    "mlrs": {
+      "blindLongestCells": 3.6,
+      "spottedLongestCells": 3.0
+    },
+    "stnk": {
+      "blindLongestCells": 5.0,
+      "spottedLongestCells": 6.0
+    },
+    "e5": {
+      "blindLongestCells": 4.0,
+      "spottedLongestCells": 4.1
+    },
+    "bike": {
+      "blindLongestCells": 5.0,
+      "spottedLongestCells": 6.0
+    },
+    "arty": {
+      "blindLongestCells": 10.0,
+      "spottedLongestCells": 12.0
+    },
+    "orca": {
+      "blindLongestCells": 5.0,
+      "spottedLongestCells": 6.0
+    },
+    "e2": {
+      "blindLongestCells": 4.75,
+      "spottedLongestCells": 5.1
+    },
+    "ltnk": {
+      "blindLongestCells": 4.0,
+      "spottedLongestCells": 4.0
+    },
+    "msam": {
+      "blindLongestCells": 6.8,
+      "spottedLongestCells": 13.0
+    },
+    "e4": {
+      "blindLongestCells": 3.2,
+      "spottedLongestCells": 4.1
+    },
+    "bggy": {
+      "blindLongestCells": 3.6,
+      "spottedLongestCells": 4.2
+    }
+  }
+}

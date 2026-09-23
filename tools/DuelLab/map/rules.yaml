@@ -1,0 +1,31 @@
+World:
+	LuaScript:
+		Scripts: duel-lab-config.lua, duel-lab.lua
+	-AutoSave:
+	MissionData:
+		Briefing: duel-lab-briefing
+	MusicPlaylist:
+		DisableWorldSounds: true
+
+# mods/autocnc/rules/units.yaml forces every actor to HoldFire with no idle scanning, so that a
+# battle bot is the only thing that ever chooses a target. The lab has no bot: its two sides are
+# script players, and a matchup measured with towers that never shoot back would be wrong. So the
+# engine's own Tiberian Dawn targeting comes back here, and only here. Script players are not
+# playable, so the engine reads InitialStanceAI for them.
+^AutoTargetGround:
+	AutoTarget:
+		InitialStance: AttackAnything
+		InitialStanceAI: AttackAnything
+		ScanOnIdle: True
+
+^AutoTargetAir:
+	AutoTarget:
+		InitialStance: AttackAnything
+		InitialStanceAI: AttackAnything
+		ScanOnIdle: True
+
+^AutoTargetAll:
+	AutoTarget:
+		InitialStance: AttackAnything
+		InitialStanceAI: AttackAnything
+		ScanOnIdle: True

@@ -36,7 +36,9 @@ namespace AutoCnC.Reference.Logic
 		int MaxHaulCells,
 		int WorkCycleTicks,
 		int ContestedMemoryTicks,
-		int CriticalHealthPercent)
+		int CriticalHealthPercent,
+		int HomeGroundRatioPercent,
+		int HomeContestedMemoryTicks)
 	{
 		public static HarvesterTuning Default { get; } = new(
 			PanicRadiusUnits: 7 * 1024,
@@ -211,7 +213,42 @@ namespace AutoCnC.Reference.Logic
 			// its hit points is therefore the smallest margin that still covers the escape, and
 			// it leaves the window a 20-point band — 70% down to 50% — which is the scratch it
 			// was built to work through.
-			CriticalHealthPercent: 50);
+			CriticalHealthPercent: 50,
+
+			// How much further from the enemy than from our own base a field's centre has to lie
+			// for the field to be home ground, in percent. Anything else is frontier, and
+			// frontier ground is worked only when no home ground inside the haul ceiling is
+			// left. See IsFrontier and SelectFieldAvoiding.
+			//
+			// The score is what a field pays per cell of commute, and it cannot see which side of
+			// the map the commute crosses. On 16:9 (GDI v Nod) the survey revealed a 13,160-credit
+			// field 34 cells out; the score ranked it about three times above the 2,000-credit
+			// field the fleet was on, and at 279-282s all four harvesters crossed to it, followed
+			// by both replacements. An enemy construction yard was spotted 9 cells from it at
+			// 373s, and bike and e3 killed all six harvesters between 379s and 405s on the road
+			// home, 21 to 26 cells from the yard. The side earned nothing in the 472 seconds that
+			// were left of the match.
+			//
+			// That field lay 1.22 times as far from the point mirror of our yard as from the yard,
+			// and 0.9 to 1.4 times as far from the enemy structures the jeep had found at 309-316s.
+			// The fields this fleet worked without a loss lay 4.9 to 6.5 times as far. One and a
+			// half separates the two with margin against either anchor, and still admits lateral
+			// ground: a field due south of that yard at 30 cells scores about two.
+			HomeGroundRatioPercent: 150,
+
+			// How long home ground stays given up after a harvester is driven off it: one work
+			// cycle, where frontier ground keeps ContestedMemoryTicks.
+			//
+			// Home ground is where the screen and the towers fight — EarnerUnderFire sends the
+			// screen to a harvester shot within 16 cells of the base centre — so a raid there is
+			// answered rather than camped. On that same 16:9 an in-base raid drove a harvester off
+			// the 8,225-credit field 10 cells from the yard at 245s, the base killed all fifteen
+			// attackers by 253s, and the side still avoided that field until about 425s. With its
+			// richest home field excluded, the best uncontested ground left was the frontier field
+			// above, and the whole fleet died on it. A field that is still being raided refreshes
+			// its report on every drive-off, so this only shortens the time after the shooting
+			// stops; one cycle is the floor ContestedMemoryTicks already argues for.
+			HomeContestedMemoryTicks: 1500);
 	}
 
 	/// <summary>One tiberium field, as the harvester rule needs to see it.</summary>
@@ -259,7 +296,10 @@ namespace AutoCnC.Reference.Logic
 		int MapMinX,
 		int MapMinY,
 		int MapMaxX,
-		int MapMaxY);
+		int MapMaxY,
+		bool HasEnemySighting = false,
+		int EnemySeenX = 0,
+		int EnemySeenY = 0);
 
 	/// <summary>
 	/// What one harvester has been seen doing, and which field it has been told to work. Carried
@@ -411,6 +451,17 @@ namespace AutoCnC.Reference.Logic
 	/// within seventeen seconds of each other. Home is the only ground this side owns guns on:
 	/// six guard towers killed 141 units there for 3,600 credits. See
 	/// <c>economy.harvester-runs-home</c>.
+	/// </para>
+	/// <para>
+	/// <b>And home ground is worked before the frontier, however rich the frontier is.</b> Once
+	/// the survey could see the middle of the map, the score sent the whole 16:9 fleet 34 cells
+	/// out to a field beside the enemy's expansion while the home fields still held thousands,
+	/// and all six harvesters died on the road home inside 26 seconds. Which side of the map a
+	/// field lies on is now a tier above the score (<see cref="IsFrontier"/>), and a home field
+	/// the side was driven off comes back after one work cycle instead of three. The trace names
+	/// both halves: <c>economy.harvester-declines-frontier</c> when home ground changed the
+	/// answer, <c>economy.harvester-frontier-fallback</c> when there was no home ground left,
+	/// and <c>economy.harvester-leaves-frontier</c> when home ground came back.
 	/// </para>
 	/// This type has ZERO OpenRA dependencies by design and is integer-only, so it is both
 	/// lockstep-safe and readable without booting the engine.
@@ -850,7 +901,7 @@ namespace AutoCnC.Reference.Logic
 			if (completedBoundedWithdrawal && scanned && count > 0)
 			{
 				var contested = FindContested(fields, seen, tuning);
-				var best = SelectFieldAvoiding(fields, -1, contested, tuning);
+				var best = SelectFieldAvoiding(fields, -1, contested, state, tuning);
 				var f = fields[best];
 				var resumed = withdrawalOutlastedItsValue
 					? $"{activeStallPrefix}harvester withdrawal outlasted the delivery it displaced, resuming on {f.CellCount} cells ({f.TotalDensity} left) {f.DistanceUnits / 1024} cells out"
@@ -865,11 +916,26 @@ namespace AutoCnC.Reference.Logic
 			}
 
 			// 2. Choosing the ground. Only on a review, because this is the half that costs a scan.
+			//
+			//    Home ground comes first: a field on the frontier is worked only when no home
+			//    ground inside the haul ceiling is left, however much it holds. The score is what
+			//    a field pays per cell of commute and cannot see which side of the map the commute
+			//    crosses, so the side of the map is a tier above it rather than a term in it — see
+			//    HarvesterTuning.HomeGroundRatioPercent for the fleet that died learning this.
+			var declinedFrontier = false;
+			var declinedReason = string.Empty;
 			if (scanned && count > 0)
 			{
 				var assigned = FindAssigned(fields, watchdog, tuning);
 				var contested = FindContested(fields, seen, tuning);
-				var best = SelectFieldAvoiding(fields, -1, contested, tuning);
+				var best = SelectFieldAvoiding(fields, -1, contested, state, tuning);
+				var bestIsFrontier = IsFrontier(fields[best], state, tuning);
+
+				// What the rule would have chosen without knowing which side of the map a field
+				// is on. Nothing is decided on it; it is here so the trace can say when keeping
+				// to home ground changed the answer. See economy.harvester-declines-frontier.
+				var groundBlind = SelectFieldAvoiding(fields, -1, contested, state, tuning, homeGroundFirst: false);
+				var blindIsFrontier = groundBlind >= 0 && IsFrontier(fields[groundBlind], state, tuning);
 
 				// Worked out: the patch we were sent to no longer holds MinFieldCells of anything,
 				// so the scan does not return it any more and there is nothing left to go back to.
@@ -885,12 +951,22 @@ namespace AutoCnC.Reference.Logic
 					var avoided = inherited
 						? ", avoiding the field the fleet was last driven off"
 						: string.Empty;
+					var declined = !bestIsFrontier && blindIsFrontier && groundBlind != best;
+					var ground = bestIsFrontier
+						? ", on the frontier because no home ground is left"
+						: declined
+							? $", on home ground rather than {fields[groundBlind].TotalDensity} left on the frontier"
+							: string.Empty;
 
 					return Assign(f, ordered,
-						$"{activeStallPrefix}{why}{avoided}, harvesting {f.CellCount} cells ({f.TotalDensity} left) {f.DistanceUnits / 1024} cells out",
-						reasonId: inherited
-							? "economy.harvester-inherits-contested"
-							: "economy.harvester-assign-field");
+						$"{activeStallPrefix}{why}{avoided}{ground}, harvesting {f.CellCount} cells ({f.TotalDensity} left) {f.DistanceUnits / 1024} cells out",
+						reasonId: bestIsFrontier
+							? "economy.harvester-frontier-fallback"
+							: declined
+								? "economy.harvester-declines-frontier"
+								: inherited
+									? "economy.harvester-inherits-contested"
+									: "economy.harvester-assign-field");
 				}
 
 				// Still there, but no longer worth staying on: something within reach holds enough
@@ -908,12 +984,23 @@ namespace AutoCnC.Reference.Logic
 				// the score cannot see the infantry standing on it. It cannot dither either,
 				// because the exclusion travels with the harvester — after the switch the
 				// contested field is still excluded, so the pair can never swap back.
+				//
+				// ...or we are on the frontier and home ground has come back — a contested home
+				// field offered back, or the last home patch no longer contested. It has to be
+				// worth at least half the frontier field, which is the same margin read from the
+				// other side: a frontier field keeps a harvester only while it pays twice what
+				// home ground would. It cannot dither for the reason comingHome cannot: once on
+				// home ground, no frontier field is ever the best choice while home ground lasts.
 				var evicted = assigned == contested;
 				var evictedByFleet = evicted && seen.InheritedContested;
 				var assignedScore = Score(fields[assigned], tuning);
 				var bestScore = Score(fields[best], tuning);
 				var comingHome = TooFarToHaul(fields[assigned], tuning) && !TooFarToHaul(fields[best], tuning);
-				if (best != assigned && (evicted || comingHome || bestScore >= (long)assignedScore * tuning.SwitchScoreMultiplier))
+				var assignedIsFrontier = IsFrontier(fields[assigned], state, tuning);
+				var leavingFrontier = assignedIsFrontier
+					&& !bestIsFrontier
+					&& (long)bestScore * tuning.SwitchScoreMultiplier >= assignedScore;
+				if (best != assigned && (evicted || comingHome || leavingFrontier || bestScore >= (long)assignedScore * tuning.SwitchScoreMultiplier))
 				{
 					var f = fields[best];
 					var why = evictedByFleet
@@ -922,12 +1009,33 @@ namespace AutoCnC.Reference.Logic
 							? $"driven off that field, working {f.TotalDensity} left {f.DistanceUnits / 1024} cells out instead"
 							: comingHome
 								? $"field {fields[assigned].DistanceUnits / 1024} cells out is past the {tuning.MaxHaulCells} cell haul limit, coming back to {f.TotalDensity} left {f.DistanceUnits / 1024} cells out"
-								: $"field thinning to {fields[assigned].TotalDensity}, crossing to {f.TotalDensity} left {f.DistanceUnits / 1024} cells out";
+								: leavingFrontier
+									? $"home ground is back, leaving {fields[assigned].TotalDensity} on the frontier for {f.TotalDensity} left {f.DistanceUnits / 1024} cells out"
+									: $"field thinning to {fields[assigned].TotalDensity}, crossing to {f.TotalDensity} left {f.DistanceUnits / 1024} cells out";
+					var leftFrontier = assignedIsFrontier && !bestIsFrontier;
+					var declined = !bestIsFrontier && blindIsFrontier && groundBlind != best;
 
 					return Assign(f, ordered, $"{activeStallPrefix}{why}",
-						reasonId: evictedByFleet
-							? "economy.harvester-inherits-contested"
-							: "economy.harvester-assign-field");
+						reasonId: leftFrontier
+							? "economy.harvester-leaves-frontier"
+							: bestIsFrontier
+								? "economy.harvester-frontier-fallback"
+								: declined
+									? "economy.harvester-declines-frontier"
+									: evictedByFleet
+										? "economy.harvester-inherits-contested"
+										: "economy.harvester-assign-field");
+				}
+
+				// No move, but the ground-blind rule would have crossed to the frontier from home
+				// ground here. That is the exact decision that walked six harvesters into an
+				// enemy expansion, so the trace names it; see step 4.
+				if (!assignedIsFrontier
+					&& blindIsFrontier
+					&& WouldSwitchTo(fields, assigned, groundBlind, evicted, tuning))
+				{
+					declinedFrontier = true;
+					declinedReason = $"staying on home ground with {fields[assigned].TotalDensity} left rather than crossing to {fields[groundBlind].TotalDensity} left {fields[groundBlind].DistanceUnits / 1024} cells out on the frontier";
 				}
 
 				if (stalled)
@@ -952,13 +1060,16 @@ namespace AutoCnC.Reference.Logic
 					//     Assign() moves the remembered assignment with it, so the next stall
 					//     excludes this field in turn and the harvester works outward through
 					//     what is left instead of grinding on one dead patch.
-					var other = SelectFieldAvoiding(fields, assigned, contested, tuning);
+					var other = SelectFieldAvoiding(fields, assigned, contested, state, tuning);
 					if (other >= 0)
 					{
 						var f = fields[other];
 						return Assign(f, ordered,
 							$"{activeStallPrefix}stopped for {seen.StillEvaluations} evaluations, giving that field up for {f.TotalDensity} left {f.DistanceUnits / 1024} cells out",
-							probeIndex: 1);
+							probeIndex: 1,
+							reasonId: IsFrontier(f, state, tuning)
+								? "economy.harvester-frontier-fallback"
+								: "economy.harvester-assign-field");
 					}
 				}
 			}
@@ -967,7 +1078,7 @@ namespace AutoCnC.Reference.Logic
 			//
 			//    Contact inside the earning window lands here rather than cancelling the load,
 			//    and is named so the trace can tell "the harvester kept working through fire"
-			//    from "nothing happened".
+			//    from "nothing happened". So is a frontier crossing that home ground declined.
 			if (!stalled)
 				return new HarvesterOutcome(
 					workedThroughContact
@@ -976,7 +1087,13 @@ namespace AutoCnC.Reference.Logic
 							Reason = $"harvester working through contact inside its earning window at {state.HealthPercent}%",
 							ReasonId = "economy.harvester-work-window"
 						}
-						: UnitDecision.Continue,
+						: declinedFrontier
+							? UnitDecision.Continue with
+							{
+								Reason = declinedReason,
+								ReasonId = "economy.harvester-declines-frontier"
+							}
+							: UnitDecision.Continue,
 					seen);
 
 			// 5. Stopped, and naming a field has not helped — either nothing was scanned this
@@ -1091,8 +1208,8 @@ namespace AutoCnC.Reference.Logic
 		}
 
 		/// <summary>The best field to be working. Never returns -1 for a non-empty list.</summary>
-		public static int SelectField(IReadOnlyList<FieldOption> fields, in HarvesterTuning tuning)
-			=> SelectFieldExcept(fields, -1, tuning);
+		public static int SelectField(IReadOnlyList<FieldOption> fields, in HarvesterState state, in HarvesterTuning tuning)
+			=> SelectFieldExcept(fields, -1, state, tuning);
 
 		/// <summary>
 		/// The best field other than <paramref name="exclude"/>, or -1 if there is no other one.
@@ -1111,12 +1228,12 @@ namespace AutoCnC.Reference.Logic
 		/// it can never refuse the last ground there is.
 		/// </para>
 		/// </remarks>
-		public static int SelectFieldExcept(IReadOnlyList<FieldOption> fields, int exclude, in HarvesterTuning tuning)
-			=> SelectFieldAvoiding(fields, exclude, -1, tuning);
+		public static int SelectFieldExcept(IReadOnlyList<FieldOption> fields, int exclude, in HarvesterState state, in HarvesterTuning tuning)
+			=> SelectFieldAvoiding(fields, exclude, -1, state, tuning);
 
 		/// <summary>
 		/// The best field other than <paramref name="exclude"/>, preferring to leave
-		/// <paramref name="avoid"/> alone as well.
+		/// <paramref name="avoid"/> alone as well, and home ground before the frontier.
 		/// </summary>
 		/// <remarks>
 		/// <paramref name="exclude"/> is a hard exclusion and <paramref name="avoid"/> is a soft
@@ -1131,26 +1248,54 @@ namespace AutoCnC.Reference.Logic
 		/// haul ceiling above, for the same reason: this rule may refuse ground, but it may never
 		/// refuse the last ground there is.
 		/// </para>
+		/// <para>
+		/// Inside each of those passes, home ground inside the haul ceiling is tried before
+		/// anything else — see <see cref="IsFrontier"/>. The contested avoidance still outranks
+		/// it, because a home field that is being shot is being shot now, whereas the frontier
+		/// is only likelier to be. <paramref name="homeGroundFirst"/> is false only for the
+		/// trace's counterfactual in <see cref="Decide"/>.
+		/// </para>
 		/// </remarks>
 		public static int SelectFieldAvoiding(
-			IReadOnlyList<FieldOption> fields, int exclude, int avoid, in HarvesterTuning tuning)
+			IReadOnlyList<FieldOption> fields,
+			int exclude,
+			int avoid,
+			in HarvesterState state,
+			in HarvesterTuning tuning,
+			bool homeGroundFirst = true)
 		{
 			if (avoid >= 0)
 			{
-				var elsewhere = SelectWithin(fields, exclude, avoid, tuning);
+				var elsewhere = SelectWithin(fields, exclude, avoid, state, tuning, homeGroundFirst);
 				if (elsewhere >= 0)
 					return elsewhere;
 			}
 
-			return SelectWithin(fields, exclude, -1, tuning);
+			return SelectWithin(fields, exclude, -1, state, tuning, homeGroundFirst);
 		}
 
-		/// <summary>The haul-ceiling preference, over whatever exclusions it is given.</summary>
+		/// <summary>
+		/// Home ground inside the haul ceiling, then anything inside it, then anything at all, over
+		/// whatever exclusions it is given.
+		/// </summary>
 		static int SelectWithin(
-			IReadOnlyList<FieldOption> fields, int exclude, int avoid, in HarvesterTuning tuning)
+			IReadOnlyList<FieldOption> fields,
+			int exclude,
+			int avoid,
+			in HarvesterState state,
+			in HarvesterTuning tuning,
+			bool homeGroundFirst)
 		{
-			var near = BestWithin(fields, exclude, avoid, tuning, HaulCeilingUnits(tuning));
-			return near >= 0 ? near : BestWithin(fields, exclude, avoid, tuning, int.MaxValue);
+			var ceiling = HaulCeilingUnits(tuning);
+			if (homeGroundFirst)
+			{
+				var home = BestWithin(fields, exclude, avoid, state, tuning, ceiling, homeOnly: true);
+				if (home >= 0)
+					return home;
+			}
+
+			var near = BestWithin(fields, exclude, avoid, state, tuning, ceiling, homeOnly: false);
+			return near >= 0 ? near : BestWithin(fields, exclude, avoid, state, tuning, int.MaxValue, homeOnly: false);
 		}
 
 		/// <summary>How far out a harvester will be sent while anything closer is on offer.</summary>
@@ -1160,14 +1305,116 @@ namespace AutoCnC.Reference.Logic
 		public static bool TooFarToHaul(in FieldOption field, in HarvesterTuning tuning) =>
 			field.DistanceUnits > HaulCeilingUnits(tuning);
 
+		/// <summary>Whether a field lies on the frontier rather than on home ground.</summary>
+		/// <remarks>
+		/// Judged at the field's centre, which is where a harvester spends its time on it and the
+		/// identity every other rule here remembers a field by.
+		/// </remarks>
+		public static bool IsFrontier(in FieldOption field, in HarvesterState state, in HarvesterTuning tuning) =>
+			IsFrontierCell(field.CenterX, field.CenterY, state, tuning);
+
+		/// <summary>
+		/// Whether a cell is frontier: less than <see cref="HarvesterTuning.HomeGroundRatioPercent"/>
+		/// as far from the enemy as from our own base centre.
+		/// </summary>
+		/// <remarks>
+		/// "The enemy" is the nearer of two places this side may legitimately believe it lives:
+		/// the point mirror of our base through the middle of the map — the guess
+		/// <see cref="SurveyLogic"/> and <see cref="ScoutSearchLogic"/> already steer by — and,
+		/// once a unit of ours has seen one, the last enemy structure it saw. Both are derived at
+		/// runtime; nothing here knows which map is being played. Taking the nearer makes the
+		/// test stricter once the enemy is found, never looser, and a mirror that coincides with
+		/// our own base (a base in the dead centre of a map) makes every field frontier, which
+		/// is the ground-blind rule exactly.
+		/// <para>
+		/// Squared and integer throughout, so there is no square root and no floating point in a
+		/// decision that becomes an order.
+		/// </para>
+		/// </remarks>
+		public static bool IsFrontierCell(int x, int y, in HarvesterState state, in HarvesterTuning tuning)
+		{
+			var ratio = (long)tuning.HomeGroundRatioPercent;
+			if (ratio <= 0)
+				return false;
+
+			var ownSq = Sq(x - state.BaseX) + Sq(y - state.BaseY);
+			if (ownSq == 0)
+				return false;
+
+			var mirrorX = state.MapMinX + state.MapMaxX - state.BaseX;
+			var mirrorY = state.MapMinY + state.MapMaxY - state.BaseY;
+			var enemySq = Sq(x - mirrorX) + Sq(y - mirrorY);
+			if (state.HasEnemySighting)
+			{
+				var seenSq = Sq(x - state.EnemySeenX) + Sq(y - state.EnemySeenY);
+				if (seenSq < enemySq)
+					enemySq = seenSq;
+			}
+
+			return enemySq * 10_000 < ownSq * ratio * ratio;
+		}
+
+		/// <summary>
+		/// Whether a report that this side was driven off the field centred on (x, y) at
+		/// <paramref name="reportedTick"/> should still keep harvesters off it.
+		/// </summary>
+		/// <remarks>
+		/// Frontier ground keeps <see cref="HarvesterTuning.ContestedMemoryTicks"/>; home ground,
+		/// where the screen and the towers answer a raid, is offered back after
+		/// <see cref="HarvesterTuning.HomeContestedMemoryTicks"/>. Applied by
+		/// <see cref="Modes.HarvesterMode"/> to the side's report and to a harvester's own
+		/// first-hand memory alike — the first-hand one used to be kept until something replaced
+		/// it, which for a harvester never shot again was for the rest of its life.
+		/// </remarks>
+		public static bool ContestedStillHot(
+			int x, int y, int reportedTick, in HarvesterState state, in HarvesterTuning tuning)
+		{
+			if (x == int.MinValue || y == int.MinValue || reportedTick == int.MinValue)
+				return false;
+
+			var memory = IsFrontierCell(x, y, state, tuning)
+				? tuning.ContestedMemoryTicks
+				: tuning.HomeContestedMemoryTicks;
+
+			return memory <= 0 || state.WorldTick - reportedTick <= memory;
+		}
+
+		/// <summary>
+		/// Whether the switch rule in <see cref="Decide"/> would move a harvester from
+		/// <paramref name="assigned"/> to <paramref name="candidate"/>, ignoring which side of the
+		/// map either lies on.
+		/// </summary>
+		static bool WouldSwitchTo(
+			IReadOnlyList<FieldOption> fields, int assigned, int candidate, bool evicted, in HarvesterTuning tuning)
+		{
+			if (candidate < 0 || assigned < 0 || candidate == assigned)
+				return false;
+
+			var comingHome = TooFarToHaul(fields[assigned], tuning) && !TooFarToHaul(fields[candidate], tuning);
+			return evicted
+				|| comingHome
+				|| Score(fields[candidate], tuning) >= (long)Score(fields[assigned], tuning) * tuning.SwitchScoreMultiplier;
+		}
+
+		static long Sq(long v) => v * v;
+
 		static int BestWithin(
-			IReadOnlyList<FieldOption> fields, int exclude, int avoid, in HarvesterTuning tuning, int ceilingUnits)
+			IReadOnlyList<FieldOption> fields,
+			int exclude,
+			int avoid,
+			in HarvesterState state,
+			in HarvesterTuning tuning,
+			int ceilingUnits,
+			bool homeOnly)
 		{
 			var best = -1;
 			var bestScore = 0;
 			for (var i = 0; i < fields.Count; i++)
 			{
 				if (i == exclude || i == avoid || fields[i].DistanceUnits > ceilingUnits)
+					continue;
+
+				if (homeOnly && IsFrontier(fields[i], state, tuning))
 					continue;
 
 				var score = Score(fields[i], tuning);

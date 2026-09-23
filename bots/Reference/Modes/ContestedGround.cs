@@ -50,8 +50,11 @@ namespace AutoCnC.Reference.Modes
 	/// time. The entry is refreshed every time any harvester is driven off that field, so a patch
 	/// that is still being camped stays excluded for as long as the camping lasts, and one whose
 	/// attacker has moved on is offered back <see cref="Logic.HarvesterTuning.ContestedMemoryTicks"/>
-	/// after the shooting stops. The avoidance it feeds is a soft preference with a fallback, so
-	/// even an unexpired entry can never refuse the last field on the map.
+	/// after the shooting stops — or <see cref="Logic.HarvesterTuning.HomeContestedMemoryTicks"/>
+	/// for a field on home ground, where the screen and the towers answer the raid (see
+	/// <see cref="Logic.HarvesterLogic.ContestedStillHot"/>). The avoidance it feeds is a soft
+	/// preference with a fallback, so even an unexpired entry can never refuse the last field
+	/// on the map.
 	/// </para>
 	/// <para>
 	/// Keyed on the owning player, like <see cref="BaseDamageWatch"/> and

@@ -2512,6 +2512,52 @@ of that number in `HarvesterLogic` is a ratio or a `> 0` test.
 - **`c17` in the unit ledger is the Nod airstrip's delivery plane**: 25 "built", 50,000 "spent".
   None of it was bought. The headline's `creditsSpent` (58,770) is the real figure.
 
+## The survey found the middle of the map, and the fleet moved into it
+
+The next `16:9` at Hard (GDI against Nod) was lost at 877s with fitness 0.226 against a prior median
+of 0.634. **The survey worked, and the ground it revealed killed the economy.**
+
+| | |
+| --- | --- |
+| 245s | an in-base raid drives a harvester off the 8,225-credit field 10 cells from the yard |
+| 253s | all fifteen raiders are dead; the field stays excluded fleet-wide until ~425s |
+| 279-282s | all four harvesters leave a home field with ~2,000 left for a 13,160-credit field 34 cells out, scored ~3× higher |
+| 293s, 342s | both replacement harvesters are sent to the same field |
+| 373s | an enemy construction yard is spotted 9 cells from it |
+| 379-405s | `bike` and `e3` kill all six harvesters on the road home, 21-26 cells from the yard |
+| 405-877s | no harvester (525 s in all), cash 0, income frozen at 14,075; `heli` then takes the base apart |
+
+The score is what a field pays per cell of commute, and it cannot see which side of the map the
+commute crosses. That field lay 1.22 times as far from the point mirror of our yard as from the yard
+(0.9-1.4 against the enemy structures the jeep found at 309-316s); every field worked without loss lay
+4.9-6.5 times as far.
+
+**Home ground now comes before the frontier** ([`HarvesterLogic.IsFrontier`](Logic/HarvesterLogic.cs)).
+A field is home ground when its centre lies at least `HomeGroundRatioPercent` (150%) as far from the
+enemy as from our base centre. "The enemy" is the nearer of the map's point mirror of our base and the
+last enemy structure a scout recorded. Frontier fields are a fallback tier inside the contested
+avoidance and above the haul ceiling, so the rule may still refuse ground but never the last ground.
+A harvester on the frontier returns when home ground worth half its field comes back. **A home field
+the side was driven off is offered back after one work cycle** (`HomeContestedMemoryTicks`) instead of
+three, and a harvester's first-hand memory of being driven off now expires by the same clock rather
+than never. Reason ids: `economy.harvester-declines-frontier` (home ground changed the answer),
+`economy.harvester-frontier-fallback` (no home ground left), `economy.harvester-leaves-frontier`.
+
+Not changed, and worth reading next time: the infantry screen answered **3,825** "on post, no threats"
+evaluations over 340-410s while the fleet died 21-26 cells out, beyond `EarnerRadiusCells` (16). A
+fleet that is kept on home ground keeps inside that radius; the fallback to frontier ground does not.
+
+### Two things in this match that are not what they look like
+
+- **The fight did not run this source.** Its DLL was built at 21:55 from an uncommitted candidate,
+  and the restored source files carry older timestamps, so an incremental build would never have
+  replaced it. The trace's `economy.harvester-withdrawal-off-field` ("shot away from its field so the
+  field stays open") exists in no commit. That variant is what sent three harvesters that had escaped
+  home back into the raid via `economy.harvester-works-the-raid`; committed code always marks the
+  field contested. Check a trace's reason ids against the source before reasoning from them.
+- **`units.mean(lifetimeSeconds,type=harv)` read 83.5 because it counts enemy harvesters too**, whose
+  blank lifetimes count as zero. Own harvesters lived 194.8 s on average. Add `owner=Commander`.
+
 ## Start your own
 
 

@@ -1,62 +1,62 @@
 {
   "schemaVersion": 1,
-  "authoredForRevision": "0eaf80a105b24154a4f5c8053f0222abbc548bde",
+  "authoredForRevision": "3992bad6f0a08d08b1d05dd1150bc3a8c131c01c",
   "checks": [
     {
-      "id": "survey-flies",
+      "id": "home-ground-declines-frontier",
       "category": "activation",
-      "description": "TiberiumSurvey sends one screen vehicle along the survey route. Previously the only scouting was 34 seconds of ScoutMode (375-409s) heading straight for the enemy base, and the fleet never learned of any field beyond the three beside the yard. If this id is absent the survey never ran (no jeep/bggy reached ScoutMode or HarvesterEscortMode), and nothing else in this round can be attributed to it.",
-      "query": "reason-id:economy.survey-tiberium",
+      "description": "The home-ground tier changes at least one field choice. On 16:9 the ground-blind score sent four harvesters from a ~2,000-credit home field to a 13,160-credit frontier field 34 cells out at 279-282s, and both replacements after them. If this id is absent, either IsFrontier never classified a field as frontier (mirror or sighting anchor wrong) or no frontier field outscored home ground, and nothing about harvester survival can be attributed to this round.",
+      "query": "reason-id:economy.harvester-declines-frontier",
       "operator": ">=",
       "value": "1"
     },
     {
-      "id": "survey-completes",
-      "category": "activation",
-      "description": "The whole route (about 17 points, roughly 52s at buggy speed on 16:9) is flown or written off within the match, because progress belongs to the side and a replacement surveyor continues where a dead one stopped. Present but not complete means surveyors are dying faster than they fly. Read the economy.survey-skip-point count beside it.",
-      "query": "reason-id:economy.survey-complete",
-      "operator": ">=",
-      "value": "1"
-    },
-    {
-      "id": "income-outlasts-home-fields",
-      "category": "outcome",
-      "description": "Home fields were worked out by about 550s. Income fell from 122 c/s (420-480s) to 37 c/s (540-600s) before the siege, and the lifetime rate was 36.5 c/s. It was 50.3 c/s up to the 939s nuke, which ended all spending. With surveyed ground to move to, the fleet should hold the rate past the home fields.",
-      "query": "summary.headline.creditsEarnedPerSecond",
-      "operator": ">=",
-      "value": "40"
-    },
-    {
-      "id": "harvesters-not-fed-to-far-fields",
+      "id": "frontier-return-does-not-dither",
       "category": "invariant",
-      "description": "More ground to haul from makes it easy to get harvesters killed further from home. Mean harvester lifetime was 654.6s. A floor of 350 still allows heavier pressure but rejects a fleet that is being thrown away on distant fields.",
-      "query": "units.mean(lifetimeSeconds,type=harv)",
+      "description": "A harvester on frontier fallback ground comes home only when home ground worth half its field returns, and never goes back while home ground lasts. Each economy.harvester-leaves-frontier is a real order; more than 30 in a match means the frontier classification is flipping or the rule is oscillating.",
+      "query": "reason-id:economy.harvester-leaves-frontier",
+      "operator": "<=",
+      "value": "30"
+    },
+    {
+      "id": "own-harvesters-live",
+      "category": "invariant",
+      "description": "Own harvesters (owner=Commander; without it enemy harvesters count as zero-lifetime rows) lived 194.8s on average here, all six dying 379-405s on the road from the frontier field. Kept on home ground they should outlive one raid.",
+      "query": "units.mean(lifetimeSeconds,type=harv,owner=Commander)",
       "operator": ">=",
       "value": "350"
     },
     {
       "id": "fleet-keeps-working",
       "category": "invariant",
-      "description": "The previous round got secondsWithNoHarvester down from 565 to 118. Surveying must not undo that by pulling the fleet onto exposed ground.",
+      "description": "525 of 877 seconds had no live harvester after the frontier wipe. The round before the survey had it at 118.",
       "query": "summary.economy.secondsWithNoHarvester",
       "operator": "<=",
       "value": "220"
     },
     {
-      "id": "army-follows-income",
+      "id": "income-holds",
       "category": "outcome",
-      "description": "meanArmyValue was 1,520 (component score 0.253). Extra income from surveyed fields should show up as army held.",
-      "query": "summary.headline.meanArmyValue",
+      "description": "Lifetime income was 16.0 c/s against a prior median of 38.3, because earnings froze at 14,075 from ~400s. Home-ground-first can cost some rate while home fields thin; losing the fleet cost everything after 405s.",
+      "query": "summary.headline.creditsEarnedPerSecond",
       "operator": ">=",
-      "value": "1600"
+      "value": "35"
     },
     {
-      "id": "fitness-holds",
+      "id": "army-follows-income",
       "category": "outcome",
-      "description": "Fitness was 0.517 against a prior median of 0.295. Across recent runs income is the metric that separates the best runs from the worst, so a working survey should lift the total and not only economicRate.",
+      "description": "meanArmyValue was 783.8 against a prior median of 1,683.5; the army peaked at 3,120 before the economy died.",
+      "query": "summary.headline.meanArmyValue",
+      "operator": ">=",
+      "value": "1500"
+    },
+    {
+      "id": "fitness-recovers",
+      "category": "outcome",
+      "description": "Fitness was 0.226 against a prior median of 0.634. Diagnostic only; paired benchmark results decide promotion.",
       "query": "summary.fitness.total",
       "operator": ">=",
-      "value": "0.55"
+      "value": "0.45"
     }
   ]
 }

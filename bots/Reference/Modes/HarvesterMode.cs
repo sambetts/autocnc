@@ -68,6 +68,10 @@ namespace AutoCnC.Reference.Modes
 			var bounds = ctx.World.Map.Bounds;
 			var here = self.Location;
 
+			// Where the enemy was last seen building, if anywhere, so frontier ground can be told
+			// from home ground. Side memory filled by the scouts; see HarvesterLogic.IsFrontierCell.
+			var enemySeen = EnemyBaseSightings.TryGetLastKnown(self.Owner, out var enemyCell);
+
 			var state = new HarvesterState(
 				HealthPercent: ctx.HealthPercent,
 				CanMove: ctx.CanMove,
@@ -89,7 +93,10 @@ namespace AutoCnC.Reference.Modes
 				MapMinX: bounds.Left,
 				MapMinY: bounds.Top,
 				MapMaxX: bounds.Left + bounds.Width - 1,
-				MapMaxY: bounds.Top + bounds.Height - 1);
+				MapMaxY: bounds.Top + bounds.Height - 1,
+				HasEnemySighting: enemySeen,
+				EnemySeenX: enemySeen ? enemyCell.X : 0,
+				EnemySeenY: enemySeen ? enemyCell.Y : 0);
 
 			// Scanning the map is a scan, not a lookup, so the rule decides when it is worth
 			// paying for: on a stall, or once a review window has gone by. The scan is centred on
@@ -133,6 +140,12 @@ namespace AutoCnC.Reference.Modes
 				out var fleetY,
 				out var fleetTick);
 
+			// Home ground is offered back after one work cycle rather than three: a raid in the
+			// base is the screen's and the towers' to answer, and a field excluded after the raid
+			// is over is ground handed to the frontier. See HarvesterTuning.HomeContestedMemoryTicks.
+			if (hasReport && !HarvesterLogic.ContestedStillHot(fleetX, fleetY, fleetTick, state, tuning))
+				hasReport = false;
+
 			if (hasReport && fleetTick > watchdog.ContestedTick)
 				watchdog = watchdog with
 				{
@@ -150,6 +163,20 @@ namespace AutoCnC.Reference.Modes
 					ContestedX = int.MinValue,
 					ContestedY = int.MinValue,
 					ContestedFromFleet = false,
+					ContestedTick = int.MinValue
+				};
+
+			// ...and so does one learned first-hand, by the same clock. It used to be kept until
+			// a newer report displaced it, which for a harvester never shot again meant avoiding
+			// its best field for the rest of its life.
+			if (watchdog.HasContested
+				&& !watchdog.ContestedFromFleet
+				&& !HarvesterLogic.ContestedStillHot(
+					watchdog.ContestedX, watchdog.ContestedY, watchdog.ContestedTick, state, tuning))
+				watchdog = watchdog with
+				{
+					ContestedX = int.MinValue,
+					ContestedY = int.MinValue,
 					ContestedTick = int.MinValue
 				};
 

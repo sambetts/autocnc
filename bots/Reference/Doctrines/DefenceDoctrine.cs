@@ -31,8 +31,11 @@ namespace AutoCnC.Reference.Doctrines
 
 			// Scouts and faction-equivalent anti-infantry specialists stay with the economy,
 			// rockets answer vehicles, and siege units can return fire beyond a harvester's
-			// sight. Claims bound the response to each reported attacker.
+			// sight. Claims bound the response to each reported attacker. One rifleman keeps
+			// watching the approach instead: a turtle that cannot see what is coming builds the
+			// wrong answer to it. See IntelWatch.
 			b.Assign<HarvesterEscortMode>().ToUnitType("jeep", "bggy", "e2", "e4", "e3", "arty", "msam");
+			b.Assign<DefendOrWatchMode>().ToUnitType("e1");
 		}
 	}
 }

@@ -12,6 +12,7 @@ using AutoCnC.Core;
 using AutoCnC.Reference.Logic;
 using AutoCnC.Sdk;
 using OpenRA;
+using OpenRA.Mods.Common.Traits;
 
 namespace AutoCnC.Reference.Modes
 {
@@ -44,6 +45,18 @@ namespace AutoCnC.Reference.Modes
 		/// See <see cref="ArmyMixLogic"/>.
 		/// </summary>
 		readonly MixTuning mix = MixTuning.Default;
+
+		/// <summary>When a threat is big enough to counter, and how hard. See <see cref="CounterLogic"/>.</summary>
+		readonly CounterTuning counterTuning = CounterTuning.Default;
+
+		/// <summary>How long a sighting keeps counting toward the threat mix: two minutes.</summary>
+		/// <remarks>
+		/// Long enough to remember the army that attacked last, short enough that a composition
+		/// the enemy has moved on from stops steering production.
+		/// </remarks>
+		const int CounterWindowTicks = 120 * 25;
+
+		const string VehicleQueue = "Vehicle";
 
 		/// <summary>
 		/// How poor the side has to be before the barracks stops outbidding the harvester.
@@ -332,6 +345,14 @@ namespace AutoCnC.Reference.Modes
 			// cap's work to the mix rule would make the mix rule's own check unfalsifiable.
 			var retargeted = !ReferenceEquals(plan, unretargeted);
 
+			// What they are actually sending, answered with what the duel lab measured beats it
+			// credit for credit. Applied after the two-bin mix rule so a measured counter wins
+			// that argument, and before the funding caps below so they still cap whatever it
+			// buys. Returns the plan by reference until a real army has been seen. See
+			// CounterLogic and EnemySightings.RecentThreats.
+			var counter = PlanCounter(ctx, plan, owned);
+			plan = counter.Plan;
+
 			// Keep the faction's always-buildable light screen funded while it is below the
 			// plan's release band. Siege units cannot serve this role until tech exists.
 			var screenVehicleRung = ExpansionLogic.FirstRungNaming(plan, ReferencePlans.ScreenVehicles);
@@ -612,14 +633,92 @@ namespace AutoCnC.Reference.Modes
 			if (armourFloorWrittenOff)
 				why += $", armour floor written off after {armourAttritionRelease.Losses} lost without {armourAttritionRelease.Target} standing";
 
+			var counterChoice = counter.Changed
+				&& (Picks(counter.Inserted, choice.ActorType)
+					|| Picks(counter.InfantryRung, choice.ActorType)
+					|| Picks(counter.VehicleRung, choice.ActorType));
+			if (counterChoice)
+			{
+				var score = Picks(counter.Inserted, choice.ActorType) ? counter.Inserted.Score
+					: Picks(counter.InfantryRung, choice.ActorType) ? counter.InfantryRung.Score
+					: counter.VehicleRung.Score;
+				why += $", countering {counter.Summary} with {choice.ActorType}, measured margin {score:+0;-0} per 100";
+				if (Picks(counter.Inserted, choice.ActorType))
+					why += $", counter rung of {counter.InsertedTarget}";
+			}
+
 			if (screenFloorWrittenOff)
 				return UnitDecision.Produce(
 					choice.Queue, choice.ActorType, why, "production.screen-floor-written-off");
 
-			return armourFloorWrittenOff
-				? UnitDecision.Produce(
-					choice.Queue, choice.ActorType, why, "production.armour-floor-written-off")
+			if (armourFloorWrittenOff)
+				return UnitDecision.Produce(
+					choice.Queue, choice.ActorType, why, "production.armour-floor-written-off");
+
+			return counterChoice
+				? UnitDecision.Produce(choice.Queue, choice.ActorType, why,
+					!Picks(counter.Inserted, choice.ActorType) ? "production.counter-endless"
+						: counter.AntiAir ? "production.counter-air"
+						: "production.counter-rung")
 				: UnitDecision.Produce(choice.Queue, choice.ActorType, why);
+		}
+
+		static bool Picks(in CounterPick pick, string actorType) =>
+			pick.IsValid && string.Equals(pick.ActorType, actorType, System.StringComparison.OrdinalIgnoreCase);
+
+		/// <summary>The best measured counter each queue can build now, folded into the plan.</summary>
+		/// <remarks>
+		/// Two threat mixes, because anticipation and sightings deserve different answers. A
+		/// helipad seen is worth a bounded anti-air rung before the aircraft arrive. It is not
+		/// worth re-planning every spare credit for the rest of the match. The first version let
+		/// it retarget the endless infantry rung, and a GDI mirror built 19 riflemen where the
+		/// champion built 62. So the inserted rung answers what was seen plus what was
+		/// anticipated, and the endless rungs answer only what was seen.
+		/// </remarks>
+		CounterPlan PlanCounter(
+			ModeContext ctx,
+			IReadOnlyList<ProductionStep> plan,
+			IReadOnlyDictionary<string, int> owned)
+		{
+			var anticipated = EnemySightings.RecentThreats(
+				ctx.Owner, ctx.WorldTick, CounterWindowTicks, counterTuning.AnticipatedAircraftValue);
+			var floor = System.Math.Min(counterTuning.MinimumThreatValue, counterTuning.MinimumAirThreatValue);
+			if (CounterLogic.TotalValue(anticipated) < floor)
+				return new CounterPlan(plan, CounterPick.None, 0, CounterPick.None, CounterPick.None, 0, null);
+
+			var seen = EnemySightings.RecentThreats(ctx.Owner, ctx.WorldTick, CounterWindowTicks, 0);
+			var infantryItems = ctx.BuildableItems(ReferencePlans.InfantryQueue);
+			var vehicleItems = ctx.BuildableItems(VehicleQueue);
+
+			var insertInfantry = CounterLogic.Best(infantryItems, ReferencePlans.InfantryQueue, anticipated);
+			var insertVehicle = CounterLogic.Best(vehicleItems, VehicleQueue, anticipated);
+			var insert = insertInfantry.Score >= insertVehicle.Score ? insertInfantry : insertVehicle;
+
+			// The best answer to their aircraft alone, from either queue.
+			var aircraft = CounterLogic.Aircraft(anticipated);
+			var antiAir = CounterPick.None;
+			if (aircraft.Count > 0)
+			{
+				var airInfantry = CounterLogic.Best(infantryItems, ReferencePlans.InfantryQueue, aircraft);
+				var airVehicle = CounterLogic.Best(vehicleItems, VehicleQueue, aircraft);
+				antiAir = airInfantry.Score >= airVehicle.Score ? airInfantry : airVehicle;
+			}
+
+			var enough = CounterLogic.TotalValue(seen) >= counterTuning.MinimumThreatValue;
+			var infantry = enough
+				? CounterLogic.Best(infantryItems, ReferencePlans.InfantryQueue, seen)
+				: CounterPick.None;
+			var vehicle = enough ? CounterLogic.Best(vehicleItems, VehicleQueue, seen) : CounterPick.None;
+
+			var rules = ctx.World.Map.Rules.Actors;
+			return CounterLogic.Apply(
+				plan, anticipated, insert, antiAir, infantry, vehicle, owned,
+				actorType => rules.TryGetValue(actorType, out var info)
+					? info.TraitInfoOrDefault<ValuedInfo>()?.Cost ?? 0
+					: 0,
+				ReferencePlans.HarvesterUnits[0],
+				ReferencePlans.SiegeVehicles,
+				counterTuning);
 		}
 	}
 }

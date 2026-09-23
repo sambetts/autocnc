@@ -31,8 +31,9 @@ namespace AutoCnC.Reference.Doctrines
 			b.Assign<DefensiveMode>().ToAll();
 
 			// Only the cheap fast things go. Sending the army to look would answer the question
-			// and lose the match doing it.
+			// and lose the match doing it. One rifleman keeps watching once it has: see IntelWatch.
 			b.Assign<ScoutMode>().ToUnitType("jeep", "bggy");
+			b.Assign<DefendOrWatchMode>().ToUnitType("e1");
 		}
 	}
 }

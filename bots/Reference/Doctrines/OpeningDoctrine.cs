@@ -38,6 +38,9 @@ namespace AutoCnC.Reference.Doctrines
 			// jeep does that this bot cannot do without, because the Attack doctrine is gated on
 			// it, so a jeep should be doing it whenever it is alive.
 			b.Assign<ScoutMode>().ToUnitType("jeep", "bggy");
+
+			// Once their base is found, one rifleman becomes the side's watcher: see IntelWatch.
+			b.Assign<DefendOrWatchMode>().ToUnitType("e1");
 		}
 	}
 }

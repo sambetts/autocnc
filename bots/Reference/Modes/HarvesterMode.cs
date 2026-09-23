@@ -173,6 +173,8 @@ namespace AutoCnC.Reference.Modes
 
 		public override void OnDamaged(Actor self, ModeContext ctx, AttackInfo e)
 		{
+			EnemySightings.RecordAttacker(self.Owner, e.Attacker);
+
 			var attacker = e.Attacker;
 			if (attacker != null
 				&& attacker.IsInWorld

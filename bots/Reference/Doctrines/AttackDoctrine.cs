@@ -32,6 +32,10 @@ namespace AutoCnC.Reference.Doctrines
 		protected override void Behaviour(IDoctrineBuilder b)
 		{
 			b.Assign<AttackBaseMode>().ToAll();
+
+			// Every rifleman joins the push except the side's watcher, which keeps seeing what
+			// the push is about to meet. See IntelWatch.
+			b.Assign<AttackOrWatchMode>().ToUnitType("e1");
 			b.Register<DefensiveMode>();
 		}
 	}

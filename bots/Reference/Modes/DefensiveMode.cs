@@ -283,6 +283,10 @@ namespace AutoCnC.Reference.Modes
 
 		public override void OnDamaged(Actor self, ModeContext ctx, AttackInfo e)
 		{
+			// Whatever hit us is part of what the enemy is fielding, seen or not: see
+			// EnemySightings.RecordAttacker, which is how artillery reaches the counter plan.
+			EnemySightings.RecordAttacker(self.Owner, e.Attacker);
+
 			// Being shot from outside our sense radius is the one case the periodic scan cannot
 			// see. Pull the anchor toward the attacker so the next evaluation reacts, rather than
 			// issuing an order from here and fighting the executor's order suppression.

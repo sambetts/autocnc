@@ -481,6 +481,8 @@ namespace AutoCnC.Reference.Modes
 
 		public override void OnDamaged(Actor self, ModeContext ctx, AttackInfo e)
 		{
+			EnemySightings.RecordAttacker(self.Owner, e.Attacker);
+
 			// Taking fire from something already inside our reach is the expected cost of a base
 			// assault, and reacting to it is exactly the distraction this mode exists to avoid.
 			// Static defences are handled as blockers by AttackBaseLogic once they come into

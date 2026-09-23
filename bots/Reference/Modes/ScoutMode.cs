@@ -49,6 +49,7 @@ namespace AutoCnC.Reference.Modes
 			// has no opinion, and ReferenceBot reaches the same conclusion, so its reason is the
 			// one that ends up in the battle log.
 			var structures = ctx.SenseStructures(new WDist(SightRadius));
+			EnemySightings.RecordStructures(self.Owner, structures);
 			var inSight = structures.Count > 0;
 			if (inSight)
 			{

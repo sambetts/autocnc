@@ -62,6 +62,12 @@ namespace AutoCnC.Reference.Modes
 				ctx.SwitchDoctrine(ReferenceDoctrines.Opening, "scout found their base");
 			}
 
+			// Our own half of the map first, once, by one scout: the economy can only work the
+			// tiberium somebody has looked at. After the sighting report above, so a surveyor that
+			// happens across their base still says so. See TiberiumSurvey.
+			if (TiberiumSurvey.TryStep(self, ctx, out var surveying))
+				return surveying;
+
 			// Where the threat is, not merely that there is one: going around something needs to
 			// know which side of us it stands on, and ThreatSnapshot carries a range but no cell.
 			var threatened = false;

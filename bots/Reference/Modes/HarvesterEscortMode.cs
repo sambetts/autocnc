@@ -33,6 +33,12 @@ namespace AutoCnC.Reference.Modes
 
 		public override UnitDecision OnTick(Actor self, ModeContext ctx)
 		{
+			// A screen vehicle escorting a harvester in Defence is the one fast pair of eyes the
+			// side has, and the fleet it escorts runs dry on the ground nobody has looked at.
+			// Until the survey is flown, one of them flies it. See TiberiumSurvey.
+			if (TiberiumSurvey.TryStep(self, ctx, out var surveying))
+				return surveying;
+
 			var ward = ctx.ResolveActor(wardId);
 			if (!IsLive(ward))
 				ward = null;

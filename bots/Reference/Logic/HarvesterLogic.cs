@@ -220,6 +220,13 @@ namespace AutoCnC.Reference.Logic
 	/// nothing here may retain one, and because the judgement below has to stay engine-free.
 	/// <c>DistanceUnits</c> is measured from whatever origin the scan was centred on — the
 	/// refinery, for a harvester that has one.
+	/// <para>
+	/// <c>TotalDensity</c> is what the field is worth to whoever built the option.
+	/// <see cref="Modes.HarvesterMode"/> fills it with the SDK's <c>TotalValue</c> in credits
+	/// where the mod declares one, so blue tiberium outranks green; the construction yard fills
+	/// it with density. Nothing reads it except as a ratio or a "> 0" test, so either scale is
+	/// sound as long as one list never mixes them.
+	/// </para>
 	/// </remarks>
 	public readonly record struct FieldOption(
 		int NearestX,

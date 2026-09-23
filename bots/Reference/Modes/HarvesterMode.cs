@@ -107,8 +107,15 @@ namespace AutoCnC.Reference.Modes
 				for (var i = 0; i < found.Count; i++)
 				{
 					// Copied, not retained: sensing methods reuse their buffers.
+					//
+					// Ranked on what the patch pays rather than how much of it there is: blue
+					// tiberium pays about 1.7 times green per unit, so density alone drives past
+					// the better field. Every use of this number in HarvesterLogic is a ratio or
+					// a "> 0" test, so swapping credits for density changes the ranking and
+					// nothing else. A mod that declares no value reports 0; fall back to density.
 					var f = found[i];
-					fields.Add(new FieldOption(f.NearestX, f.NearestY, f.CenterX, f.CenterY, f.CellCount, f.TotalDensity, f.DistanceUnits));
+					var worth = f.TotalValue > 0 ? f.TotalValue : f.TotalDensity;
+					fields.Add(new FieldOption(f.NearestX, f.NearestY, f.CenterX, f.CenterY, f.CellCount, worth, f.DistanceUnits));
 				}
 			}
 

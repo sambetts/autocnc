@@ -1,70 +1,62 @@
 {
   "schemaVersion": 1,
-  "authoredForRevision": "1a74e2fb456acaedc78f6f810608eefdb16f8a55",
+  "authoredForRevision": "0eaf80a105b24154a4f5c8053f0222abbc548bde",
   "checks": [
     {
-      "id": "harvester-works-instead-of-sheltering",
+      "id": "survey-flies",
       "category": "activation",
-      "description": "activation: HarvesterLogic now ends a withdrawal the moment the harvester is back inside SafeDistanceUnits of its refinery, and refuses to start one there. Previously that case answered Hold or a move order onto the cell it already occupied: 205 sheltering evaluations, and 751 of 1,235 withdrawal move orders named a cell within five cells of this side's own construction yard while enemiesNearBase ran 16 to 75. An absent id means the new branch never ran and everything below it is unexplained.",
-      "query": "reason-id:economy.harvester-works-the-raid",
+      "description": "TiberiumSurvey sends one screen vehicle along the survey route. Previously the only scouting was 34 seconds of ScoutMode (375-409s) heading straight for the enemy base, and the fleet never learned of any field beyond the three beside the yard. If this id is absent the survey never ran (no jeep/bggy reached ScoutMode or HarvesterEscortMode), and nothing else in this round can be attributed to it.",
+      "query": "reason-id:economy.survey-tiberium",
       "operator": ">=",
       "value": "1"
     },
     {
-      "id": "famine-bank-arms",
+      "id": "survey-completes",
       "category": "activation",
-      "description": "activation: ReserveHarvesterRecovery no longer releases the bank for base pressure or a lost refinery while the fleet is at or below one harvester. The production-budget trace read inactive/reservedCash 0 at EVERY assessment from 690s to the end of a 1,379-second match, because EnemiesNearBase>0 or BaseUnderAttack held at 151 of 156 late assessments and Refineries<4 at 113. Read this one beside income-does-not-hard-lock: a zero here means the fleet never fell to one harvester with a refinery standing, which is the outcome the harvester change is aiming at, rather than the branch being wrong.",
-      "query": "reason-id:economy.bank-restarts-income",
+      "description": "The whole route (about 17 points, roughly 52s at buggy speed on 16:9) is flown or written off within the match, because progress belongs to the side and a replacement surveyor continues where a dead one stopped. Present but not complete means surveyors are dying faster than they fly. Read the economy.survey-skip-point count beside it.",
+      "query": "reason-id:economy.survey-complete",
       "operator": ">=",
       "value": "1"
     },
     {
-      "id": "income-does-not-hard-lock",
+      "id": "income-outlasts-home-fields",
       "category": "outcome",
-      "description": "outcome: the direct measure of the change. Lifetime earnings froze at 42,880 credits from 780s while eight harvesters and five refineries were still standing, and 565 seconds had no live harvester at all. A fleet that keeps working when the raid follows it home, and a bank that can buy the replacement, both show up here first.",
-      "query": "summary.economy.secondsWithNoHarvester",
-      "operator": "<=",
-      "value": "220"
-    },
-    {
-      "id": "economic-rate-recovers",
-      "category": "outcome",
-      "description": "outcome: 31.095 credits a second against a reference of 50 and a prior median of 32.938, and a regression of 18.7% on the previous run. Measured over harvester-alive time alone the rate was 52.7, so the shortfall is entirely the 599 seconds played at zero income rather than the rate while earning.",
+      "description": "Home fields were worked out by about 550s. Income fell from 122 c/s (420-480s) to 37 c/s (540-600s) before the siege, and the lifetime rate was 36.5 c/s. It was 50.3 c/s up to the 939s nuke, which ended all spending. With surveyed ground to move to, the fleet should hold the rate past the home fields.",
       "query": "summary.headline.creditsEarnedPerSecond",
       "operator": ">=",
       "value": "40"
     },
     {
-      "id": "the-army-is-held",
-      "category": "outcome",
-      "description": "outcome: flagged regression. meanArmyValue 1,087.6 against a reference of 6,000 and a prior median of 1,488.3, scoring 0.181 on a component weighted 0.2. Every assessment from 780s to 1,379s reported units 0, armyValue 0 and cash 0 with a war factory standing until 1,359s and a barracks until 1,363s: 480 seconds in which not one unit was built. Income is the only thing that moves this.",
-      "query": "summary.headline.meanArmyValue",
-      "operator": ">=",
-      "value": "1500"
-    },
-    {
-      "id": "the-trade-recovers",
-      "category": "outcome",
-      "description": "outcome: flagged regression. valueExchangeRatio 0.718 against a prior median of 0.947, the heaviest fitness component at weight 0.25. The two Attack episodes traded 21,100 killed for 17,140 lost; the terminal 714-second Defence episode traded 13,800 for 37,300, because there was nothing left to defend with.",
-      "query": "summary.headline.valueExchangeRatio",
-      "operator": ">=",
-      "value": "0.95"
-    },
-    {
-      "id": "harvesters-are-not-thrown-away",
+      "id": "harvesters-not-fed-to-far-fields",
       "category": "invariant",
-      "description": "invariant: this change makes harvesters work through contact inside their own base instead of parking, so the failure mode it is one step from is a fleet that dies faster than it earns. Mean harvester lifetime was 499.4 seconds across nine built and nine lost, with 8 of 9 killed by enemy e3. A floor of 350 admits the same fleet under heavier pressure and rejects one that is being fed to the raid.",
+      "description": "More ground to haul from makes it easy to get harvesters killed further from home. Mean harvester lifetime was 654.6s. A floor of 350 still allows heavier pressure but rejects a fleet that is being thrown away on distant fields.",
       "query": "units.mean(lifetimeSeconds,type=harv)",
       "operator": ">=",
       "value": "350"
     },
     {
-      "id": "fitness-recovers",
+      "id": "fleet-keeps-working",
+      "category": "invariant",
+      "description": "The previous round got secondsWithNoHarvester down from 565 to 118. Surveying must not undo that by pulling the fleet onto exposed ground.",
+      "query": "summary.economy.secondsWithNoHarvester",
+      "operator": "<=",
+      "value": "220"
+    },
+    {
+      "id": "army-follows-income",
       "category": "outcome",
-      "description": "outcome: 0.5209 against a prior median of 0.504 and 0.69 on the run before, with armyValueIntegral 0.181 and valueExchange 0.359 the two components at the floor. Both are downstream of 43% of the match played with no economy and no army, so a working economy should lift the total rather than one component.",
+      "description": "meanArmyValue was 1,520 (component score 0.253). Extra income from surveyed fields should show up as army held.",
+      "query": "summary.headline.meanArmyValue",
+      "operator": ">=",
+      "value": "1600"
+    },
+    {
+      "id": "fitness-holds",
+      "category": "outcome",
+      "description": "Fitness was 0.517 against a prior median of 0.295. Across recent runs income is the metric that separates the best runs from the worst, so a working survey should lift the total and not only economicRate.",
       "query": "summary.fitness.total",
       "operator": ">=",
-      "value": "0.62"
+      "value": "0.55"
     }
   ]
 }

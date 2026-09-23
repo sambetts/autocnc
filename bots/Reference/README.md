@@ -2471,6 +2471,47 @@ releases and the duty cycle with them, under `economy.bank-restarts-income`. It 
 — buying one harvester leaves the famine band and the ordinary releases resume — and self-limiting
 when it is not, because a side earning nothing has nothing for the reservation to suppress.
 
+## The economy can only work the ground somebody has looked at
+
+The next `16:9` at Hard (Nod against Nod) was lost at 1,405s. **The fleet worked the three fields
+beside the yard until they were gone, and no unit ever looked for a fourth.**
+
+| | |
+| --- | --- |
+| income 420-480s | 122 credits a second, 7 harvesters |
+| income 540-600s | **37**, 8-9 harvesters, before the first enemy shell landed at 583s |
+| harvester reasons from 554s | "field worked out, harvesting 4-9 cells (16-39 left)" |
+| enemy income 300-1000s | 107-142 credits a second |
+| `ScoutMode` time with a live screen vehicle | **34 seconds** (375-409s), straight at their base |
+
+Resource reads are shroud-filtered, so tiberium within haul reach that no unit has looked at does not
+exist for `FindResourceFields`. The only scouting of the match was two `bggy` driving rung 0 of
+`ScoutSearchLogic` to the enemy's yard, where both died at 421-423s. The rest of their lives was
+spent in `HarvesterEscortMode`, because Defence ran for 970 of the match's 1,405 seconds.
+
+[`TiberiumSurvey`](Modes/TiberiumSurvey.cs) and [`SurveyLogic`](Logic/SurveyLogic.cs) fly one pass
+over our own half of the map: a 12-cell lattice (a screen vehicle sees 8) inside the haul reach and
+nearer our yard than its point mirror, visited nearest-first with the ground toward them last. The
+route and the progress along it belong to the side, so a replacement picks it up where a dead
+surveyor stopped. One `jeep`/`bggy` at a time flies it, from both `ScoutMode` and
+`HarvesterEscortMode`, which are the two modes a screen vehicle runs outside an assault. Once it is
+flown it is over and both modes behave exactly as before. Its reason ids are `economy.survey-tiberium`,
+`economy.survey-evade`, `economy.survey-skip-point` and `economy.survey-complete`.
+
+`HarvesterMode` now also ranks fields on `TotalValue` rather than `TotalDensity`, falling back to
+density where a mod declares no value, so blue tiberium outranks green at the same size. Every use
+of that number in `HarvesterLogic` is a ratio or a `> 0` test.
+
+### Two things in this match that are not what they look like
+
+- **Earnings froze at 51,270 from 1,020s with eight harvesters alive**, and that was not a
+  harvester fault. One enemy nuclear strike at 939s (killer `player`) destroyed the construction
+  yard, both `hand`, both `afld`, the `hq` and a refinery together. The side then had nothing to
+  spend on, cash sat at 2,966 (three refineries' storage), and whatever was harvested past that cap
+  was lost.
+- **`c17` in the unit ledger is the Nod airstrip's delivery plane**: 25 "built", 50,000 "spent".
+  None of it was bought. The headline's `creditsSpent` (58,770) is the real figure.
+
 ## Start your own
 
 

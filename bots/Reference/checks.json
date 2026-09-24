@@ -1,62 +1,38 @@
 {
   "schemaVersion": 1,
-  "authoredForRevision": "57315105fc52e8de04bf94da2fa21b317922824d",
+  "authoredForRevision": "51e0e4c85457a953ca531639635215ea38b7ff6a",
   "checks": [
     {
-      "id": "return-fire-runs",
+      "id": "hunt-runs",
       "category": "activation",
-      "description": "A unit finishing a damaged objective that cannot shoot it turned on a mobile shooter inside that shooter's own reach. Last fight 13 of the 36 assault losses died on assault.finish-damaged-objective, 11 of them rifles finishing an air-only Nod sam while one bggy killed eight. Absent means the push never stood at a damaged harmless building under fire from mobile units (enemy army dead before the push reached buildings, or no assault at all), not necessarily that the branch is broken.",
-      "query": "reason-id:assault.return-fire-over-harmless-objective",
+      "description": "Once their main base has fallen and nothing more is in sight, the Scout doctrine's army, when worth 10,000 or more, hunts the map sector by sector instead of standing at home. On hard-16-9, seed 300008 went from a 2,400s timeout to a win at 1,007s. Absent means the fight never reached that state (lost, or won while their base was still in sight), not necessarily that the branch is broken.",
+      "query": "reason-id:hunt.sweep",
       "operator": ">=",
       "value": "1"
     },
     {
-      "id": "damaged-objectives-still-finished",
-      "category": "invariant",
-      "description": "The concentrate-fire rule is narrowed, not deleted: a damaged objective with nothing shooting the unit, a damaged objective that shoots back, and every siege piece (msam, arty) still finish the building. Last fight 5,115 evaluations. Zero means the new branch swallowed the rule that makes buildings fall.",
-      "query": "reason-id:assault.finish-damaged-objective",
+      "id": "hunt-finds-and-pushes",
+      "category": "activation",
+      "description": "A hunter that sees one of their structures records it and asks for Attack, and the Scout doctrine goes straight to Attack rather than home through Opening (doctrine.scout-found-push). Absent under the same conditions as hunt-runs.",
+      "query": "reason-id:hunt.found",
       "operator": ">=",
       "value": "1"
+    },
+    {
+      "id": "no-timeout",
+      "category": "invariant",
+      "description": "No fight may run past the benchmark's 2,400s limit. A timed-out benchmark game voids its pair, and three voided pairs stopped training outright. The three that did at the previous champion ended with 380 to 700 of our units at home and one or two enemy buildings never found.",
+      "query": "summary.fight.durationSeconds",
+      "operator": "<=",
+      "value": "2400"
     },
     {
       "id": "buildings-still-fall",
       "category": "invariant",
-      "description": "Returning fire must not turn a base assault into a skirmish that never finishes a building. 22 were destroyed last fight; 8 is the component's reference.",
+      "description": "The hunt changes only what the Scout doctrine's army does once it is big, so base assaults must still finish buildings. 22 were destroyed two fights ago; 8 is the component's reference.",
       "query": "summary.headline.buildingsKilled",
       "operator": ">=",
       "value": "8"
-    },
-    {
-      "id": "exchange-holds",
-      "category": "outcome",
-      "description": "Units that shoot back at what is killing them should not trade worse. valueExchangeRatio was 7.924 last fight (reference 2).",
-      "query": "summary.headline.valueExchangeRatio",
-      "operator": ">=",
-      "value": "2.0"
-    },
-    {
-      "id": "rifles-fight-back",
-      "category": "outcome",
-      "description": "Rifles that return fire on infantry and buggies instead of chipping Concrete should keep scoring kills. e1 killed 47 last fight against an opponent that peaked at 24 units (126 the fight before, against an infantry army).",
-      "query": "units.sum(kills,type=e1,owner=Commander)",
-      "operator": ">=",
-      "value": "30"
-    },
-    {
-      "id": "army-held",
-      "category": "outcome",
-      "description": "Fewer rifles spent for nothing at the enemy's buildings should keep mean army at or above the component's reach. 6,543.6 last fight, 3,705.7 the fight before; reference 6,000.",
-      "query": "summary.headline.meanArmyValue",
-      "operator": ">=",
-      "value": "4000"
-    },
-    {
-      "id": "income-untouched",
-      "category": "invariant",
-      "description": "The change is confined to assault targeting in AttackBaseLogic and touches no economy code. Income was 58.7 credits a second (prior median 52.0); below 45 is a regression from somewhere else, or a match lost early.",
-      "query": "summary.headline.creditsEarnedPerSecond",
-      "operator": ">=",
-      "value": "45"
     }
   ]
 }

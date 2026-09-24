@@ -254,8 +254,14 @@ namespace AutoCnC.Reference.Logic
 				if (s.DoctrineSeconds < t.ScoutHoldSeconds)
 					return DoctrineDecision.Continue;
 
+				// A side ready to push goes straight back out. Routing it through Opening sent an
+				// army that had spread across the map to hunt (ArmyHunt, in DefensiveMode) home for
+				// a whole dwell window, then back to the structure it had just found.
 				if (s.EnemyBaseFound)
-					return DoctrineDecision.SwitchTo(ReferenceDoctrines.Opening, "their base has been found");
+					return readyToPush
+						? DoctrineDecision.SwitchTo(ReferenceDoctrines.Attack,
+							$"their base has been found; pushing with army worth {s.ArmyValue}", "doctrine.scout-found-push")
+						: DoctrineDecision.SwitchTo(ReferenceDoctrines.Opening, "their base has been found");
 			}
 
 			// 6. An army worth spending, and somewhere to spend it.

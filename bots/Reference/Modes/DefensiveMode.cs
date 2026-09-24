@@ -41,8 +41,14 @@ namespace AutoCnC.Reference.Modes
 		// CounterBatteryTuning.MaxEvaluations.
 		int counterBatteryEvaluations;
 
+		// A winning army with nothing left in sight hunts instead of guarding a base nobody is
+		// attacking. Inactive outside the Scout doctrine and below its army threshold. See ArmyHunt.
+		readonly ArmyHunt hunt = new();
+
 		public override void OnEnter(Actor self, ModeContext ctx)
 		{
+			hunt.Reset();
+
 			// Scale the leash off the unit's own reach, so short-ranged units stay tighter to the
 			// anchor than artillery does.
 			var range = ctx.WeaponRangeUnits;
@@ -71,6 +77,11 @@ namespace AutoCnC.Reference.Modes
 
 		public override UnitDecision OnTick(Actor self, ModeContext ctx)
 		{
+			// The Scout doctrine's army once their main base has fallen and nothing more is in
+			// sight: go and find what is left rather than stand at home until the match times out.
+			if (hunt.Active(self, ctx))
+				return hunt.Tick(self, ctx);
+
 			// --- Sense -------------------------------------------------------------
 			// Where the base is actually being destroyed, before anything is measured against
 			// the anchor: DistanceFromAnchorUnits is read below and decides both the tether and

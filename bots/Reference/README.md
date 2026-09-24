@@ -40,6 +40,39 @@ fight anything that comes inside its own weapon range on the way, because the ma
 point is the longest leg of the push and the ground it crosses is not safe.
 See [`Logic/AssaultStagingLogic.cs`](Logic/AssaultStagingLogic.cs).
 
+## A won game has to be finished
+
+A match only ends when the loser has nothing left, and this bot could not finish one. Once
+their main base fell and nothing more was in sight, rule 4 of `ReferenceBotLogic` switched to
+Scout ("nothing of theirs seen for 300s") and then re-affirmed Scout on every assessment. That
+held the doctrine there for the rest of the match. The Scout doctrine's army guards home, so the
+whole army stood there ("on post, no threats", around 40,000 evaluations in the last 400 seconds)
+while one or two scouts walked the map's rim.
+
+In the hard-16-9 evaluation at 51e0e4c, three benchmark games timed out at 2,400 s this way, two
+for a candidate and one for the champion itself. Each ended with 380 to 700 of our units, 76,000 to
+131,000 of army value, against an enemy with no army and one or two buildings nobody found. A
+timed-out benchmark game voids its pair, and three voided pairs stopped training outright.
+
+[`Modes/ArmyHunt.cs`](Modes/ArmyHunt.cs) and [`Logic/HuntLogic.cs`](Logic/HuntLogic.cs) now make
+the Scout doctrine's army hunt once it is worth 10,000 or more. The map is split into sectors of
+12 cells, and each unit walks them on an attack-move from a sector picked by its actor id, so the
+army spreads out instead of marching as one column (`hunt.sweep`). A hunter that sees a structure
+records it for the whole side, asks for Attack (`hunt.found`) and hits it (`hunt.attack`). Rule 5
+now sends a side that is ready to push straight to Attack when scouting has found their base,
+rather than home through Opening (`doctrine.scout-found-push`).
+
+The hunt is part of `DefensiveMode`, not a mode of its own. The platform keeps a unit's mode
+instance only while its mode type stays the same, so a separate hunt mode reset every defender's
+state at each doctrine switch. That changed the opening of games that never hunted, and two of
+them flipped from wins to losses.
+
+Measured on hard-16-9 against 51e0e4c: 6 wins to 5, with no timeouts. The five games that never
+hunt are identical to the second. Two wins came sooner (1,103 s against 1,215 s, and 999 s
+against 1,074 s), and seed 300008 went from a 2,400 s timeout to a win at 1,007 s. The paired gate
+scores this a tie because it drops the pair the control timed out, and a shorter win scores
+slightly less survival. It was adopted by hand for that reason.
+
 ## A bot must not talk over its own modes
 
 The host takes the bot's answer where it has one, and a mode's request only where it does not. So

@@ -332,6 +332,16 @@ namespace AutoCnC.Reference.Modes
 			// cap's work to the mix rule would make the mix rule's own check unfalsifiable.
 			var retargeted = !ReferenceEquals(plan, unretargeted);
 
+			// The bounded rocket rungs are an anti-air screen, so against an infantry army they
+			// are sized by the aircraft actually seen rather than by the plan's 8-12. Endless
+			// rungs, rifle rungs and every armour-heavy mix are untouched. See
+			// ArmyMixLogic.RocketCeiling for the 37 e3 this stops buying.
+			var rocketCeiling = ArmyMixLogic.RocketCeiling(seen, mix);
+			var uncappedRockets = plan;
+			plan = ArmyMixLogic.CapBounded(
+				plan, ReferencePlans.InfantryQueue, ReferencePlans.RocketBodies, rocketCeiling);
+			var rocketsCapped = !ReferenceEquals(plan, uncappedRockets);
+
 			// Keep the faction's always-buildable light screen funded while it is below the
 			// plan's release band. Siege units cannot serve this role until tech exists.
 			var screenVehicleRung = ExpansionLogic.FirstRungNaming(plan, ReferencePlans.ScreenVehicles);
@@ -530,6 +540,35 @@ namespace AutoCnC.Reference.Modes
 					why += $", rifles swapped for rockets, {seen.Armour} of {seen.Total} seen wear armour";
 			}
 
+			// Claimed on the same terms as the retarget above: only when the plan without the
+			// ceiling, carrying the same funding caps and recovery exemption, would have bought a
+			// rocket here. Barracks decisions only, because the vehicle queue never buys one and
+			// a rung reordering it sees is not this rule's to claim.
+			var rocketsCapChangedChoice = false;
+			if (rocketsCapped
+				&& string.Equals(choice.Queue, ReferencePlans.InfantryQueue, System.StringComparison.OrdinalIgnoreCase)
+				&& !ArmyMixLogic.Names(ReferencePlans.RocketBodies, choice.ActorType))
+			{
+				var baseline = IncomeFirstLogic.HoldForPriority(
+					uncappedRockets, ReferencePlans.InfantryQueue, ctx.Cash,
+					standingScreenVehicles, screenVehicleShortBelow,
+					screenVehicleBuildable, income.ScreenVehiclePrice, income).Plan;
+				baseline = IncomeFirstLogic.Hold(
+					baseline, ReferencePlans.InfantryQueue, ctx.Cash,
+					standingHarvesters, shortBelow, factories > 0, income).Plan;
+				if (!preserveFirstScreen)
+					baseline = IncomeFirstLogic.PrioritizeRecovery(
+						baseline, ReferencePlans.HarvesterUnits,
+						standingHarvesters, shortBelow, factories > 0);
+
+				var before = UnitProductionLogic.ChooseNext(state, baseline);
+				rocketsCapChangedChoice = before.IsValid
+					&& ArmyMixLogic.Names(ReferencePlans.RocketBodies, before.ActorType);
+			}
+
+			if (rocketsCapChangedChoice)
+				why += $", rockets held at {rocketCeiling} for {seen.Aircraft} aircraft seen: {seen.Infantry} of {seen.Total} seen are infantry";
+
 			if (standingHarvesters < shortBelow
 				&& ArmyMixLogic.Names(ReferencePlans.HarvesterUnits, choice.ActorType))
 				why += ", reserving construction cash before harvester queue visibility";
@@ -551,8 +590,13 @@ namespace AutoCnC.Reference.Modes
 				var floorShortBelow = ArmyBalanceLogic.ReleaseAt(
 					floorRung >= 0 ? preAttrition[floorRung].DesiredCount : 0, balance);
 
+				var baselinePlan = rocketsCapped
+					? ArmyMixLogic.CapBounded(
+						preAttrition, ReferencePlans.InfantryQueue, ReferencePlans.RocketBodies, rocketCeiling)
+					: preAttrition;
+
 				var baseline = IncomeFirstLogic.HoldForPriority(
-					preAttrition, ReferencePlans.InfantryQueue, ctx.Cash,
+					baselinePlan, ReferencePlans.InfantryQueue, ctx.Cash,
 					standingScreenVehicles, floorShortBelow,
 					screenVehicleBuildable, income.ScreenVehiclePrice, income).Plan;
 				baseline = IncomeFirstLogic.Hold(
@@ -592,6 +636,10 @@ namespace AutoCnC.Reference.Modes
 						baseline, ReferencePlans.InfantryQueue,
 						ReferencePlans.RifleBodies, ReferencePlans.RocketBodies);
 
+				if (rocketsCapped)
+					baseline = ArmyMixLogic.CapBounded(
+						baseline, ReferencePlans.InfantryQueue, ReferencePlans.RocketBodies, rocketCeiling);
+
 				baseline = IncomeFirstLogic.HoldForPriority(
 					baseline, ReferencePlans.InfantryQueue, ctx.Cash,
 					standingScreenVehicles, screenVehicleShortBelow,
@@ -616,9 +664,13 @@ namespace AutoCnC.Reference.Modes
 				return UnitDecision.Produce(
 					choice.Queue, choice.ActorType, why, "production.screen-floor-written-off");
 
-			return armourFloorWrittenOff
+			if (armourFloorWrittenOff)
+				return UnitDecision.Produce(
+					choice.Queue, choice.ActorType, why, "production.armour-floor-written-off");
+
+			return rocketsCapChangedChoice
 				? UnitDecision.Produce(
-					choice.Queue, choice.ActorType, why, "production.armour-floor-written-off")
+					choice.Queue, choice.ActorType, why, "production.rockets-held-to-air-threat")
 				: UnitDecision.Produce(choice.Queue, choice.ActorType, why);
 		}
 	}

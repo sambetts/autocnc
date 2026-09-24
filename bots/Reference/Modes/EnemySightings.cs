@@ -60,6 +60,9 @@ namespace AutoCnC.Reference.Modes
 
 			public int Infantry;
 			public int Armour;
+
+			/// <summary>The aircraft among <see cref="Armour"/>, for the anti-air ceiling.</summary>
+			public int Aircraft;
 		}
 
 		static readonly ConditionalWeakTable<Player, Tally> Tallies = new();
@@ -96,13 +99,16 @@ namespace AutoCnC.Reference.Modes
 					tally.Armour++;
 				else
 					tally.Infantry++;
+
+				if (kind == ThreatKind.Aircraft)
+					tally.Aircraft++;
 			}
 		}
 
 		/// <summary>What this side has seen so far, or <see cref="EnemyMix.None"/> if nothing.</summary>
 		public static EnemyMix Mix(Player owner) =>
 			owner != null && Tallies.TryGetValue(owner, out var tally)
-				? new EnemyMix(tally.Infantry, tally.Armour)
+				? new EnemyMix(tally.Infantry, tally.Armour, tally.Aircraft)
 				: EnemyMix.None;
 	}
 }

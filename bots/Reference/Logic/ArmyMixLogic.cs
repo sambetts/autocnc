@@ -24,9 +24,15 @@ namespace AutoCnC.Reference.Logic
 	/// supposed to describe. Harvesters count as armour, because that is what they wear — a
 	/// <c>harv</c> is Heavy plate, and the warhead that kills one is the warhead that kills a
 	/// tank.
+	/// <para>
+	/// <see cref="Aircraft"/> is a subset of <see cref="Armour"/>, not a third class, so every
+	/// share computed before it existed is unchanged. It only counts aircraft a sensing call
+	/// could return at all: the SDK drops actors with no enabled target types, so an airstrike
+	/// plane (<c>a10</c> has none) is never counted — correctly, since no rocket can shoot it.
+	/// </para>
 	/// <para>No engine types, so the rule that reads it can be read on its own.</para>
 	/// </remarks>
-	public readonly record struct EnemyMix(int Infantry, int Armour)
+	public readonly record struct EnemyMix(int Infantry, int Armour, int Aircraft = 0)
 	{
 		public static EnemyMix None { get; } = new(0, 0);
 
@@ -34,7 +40,11 @@ namespace AutoCnC.Reference.Logic
 	}
 
 	/// <summary>Tunable knobs for <see cref="ArmyMixLogic"/>.</summary>
-	public readonly record struct MixTuning(int MinimumSeen, int ArmourSharePercent)
+	public readonly record struct MixTuning(
+		int MinimumSeen,
+		int ArmourSharePercent,
+		int RocketFloor,
+		int RocketsPerAircraft)
 	{
 		public static MixTuning Default { get; } = new(
 			// How much of the enemy has to have been looked at before the plan is allowed to
@@ -65,7 +75,18 @@ namespace AutoCnC.Reference.Logic
 			// A mix genuinely balanced between the two lands under 60 and keeps the cheap body,
 			// which is the safe way round: rifles are a third of the price, so a wrong rifle
 			// wastes 100 credits and a wrong rocket wastes 300.
-			ArmourSharePercent: 60);
+			ArmourSharePercent: 60,
+
+			// The rockets every bounded rung keeps against an infantry army that has shown no
+			// aircraft: the same pair Defence already calls its anti-air core, so a heli that
+			// arrives later meets something that can shoot upwards while the next ones train.
+			RocketFloor: ReferencePlans.DefenceAntiAirCore,
+
+			// ...and one more for every distinct aircraft this side has actually seen. On 16:9 at
+			// Hard the opponent showed three heli in 1,190 seconds; this answers them with five
+			// rockets rather than the eight to twelve the rungs asked for, which is the gap
+			// between an anti-air screen and 37 rocket soldiers bought against infantry.
+			RocketsPerAircraft: 1);
 	}
 
 	/// <summary>
@@ -107,6 +128,22 @@ namespace AutoCnC.Reference.Logic
 	/// upwards — and a rule that rewrote those would delete the mixed army rather than choose
 	/// what tops it up.
 	/// </para>
+	/// <para>
+	/// <b>The rocket core is sized, though, and it used to be sized for the wrong job.</b> The
+	/// bounded rocket rungs asked for four and then twelve in Opening, two and then eight in
+	/// Defence, eight in Attack, and a bounded rung that names something which dies is re-bought
+	/// every time it does. On 16:9 at Hard the opponent fielded 98 <c>e1</c>, 85 <c>e4</c>,
+	/// 80 <c>e3</c>, three <c>heli</c> and no combat vehicle at all, and the rungs bought
+	/// <b>37 <c>e3</c> for 11,100 credits: 8 kills, 1,387 credits a kill, 29 of them dead</b>.
+	/// The same 11,100 spent on <c>e1</c> killed 24,300 credits' worth at 88 a kill. The duel
+	/// lab says why and that it is not one match: at equal cost <c>e3</c> is swept by every
+	/// infantry type (-0.9 against <c>e1</c>, <c>e2</c>, <c>e4</c> and <c>e5</c>), while
+	/// <c>e1</c> beats <c>mtnk</c> (+0.7) and <c>ltnk</c> (+0.8) about as well as <c>e3</c>
+	/// does. What only a rocket can do is shoot upwards (+0.9 against <c>orca</c>, +0.6 against
+	/// <c>heli</c>). So against an infantry army <see cref="RocketCeiling"/> caps those rungs at
+	/// an anti-air screen sized by the aircraft actually seen — never raising one, and never
+	/// touching an armour-heavy mix, whose endless rung is rockets anyway.
+	/// </para>
 	/// <para>ZERO OpenRA dependencies by design, integer-only, so it is lockstep-safe.</para>
 	/// </remarks>
 	public static class ArmyMixLogic
@@ -138,6 +175,70 @@ namespace AutoCnC.Reference.Logic
 				return false;
 
 			return mix.Armour * 100 < total * t.ArmourSharePercent;
+		}
+
+		/// <summary>
+		/// How many anti-air bodies every bounded rocket rung may ask for, or
+		/// <see cref="int.MaxValue"/> when the rungs should stand as written.
+		/// </summary>
+		/// <remarks>
+		/// Uncapped until the mix is both large enough to judge and infantry-dominated, so a side
+		/// that has met nobody, or has met armour, builds exactly what it built before. Past that
+		/// it is <see cref="MixTuning.RocketFloor"/> plus
+		/// <see cref="MixTuning.RocketsPerAircraft"/> for each distinct aircraft seen, so an
+		/// opponent who does build aircraft raises the ceiling back towards the plan by itself.
+		/// </remarks>
+		public static int RocketCeiling(in EnemyMix mix, in MixTuning t)
+		{
+			if (!PreferAntiInfantry(mix, t))
+				return int.MaxValue;
+
+			var floor = Math.Max(0, t.RocketFloor);
+			var perAircraft = Math.Max(0, t.RocketsPerAircraft);
+			var ceiling = floor + (long)Math.Max(0, mix.Aircraft) * perAircraft;
+			return ceiling >= int.MaxValue ? int.MaxValue : (int)ceiling;
+		}
+
+		/// <summary>
+		/// The plan with every bounded rung of <paramref name="queue"/> that names only
+		/// <paramref name="role"/> lowered to at most <paramref name="ceiling"/>.
+		/// </summary>
+		/// <remarks>
+		/// Lowers and never raises, and leaves endless rungs alone, so it can only take spend off
+		/// a role. Returns the plan it was handed, by reference, when nothing needed lowering,
+		/// which is how the caller knows whether to claim the change in its decision reason.
+		/// </remarks>
+		public static IReadOnlyList<ProductionStep> CapBounded(
+			IReadOnlyList<ProductionStep> plan,
+			string queue,
+			IReadOnlyList<string> role,
+			int ceiling)
+		{
+			if (plan == null
+				|| string.IsNullOrEmpty(queue)
+				|| role == null
+				|| role.Count == 0
+				|| ceiling < 0
+				|| ceiling == int.MaxValue)
+				return plan;
+
+			List<ProductionStep> rewritten = null;
+
+			for (var i = 0; i < plan.Count; i++)
+			{
+				var step = plan[i];
+				if (step.DesiredCount == int.MaxValue || step.DesiredCount <= ceiling)
+					continue;
+
+				if (!string.Equals(step.Queue, queue, StringComparison.OrdinalIgnoreCase)
+					|| !AllNamed(role, step.Candidates))
+					continue;
+
+				rewritten ??= new List<ProductionStep>(plan);
+				rewritten[i] = new ProductionStep(step.Queue, step.Candidates, ceiling);
+			}
+
+			return rewritten ?? plan;
 		}
 
 		/// <summary>

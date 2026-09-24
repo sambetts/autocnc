@@ -1,62 +1,62 @@
 {
   "schemaVersion": 1,
-  "authoredForRevision": "0759e464b7ead8652a5fda0d854c8e3811090d5c",
+  "authoredForRevision": "b2a8a77d64a08d31f4a472f321e248849c4e17d7",
   "checks": [
     {
-      "id": "engine-first-runs",
+      "id": "rocket-cap-runs",
       "category": "activation",
-      "description": "A fresh harvester is left on the engine's own (shroud-blind) search before the home survey is flown. In all 14 recorded 16:9 openings the first harvester was ordered at 51s to a 4-cell patch 16-17 cells out, so the best field this side could see was past EngineFirstCells (8) for at least the first review of that harvester. If this id is absent: TiberiumSurvey.IsFlown read true too early, the harvester read idle or not-live at spawn, or the yard could already see a field within 8 cells of the first refinery (then there was nothing to fix).",
-      "query": "reason-id:economy.harvester-engine-first",
+      "description": "The anti-air ceiling on bounded rocket rungs changed at least one barracks decision from e3 to another body. Last fight the side saw about 7% armour (283 infantry sightings, 3 aircraft, 1 vehicle, 16 economy) and the rungs still bought 37 e3. If absent against an infantry-heavy opponent: EnemySightings never reached 6, the ceiling never fell below a rung, or the claim's baseline disagrees with the plan. Absent against an armour-heavy opponent (>= 60% armour seen) is correct, because the rule does not apply.",
+      "query": "reason-id:production.rockets-held-to-air-threat",
       "operator": ">=",
       "value": "1"
     },
     {
-      "id": "engine-first-hands-back",
+      "id": "anti-air-screen-kept",
       "category": "invariant",
-      "description": "Deferral ends once the harvester's own ground is known within 8 cells or the survey is flown. Three pre-survey harvesters reviewed about every 15s over roughly 51-273s is at most ~35 deferrals; more than 80 means the survey never completed or a harvester kept deferring on ground past the threshold for the whole match.",
-      "query": "reason-id:economy.harvester-engine-first",
+      "description": "The ceiling keeps the DefenceAntiAirCore pair plus one per aircraft seen, and the pre-contact Opening rung (e3 x4) is untouched, so some rockets are always bought. Zero means the cap deleted the only unit that shoots upwards.",
+      "query": "summary.unitTypes[e3].built",
+      "operator": ">=",
+      "value": "2"
+    },
+    {
+      "id": "rockets-bought-as-screen",
+      "category": "outcome",
+      "description": "37 e3 were built last fight (11,100 credits, 8 kills, 1,387.5 credits a kill) against an opponent with no combat vehicles. Capped at 2 + aircraft seen, an infantry-heavy opponent should see at most about 20. Expect this to fail, legitimately, against an armour-heavy opponent where the cap does not apply.",
+      "query": "summary.unitTypes[e3].built",
       "operator": "<=",
-      "value": "80"
+      "value": "20"
     },
     {
-      "id": "second-load-by-120s",
-      "category": "outcome",
-      "description": "Earned at 120s was exactly 700 (one load) in all 13 scored 16:9 runs, because the first harvester commuted 16-17 cells. On the engine's search it works ground about 6 cells from its dock and should be unloading a second load before 120s.",
-      "query": "summary.economy.series[120].earned",
-      "operator": ">",
-      "value": "700"
-    },
-    {
-      "id": "opening-income-180s",
-      "category": "outcome",
-      "description": "Earned at 180s: 2,660 here, median 2,765 over 13 scored runs, only one run ever above 3,300 (3,485). The opponent's median was 4,200.",
-      "query": "summary.economy.series[180].earned",
-      "operator": ">=",
-      "value": "3300"
-    },
-    {
-      "id": "opening-income-300s",
-      "category": "outcome",
-      "description": "Earned at 300s: 8,400 here against the opponent's 14,500; median 9,225 over 13 scored runs (opponent median 11,990).",
-      "query": "summary.economy.series[300].earned",
-      "operator": ">=",
-      "value": "10500"
-    },
-    {
-      "id": "own-harvesters-live",
+      "id": "rifles-still-trade",
       "category": "invariant",
-      "description": "Own harvesters lived 634s on average on home ground (194.8s the round before). Deferring the opening to the engine keeps them within its 15-cell refinery search, so it must not feed the early fleet to raids.",
-      "query": "units.mean(lifetimeSeconds,type=harv,owner=Commander)",
-      "operator": ">=",
-      "value": "350"
+      "description": "e1 killed at 88.1 credits a kill last fight. Spend moved off rockets lands mostly on the rifle rungs, and more rifles must not mean worse rifles.",
+      "query": "summary.unitTypes[e1].creditsPerKill",
+      "operator": "<=",
+      "value": "150"
     },
     {
-      "id": "income-holds",
+      "id": "army-held-rises",
       "category": "outcome",
-      "description": "Lifetime income was 42.2 c/s (prior median 38.3). The change only touches the pre-survey opening, so the whole-match rate should not fall.",
+      "description": "armyValueIntegral was the one fitness component with room, apart from survival: mean army 3,705.7 against a reference of 6,000 (4,831 the round before). e3 lost 78% of what was spent on them and e1 64%, so the same spend on rifles should hold more army.",
+      "query": "summary.headline.meanArmyValue",
+      "operator": ">=",
+      "value": "4000"
+    },
+    {
+      "id": "exchange-holds",
+      "category": "outcome",
+      "description": "valueExchangeRatio was 2.382 (the component saturates at 2). Replacing a unit that is swept by infantry at -0.9 should not lower it.",
+      "query": "summary.headline.valueExchangeRatio",
+      "operator": ">=",
+      "value": "2.0"
+    },
+    {
+      "id": "income-untouched",
+      "category": "invariant",
+      "description": "The change touches only infantry rung sizes. Income was 58.3 c/s (prior median 42.2), and the engine-first opening that produced it is unchanged.",
       "query": "summary.headline.creditsEarnedPerSecond",
       "operator": ">=",
-      "value": "38"
+      "value": "45"
     }
   ]
 }

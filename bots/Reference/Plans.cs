@@ -364,7 +364,10 @@ namespace AutoCnC.Reference
 		/// <remarks>
 		/// The mirror image: 319 against <c>None</c>, 1,593 against <c>Light</c> and
 		/// <c>Heavy</c>. Three times the price of <see cref="RifleBodies"/> and worth it against
-		/// exactly the half of the game the rifle cannot touch.
+		/// exactly the half of the game the rifle cannot touch. The bounded rocket rungs below are
+		/// therefore written for an enemy with armour or aircraft: against an infantry army
+		/// <see cref="Logic.ArmyMixLogic.RocketCeiling"/> holds every one of them to an anti-air
+		/// screen sized by the aircraft actually seen.
 		/// </remarks>
 		public static string[] RocketBodies { get; } = ["e3"];
 

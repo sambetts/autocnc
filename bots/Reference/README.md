@@ -2607,6 +2607,53 @@ from the last round. `TiberiumSurvey.IsFlown` supplies the survey flag. Reason i
   `arty` outranged the towers from 1,236s and `heli` (21 of the 35 buildings lost) then took the
   base apart. The fleet did not die on the road this time; it died with its refineries.
 
+## Thirty-seven rocket soldiers against an army with no tanks
+
+The next `16:9` at Hard (Nod against Nod) was won at 1,190s, fitness 0.89. The engine-first opening
+held: 1,400 earned at 120s (700 in every earlier run) and 4,060 at 180s. Every fitness component
+scored 1.0 except `armyValueIntegral` (mean army 3,706 against a reference of 6,000) and
+`survival`, which is only the length of a won match.
+
+The opponent fielded **98 `e1`, 85 `e4`, 80 `e3`, three `heli` and not one combat vehicle**. This
+side logged 283 infantry sightings against three aircraft, one vehicle and 16 economy actors, so
+about 7% of what it saw wore armour. The endless rung read that correctly and bought rifles. The
+**bounded** rocket rungs had no way to. They ask for 4 then 12 in Opening, 2 then 8 in Defence and
+8 in Attack, and a bounded rung that names something that dies re-buys it every time it does:
+
+| | built | spent | kills | credits killed | credits a kill | died |
+| --- | --- | --- | --- | --- | --- | --- |
+| `e3` | 37 | 11,100 | 8 | 5,800 | 1,387 | 29 |
+| `e1` | 111 | 11,100 | 126 | 24,300 | 88 | 71 |
+
+Against enemy `e4` the rockets scored 1 kill for 11 deaths, and against `e1` 1 for 9. The duel lab
+says this is not one match: at equal cost `e3` is swept by every infantry type (-0.9 against `e1`,
+`e2`, `e4` and `e5`), and `e1` beats `mtnk` (+0.7) and `ltnk` (+0.8) about as well as `e3` does.
+The one thing only a rocket does is shoot upwards (+0.9 against `orca`, +0.6 against `heli`).
+
+**Against an infantry army, every bounded rocket rung is now capped at an anti-air screen**
+([`ArmyMixLogic.RocketCeiling`](Logic/ArmyMixLogic.cs), `CapBounded`). The cap is
+`DefenceAntiAirCore` (two) plus one per distinct enemy aircraft this side has seen. It applies only
+once six or more enemies have been seen and under 60% of them wore armour, the same test the endless
+rung already uses. It only ever lowers a bounded rung, so a side that has met nobody, or has met
+armour, trains exactly what it trained before. `EnemySightings` now counts aircraft separately.
+Airstrike planes are never counted, because the SDK drops actors with no target types from
+sensing. A barracks decision is tagged `production.rockets-held-to-air-threat` only when the
+uncapped plan, carrying the same funding caps, would have bought a rocket there.
+
+### Two things in this match that are not what they look like
+
+- **`c17` is 53.8% of spend in the unit ledger, and none of it was spent.** It is the Nod airstrip's
+  delivery plane, about one per vehicle delivered (45 planes, 44 vehicles), priced at 2,000 each. The per-type spend column
+  sums to 167,250 against 73,583 actually spent, so read shares of spend with `c17` removed.
+- **`idleUnitSeconds` rose to 19,542, and it is not idle combat units.** 6,234 of it is nine
+  harvesters, alive 759s on average, working without needing an order. About 7,000 more is
+  structures (`gtwr`, `sam`, `mcv`, `fact`, `afld`, `hand`).
+
+Not addressed this round, and worth measuring next: one `a10` napalm run at 527-529s killed three
+`arty` and six `e3` (3,600 credits, 12% of everything lost) packed inside two cells at (68-72,
+36-39). Both failed pushes, at 460s and 680s, launched at 4,400 of army and bled to the 1,500
+retreat floor. The second went in against an opponent whose army was 6,600.
+
 ## Start your own
 
 

@@ -63,6 +63,12 @@ Earlier experiments on these themes, so they are not repeated:
 - Answering aircraft on sight, or on seeing a helipad, with rocket soldiers or APCs won games the
   champion lost.
 
+A won game must also be finished. A benchmark game still running at 2,400 s voids its pair, and
+three voided pairs stop training outright. That happened once, with 380 to 700 of our units standing
+at home while the enemy had no army and one or two buildings nobody found. When the enemy has
+nothing left in sight, hunting down their last buildings and harvesters comes before any of the
+three priorities.
+
 ## Boundaries
 
 - Edit only files under `{workspace}`.

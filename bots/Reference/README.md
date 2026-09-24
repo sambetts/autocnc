@@ -2654,6 +2654,56 @@ Not addressed this round, and worth measuring next: one `a10` napalm run at 527-
 36-39). Both failed pushes, at 460s and 680s, launched at 4,400 of army and bled to the 1,500
 retreat floor. The second went in against an opponent whose army was 6,600.
 
+## A scratched building switched self-defence off
+
+The next `16:9` at Hard (GDI against Nod) was won at 729s, fitness 0.94, with every component at
+1.0 except `survival`, which for a won match is only its length. The loss ledger still had one
+shape in it, and the shape was a rule.
+
+`AttackBaseLogic.Decide` let an objective screen pre-empt the objective only while the objective
+was **untouched**. A building in a base assault is untouched for about one volley:
+
+| in-range evaluations, whole match | count |
+| --- | --- |
+| `assault.finish-damaged-objective` | **5,115** |
+| `assault.objective-in-range` | 49 |
+| `assault.screen-before-objective` | **17** |
+
+So once anybody had scratched a building, nothing in weapon range of it defended itself. Joining
+each own loss in `battle.csv` to its last evaluated decision: **13 of the 36 units lost in the
+assault died on `finish-damaged-objective`**, 11 of them riflemen finishing a Nod `sam` — a weapon
+that only targets aircraft, on Concrete that `M16` does 10% to — while **one `bggy` killed eight of
+them in twelve seconds** (389-401s) at the staging ground. The sampled hit log agrees: the largest
+share of enemy hits taken during the assault (33) landed on units holding that decision.
+
+**A damaged objective now yields to a mobile shooter when the objective cannot shoot back**
+([`AttackBaseLogic.SelectReturnFire`](Logic/AttackBaseLogic.cs)). The bounds are what keep fire
+concentrated: only when the objective cannot hit this unit (a damaged tower that is shooting us is
+still finished); only infantry, vehicles and aircraft, never another building; only something able
+to hit this unit and inside its own reach of it plus a cell; never outside our own weapon range;
+never for a siege piece (reach of 10 cells or more — `msam`, `arty`); and only when the shooter is at
+least as good a match for this unit's warhead as the objective, so rifles answer infantry and
+buggies while rockets and tanks keep shelling the building. The objective id is untouched, so the
+unit resumes the same building when the shooter is dead or gone. Reason id:
+`assault.return-fire-over-harmless-objective`.
+
+### Two things in this match that are not what they look like
+
+- **`e1` credits per kill failed its check at 212.8 (≤ 150 asked) mostly on the denominator.**
+  100 rifles were built and **54 were alive at the end**: the enemy's army was 0 from 660s while
+  this side's grew to 18,900, and the opponent fielded 63 combat units in all against the 266 of
+  the fight before. The rifles that did die for nothing are the 11 above, and the five below.
+- **`e1,msam` in the engagement matrix is this side's own `msam`.** Its splash dealt 41,697 damage
+  to own riflemen (27% of all damage `e1` took) and killed five, four of them while it was aimed at
+  an enemy harvester the riflemen were already standing beside. The
+  `durationSeconds`, `creditsKilled` and `cellsExplored` regressions are what a quick win against
+  a small opponent looks like, not faults: exploration still scored 1.0.
+
+Not addressed this round, and worth measuring next: the push spent **20,261** evaluations on
+`assault.sweep-for-targets`. After the last building of their main base fell at 605s it killed
+nothing for 96 seconds while the enemy had six buildings and no army, and the last expansion was
+on the sweep's sixth rung.
+
 ## Start your own
 
 

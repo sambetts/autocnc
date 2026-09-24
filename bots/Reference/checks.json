@@ -1,59 +1,59 @@
 {
   "schemaVersion": 1,
-  "authoredForRevision": "b2a8a77d64a08d31f4a472f321e248849c4e17d7",
+  "authoredForRevision": "57315105fc52e8de04bf94da2fa21b317922824d",
   "checks": [
     {
-      "id": "rocket-cap-runs",
+      "id": "return-fire-runs",
       "category": "activation",
-      "description": "The anti-air ceiling on bounded rocket rungs changed at least one barracks decision from e3 to another body. Last fight the side saw about 7% armour (283 infantry sightings, 3 aircraft, 1 vehicle, 16 economy) and the rungs still bought 37 e3. If absent against an infantry-heavy opponent: EnemySightings never reached 6, the ceiling never fell below a rung, or the claim's baseline disagrees with the plan. Absent against an armour-heavy opponent (>= 60% armour seen) is correct, because the rule does not apply.",
-      "query": "reason-id:production.rockets-held-to-air-threat",
+      "description": "A unit finishing a damaged objective that cannot shoot it turned on a mobile shooter inside that shooter's own reach. Last fight 13 of the 36 assault losses died on assault.finish-damaged-objective, 11 of them rifles finishing an air-only Nod sam while one bggy killed eight. Absent means the push never stood at a damaged harmless building under fire from mobile units (enemy army dead before the push reached buildings, or no assault at all), not necessarily that the branch is broken.",
+      "query": "reason-id:assault.return-fire-over-harmless-objective",
       "operator": ">=",
       "value": "1"
     },
     {
-      "id": "anti-air-screen-kept",
+      "id": "damaged-objectives-still-finished",
       "category": "invariant",
-      "description": "The ceiling keeps the DefenceAntiAirCore pair plus one per aircraft seen, and the pre-contact Opening rung (e3 x4) is untouched, so some rockets are always bought. Zero means the cap deleted the only unit that shoots upwards.",
-      "query": "summary.unitTypes[e3].built",
+      "description": "The concentrate-fire rule is narrowed, not deleted: a damaged objective with nothing shooting the unit, a damaged objective that shoots back, and every siege piece (msam, arty) still finish the building. Last fight 5,115 evaluations. Zero means the new branch swallowed the rule that makes buildings fall.",
+      "query": "reason-id:assault.finish-damaged-objective",
       "operator": ">=",
-      "value": "2"
+      "value": "1"
     },
     {
-      "id": "rockets-bought-as-screen",
-      "category": "outcome",
-      "description": "37 e3 were built last fight (11,100 credits, 8 kills, 1,387.5 credits a kill) against an opponent with no combat vehicles. Capped at 2 + aircraft seen, an infantry-heavy opponent should see at most about 20. Expect this to fail, legitimately, against an armour-heavy opponent where the cap does not apply.",
-      "query": "summary.unitTypes[e3].built",
-      "operator": "<=",
-      "value": "20"
-    },
-    {
-      "id": "rifles-still-trade",
+      "id": "buildings-still-fall",
       "category": "invariant",
-      "description": "e1 killed at 88.1 credits a kill last fight. Spend moved off rockets lands mostly on the rifle rungs, and more rifles must not mean worse rifles.",
-      "query": "summary.unitTypes[e1].creditsPerKill",
-      "operator": "<=",
-      "value": "150"
-    },
-    {
-      "id": "army-held-rises",
-      "category": "outcome",
-      "description": "armyValueIntegral was the one fitness component with room, apart from survival: mean army 3,705.7 against a reference of 6,000 (4,831 the round before). e3 lost 78% of what was spent on them and e1 64%, so the same spend on rifles should hold more army.",
-      "query": "summary.headline.meanArmyValue",
+      "description": "Returning fire must not turn a base assault into a skirmish that never finishes a building. 22 were destroyed last fight; 8 is the component's reference.",
+      "query": "summary.headline.buildingsKilled",
       "operator": ">=",
-      "value": "4000"
+      "value": "8"
     },
     {
       "id": "exchange-holds",
       "category": "outcome",
-      "description": "valueExchangeRatio was 2.382 (the component saturates at 2). Replacing a unit that is swept by infantry at -0.9 should not lower it.",
+      "description": "Units that shoot back at what is killing them should not trade worse. valueExchangeRatio was 7.924 last fight (reference 2).",
       "query": "summary.headline.valueExchangeRatio",
       "operator": ">=",
       "value": "2.0"
     },
     {
+      "id": "rifles-fight-back",
+      "category": "outcome",
+      "description": "Rifles that return fire on infantry and buggies instead of chipping Concrete should keep scoring kills. e1 killed 47 last fight against an opponent that peaked at 24 units (126 the fight before, against an infantry army).",
+      "query": "units.sum(kills,type=e1,owner=Commander)",
+      "operator": ">=",
+      "value": "30"
+    },
+    {
+      "id": "army-held",
+      "category": "outcome",
+      "description": "Fewer rifles spent for nothing at the enemy's buildings should keep mean army at or above the component's reach. 6,543.6 last fight, 3,705.7 the fight before; reference 6,000.",
+      "query": "summary.headline.meanArmyValue",
+      "operator": ">=",
+      "value": "4000"
+    },
+    {
       "id": "income-untouched",
       "category": "invariant",
-      "description": "The change touches only infantry rung sizes. Income was 58.3 c/s (prior median 42.2), and the engine-first opening that produced it is unchanged.",
+      "description": "The change is confined to assault targeting in AttackBaseLogic and touches no economy code. Income was 58.7 credits a second (prior median 52.0); below 45 is a regression from somewhere else, or a match lost early.",
       "query": "summary.headline.creditsEarnedPerSecond",
       "operator": ">=",
       "value": "45"

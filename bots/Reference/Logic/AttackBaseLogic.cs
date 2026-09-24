@@ -78,20 +78,31 @@ namespace AutoCnC.Reference.Logic
 			// 2. In range of the objective: clear only enemies already able to fight us, then
 			//    resume the sticky objective. This is not a chase: every candidate is already
 			//    inside weapon range, and the existing role scorer gives each weapon its job.
+			//    An untouched objective yields to any screen; a damaged one yields only to a
+			//    mobile shooter, and only when the objective itself cannot shoot back.
 			if (state.DistanceToObjectiveUnits <= state.WeaponRangeUnits)
 			{
-				var damaged = ObjectiveIsDamaged(state);
-				var screen = SelectObjectiveScreen(state, tuning, role);
-				if (screen.HasValue && !damaged)
-					return UnitDecision.Attack(screen.Value.ActorId,
-						"screening immediate threat before objective",
-						"assault.screen-before-objective");
+				if (!ObjectiveIsDamaged(state))
+				{
+					var screen = SelectObjectiveScreen(state, tuning, role);
+					return screen.HasValue
+						? UnitDecision.Attack(screen.Value.ActorId,
+							"screening immediate threat before objective",
+							"assault.screen-before-objective")
+						: UnitDecision.Attack(state.ObjectiveActorId, "objective in range", "assault.objective-in-range");
+				}
 
-				return damaged
-					? UnitDecision.Attack(state.ObjectiveActorId,
-						"finishing damaged objective rather than starting another",
-						"assault.finish-damaged-objective")
-					: UnitDecision.Attack(state.ObjectiveActorId, "objective in range", "assault.objective-in-range");
+				// A damaged objective is sticky against other buildings, not against the thing
+				// killing us. See SelectReturnFire.
+				var shooter = SelectReturnFire(state, role);
+				if (shooter.HasValue)
+					return UnitDecision.Attack(shooter.Value.ActorId,
+						$"returning fire on {shooter.Value.ActorType ?? shooter.Value.Kind.ToString()} before finishing an objective that cannot shoot back",
+						"assault.return-fire-over-harmless-objective");
+
+				return UnitDecision.Attack(state.ObjectiveActorId,
+					"finishing damaged objective rather than starting another",
+					"assault.finish-damaged-objective");
 			}
 
 			// 3. Opportunistic fire only — strictly targets already inside weapon range, so
@@ -252,20 +263,126 @@ namespace AutoCnC.Reference.Logic
 			return best;
 		}
 
-		static bool ObjectiveIsDamaged(in AssaultState state)
+		static bool ObjectiveIsDamaged(in AssaultState state) =>
+			TryFindObjective(state, out var objective) && objective.HealthPercent < 100;
+
+		static bool TryFindObjective(in AssaultState state, out ThreatSnapshot objective)
 		{
 			var threats = state.Threats;
-			if (threats == null)
-				return false;
+			if (threats != null)
+			{
+				for (var i = 0; i < threats.Count; i++)
+				{
+					if (threats[i].ActorId == state.ObjectiveActorId)
+					{
+						objective = threats[i];
+						return true;
+					}
+				}
+			}
+
+			objective = default;
+			return false;
+		}
+
+		/// <summary>How far past its own reach a shooter still counts as shooting at us.</summary>
+		/// <remarks>
+		/// One cell. Distances are centre to centre and a mobile shooter moves between
+		/// evaluations, so a threat measured just outside its range is usually about to be
+		/// inside it again.
+		/// </remarks>
+		public const int ReturnFireSlackUnits = 1024;
+
+		/// <summary>A reach at which a unit is a siege piece rather than a line unit.</summary>
+		/// <remarks>
+		/// Ten cells sits in the ruleset's gap: every other armed mobile reaches 9 or less
+		/// (<c>mlrs</c>'s anti-air 9, <c>rmbo</c> 8, <c>stnk</c> 7, <c>e3</c> and <c>bike</c> 6),
+		/// and the two siege pieces reach 11 with a 3-cell minimum and a splash that lands on
+		/// allies (<c>msam</c>, <c>arty</c>). A siege piece keeps shelling its objective: something
+		/// close enough to be shooting it is inside the melee our own line units are fighting,
+		/// and on 16:9 our own <c>msam</c> killed five of our <c>e1</c>, four of them while it was
+		/// aimed at an enemy harvester the riflemen were standing beside.
+		/// </remarks>
+		public const int SiegeRangeUnits = 10 * 1024;
+
+		/// <summary>
+		/// A mobile enemy that is shooting this unit while the damaged objective it is finishing
+		/// cannot shoot back — or null when finishing the objective is still the right shot.
+		/// </summary>
+		/// <remarks>
+		/// <b>A damaged objective used to switch self-defence off.</b> The objective screen only
+		/// ran while the objective was untouched, and a building in a base assault is untouched
+		/// for about one volley. On 16:9 (GDI against Nod, won at 729s) the screen fired on 17 of
+		/// 5,181 in-range evaluations; <c>assault.finish-damaged-objective</c> took the other
+		/// 5,115, and 13 of the 36 units lost in the assault died on that decision. Eleven of
+		/// them were riflemen finishing a Nod <c>sam</c> — a weapon that only targets aircraft,
+		/// on Concrete that an <c>M16</c> does 10% to — while one <c>bggy</c> killed eight of them
+		/// in twelve seconds. The buildings do not go anywhere; the thing killing the push does.
+		/// <para>
+		/// The bounds are what keep fire concentrated, which is what the damaged-objective rule
+		/// exists for:
+		/// </para>
+		/// <list type="bullet">
+		/// <item>Only when the objective itself cannot hit this unit. Finishing a damaged tower
+		/// that is shooting us is already self-defence, so it keeps the shot.</item>
+		/// <item>Only mobile shooters. Another building is never a reason to leave a damaged one;
+		/// that is the fire-spreading the damage weight in <see cref="SelectObjective"/> was
+		/// written to end.</item>
+		/// <item>Only something that is shooting at us: able to hit this unit, and inside its own
+		/// reach of it plus <see cref="ReturnFireSlackUnits"/>. Something merely visible inside
+		/// our reach is not an attacker.</item>
+		/// <item>Never leave weapon range, so this is a shot rather than a chase.</item>
+		/// <item>Never for a siege piece (<see cref="SiegeRangeUnits"/>).</item>
+		/// <item>Each weapon keeps its job: the shooter must be at least as good a match for this
+		/// unit's warhead as the objective is (<see cref="WeaponMatchLogic.Effectiveness"/>).
+		/// Rifles answer infantry and buggies; rockets and tanks answer vehicles and aircraft and
+		/// keep shelling the building while enemy infantry is about — which is also where a
+		/// splash weapon would land on our own riflemen.</item>
+		/// </list>
+		/// The objective id is untouched, so the unit resumes the same building the moment the
+		/// shooter is dead or gone.
+		/// </remarks>
+		public static ThreatSnapshot? SelectReturnFire(in AssaultState state, WeaponRole role)
+		{
+			var threats = state.Threats;
+			if (threats == null || threats.Count == 0 || state.WeaponRangeUnits >= SiegeRangeUnits)
+				return null;
+
+			if (!TryFindObjective(state, out var objective) || objective.CanHitUs)
+				return null;
+
+			var objectiveFit = WeaponMatchLogic.Effectiveness(role, objective.Kind);
+
+			ThreatSnapshot? best = null;
+			var bestScore = int.MinValue;
 
 			for (var i = 0; i < threats.Count; i++)
 			{
-				var threat = threats[i];
-				if (threat.ActorId == state.ObjectiveActorId)
-					return threat.HealthPercent < 100;
+				var t = threats[i];
+				if (t.ActorId == state.ObjectiveActorId || !t.IsAttackable || !t.CanHitUs)
+					continue;
+
+				if (t.Kind != ThreatKind.Infantry && t.Kind != ThreatKind.Vehicle && t.Kind != ThreatKind.Aircraft)
+					continue;
+
+				if (t.DistanceUnits > state.WeaponRangeUnits)
+					continue;
+
+				if (t.WeaponRangeUnits <= 0 || t.DistanceUnits > t.WeaponRangeUnits + ReturnFireSlackUnits)
+					continue;
+
+				if (WeaponMatchLogic.Effectiveness(role, t.Kind) < objectiveFit)
+					continue;
+
+				var score = ScoreBlocker(t, role);
+				if (score > bestScore || (score == bestScore && best.HasValue && t.ActorId < best.Value.ActorId))
+				{
+					bestScore = score;
+					best = t;
+				}
 			}
 
-			return false;
+			return best;
 		}
 
 		/// <inheritdoc cref="SelectBlocker(in AssaultState, in AssaultTuning)"/>

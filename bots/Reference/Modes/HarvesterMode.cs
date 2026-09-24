@@ -96,7 +96,11 @@ namespace AutoCnC.Reference.Modes
 				MapMaxY: bounds.Top + bounds.Height - 1,
 				HasEnemySighting: enemySeen,
 				EnemySeenX: enemySeen ? enemyCell.X : 0,
-				EnemySeenY: enemySeen ? enemyCell.Y : 0);
+				EnemySeenY: enemySeen ? enemyCell.Y : 0,
+
+				// Whether the fields this side can read are its home ground or only the part of
+				// it the yard happened to see. See HarvesterLogic.DefersToEngine.
+				HomeSurveyed: TiberiumSurvey.IsFlown(self.Owner));
 
 			// Scanning the map is a scan, not a lookup, so the rule decides when it is worth
 			// paying for: on a stall, or once a review window has gone by. The scan is centred on

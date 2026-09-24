@@ -69,6 +69,23 @@ namespace AutoCnC.Reference.Modes
 		}
 
 		/// <summary>
+		/// Whether this side has flown its whole survey, and so can see its own ground.
+		/// </summary>
+		/// <remarks>
+		/// False until a surveyor has planned the route, so a side with no screen vehicle yet
+		/// reads as unsurveyed — which is the truth. Asked by <see cref="HarvesterMode"/>: until
+		/// this is true, the resource layer this side can read is a sample of its home ground
+		/// rather than a map of it. See <see cref="HarvesterLogic.DefersToEngine"/>.
+		/// </remarks>
+		public static bool IsFlown(Player owner)
+		{
+			if (owner == null || !Surveys.TryGetValue(owner, out var survey) || survey.Plan == null)
+				return false;
+
+			return SurveyLogic.IsComplete(survey.Plan, survey.Progress);
+		}
+
+		/// <summary>
 		/// The survey's order for this unit, when this unit is the one flying it.
 		/// </summary>
 		/// <returns>False when the unit should do its mode's own job instead.</returns>

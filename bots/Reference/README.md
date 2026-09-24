@@ -2558,6 +2558,55 @@ fleet that is kept on home ground keeps inside that radius; the fallback to fron
 - **`units.mean(lifetimeSeconds,type=harv)` read 83.5 because it counts enemy harvesters too**, whose
   blank lifetimes count as zero. Own harvesters lived 194.8 s on average. Add `owner=Commander`.
 
+## The opening was ordered by the shroud, and the engine could see through it
+
+The next `16:9` at Hard (GDI against Nod) was lost at 1,842s — but slowly, and on economics. Home
+ground held: own harvesters lived 634 s on average (194.8 before), income was 42.2 credits a second
+(16.0 before) and every doctrine episode traded above one for one on value. The opponent simply
+earned **205,725 credits to 77,785** with the same income per harvester (7.0 against 7.9 credits a
+second at 900-1,200s) and twice the fleet, on ground it expanded onto.
+
+The gap does not start in the mid-game. It starts in the first two minutes, in the same way in
+every recorded 16:9 match, and it is this bot's doing:
+
+| | this side | opponent |
+| --- | --- | --- |
+| earned at 120s, all 13 scored runs | **700** every time (one load) | 700-2,400 |
+| earned at 180s, median of 13 | 2,765 | 4,200 |
+| earned at 300s, median of 13 | 9,225 | 11,990 |
+| income per harvester-second, 0-300s, this match | 13.9 | 20.5 |
+
+The harvester orders repeat run after run: in all fourteen recorded openings the first harvester is
+sent at 51s to a **4-cell patch 16-17 cells out** — the only ground the yard's sight reaches — the
+second at 103s to a field 9-10 cells out, and in half of them the third at 155s to **the same field
+21-24 cells out**. In this match a full green field lay 8-9 cells from the first and third
+refineries, and a blue one about as near the second, none of it explored until the jeep flew the
+survey at 229-284s, when all three crossed to it.
+
+`FindResourceFields` honours the shroud, correctly. The engine's own harvester search does not —
+it reads the resource layer from the refinery a harvester is created at, as any player's harvester
+does — and a new harvester is created already running it. The first explicit order replaced a
+search that could see the home fields with a destination that could not.
+
+**A fresh harvester is now left to the engine's search until the home survey is flown**
+([`HarvesterLogic.DefersToEngine`](Logic/HarvesterLogic.cs)), provided it has never been assigned
+a field, holds no contested report, is not under fire, has moved within `EngineSearchLiveTicks`
+(ten seconds), and the best field this side can see is more than `EngineFirstCells` (eight) from
+its refinery. Any of those failing hands it straight back to the explicit rules, so a search that
+finds nothing costs one review rather than a match, and once the survey is flown nothing differs
+from the last round. `TiberiumSurvey.IsFlown` supplies the survey flag. Reason id:
+`economy.harvester-engine-first`.
+
+### Two things in this match that are not what they look like
+
+- **`idleUnitSeconds` rose to 18,977 without anything idling.** 8,089 of it is harvesters working
+  without needing a new order for longer than 15 seconds — which is what a harvester that lives 634
+  seconds on home ground does — and most of the rest is structures. Combat units account for
+  about 1,800.
+- **`secondsWithNoHarvester` failed its check at 336 because of the last 300 seconds**, when enemy
+  `arty` outranged the towers from 1,236s and `heli` (21 of the 35 buildings lost) then took the
+  base apart. The fleet did not die on the road this time; it died with its refineries.
+
 ## Start your own
 
 

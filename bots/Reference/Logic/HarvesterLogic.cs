@@ -38,7 +38,9 @@ namespace AutoCnC.Reference.Logic
 		int ContestedMemoryTicks,
 		int CriticalHealthPercent,
 		int HomeGroundRatioPercent,
-		int HomeContestedMemoryTicks)
+		int HomeContestedMemoryTicks,
+		int EngineFirstCells,
+		int EngineSearchLiveTicks)
 	{
 		public static HarvesterTuning Default { get; } = new(
 			PanicRadiusUnits: 7 * 1024,
@@ -248,7 +250,40 @@ namespace AutoCnC.Reference.Logic
 			// above, and the whole fleet died on it. A field that is still being raided refreshes
 			// its report on every drive-off, so this only shortens the time after the shooting
 			// stops; one cycle is the floor ContestedMemoryTicks already argues for.
-			HomeContestedMemoryTicks: 1500);
+			HomeContestedMemoryTicks: 1500,
+
+			// How close to its refinery the best field this side has *seen* must be before a
+			// fresh harvester is sent to it rather than left to the engine's own search, while
+			// the home survey has not been flown. See HarvesterLogic.DefersToEngine.
+			//
+			// The engine's search reads the resource layer without shroud; FindResourceFields,
+			// correctly, does not. So before the survey the explicit order is the worse-informed
+			// of the two. In all fourteen recorded 16:9 openings the first harvester was sent at
+			// 51s to a 4-cell patch 16-17 cells out — the only ground the yard could see — and in
+			// half of them the third was sent 21-24 cells to the same field. In this match a full
+			// field lay 8-9 cells from the first and third refineries and a blue one about as near
+			// the second as the green it was sent to, none of it explored until the jeep flew the
+			// survey at 229-284s. The side had earned 980 credits at 140s to the opponent's
+			// 3,300, and 8,400 at 300s to its 14,500.
+			//
+			// Eight cells is about half the engine's refinery search radius in this mod (15), so
+			// a field we can see that close is one the engine would reach first anyway and the
+			// order costs nothing; beyond it, unexplored ground next to the refinery can beat it.
+			// Deferring is cheap when wrong: an engine search that finds nothing leaves the
+			// harvester standing still, and EngineSearchLiveTicks hands it back at the next review.
+			EngineFirstCells: 8,
+
+			// How recently a deferred harvester must have moved for its engine search to count
+			// as live. A search that found nothing parks the harvester beside the dock but keeps
+			// its activity running, so it never reads as idle and the active-order watchdog
+			// would take ActiveStallTicks — thirty seconds, most of a load — to notice. Ten
+			// seconds covers cutting a full cell (twelve bales at twelve ticks, under six
+			// seconds) and an unload (twenty at six, under five), so a harvester that is cutting
+			// or unloading qualifies, and a parked one is handed the explicit order at the next
+			// review, about fifteen seconds on at the two evaluations a second harvesters ran at
+			// on 16:9. Queueing at a busy dock can make a working harvester miss it once; that
+			// costs nothing but the old behaviour.
+			EngineSearchLiveTicks: 250);
 	}
 
 	/// <summary>One tiberium field, as the harvester rule needs to see it.</summary>
@@ -299,7 +334,8 @@ namespace AutoCnC.Reference.Logic
 		int MapMaxY,
 		bool HasEnemySighting = false,
 		int EnemySeenX = 0,
-		int EnemySeenY = 0);
+		int EnemySeenY = 0,
+		bool HomeSurveyed = true);
 
 	/// <summary>
 	/// What one harvester has been seen doing, and which field it has been told to work. Carried
@@ -942,6 +978,20 @@ namespace AutoCnC.Reference.Logic
 				if (assigned < 0)
 				{
 					var f = fields[best];
+
+					// ...or never sent anywhere yet, and this side does not know its own ground
+					// well enough to send it anywhere better than the engine will. See
+					// DefersToEngine: the engine's own search can see tiberium the shroud hides
+					// from us, and before the survey that is most of the tiberium near home.
+					if (DefersToEngine(state, seen, stalled, f, tuning))
+						return new HarvesterOutcome(
+							UnitDecision.Continue with
+							{
+								Reason = $"leaving a fresh harvester to the engine's own search: the best field this side has seen is {f.DistanceUnits / 1024} cells out and the home survey is not flown",
+								ReasonId = "economy.harvester-engine-first"
+							},
+							seen);
+
 					var why = watchdog.HasAssignment ? "field worked out" : "picking a field";
 
 					// A harvester that has never been shot at still knows where this side was
@@ -1121,6 +1171,74 @@ namespace AutoCnC.Reference.Logic
 		static bool IsNear(int x, int y, int targetX, int targetY) =>
 			x >= targetX - 1 && x <= targetX + 1
 			&& y >= targetY - 1 && y <= targetY + 1;
+
+		/// <summary>
+		/// Whether a harvester this side has never sent anywhere is better left on the engine's
+		/// own search than sent to <paramref name="best"/>, the best field this side has seen.
+		/// </summary>
+		/// <remarks>
+		/// <b>Before the survey, the explicit order is the worse-informed of the two.</b> A
+		/// harvester is created running the engine's search, which looks for the nearest
+		/// tiberium to its refinery through the resource layer itself — shroud or no shroud, as
+		/// any player's harvester does. <c>FindResourceFields</c> honours the shroud, so in the
+		/// opening it knows only what the yard's sight happens to reach, and the first order
+		/// this rule gave replaced a search that could see the whole home field with a
+		/// destination that could not. The recorded 16:9 openings show it: in all fourteen the
+		/// first harvester was sent to a 4-cell patch 16-17 cells out, and in this match a full
+		/// field sat 8-9 cells from two of the refineries, unexplored until the survey at
+		/// 229-284s. The opponent had earned 3,300 credits by 140s to this side's 980.
+		/// <para>
+		/// So a fresh harvester is left alone while all of the following hold, and is managed
+		/// exactly as before the moment any of them fails:
+		/// </para>
+		/// <list type="bullet">
+		/// <item>The home survey is not flown. Once it is, this side can see its own ground and
+		/// the field scores are the better judge — they rank blue over green and know which
+		/// side of the map a field is on.</item>
+		/// <item>It has never been assigned a field, and holds no contested report. A harvester
+		/// the fleet has warned off some ground must not be handed to a search that cannot
+		/// read the warning.</item>
+		/// <item>Its engine search is live: a refinery to search from, not idle, not stalled,
+		/// moved within <see cref="HarvesterTuning.EngineSearchLiveTicks"/>, nothing shooting at
+		/// it. A search that stops moving is reporting that it found nothing, which is the case
+		/// the explicit order exists for, and it gets that order at the next review.</item>
+		/// <item>The best field this side can see is further than
+		/// <see cref="HarvesterTuning.EngineFirstCells"/> from the refinery. Anything nearer is
+		/// ground the engine would reach first anyway, so ordering it changes nothing.</item>
+		/// </list>
+		/// <para>
+		/// It cannot hold a harvester in the dead bubble the explicit orders were built to
+		/// escape, because that bubble is exactly what stops the search moving. And it hands the
+		/// harvester back as soon as it stops being the better-informed choice: the harvester
+		/// explores the ground it is working, so a review that finds that ground inside the
+		/// threshold assigns it, and once the survey is flown the scores take over for every
+		/// harvester. Deferrals are named <c>economy.harvester-engine-first</c>.
+		/// </para>
+		/// </remarks>
+		public static bool DefersToEngine(
+			in HarvesterState state,
+			in HarvesterWatchdog seen,
+			bool stalled,
+			in FieldOption best,
+			in HarvesterTuning tuning)
+		{
+			if (state.HomeSurveyed || tuning.EngineFirstCells <= 0)
+				return false;
+
+			if (seen.HasAssignment || seen.HasContested || seen.Retreating)
+				return false;
+
+			if (!state.HasRefinery || state.IsIdle || stalled || state.DangerNearby)
+				return false;
+
+			// A running search that has stopped moving has found nothing. See
+			// HarvesterTuning.EngineSearchLiveTicks.
+			if (seen.LastProgressTick == int.MinValue
+				|| state.WorldTick - seen.LastProgressTick > tuning.EngineSearchLiveTicks)
+				return false;
+
+			return best.DistanceUnits > tuning.EngineFirstCells * 1024;
+		}
 
 		/// <summary>
 		/// Sends the harvester to a field and remembers which one, so the next review can tell

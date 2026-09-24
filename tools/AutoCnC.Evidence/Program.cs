@@ -63,10 +63,13 @@ namespace AutoCnC.Evidence
 		/// The previous round's <c>checks.json</c>. Null looks for one beside the evidence.
 		/// </param>
 		/// <param name="bot">Bot name for a history file that does not exist yet.</param>
+		/// <param name="matchupsPath">
+		/// The duel lab's <c>matchups.json</c>, or <c>none</c>. Null finds the repository's own.
+		/// </param>
 		public static Outcome Run(string evidenceDirectory, string historyPath = null,
-			string checksPath = null, string bot = null)
+			string checksPath = null, string bot = null, string matchupsPath = null)
 		{
-			var evidence = new EvidenceSet(evidenceDirectory).Load();
+			var evidence = new EvidenceSet(evidenceDirectory) { MatchupsPath = matchupsPath }.Load();
 
 			var seconds = evidence.Manifest.DurationSeconds;
 			if (evidence.Telemetry.Samples.Count > 0)
@@ -172,7 +175,8 @@ namespace AutoCnC.Evidence
 			var outcome = EvidencePipeline.Run(args[1],
 				options.GetValueOrDefault("history"),
 				options.GetValueOrDefault("checks"),
-				options.GetValueOrDefault("bot"));
+				options.GetValueOrDefault("bot"),
+				options.GetValueOrDefault("matchups"));
 
 			foreach (var path in outcome.Written)
 				Console.WriteLine($"wrote {path} ({new FileInfo(path).Length} bytes)");
@@ -318,7 +322,10 @@ namespace AutoCnC.Evidence
 				autocnc-evidence — derives the artifacts an improvement round reads.
 
 				  summarise <evidenceDir> [--history <file>] [--checks <file>] [--bot <name>]
-				      Writes units.csv, summary.json, check-results.json and trend.json.
+				            [--matchups <file>|none]
+				      Writes units.csv, summary.json, check-results.json and trend.json. Counters
+				      come from the duel lab's tools/DuelLab/results/matchups.json unless told
+				      otherwise.
 
 				  trend <historyFile> [--out <file>]
 				      Re-renders the cross-run trend from an existing index.

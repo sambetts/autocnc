@@ -217,6 +217,12 @@ namespace AutoCnC.Evidence
 		};
 
 		/// <summary>Metrics the trend tracks, and whether more of each is better.</summary>
+		/// <remarks>
+		/// The last three come from <c>intel</c> and <c>scale</c>: whether this side saw the army
+		/// that hurt it in time, whether what it built answers what it saw, and whether it produced
+		/// as much as the opponent. They are tracked so a round that improves or regresses them is
+		/// told so, whichever of them it set out to move.
+		/// </remarks>
 		static readonly (string Name, bool HigherIsBetter)[] Tracked =
 		[
 			("fitness", true),
@@ -229,7 +235,10 @@ namespace AutoCnC.Evidence
 			("creditsLost", false),
 			("durationSeconds", true),
 			("cellsExplored", true),
-			("idleUnitSeconds", false)
+			("idleUnitSeconds", false),
+			("lateSightingLossPercent", false),
+			("counterMatchPercent", true),
+			("spendVsOpponentPercent", true)
 		];
 
 		public static RunHistory Read(string path)
@@ -300,6 +309,16 @@ namespace AutoCnC.Evidence
 			entry.Headline["cellsExplored"] = headline.CellsExplored;
 			entry.Headline["idleUnitSeconds"] = headline.IdleUnitSeconds;
 			entry.Headline["fitness"] = entry.Fitness;
+
+			if (summary.Intel?.LateSightingLossPercent is double late)
+				entry.Headline["lateSightingLossPercent"] = late;
+
+			if (summary.Intel?.CounterMatchPercent is int match)
+				entry.Headline["counterMatchPercent"] = match;
+
+			if (summary.Scale?.SpendVsOpponentPercent is double spend)
+				entry.Headline["spendVsOpponentPercent"] = spend;
+
 			return entry;
 		}
 

@@ -43,6 +43,24 @@ namespace AutoCnC.Evidence
 		/// <summary>A power balance below this is a brownout, which slows production.</summary>
 		public const int LowPowerThreshold = 0;
 
+		/// <summary>
+		/// An enemy type first seen less than this long before it first hit this side arrived
+		/// unannounced: too late to build an answer to it.
+		/// </summary>
+		public const int LateSightingSeconds = 30;
+
+		/// <summary>A sighting within this many cells of this side's base is a sighting on arrival.</summary>
+		public const int NearBaseCells = 20;
+
+		/// <summary>How many measured counters each enemy type lists.</summary>
+		public const int CountersPerThreat = 3;
+
+		/// <summary>The weakest equal-cost margin still worth calling a counter.</summary>
+		public const double MinimumCounterMargin = 0.3;
+
+		/// <summary>Enemy unit types listed in <c>intel.threats</c>, most damaging first.</summary>
+		public const int MaxThreatRows = 12;
+
 		static readonly JsonSerializerOptions JsonOptions = new()
 		{
 			WriteIndented = true,
@@ -88,7 +106,8 @@ namespace AutoCnC.Evidence
 					HasEconomyFlows = telemetry.HasEconomyFlows,
 					FreeActorExclusion = rules.KnowsFreeActors ? "ruleset" : "unavailable",
 					GameRulesSchemaVersion = rules.SchemaVersion,
-					DecisionTraceSchemaVersion = trace.SchemaVersion
+					DecisionTraceSchemaVersion = trace.SchemaVersion,
+					HasMatchups = evidence.Matchups != null
 				},
 				Fight = new SummaryFight
 				{
@@ -175,6 +194,9 @@ namespace AutoCnC.Evidence
 			summary.Headline = Headline(summary, own, theirs, ours, queues, trace, seconds, rules);
 			summary.Fitness = FitnessScore.From(summary.Headline, summary.Map, summary.Fight.Outcome,
 				summary.Provenance);
+
+			summary.Intel = Intel(battle, local, rules, evidence.Matchups, summary.Fight.Faction, unitTypes);
+			summary.Scale = Scale(own, theirs, seconds, battle, local, rules, telemetry.HasEconomyFlows);
 
 			Note(summary, unitTypes, trace, rules);
 			return summary;
@@ -707,6 +729,311 @@ namespace AutoCnC.Evidence
 			};
 		}
 
+		/// <summary>One enemy unit type, as this side's battle log saw it.</summary>
+		sealed class ThreatTally
+		{
+			public string Type { get; init; }
+			public string Kind { get; set; }
+			public int? FirstSeen { get; set; }
+			public int? FirstSeenFromBase { get; set; }
+			public int? FirstHit { get; set; }
+			public int CreditsKilled { get; set; }
+			public int ValueSeen { get; set; }
+			public HashSet<uint> Seen { get; } = [];
+
+			public int? Lead => FirstSeen != null && FirstHit != null ? FirstHit - FirstSeen : null;
+		}
+
+		/// <summary>
+		/// When each enemy unit type was first seen against when it first hit this side, and what
+		/// the duel lab says this side's faction should have built against it.
+		/// </summary>
+		/// <remarks>
+		/// Reads only what this side observed. First sighting is per type rather than per wave: the
+		/// question it answers is whether this side knew the enemy fields a type in time to build
+		/// the answer, and a counter is bought against a type, not against one unit.
+		/// </remarks>
+		static SummaryIntel Intel(BattleEvents battle, string local, GameRules rules, Matchups matchups,
+			string faction, List<UnitTypeLedger> ourTypes)
+		{
+			var intel = new SummaryIntel();
+			var threats = new Dictionary<string, ThreatTally>(StringComparer.OrdinalIgnoreCase);
+			var structures = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+			ThreatTally Tally(string type)
+			{
+				if (!threats.TryGetValue(type, out var tally))
+				{
+					tally = new ThreatTally { Type = type };
+					threats[type] = tally;
+				}
+
+				return tally;
+			}
+
+			bool Combat(string type) =>
+				threats.TryGetValue(type, out var known) && known.Kind != null
+					? IsCombatKind(known.Kind)
+					: rules.Rule(type) is { } rule && !rule.IsHarvester &&
+						(string.Equals(rule.Kind, "mobile", StringComparison.OrdinalIgnoreCase) ||
+						 string.Equals(rule.Kind, "aircraft", StringComparison.OrdinalIgnoreCase));
+
+			// battle.csv is written in time order, so the first match of each is the earliest.
+			foreach (var e in battle.Events)
+			{
+				switch (e.Kind)
+				{
+					case BattleEvents.Spotted when IsEnemy(battle, local, e.Player) && !string.IsNullOrEmpty(e.Actor):
+					{
+						var kind = e.DetailText("kind");
+						int? fromBase = e.Details.ContainsKey("frombase") ? e.DetailInt("frombase") : null;
+
+						// An unarmed unit, a construction vehicle or a transport, is not a threat to answer.
+						if (IsCombatKind(kind) && rules.Rule(e.Actor)?.Armed != false)
+						{
+							var tally = Tally(e.Actor);
+							tally.Kind ??= kind;
+							if (tally.FirstSeen == null)
+							{
+								tally.FirstSeen = e.Seconds;
+								tally.FirstSeenFromBase = fromBase;
+							}
+
+							if (e.ActorId != 0)
+								tally.Seen.Add(e.ActorId);
+						}
+						else if (IsStructure(kind, e.Actor, rules))
+						{
+							structures.TryAdd(e.Actor, e.Seconds);
+							if (intel.EnemyBaseFirstSeenSeconds == null && (fromBase == null || fromBase > NearBaseCells))
+								intel.EnemyBaseFirstSeenSeconds = e.Seconds;
+						}
+
+						break;
+					}
+
+					case BattleEvents.Attacked when string.Equals(e.Player, local, StringComparison.Ordinal) &&
+						IsEnemy(battle, local, e.OtherPlayer):
+					{
+						intel.FirstEnemyHitSeconds ??= e.Seconds;
+						if (!string.IsNullOrEmpty(e.OtherActor) && Combat(e.OtherActor))
+							Tally(e.OtherActor).FirstHit ??= e.Seconds;
+
+						break;
+					}
+
+					case BattleEvents.Lost when string.Equals(e.Player, local, StringComparison.Ordinal) &&
+						IsEnemy(battle, local, e.OtherPlayer):
+					{
+						if (string.IsNullOrEmpty(e.OtherActor) || !Combat(e.OtherActor))
+							break;
+
+						var tally = Tally(e.OtherActor);
+						tally.FirstHit ??= e.Seconds;
+						tally.CreditsKilled += e.DetailInt("value") > 0 ? e.DetailInt("value") : rules.CostOf(e.Actor);
+						break;
+					}
+				}
+			}
+
+			foreach (var (type, seconds) in structures.OrderBy(s => s.Value).ThenBy(s => s.Key, StringComparer.Ordinal))
+				intel.EnemyStructuresFirstSeen[type] = seconds;
+
+			var combat = threats.Values
+				.Where(t => t.CreditsKilled > 0 || t.Seen.Count > 0 || t.FirstHit != null)
+				.ToList();
+			foreach (var tally in combat)
+				tally.ValueSeen = tally.Seen.Count * rules.CostOf(tally.Type);
+
+			var killed = combat.Sum(t => t.CreditsKilled);
+			if (killed > 0)
+			{
+				var late = combat
+					.Where(t => t.CreditsKilled > 0 && (t.Lead == null || t.Lead < LateSightingSeconds))
+					.Sum(t => t.CreditsKilled);
+				var near = combat
+					.Where(t => t.CreditsKilled > 0 && t.FirstSeenFromBase != null && t.FirstSeenFromBase <= NearBaseCells)
+					.Sum(t => t.CreditsKilled);
+
+				intel.LateSightingLossPercent = Math.Round(100d * late / killed, 1);
+				intel.NearBaseSightingLossPercent = Math.Round(100d * near / killed, 1);
+			}
+
+			var candidates = matchups == null
+				? new List<string>()
+				: matchups.Units.Where(u => rules.BuildableBy(u, faction)).ToList();
+			var spent = ourTypes.GroupBy(u => u.Type, StringComparer.OrdinalIgnoreCase)
+				.ToDictionary(g => g.Key, g => g.Sum(u => u.CreditsSpent), StringComparer.OrdinalIgnoreCase);
+
+			// What they fielded, by value seen; by what it killed when nothing was seen at all.
+			var weights = combat.Where(t => matchups?.Knows(t.Type) == true)
+				.Select(t => (t.Type, Weight: (double)t.ValueSeen)).ToList();
+			if (weights.Sum(w => w.Weight) <= 0)
+				weights = combat.Where(t => matchups?.Knows(t.Type) == true)
+					.Select(t => (t.Type, Weight: (double)t.CreditsKilled)).ToList();
+
+			double? MixScore(string unit)
+			{
+				double sum = 0, total = 0;
+				foreach (var (type, weight) in weights)
+				{
+					var margin = matchups?.Margin(unit, type);
+					if (margin == null || weight <= 0)
+						continue;
+
+					sum += weight * margin.Value;
+					total += weight;
+				}
+
+				return total > 0 ? sum / total : null;
+			}
+
+			if (matchups != null && candidates.Count > 0)
+				intel.MixCounters = Join(candidates
+					.Select(c => (Type: c, Margin: MixScore(c)))
+					.Where(c => c.Margin > 0)
+					.OrderByDescending(c => c.Margin).ThenBy(c => c.Type, StringComparer.Ordinal)
+					.Take(CountersPerThreat));
+
+			if (matchups != null)
+			{
+				double sum = 0, total = 0;
+				foreach (var (type, credits) in spent)
+				{
+					var score = credits > 0 ? MixScore(type) : null;
+					if (score == null)
+						continue;
+
+					sum += credits * score.Value;
+					total += credits;
+				}
+
+				if (total > 0)
+					intel.CounterMatchPercent = (int)Math.Round((sum / total + 1) * 50);
+			}
+
+			var rows = combat
+				.OrderByDescending(t => t.CreditsKilled)
+				.ThenByDescending(t => t.ValueSeen)
+				.ThenBy(t => t.FirstSeen ?? int.MaxValue)
+				.ThenBy(t => t.Type, StringComparer.Ordinal)
+				.Take(MaxThreatRows)
+				.ToList();
+
+			intel.Threats = Table.Of(rows,
+				[
+					"type", "kind", "firstSeenSeconds", "firstSeenCellsFromBase", "firstHitSeconds",
+					"leadSeconds", "actorsSeen", "valueSeen", "creditsKilled", "counters",
+					"creditsSpentOnCounters"
+				],
+				t =>
+				{
+					var counters = matchups == null || !matchups.Knows(t.Type)
+						? new List<(string Type, double? Margin)>()
+						: candidates
+							.Select(c => (Type: c, Margin: matchups.Margin(c, t.Type)))
+							.Where(c => c.Margin >= MinimumCounterMargin)
+							.OrderByDescending(c => c.Margin).ThenBy(c => c.Type, StringComparer.Ordinal)
+							.Take(CountersPerThreat)
+							.ToList();
+
+					return
+					[
+						t.Type, t.Kind ?? KindFromRules(t.Type, rules), t.FirstSeen, t.FirstSeenFromBase,
+						t.FirstHit, t.Lead, t.Seen.Count, t.ValueSeen, t.CreditsKilled,
+						counters.Count > 0 ? Join(counters) : null,
+						counters.Count > 0 ? counters.Sum(c => spent.GetValueOrDefault(c.Type)) : (int?)null
+					];
+				});
+
+			return intel;
+		}
+
+		static string Join(IEnumerable<(string Type, double? Margin)> counters) =>
+			string.Join('|', counters.Select(c =>
+				string.Create(CultureInfo.InvariantCulture, $"{c.Type} {c.Margin:+0.00;-0.00}")));
+
+		static bool IsEnemy(BattleEvents battle, string local, string player) =>
+			!string.IsNullOrEmpty(player) &&
+			!string.Equals(player, local, StringComparison.Ordinal) &&
+			(battle.Roster.Count == 0 || battle.Roster.ContainsKey(player));
+
+		static bool IsCombatKind(string kind) =>
+			string.Equals(kind, "Infantry", StringComparison.OrdinalIgnoreCase) ||
+			string.Equals(kind, "Vehicle", StringComparison.OrdinalIgnoreCase) ||
+			string.Equals(kind, "Aircraft", StringComparison.OrdinalIgnoreCase);
+
+		static bool IsStructure(string kind, string actor, GameRules rules) =>
+			string.Equals(kind, "Structure", StringComparison.OrdinalIgnoreCase) ||
+			string.Equals(kind, "Defence", StringComparison.OrdinalIgnoreCase) ||
+			(string.Equals(kind, "Economy", StringComparison.OrdinalIgnoreCase) && rules.Rule(actor)?.IsRefinery == true) ||
+			(string.IsNullOrEmpty(kind) && string.Equals(rules.Rule(actor)?.Kind, "building", StringComparison.OrdinalIgnoreCase));
+
+		/// <summary>A type that hit this side without ever being seen still gets a kind.</summary>
+		static string KindFromRules(string type, GameRules rules) =>
+			string.Equals(rules.Rule(type)?.Kind, "aircraft", StringComparison.OrdinalIgnoreCase)
+				? "Aircraft"
+				: "unseen";
+
+		/// <summary>
+		/// This side's income, spend, army and harvesters beside the opponent's, and how many unit
+		/// factories this side ever ran at once.
+		/// </summary>
+		static SummaryScale Scale(List<TelemetrySample> own, List<TelemetrySample> theirs, int seconds,
+			BattleEvents battle, string local, GameRules rules, bool hasEconomyFlows)
+		{
+			var scale = new SummaryScale
+			{
+				OwnEarnedPerSecond = Rate(Flow(own, s => s.Earned), seconds),
+				OpponentEarnedPerSecond = Rate(Flow(theirs, s => s.Earned), seconds),
+				OwnSpentPerSecond = Rate(Flow(own, s => s.Spent), seconds),
+				OpponentSpentPerSecond = Rate(Flow(theirs, s => s.Spent), seconds),
+				OwnPeakArmyValue = Peak(own, s => s.Army),
+				OpponentPeakArmyValue = Peak(theirs, s => s.Army),
+				OwnMeanArmyValue = own.Count > 0 ? Math.Round(own.Average(s => (double)s.Army), 1) : 0,
+				OpponentMeanArmyValue = theirs.Count > 0 ? Math.Round(theirs.Average(s => (double)s.Army), 1) : 0,
+				OwnPeakHarvesters = Peak(own, s => s.Harvesters ?? 0),
+				OpponentPeakHarvesters = Peak(theirs, s => s.Harvesters ?? 0),
+				OwnPeakBuildings = Peak(own, s => s.Buildings),
+				OpponentPeakBuildings = Peak(theirs, s => s.Buildings)
+			};
+
+			if (hasEconomyFlows && scale.OpponentSpentPerSecond > 0)
+				scale.SpendVsOpponentPercent = Math.Round(100d * scale.OwnSpentPerSecond / scale.OpponentSpentPerSecond, 1);
+
+			scale.OwnMeanHarvesters = own.Count > 0 ? Math.Round(own.Average(s => (double)(s.Harvesters ?? 0)), 1) : 0;
+			scale.OpponentMeanHarvesters = theirs.Count > 0 ? Math.Round(theirs.Average(s => (double)(s.Harvesters ?? 0)), 1) : 0;
+			if (hasEconomyFlows && scale.OwnMeanHarvesters > 0)
+				scale.OwnEarnedPerHarvesterSecond = Math.Round(scale.OwnEarnedPerSecond / scale.OwnMeanHarvesters, 2);
+
+			if (hasEconomyFlows && scale.OpponentMeanHarvesters > 0)
+				scale.OpponentEarnedPerHarvesterSecond = Math.Round(scale.OpponentEarnedPerSecond / scale.OpponentMeanHarvesters, 2);
+
+			var standing = 0;
+			foreach (var e in battle.Events)
+			{
+				if (!string.Equals(e.Player, local, StringComparison.Ordinal) || !rules.IsUnitFactory(e.Actor))
+					continue;
+
+				if (string.Equals(e.Kind, BattleEvents.Built, StringComparison.Ordinal))
+					standing++;
+				else if (string.Equals(e.Kind, BattleEvents.Lost, StringComparison.Ordinal))
+					standing = Math.Max(0, standing - 1);
+				else
+					continue;
+
+				scale.OwnUnitFactoriesPeak = Math.Max(scale.OwnUnitFactoriesPeak, standing);
+				if (standing >= 2)
+					scale.OwnSecondUnitFactorySeconds ??= e.Seconds;
+			}
+
+			return scale;
+		}
+
+		/// <summary>A cumulative flow's final value, or its peak if the last sample dipped.</summary>
+		static int Flow(List<TelemetrySample> samples, Func<TelemetrySample, int?> flow) =>
+			samples.Count == 0 ? 0 : Math.Max(flow(samples[^1]) ?? 0, samples.Max(s => flow(s) ?? 0));
+
 		static SummaryHeadline Headline(FightSummary summary, List<TelemetrySample> own,
 			List<TelemetrySample> theirs, List<UnitRecord> ours, List<QueueSummary> queues,
 			DecisionTrace trace, int seconds, GameRules rules)
@@ -800,6 +1127,30 @@ namespace AutoCnC.Evidence
 					string.Join(", ", unitTypes.Where(u => u.FreeCount > 0)
 						.Select(u => $"{u.FreeCount}x {u.Type}")) +
 					". Instances of the same type that were ordered are still charged.");
+
+			if (summary.Intel?.LateSightingLossPercent is double late && late >= 50)
+				summary.Notes.Add(string.Format(CultureInfo.InvariantCulture,
+					"{0:0.#}% of the value this side lost to enemy units went to types first seen " +
+					"less than {1}s before they first hit it, or never seen: intel.threats has the timings.",
+					late, LateSightingSeconds));
+
+			if (summary.Scale?.SpendVsOpponentPercent is double spend && spend < 60)
+				summary.Notes.Add(string.Format(CultureInfo.InvariantCulture,
+					"This side spent {0:0.#} credits a second against the opponent's {1:0.#} ({2:0}%): " +
+					"the gap is how much was produced, whatever the unit mix.",
+					summary.Scale.OwnSpentPerSecond, summary.Scale.OpponentSpentPerSecond, spend));
+
+			if (summary.Intel?.CounterMatchPercent is int match && match < 45)
+				summary.Notes.Add(string.Format(CultureInfo.InvariantCulture,
+					"counterMatchPercent is {0}: by the duel lab's equal-cost margins, what this side " +
+					"built trades worse than even against what the enemy fielded. intel.mixCounters " +
+					"names the measured answers.",
+					match));
+
+			if (!summary.Provenance.HasMatchups)
+				summary.Notes.Add(
+					"The duel lab's matchups.json was not found, so intel names no counters and no " +
+					"counterMatchPercent.");
 		}
 
 		/// <summary>
@@ -845,11 +1196,13 @@ namespace AutoCnC.Evidence
 				(summary.Engagements, 24, "engagements"),
 				(summary.LossClusters, 8, "lossClusters"),
 				(summary.Economy?.Series, 20, "economy.series"),
+				(summary.Intel?.Threats, 8, "intel.threats"),
 				(summary.DoctrineEpisodes, 12, "doctrineEpisodes"),
 				(summary.UnitTypes, 20, "unitTypes"),
 				(summary.Engagements, 8, "engagements"),
 				(summary.LossClusters, 3, "lossClusters"),
 				(summary.Economy?.Series, 10, "economy.series"),
+				(summary.Intel?.Threats, 5, "intel.threats"),
 				(summary.UnitTypes, 12, "unitTypes")
 			})
 			{
@@ -867,6 +1220,7 @@ namespace AutoCnC.Evidence
 				(summary.LossClusters, "lossClusters"),
 				(summary.Economy?.Series, "economy.series"),
 				(summary.DoctrineEpisodes, "doctrineEpisodes"),
+				(summary.Intel?.Threats, "intel.threats"),
 				(summary.Production, "production"),
 				(summary.UnitTypes, "unitTypes")
 			};

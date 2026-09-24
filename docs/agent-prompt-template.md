@@ -16,6 +16,53 @@ Query the resolved actor and weapon stats as needed: `{gameRules}`
 
 Treat the guide as authoritative for game mechanics, fair information access, and the SDK.
 
+## Priorities for this phase
+
+Three gaps decide this bot's matches. Choose this round's change from them, say which one you chose
+and cite the number that chose it, and write at least one check on the metric it targets. All of
+these numbers are precomputed in `{summary}`.
+
+1. **Produce more.** `scale` sets this side's income, spend, harvesters, unit factories and army
+   beside the opponent's. In the twelve fights before this section was written, every loss had a
+   `scale.spendVsOpponentPercent` of 40 or less and every win had 71 or more. The losses were
+   economies that collapsed: a mean of 1.3 to 4.8 harvesters on the field against the opponent's
+   6.5 to 12.8, and a peak of 6 to 9 against 13 to 23. Income per harvester
+   (`scale.ownEarnedPerHarvesterSecond`) differed far less than harvester count, so the gap is how
+   many harvesters there are and how long they live. Then spend everything that comes in: keep
+   every queue busy (`production` secondsIdle, `economy.meanIdleCash`), and turn cash that banks
+   up into another barracks or war factory (`scale.ownUnitFactoriesPeak`). Work on this first
+   while `spendVsOpponentPercent` is below 70.
+2. **See what is coming.** `intel.threats` compares when each enemy unit type was first seen with
+   when it first hit this side. `leadSeconds` is negative when a type, usually artillery, hit
+   before anything saw it. `intel.lateSightingLossPercent` is the share of losses to types that
+   arrived unannounced, and it was 55 to 100 in eleven of those twelve fights, wins included.
+   `intel.enemyStructuresFirstSeen` dates their tech: a helipad or airfield means aircraft are
+   coming. A counter can only be built against something that has been seen, so scouting must go
+   on after their base is found. Watch their approach, and look into their base every few
+   minutes. Work on this when `lateSightingLossPercent` is 50 or more and production is not the
+   larger gap.
+3. **Build what beats it.** For each enemy type, the `counters` column of `intel.threats` names the
+   three units this faction can build that beat it at equal cost, as measured by the engine in the
+   duel lab, and `creditsSpentOnCounters` says how much this side bought of them.
+   `intel.mixCounters` answers the whole enemy army seen, and `intel.counterMatchPercent` scores
+   what this side actually built against it: 50 is an even trade, 100 a sweep. The full grid,
+   blind and with vision, including towers and raids, is `docs/unit-matchups.md` at the repository
+   root. To use the margins in code, run `./scripts/export-bot-matchups.ps1` from the repository
+   root. It writes `Logic/MatchupTable.cs` into this workspace, with
+   `MatchupTable.Margin(unit, opponent)`. The margins come from massed, equal-cost groups on open
+   ground. A counter bought one unit at a time into a fight it cannot win alone still loses, and
+   a combined army, such as artillery behind riflemen, can beat what each of its parts loses to
+   on its own.
+
+Earlier experiments on these themes, so they are not repeated:
+
+- A scout taken from the only light vehicle a Nod opening escorts its harvesters with lost games
+  the champion wins. Watch with a cheap body, or build an extra scout.
+- Counter rungs placed ahead of the harvester rungs, or swapped in for the siege rung, starved
+  the economy and lost.
+- Answering aircraft on sight, or on seeing a helipad, with rocket soldiers or APCs won games the
+  champion lost.
+
 ## Boundaries
 
 - Edit only files under `{workspace}`.
@@ -55,7 +102,9 @@ code, before you are called.
   exactly that reason. It holds the per-unit-type ledger (built, lost, kills, credits spent, share
   of spend, damage both ways, credits per kill, mean lifetime), the economy series, per-queue
   production, doctrine episodes, the engagement matrix, loss clusters, map facts, the telemetry
-  crossover, and a graded fitness score broken into named components.
+  crossover, a graded fitness score broken into named components, `intel` (each enemy unit type's
+  first sighting against its first hit on this side, and its measured counters) and `scale` (this
+  side's economy and production against the opponent's).
 - **Unit ledger: `{units}`** — one row per unit, whole lifecycle. `Import-Csv` then `Group-Object`
   answers "which type never survived anything", "did the army arrive in waves sorted by speed" and
   "what did each type kill per credit" in one line each.
@@ -110,7 +159,8 @@ of earlier runs rather than against a single noisy match, and is the first thing
    a match can be lost while a component genuinely improves.
 2. Explain every failing check and every flagged regression before proposing anything new.
 3. Read the bot source.
-4. Locate the decisive weakness, citing the artifact and the number that shows it.
+4. Choose the priority above that this fight's numbers put furthest behind, and locate the
+   decisive weakness within it, citing the artifact and the number that shows it.
 5. Implement the smallest coherent improvement to the battle logic.
 6. Write the checks for the next round, as below.
 7. Build the bot, fixing failures before finishing.
@@ -135,12 +185,12 @@ round taking your word for it. The harness reads it from there and reports it as
       "value": "1"
     },
     {
-      "id": "spend-rate-recovers",
+      "id": "spend-keeps-up",
       "category": "outcome",
-      "description": "Lifetime spend returns above 40 credits per second",
-      "query": "summary.headline.creditsSpentPerSecond",
+      "description": "This side spends at least 70% of what the opponent spends",
+      "query": "summary.scale.spendVsOpponentPercent",
       "operator": ">=",
-      "value": "40"
+      "value": "70"
     },
     {
       "id": "light-infantry-earn-their-cost",

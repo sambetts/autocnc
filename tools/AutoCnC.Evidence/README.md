@@ -25,7 +25,7 @@ launcher solution, is `IsPackable=false`, and targets plain `net8.0` so CI can t
 ## Commands
 
 ```
-dotnet AutoCnC.Evidence.dll summarise <evidenceDir> [--history <file>] [--checks <file>] [--bot <name>]
+dotnet AutoCnC.Evidence.dll summarise <evidenceDir> [--history <file>] [--checks <file>] [--bot <name>] [--matchups <file>|none]
 dotnet AutoCnC.Evidence.dll trend <historyFile> [--out <file>]
 dotnet AutoCnC.Evidence.dll audit-bot <botSourceDir>
 ```
@@ -57,6 +57,8 @@ builder trims its longest lists in a fixed order and records exactly what it tri
 | `doctrineEpisodes` | Each episode with army value at entry and exit, and what it killed and lost. |
 | `engagements` | Own actor type × enemy actor type → damage dealt, damage taken, kills, deaths. |
 | `lossClusters` | Where this side kept dying: centroid, radius, count, credits, time window. |
+| `intel` | When each enemy unit type was first seen against when it first hit this side, what it killed, and the duel lab's measured counters that this side's faction can build. See below. |
+| `scale` | This side's income, spend, army, harvesters and buildings beside the opponent's, and its peak number of unit factories. |
 | `notes` | Facts a reader would otherwise have to notice, including why a number is missing. |
 | `truncated` | What was shortened to fit, and from what. |
 
@@ -71,6 +73,29 @@ key, which is what keeps `summary.unitTypes[e1].creditsPerKill` resolvable.
 authority of the ruleset's own `FreeActor` trait, exported into `game-rules.json` at schema 2 —
 never by the old heuristic of matching a harvester's build second against a refinery's. On an older
 run, `provenance.freeActorExclusion` reads `unavailable` and a note says so rather than guessing.
+
+**`intel`** is built from this side's own battle log, meaning its sightings, hits taken and losses,
+plus the duel lab's static matchups:
+
+| Field | Contents |
+| --- | --- |
+| `enemyBaseFirstSeenSeconds` | First enemy structure seen more than 20 cells from home. |
+| `firstEnemyHitSeconds` | First time the enemy damaged anything of this side's. |
+| `lateSightingLossPercent` | Share of the value lost to enemy units that went to types first seen less than 30 s before they first hit, or never seen. |
+| `nearBaseSightingLossPercent` | Share of the same losses to types first seen within 20 cells of home. |
+| `counterMatchPercent` | How well the credits spent on combat units answer the enemy army seen, by the lab's equal-cost margins: 50 is an even trade, 100 a sweep. |
+| `mixCounters` | The three units this faction can build that best answer the whole enemy army seen. |
+| `enemyStructuresFirstSeen` | Each enemy structure type and when it was first seen. A helipad means aircraft. |
+| `threats` | Per enemy unit type: first seen, cells from home, first hit, `leadSeconds` (negative when it hit before it was seen), actors and value seen, credits killed, counters, and credits spent on them. |
+
+Counters come from `tools/DuelLab/results/matchups.json`, found by walking up from the tool.
+`--matchups <file>` names another file and `--matchups none` disables them. A `matchups.json` beside
+the evidence takes precedence. `provenance.hasMatchups` says whether any were found. Counters are
+limited to units the side's faction can build, from the queues in `game-rules.json`.
+
+**`scale`** takes the opponent's figures from telemetry, the omniscient after-match record, to
+diagnose the gap between the two economies. It is never something a bot could have read during
+the match.
 
 ### `units.csv` — `UnitLedger.SchemaVersion` 1
 
@@ -154,6 +179,10 @@ Per-bot index of every run, and a rolled-up diff of the last `RunIndex.TrendWind
 the headline metrics. A metric that falls by `RunIndex.RegressionThreshold` (15%) against the
 **median of earlier runs** — not against the previous run, which at n=1 is as noisy as the thing it
 is measuring — is flagged as a regression and named in the next prompt.
+
+Three of the tracked metrics come from `intel` and `scale`: `lateSightingLossPercent` (lower is
+better), `counterMatchPercent` and `spendVsOpponentPercent`. Runs recorded before they existed
+simply lack them, and the trend says how many runs record each.
 
 Control-arm runs are excluded from the trend series and counted only in the benchmark comparison,
 so a control loss never reads as the candidate regressing. The comparison is scoped to one

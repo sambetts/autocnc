@@ -29,6 +29,15 @@ namespace AutoCnC.Evidence
 
 		/// <summary>Actors this one is handed for nothing when it finishes.</summary>
 		public string[] FreeActors { get; init; } = [];
+
+		/// <summary>Production queues that build this actor, such as <c>Infantry.GDI</c>.</summary>
+		public string[] Queues { get; init; } = [];
+
+		/// <summary>Queues this actor provides once it stands, such as <c>Vehicle.GDI</c> for a war factory.</summary>
+		public string[] Produces { get; init; } = [];
+
+		/// <summary>True when the actor carries at least one armament.</summary>
+		public bool Armed { get; init; }
 	}
 
 	/// <summary>
@@ -78,6 +87,43 @@ namespace AutoCnC.Evidence
 		public ActorRule Rule(string actorType) =>
 			actorType != null && Actors.TryGetValue(actorType, out var rule) ? rule : null;
 
+		/// <summary>
+		/// Whether a player of <paramref name="faction"/> can build this actor from any of its queues.
+		/// </summary>
+		/// <remarks>
+		/// Queues are named per faction, <c>Infantry.GDI</c> or <c>Vehicle.Nod</c>, so the faction
+		/// is the suffix. False when the rules export carries no build data, rather than a guess
+		/// that would recommend the other faction's units.
+		/// </remarks>
+		public bool BuildableBy(string actorType, string faction)
+		{
+			var rule = Rule(actorType);
+			if (rule == null || string.IsNullOrEmpty(faction))
+				return false;
+
+			foreach (var queue in rule.Queues)
+				if (queue.EndsWith("." + faction, StringComparison.OrdinalIgnoreCase))
+					return true;
+
+			return false;
+		}
+
+		/// <summary>True for a structure that trains infantry, vehicles or aircraft.</summary>
+		public bool IsUnitFactory(string actorType)
+		{
+			var rule = Rule(actorType);
+			if (rule == null)
+				return false;
+
+			foreach (var queue in rule.Produces)
+				if (queue.StartsWith("Infantry", StringComparison.OrdinalIgnoreCase) ||
+					queue.StartsWith("Vehicle", StringComparison.OrdinalIgnoreCase) ||
+					queue.StartsWith("Aircraft", StringComparison.OrdinalIgnoreCase))
+					return true;
+
+			return false;
+		}
+
 		public static GameRules Read(string path)
 		{
 			var rules = new GameRules();
@@ -120,11 +166,30 @@ namespace AutoCnC.Evidence
 					IsHarvester = Flag(actor, "isHarvester"),
 					IsRefinery = Flag(actor, "isRefinery"),
 					SpeedCellsPerGameSecond = Real(actor, "speedCellsPerGameSecond"),
-					FreeActors = free
+					FreeActors = free,
+					Queues = actor.TryGetProperty("build", out var build) && build.ValueKind == JsonValueKind.Object
+						? Strings(build, "queues")
+						: [],
+					Produces = Strings(actor, "produces"),
+					Armed = actor.TryGetProperty("armaments", out var armaments) &&
+						armaments.ValueKind == JsonValueKind.Array && armaments.GetArrayLength() > 0
 				};
 			}
 
 			return rules;
+		}
+
+		static string[] Strings(JsonElement element, string name)
+		{
+			if (!element.TryGetProperty(name, out var array) || array.ValueKind != JsonValueKind.Array)
+				return [];
+
+			var values = new List<string>();
+			foreach (var item in array.EnumerateArray())
+				if (item.ValueKind == JsonValueKind.String && !string.IsNullOrEmpty(item.GetString()))
+					values.Add(item.GetString());
+
+			return values.ToArray();
 		}
 
 		static string[] FreeActors(JsonElement actor)

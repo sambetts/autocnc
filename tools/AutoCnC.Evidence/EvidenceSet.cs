@@ -209,6 +209,14 @@ namespace AutoCnC.Evidence
 		public MapFacts Map { get; private set; }
 		public FightManifest Manifest { get; private set; }
 
+		/// <summary>
+		/// Where to read the duel lab's matchups from, or <c>none</c> for none. Null finds them.
+		/// </summary>
+		public string MatchupsPath { get; init; }
+
+		/// <summary>The duel lab's measured margins, or null when none were found.</summary>
+		public Matchups Matchups { get; private set; }
+
 		public EvidenceSet(string directory)
 		{
 			Directory = Path.GetFullPath(directory);
@@ -225,6 +233,7 @@ namespace AutoCnC.Evidence
 			Rules = GameRules.Read(GameRulesPath);
 			Map = MapFacts.Read(MapFactsPath);
 			Manifest = FightManifest.Read(FightManifestPath);
+			Matchups = AutoCnC.Evidence.Matchups.Locate(Directory, MatchupsPath);
 			return this;
 		}
 	}

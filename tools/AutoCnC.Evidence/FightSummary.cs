@@ -75,6 +75,15 @@ namespace AutoCnC.Evidence
 		/// <summary>Where this side kept dying, as a <c>columns</c>/<c>rows</c> table.</summary>
 		public Table LossClusters { get; set; }
 
+		/// <summary>
+		/// What this side saw of the enemy and when, against when it was hit, and what the duel lab
+		/// measured as the answer to each enemy unit type.
+		/// </summary>
+		public SummaryIntel Intel { get; set; }
+
+		/// <summary>This side's income, spend, army and production beside the opponent's.</summary>
+		public SummaryScale Scale { get; set; }
+
 		public List<string> Notes { get; set; } = [];
 		public Dictionary<string, string> Truncated { get; set; } = [];
 	}
@@ -103,6 +112,11 @@ namespace AutoCnC.Evidence
 
 		public int GameRulesSchemaVersion { get; set; }
 		public int DecisionTraceSchemaVersion { get; set; }
+
+		/// <summary>
+		/// True when the duel lab's <c>matchups.json</c> was found, so <c>intel</c> carries counters.
+		/// </summary>
+		public bool HasMatchups { get; set; }
 	}
 
 	public sealed class SummaryFight
@@ -374,5 +388,116 @@ namespace AutoCnC.Evidence
 		public int FromSeconds { get; set; }
 		public int ToSeconds { get; set; }
 		public string[] Types { get; set; } = [];
+	}
+
+	/// <summary>
+	/// Whether this side saw the enemy's army coming, and whether it built what beats it.
+	/// </summary>
+	/// <remarks>
+	/// <para>
+	/// Built only from what this side's own battle log observed — sightings, hits taken and units
+	/// lost — plus the duel lab's static matchups. In sixteen fights at d1a695b, 77% of the value the
+	/// bot lost went to enemy unit types first seen less than 30 seconds before they started
+	/// shooting, and nothing in the summary said so; answering that took a bespoke script.
+	/// </para>
+	/// <para>
+	/// A counter can only be bought for something that has been seen, so the sighting timings and
+	/// the counters belong together.
+	/// </para>
+	/// </remarks>
+	public sealed class SummaryIntel
+	{
+		/// <summary>When an enemy structure more than <see cref="FightSummaryBuilder.NearBaseCells"/> from home was first seen.</summary>
+		public int? EnemyBaseFirstSeenSeconds { get; set; }
+
+		/// <summary>When the enemy first damaged anything of this side's.</summary>
+		public int? FirstEnemyHitSeconds { get; set; }
+
+		/// <summary>
+		/// Share of the value lost to enemy combat units that went to types first seen less than
+		/// <see cref="FightSummaryBuilder.LateSightingSeconds"/> before they first hit this side, or
+		/// never seen at all. Null when nothing was lost to an enemy unit.
+		/// </summary>
+		public double? LateSightingLossPercent { get; set; }
+
+		/// <summary>
+		/// Share of the same losses that went to types first seen within
+		/// <see cref="FightSummaryBuilder.NearBaseCells"/> of this side's base.
+		/// </summary>
+		public double? NearBaseSightingLossPercent { get; set; }
+
+		/// <summary>
+		/// How well the credits this side spent on combat units answer the enemy army it saw,
+		/// by the duel lab's equal-cost margins: 50 is an even trade, 100 a clean sweep, 0 swept.
+		/// Null without matchups.
+		/// </summary>
+		public int? CounterMatchPercent { get; set; }
+
+		/// <summary>
+		/// The three units this side's faction can build that best answer the enemy army it saw,
+		/// weighted by the value of each enemy type seen, as <c>type +margin</c> joined by <c>|</c>.
+		/// </summary>
+		public string MixCounters { get; set; }
+
+		/// <summary>Each enemy structure type, and the second it was first seen, in order.</summary>
+		public Dictionary<string, int> EnemyStructuresFirstSeen { get; set; } = [];
+
+		/// <summary>
+		/// One row per enemy combat unit type, most damaging first, as a <c>columns</c>/<c>rows</c>
+		/// table.
+		/// </summary>
+		/// <remarks>
+		/// Columns are <c>type, kind, firstSeenSeconds, firstSeenCellsFromBase, firstHitSeconds,
+		/// leadSeconds, actorsSeen, valueSeen, creditsKilled, counters, creditsSpentOnCounters</c>.
+		/// <c>leadSeconds</c> is first hit minus first sighting: negative when the type hit this side
+		/// before it was ever seen, as long-range artillery does, and empty when either is missing.
+		/// <c>counters</c> are the units this side's faction can build that beat the type at equal
+		/// cost, best first, and <c>creditsSpentOnCounters</c> is what this side spent on them.
+		/// </remarks>
+		public Table Threats { get; set; }
+	}
+
+	/// <summary>
+	/// Whether this side out-produced the opponent: flows and peaks for both, side by side.
+	/// </summary>
+	/// <remarks>
+	/// The opponent's figures come from telemetry, which is an omniscient after-match record. They
+	/// are here to diagnose the gap between the two economies, never as something a bot could
+	/// have read during the match.
+	/// </remarks>
+	public sealed class SummaryScale
+	{
+		public double OwnEarnedPerSecond { get; set; }
+		public double OpponentEarnedPerSecond { get; set; }
+		public double OwnSpentPerSecond { get; set; }
+		public double OpponentSpentPerSecond { get; set; }
+
+		/// <summary>This side's spend as a percentage of the opponent's. Null when either is unknown.</summary>
+		public double? SpendVsOpponentPercent { get; set; }
+
+		public int OwnPeakArmyValue { get; set; }
+		public int OpponentPeakArmyValue { get; set; }
+		public double OwnMeanArmyValue { get; set; }
+		public double OpponentMeanArmyValue { get; set; }
+		public int OwnPeakHarvesters { get; set; }
+		public int OpponentPeakHarvesters { get; set; }
+		public double OwnMeanHarvesters { get; set; }
+		public double OpponentMeanHarvesters { get; set; }
+
+		/// <summary>
+		/// Credits earned per second for each harvester on the field on average. Separates "too
+		/// few harvesters" from "harvesters that are not working". Null when there were none.
+		/// </summary>
+		public double? OwnEarnedPerHarvesterSecond { get; set; }
+
+		public double? OpponentEarnedPerHarvesterSecond { get; set; }
+		public int OwnPeakBuildings { get; set; }
+		public int OpponentPeakBuildings { get; set; }
+
+		/// <summary>Most barracks, war factories, airfields and helipads this side had standing at once.</summary>
+		public int OwnUnitFactoriesPeak { get; set; }
+
+		/// <summary>When this side first had two unit factories standing, or null if it never did.</summary>
+		public int? OwnSecondUnitFactorySeconds { get; set; }
 	}
 }

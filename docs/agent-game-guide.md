@@ -130,6 +130,11 @@ it as authoritative context alongside the source and the evidence from one compl
 
 ## Reading a training run
 
+- `summary.json` is derived by the harness from the raw records below, and is what a round reads
+  first. Its `intel` block times each enemy unit type's first sighting against its first hit on
+  this side, and names the duel lab's counters this faction can build. Its `scale` block sets this
+  side's income, spend, harvesters and unit factories beside the opponent's. Production, sight and
+  counters are the three gaps the prompt asks rounds to close.
 - `fight.json` identifies the bot source revision, match configuration, result, and scores. The
   scores are the state of each side when the match was decided, plus the peak units, army value,
   buildings and base value each one reached. They are deliberately not the final instant: a

@@ -1027,7 +1027,78 @@ namespace AutoCnC.Evidence
 					scale.OwnSecondUnitFactorySeconds ??= e.Seconds;
 			}
 
+			var harvestersLost = battle.LossesOf(local)
+				.Where(e => rules.Rule(e.Actor)?.IsHarvester == true ||
+					string.Equals(e.Actor, "harv", StringComparison.OrdinalIgnoreCase))
+				.Select(e => e.Seconds)
+				.ToList();
+			var nearBase = battle.Of(BattleEvents.Spotted)
+				.Where(e => IsEnemy(battle, local, e.Player) && IsCombatKind(e.DetailText("kind")) &&
+					e.Details.ContainsKey("frombase") && e.DetailInt("frombase") <= NearBaseCells)
+				.Select(e => e.Seconds)
+				.ToList();
+
+			if (hasEconomyFlows && own.Count > 0 && theirs.Count > 0)
+			{
+				double? Income(List<TelemetrySample> samples, int at) =>
+					at >= 120 ? (Value(samples, at, s => s.Earned ?? 0) - Value(samples, at - 120, s => s.Earned ?? 0)) / 120d : null;
+
+				bool AheadAt(int minute)
+				{
+					var mine = Income(own, minute * 60);
+					var hers = Income(theirs, minute * 60);
+					return mine != null && hers != null && hers >= 1.5 * Math.Max(mine.Value, 1d);
+				}
+
+				for (var minute = 4; (minute + 2) * 60 <= seconds; minute++)
+				{
+					if (!AheadAt(minute) || !AheadAt(minute + 1) || !AheadAt(minute + 2))
+						continue;
+
+					scale.IncomeSplitSeconds = minute * 60;
+					scale.OwnHarvestersLostBeforeSplit = harvestersLost.Count(t => t <= minute * 60);
+					break;
+				}
+			}
+
+			var rows = new List<object[]>();
+			for (var at = 60; at <= seconds; at += 60)
+			{
+				var from = at - 60;
+				rows.Add(
+				[
+					at,
+					Value(own, at, s => s.Earned ?? 0), Value(theirs, at, s => s.Earned ?? 0),
+					Value(own, at, s => s.Harvesters ?? 0), Value(theirs, at, s => s.Harvesters ?? 0),
+					Value(own, at, s => s.Army), Value(theirs, at, s => s.Army),
+					harvestersLost.Count(t => t <= at),
+					nearBase.Count(t => t > from && t <= at)
+				]);
+			}
+
+			scale.Series = Table.Of(rows,
+				[
+					"seconds", "ownEarned", "oppEarned", "ownHarvesters", "oppHarvesters", "ownArmy",
+					"oppArmy", "ownHarvestersLost", "enemyNearBase"
+				],
+				r => r);
+
 			return scale;
+		}
+
+		/// <summary>A field of the last sample at or before <paramref name="seconds"/>, or zero before the first.</summary>
+		static int Value(List<TelemetrySample> samples, int seconds, Func<TelemetrySample, int> field)
+		{
+			var value = 0;
+			foreach (var sample in samples)
+			{
+				if (sample.Seconds > seconds)
+					break;
+
+				value = field(sample);
+			}
+
+			return value;
 		}
 
 		/// <summary>A cumulative flow's final value, or its peak if the last sample dipped.</summary>
@@ -1140,6 +1211,27 @@ namespace AutoCnC.Evidence
 					"the gap is how much was produced, whatever the unit mix.",
 					summary.Scale.OwnSpentPerSecond, summary.Scale.OpponentSpentPerSecond, spend));
 
+			if (summary.Scale?.IncomeSplitSeconds is int split)
+			{
+				var seenNearHome = 0;
+				foreach (var row in summary.Scale.Series?.Rows ?? [])
+				{
+					var cells = Csv.SplitLine(row);
+					if (cells.Length >= 9 && int.TryParse(cells[0], out var at) && at > split - 180 && at <= split &&
+						int.TryParse(cells[8], out var near))
+						seenNearHome += near;
+				}
+
+				summary.Notes.Add(string.Format(CultureInfo.InvariantCulture,
+					"The opponent's income pulled away from minute {0}. By then this side had lost {1} " +
+					"harvester(s), and saw enemy units near home {2} time(s) in the three minutes before: " +
+					"{3} scale.series has both economies minute by minute.",
+					split / 60, summary.Scale.OwnHarvestersLostBeforeSplit ?? 0, seenNearHome,
+					(summary.Scale.OwnHarvestersLostBeforeSplit ?? 0) == 0
+						? "the split came from how the two economies grew, not from losses."
+						: "losses were already under way."));
+			}
+
 			if (summary.Intel?.CounterMatchPercent is int match && match < 45)
 				summary.Notes.Add(string.Format(CultureInfo.InvariantCulture,
 					"counterMatchPercent is {0}: by the duel lab's equal-cost margins, what this side " +
@@ -1196,12 +1288,14 @@ namespace AutoCnC.Evidence
 				(summary.Engagements, 24, "engagements"),
 				(summary.LossClusters, 8, "lossClusters"),
 				(summary.Economy?.Series, 20, "economy.series"),
+				(summary.Scale?.Series, 20, "scale.series"),
 				(summary.Intel?.Threats, 8, "intel.threats"),
 				(summary.DoctrineEpisodes, 12, "doctrineEpisodes"),
 				(summary.UnitTypes, 20, "unitTypes"),
 				(summary.Engagements, 8, "engagements"),
 				(summary.LossClusters, 3, "lossClusters"),
 				(summary.Economy?.Series, 10, "economy.series"),
+				(summary.Scale?.Series, 12, "scale.series"),
 				(summary.Intel?.Threats, 5, "intel.threats"),
 				(summary.UnitTypes, 12, "unitTypes")
 			})
@@ -1219,6 +1313,7 @@ namespace AutoCnC.Evidence
 				(summary.Engagements, "engagements"),
 				(summary.LossClusters, "lossClusters"),
 				(summary.Economy?.Series, "economy.series"),
+				(summary.Scale?.Series, "scale.series"),
 				(summary.DoctrineEpisodes, "doctrineEpisodes"),
 				(summary.Intel?.Threats, "intel.threats"),
 				(summary.Production, "production"),

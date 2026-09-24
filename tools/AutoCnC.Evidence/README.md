@@ -95,7 +95,11 @@ limited to units the side's faction can build, from the queues in `game-rules.js
 
 **`scale`** takes the opponent's figures from telemetry, the omniscient after-match record, to
 diagnose the gap between the two economies. It is never something a bot could have read during
-the match.
+the match. `incomeSplitSeconds` dates when the opponent's income pulled away: the first minute,
+from the fourth, at which its income over the previous two minutes was at least 1.5 times this
+side's, and stayed so for two more minutes. `ownHarvestersLostBeforeSplit` separates an economy
+that grew slower from one that was torn down. `series` puts both economies side by side for each
+minute: earned, harvesters, army, this side's harvesters lost, and enemy units seen near home.
 
 ### `units.csv` — `UnitLedger.SchemaVersion` 1
 

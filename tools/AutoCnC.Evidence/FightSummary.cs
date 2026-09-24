@@ -499,5 +499,32 @@ namespace AutoCnC.Evidence
 
 		/// <summary>When this side first had two unit factories standing, or null if it never did.</summary>
 		public int? OwnSecondUnitFactorySeconds { get; set; }
+
+		/// <summary>
+		/// When the opponent's income pulled away: the first minute, from the fourth, at which its
+		/// income over the previous two minutes was at least 1.5 times this side's and stayed so for
+		/// the two minutes after. Null if it never did.
+		/// </summary>
+		/// <remarks>
+		/// The end-of-match totals cannot say whether the opponent ramped faster or tore this side's
+		/// economy down. In 31 losses at the start of this measurement, the split came at a median
+		/// of minute 9 with no harvester of ours lost yet. Each of ours was earning barely half what
+		/// each of theirs did, and the harvesters died after the split, not before it.
+		/// </remarks>
+		public int? IncomeSplitSeconds { get; set; }
+
+		/// <summary>This side's harvesters lost by <see cref="IncomeSplitSeconds"/>.</summary>
+		public int? OwnHarvestersLostBeforeSplit { get; set; }
+
+		/// <summary>
+		/// Both economies minute by minute, as a <c>columns</c>/<c>rows</c> table.
+		/// </summary>
+		/// <remarks>
+		/// Columns are <c>seconds, ownEarned, oppEarned, ownHarvesters, oppHarvesters, ownArmy,
+		/// oppArmy, ownHarvestersLost, enemyNearBase</c>. Earned and harvesters lost are cumulative.
+		/// <c>enemyNearBase</c> counts enemy combat units this side saw within
+		/// <see cref="FightSummaryBuilder.NearBaseCells"/> of home during that minute.
+		/// </remarks>
+		public Table Series { get; set; }
 	}
 }

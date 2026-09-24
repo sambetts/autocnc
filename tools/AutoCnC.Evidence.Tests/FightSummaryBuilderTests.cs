@@ -362,5 +362,49 @@ namespace AutoCnC.Evidence.Tests
 			Assert.That(summary.Notes.Any(n => n.Contains("matchups.json was not found")), Is.True);
 			Assert.That(RunIndex.Entry(summary, null).Headline.ContainsKey("counterMatchPercent"), Is.False);
 		}
+
+		/// <summary>
+		/// Both sides earn alike for three minutes, then the opponent earns three times as fast.
+		/// The split is dated to minute 4, before this side's only harvester loss at 400s.
+		/// </summary>
+		[Test]
+		public void ScaleDatesWhenTheOpponentsIncomePulledAwayAndWhatHadBeenLostByThen()
+		{
+			WriteFile("battle.csv", BattleHeader +
+				BattleRow(0, "player", "local", detail: "side=you faction=gdi bot=1 colour=gold") +
+				BattleRow(0, "player", "enemy", detail: "side=enemy faction=nod bot=0 colour=red") +
+				BattleRow(1, "built", "local", "harv", 1, detail: "kind=Vehicle") +
+				BattleRow(200, "spotted", "enemy", "e3", 100, "local", x: "10", y: "10", detail: "kind=Infantry frombase=10") +
+				BattleRow(400, "lost", "local", "harv", 1, "enemy", "e3", 100, "10", "10", "value=1100 life=399 kind=Vehicle"));
+
+			var telemetry = new StringBuilder(TelemetryHeader);
+			for (var minute = 0; minute <= 10; minute++)
+			{
+				var theirs = minute <= 3 ? 1000 * minute : 3000 + 3000 * (minute - 3);
+				telemetry.Append(TelemetryRow(minute * 60, "local", 5, 1000, 3000, earned: 1000 * minute, spent: 900 * minute, harvesters: 3));
+				telemetry.Append(TelemetryRow(minute * 60, "enemy", 5, 2000, 4000, earned: theirs, spent: theirs, harvesters: 4));
+			}
+
+			WriteFile("telemetry.csv", telemetry.ToString());
+			WriteFile("decisions.jsonl", "");
+			WriteFile("game-rules.json", "{\"schemaVersion\":2,\"actors\":[" +
+				"{\"id\":\"harv\",\"kind\":\"mobile\",\"cost\":1100,\"isHarvester\":true}," +
+				"{\"id\":\"e3\",\"kind\":\"mobile\",\"cost\":300,\"armaments\":[{\"name\":\"primary\"}]}]}");
+
+			var evidence = new EvidenceSet(TempDirectory) { MatchupsPath = "none" }.Load();
+			var units = UnitLedger.Build(evidence.Battle, evidence.Trace, evidence.Rules, 600);
+			var scale = FightSummaryBuilder.Build(evidence, units).Scale;
+
+			Assert.That(scale.IncomeSplitSeconds, Is.EqualTo(240));
+			Assert.That(scale.OwnHarvestersLostBeforeSplit, Is.EqualTo(0));
+			Assert.That(scale.Series.Count, Is.EqualTo(10));
+
+			var minuteFour = scale.Series.Row("240");
+			Assert.That(minuteFour["ownEarned"], Is.EqualTo("4000"));
+			Assert.That(minuteFour["oppEarned"], Is.EqualTo("6000"));
+			Assert.That(minuteFour["oppHarvesters"], Is.EqualTo("4"));
+			Assert.That(scale.Series.Row("240")["enemyNearBase"], Is.EqualTo("1"), "the e3 seen at 200s");
+			Assert.That(scale.Series.Row("420")["ownHarvestersLost"], Is.EqualTo("1"));
+		}
 	}
 }

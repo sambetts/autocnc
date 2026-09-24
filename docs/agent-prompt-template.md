@@ -24,14 +24,20 @@ these numbers are precomputed in `{summary}`.
 
 1. **Produce more.** `scale` sets this side's income, spend, harvesters, unit factories and army
    beside the opponent's. In the twelve fights before this section was written, every loss had a
-   `scale.spendVsOpponentPercent` of 40 or less and every win had 71 or more. The losses were
-   economies that collapsed: a mean of 1.3 to 4.8 harvesters on the field against the opponent's
-   6.5 to 12.8, and a peak of 6 to 9 against 13 to 23. Income per harvester
-   (`scale.ownEarnedPerHarvesterSecond`) differed far less than harvester count, so the gap is how
-   many harvesters there are and how long they live. Then spend everything that comes in: keep
-   every queue busy (`production` secondsIdle, `economy.meanIdleCash`), and turn cash that banks
-   up into another barracks or war factory (`scale.ownUnitFactoriesPeak`). Work on this first
-   while `spendVsOpponentPercent` is below 70.
+   `scale.spendVsOpponentPercent` of 40 or less and every win had 71 or more. The timing matters
+   more than the totals. Both sides reach about seven harvesters by minute 7 or 8, win or lose.
+   `scale.incomeSplitSeconds` dates when the opponent's income pulls away: a median of minute 9
+   in 31 losses. In 20 of those 31, both sides still had about seven harvesters and none of ours
+   had been lost. Each of theirs simply earned more: 16 to 19 credits a second against our 9 to
+   10, already about 1.4 times ours from minute 5. In 7 they had built more harvesters, and in 4
+   ours were already being killed. Their army arrives after the split and finishes our economy:
+   9.4 harvesters and 4.8 refineries lost per losing game, 94% of them within 20 cells of home.
+   So the first question is why each of our harvesters earns barely half what theirs does: trip
+   length, refinery placement or field choice. Next comes growing the fleet past seven, then
+   protecting it. `scale.series` shows both economies minute by minute for the fight in front of
+   you. Then spend everything that comes in: keep every queue busy (`production` secondsIdle,
+   `economy.meanIdleCash`), and turn cash that banks up into another barracks or war factory
+   (`scale.ownUnitFactoriesPeak`). Work on this first while `spendVsOpponentPercent` is below 70.
 2. **See what is coming.** `intel.threats` compares when each enemy unit type was first seen with
    when it first hit this side. `leadSeconds` is negative when a type, usually artillery, hit
    before anything saw it. `intel.lateSightingLossPercent` is the share of losses to types that

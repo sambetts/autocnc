@@ -1,62 +1,54 @@
 {
   "schemaVersion": 1,
-  "authoredForRevision": "21aff072f7634042a46aad55741c3160938544c7",
+  "authoredForRevision": "d6cf3dca6c5f5c48a6579bfe01bf3188a26fdecb",
   "checks": [
     {
-      "id": "watch-posts",
+      "id": "commitment-runs",
       "category": "activation",
-      "description": "In Attack, a jeep or bggy stands watch on the approach to their base instead of joining the push (WatchMode). Last fight both jeeps joined the push at 225s and were dead by 248s. Absent means no screen vehicle was alive in Attack once their base was known, or Attack never ran.",
-      "query": "reason-id:watch.on-post",
+      "description": "A harvester sent to a field less than one work cycle (60s) ago kept it instead of moving for the fleet's report, the haul limit, home ground coming back or a better score. Last fight had 59 switches of more than 8 cells within 45s of the previous one. Absent in a short win with no field changes is benign; absent in a loss with harvesters switching means the gate never ran.",
+      "query": "reason-id:economy.harvester-keeps-field",
       "operator": ">=",
       "value": "1"
     },
     {
-      "id": "watch-looks-in",
+      "id": "saturation-spreads",
       "category": "activation",
-      "description": "A watcher finished a one-minute dwell and circled their base (flank, far side, flank). Last fight their hpad, five cells from the first airfield seen, went unseen from 237s to 587s.",
-      "query": "reason-id:watch.look-in",
+      "description": "A field choice went elsewhere because the field the whole fleet would otherwise have picked holds less than a load for each harvester already bound for it. Last fight seven harvesters were sent to a 665-credit patch at 535-549s. Unique prose literal from the crowdNote in HarvesterLogic.Decide.",
+      "query": "reason:already bound for it",
       "operator": ">=",
       "value": "1"
-    },
-    {
-      "id": "survey-finished",
-      "category": "activation",
-      "description": "The home tiberium survey is flown to its end, because WatchMode keeps the surveyor in Attack. Last fight it stopped at point 3 of 17 when Attack took the jeep at 225s, and was never completed.",
-      "query": "reason-id:economy.survey-complete",
-      "operator": ">=",
-      "value": "1"
-    },
-    {
-      "id": "fewer-unannounced-losses",
-      "category": "outcome",
-      "description": "Priority 2's metric. The share of value lost to enemy types first seen under 30s before they first hit us falls from 100.",
-      "query": "summary.intel.lateSightingLossPercent",
-      "operator": "<=",
-      "value": "90"
     },
     {
       "id": "harvesters-earn-more",
       "category": "outcome",
-      "description": "With the survey flown, harvesters can see home ground and stop sharing worked-out patches. Last fight: 12.88 credits per harvester-second against the opponent's 17.71, falling from about 16 to 9 after 420s.",
+      "description": "Priority 1's per-harvester metric. Last fight 11.03 against the opponent's 16.3, and 7-9 across 480-600s while nine harvesters were alive; twelve prior 16:9 fights ran 8.2 to 13.1.",
       "query": "summary.scale.ownEarnedPerHarvesterSecond",
       "operator": ">=",
-      "value": "14"
+      "value": "13"
     },
     {
-      "id": "explores-more",
+      "id": "fewer-returns-from-frontier",
       "category": "outcome",
-      "description": "The survey and the watcher's look-ins see more of the map. Last fight: 299 cells in 639s, prior median 393.",
-      "query": "summary.headline.cellsExplored",
-      "operator": ">=",
-      "value": "330"
+      "description": "Frontier-to-home switches (haul limit, home ground back, fleet report toward home) fall, because commitment defers them and saturated home patches no longer count as home ground. Last fight 19; losses on record 17-44, wins 0-19.",
+      "query": "reason-id:economy.harvester-leaves-frontier",
+      "operator": "<=",
+      "value": "10"
     },
     {
-      "id": "watchers-outlive-the-push",
+      "id": "spend-keeps-up",
       "category": "outcome",
-      "description": "Screen vehicles that ran WatchMode (either faction: mode= matches modesUsed) live longer than the 27s mean the two jeeps had when they pushed with the army last fight. Survivors count to the end of the match.",
-      "query": "units.mean(lifetimeSeconds,mode=WatchMode)",
+      "description": "Priority 1's headline metric. Last fight 25.9; every loss on record was 41 or less and every win 77 or more. Diagnostic: dominated by the match outcome.",
+      "query": "summary.scale.spendVsOpponentPercent",
       "operator": ">=",
-      "value": "60"
+      "value": "40"
+    },
+    {
+      "id": "harvesters-not-thrown-away",
+      "category": "invariant",
+      "description": "Commitment keeps a recently switched harvester on a field the fleet reported for up to a minute. It must not cost more harvesters than the ping-pong did: 10 lost last fight, all of them.",
+      "query": "summary.unitTypes[harv].lost",
+      "operator": "<=",
+      "value": "10"
     },
     {
       "id": "no-timeout",
@@ -65,14 +57,6 @@
       "query": "summary.fight.durationSeconds",
       "operator": "<=",
       "value": "2400"
-    },
-    {
-      "id": "buildings-still-fall",
-      "category": "invariant",
-      "description": "The push without its screen vehicles still finishes buildings: 24 last fight, 8 is the component's reference.",
-      "query": "summary.headline.buildingsKilled",
-      "operator": ">=",
-      "value": "8"
     }
   ]
 }

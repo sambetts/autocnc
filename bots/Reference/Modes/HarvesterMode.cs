@@ -33,12 +33,33 @@ namespace AutoCnC.Reference.Modes
 		readonly List<FieldOption> fields = [];
 		HarvesterWatchdog watchdog = HarvesterWatchdog.Start;
 		int publishedContestedTick = int.MinValue;
+		int holdCapacity = -1;
 
 		public override void OnEnter(Actor self, ModeContext ctx)
 		{
 			watchdog = HarvesterWatchdog.Start;
 			publishedContestedTick = int.MinValue;
+			holdCapacity = -1;
 			fields.Clear();
+			FieldClaims.Release(self.Owner, self.ActorID);
+		}
+
+		/// <summary>The most this harvester can carry, in resource units, or 0 if it cannot say.</summary>
+		/// <remarks>
+		/// Enumerated rather than looked up: a single-trait lookup throws on an actor with two
+		/// stores, and an exception out of a mode's tick costs far more than a field ranking.
+		/// </remarks>
+		int HoldCapacity(Actor self)
+		{
+			if (holdCapacity < 0)
+			{
+				holdCapacity = 0;
+				foreach (var store in self.TraitsImplementing<IStoresResources>())
+					if (store.Capacity > holdCapacity)
+						holdCapacity = store.Capacity;
+			}
+
+			return holdCapacity;
 		}
 
 		public override UnitDecision OnTick(Actor self, ModeContext ctx)
@@ -114,6 +135,11 @@ namespace AutoCnC.Reference.Modes
 			fields.Clear();
 			if (HarvesterLogic.ShouldScan(watchdog, state, tuning))
 			{
+				// One full hold, in resource units: this harvester's own storage, read off its own
+				// actor. Zero switches FieldOption.Saturated off rather than guessing.
+				var capacity = HoldCapacity(self);
+				var match = tuning.FieldMatchCells;
+
 				var found = ctx.FindResourceFields(tuning.MinFieldCells, tuning.MaxFieldsConsidered, home);
 				for (var i = 0; i < found.Count; i++)
 				{
@@ -126,7 +152,25 @@ namespace AutoCnC.Reference.Modes
 					// nothing else. A mod that declares no value reports 0; fall back to density.
 					var f = found[i];
 					var worth = f.TotalValue > 0 ? f.TotalValue : f.TotalDensity;
-					fields.Add(new FieldOption(f.NearestX, f.NearestY, f.CenterX, f.CenterY, f.CellCount, worth, f.DistanceUnits));
+
+					// A load in the same units as worth, and the harvesters bound for this field
+					// ahead of this one. On its own field this harvester counts only the claims
+					// made before its own, so the first to arrive keep it. See FieldClaims.
+					var perUnit = f.TotalValue > 0 ? f.ValuePerUnit : 1;
+					var load = capacity > 0 && perUnit > 0 ? capacity * perUnit : 0;
+					var mine = watchdog.HasAssignment
+						&& f.CenterX >= watchdog.AssignedX - match && f.CenterX <= watchdog.AssignedX + match
+						&& f.CenterY >= watchdog.AssignedY - match && f.CenterY <= watchdog.AssignedY + match;
+					var claimants = load > 0
+						? FieldClaims.CountOthers(
+							self.Owner, self.ActorID, f.CenterX, f.CenterY, match,
+							mine ? watchdog.AssignedTick : int.MaxValue,
+							ctx.WorldTick, tuning.ClaimFreshTicks)
+						: 0;
+
+					fields.Add(new FieldOption(
+						f.NearestX, f.NearestY, f.CenterX, f.CenterY, f.CellCount, worth, f.DistanceUnits,
+						claimants, load));
 				}
 			}
 
@@ -186,6 +230,15 @@ namespace AutoCnC.Reference.Modes
 
 			var outcome = HarvesterLogic.Decide(state, watchdog, tuning, fields);
 			watchdog = outcome.Watchdog;
+
+			// Tell the rest of the fleet where this harvester is bound, every evaluation, so a
+			// claim lapses on its own once the harvester stops being evaluated.
+			if (watchdog.HasAssignment)
+				FieldClaims.Record(
+					self.Owner, self.ActorID, watchdog.AssignedX, watchdog.AssignedY,
+					watchdog.AssignedTick, ctx.WorldTick);
+			else
+				FieldClaims.Release(self.Owner, self.ActorID);
 
 			// Publish only first-hand reports. A seeded value already carries the fleet's tick
 			// and is flagged as inherited, so it can never be echoed back and refresh itself

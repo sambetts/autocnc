@@ -40,7 +40,8 @@ namespace AutoCnC.Reference.Logic
 		int HomeGroundRatioPercent,
 		int HomeContestedMemoryTicks,
 		int EngineFirstCells,
-		int EngineSearchLiveTicks)
+		int EngineSearchLiveTicks,
+		int ClaimFreshTicks)
 	{
 		public static HarvesterTuning Default { get; } = new(
 			PanicRadiusUnits: 7 * 1024,
@@ -283,7 +284,13 @@ namespace AutoCnC.Reference.Logic
 			// review, about fifteen seconds on at the two evaluations a second harvesters ran at
 			// on 16:9. Queueing at a busy dock can make a working harvester miss it once; that
 			// costs nothing but the old behaviour.
-			EngineSearchLiveTicks: 250);
+			EngineSearchLiveTicks: 250,
+
+			// How long a harvester's claim on a field counts after it last refreshed it. Every
+			// harvester is evaluated at least once a second (16:9, all ten harvesters), so ten
+			// seconds only ever expires the claim of a harvester that has died or changed mode.
+			// See Modes.FieldClaims and FieldOption.Saturated.
+			ClaimFreshTicks: 250);
 	}
 
 	/// <summary>One tiberium field, as the harvester rule needs to see it.</summary>
@@ -299,6 +306,12 @@ namespace AutoCnC.Reference.Logic
 	/// it with density. Nothing reads it except as a ratio or a "> 0" test, so either scale is
 	/// sound as long as one list never mixes them.
 	/// </para>
+	/// <para>
+	/// <c>Claimants</c> and <c>LoadWorth</c> are filled only by <see cref="Modes.HarvesterMode"/>,
+	/// in the same units as <c>TotalDensity</c>: how many other harvesters of this side were
+	/// bound for this field first, and what one full load is worth. Both default to zero, which
+	/// switches <see cref="Saturated"/> off, so every other builder of a field list is unchanged.
+	/// </para>
 	/// </remarks>
 	public readonly record struct FieldOption(
 		int NearestX,
@@ -307,7 +320,28 @@ namespace AutoCnC.Reference.Logic
 		int CenterY,
 		int CellCount,
 		int TotalDensity,
-		int DistanceUnits);
+		int DistanceUnits,
+		int Claimants = 0,
+		int LoadWorth = 0)
+	{
+		/// <summary>
+		/// Whether the harvesters already bound for this field will take everything in it
+		/// before this one could fill its hold there.
+		/// </summary>
+		/// <remarks>
+		/// <b>Every harvester used to pick the same field, because every harvester asked the
+		/// same question of the same scan.</b> On 16:9 (Nod v GDI) seven harvesters were sent to
+		/// a 665-credit patch at 535-549s — less than one load between them — found it worked out
+		/// by 566s and crossed 46 cells to the frontier. On the GDI side of the same map a fleet
+		/// of six to seven alternated between a 1,330-credit and an 840-credit patch 23 cells
+		/// apart every 31 seconds from 545s to 678s, each one "worked out" half a minute after
+		/// the fleet arrived. Across twelve 16:9 fights "field worked out" was the reason for 15
+		/// to 46 of the switches a harvester made within 45 seconds of its previous one. A patch
+		/// that holds less than a load for each harvester already bound for it, plus this one,
+		/// is ground this harvester will drive to and find empty.
+		/// </remarks>
+		public bool Saturated => LoadWorth > 0 && TotalDensity < (long)LoadWorth * (Claimants + 1);
+	}
 
 	/// <summary>Everything the harvester rule needs, with no engine types in it.</summary>
 	public readonly record struct HarvesterState(
@@ -362,7 +396,8 @@ namespace AutoCnC.Reference.Logic
 		int WithdrawalStartTick,
 		int ProtectedWorkUntilTick,
 		bool ContestedFromFleet,
-		int ContestedTick)
+		int ContestedTick,
+		int AssignedTick = int.MinValue)
 	{
 		/// <summary>
 		/// A harvester we have never seen. The impossible cell counts as "moved", and the scan
@@ -378,6 +413,17 @@ namespace AutoCnC.Reference.Logic
 
 		/// <summary>Whether this harvester has been told which field to work.</summary>
 		public bool HasAssignment => AssignedX != int.MinValue;
+
+		/// <summary>
+		/// Whether the field this harvester was sent to is still inside the work cycle it was
+		/// sent for, during which only its own drive-off or the ground running dry moves it.
+		/// </summary>
+		/// <remarks>See the commitment rule in <see cref="HarvesterLogic.Decide"/>.</remarks>
+		public bool CommittedAt(int worldTick, int cycleTicks) =>
+			HasAssignment
+			&& AssignedTick != int.MinValue
+			&& worldTick >= AssignedTick
+			&& worldTick - AssignedTick < cycleTicks;
 
 		/// <summary>Whether this harvester has been shot off a field and remembers which one.</summary>
 		public bool HasContested => ContestedX != int.MinValue;
@@ -945,6 +991,7 @@ namespace AutoCnC.Reference.Logic
 				return Assign(
 					f,
 					ordered,
+					state.WorldTick,
 					resumed,
 					reasonId: withdrawalOutlastedItsValue
 						? "economy.harvester-withdrawal-timed-out"
@@ -960,6 +1007,8 @@ namespace AutoCnC.Reference.Logic
 			//    HarvesterTuning.HomeGroundRatioPercent for the fleet that died learning this.
 			var declinedFrontier = false;
 			var declinedReason = string.Empty;
+			var keptField = false;
+			var keptReason = string.Empty;
 			if (scanned && count > 0)
 			{
 				var assigned = FindAssigned(fields, watchdog, tuning);
@@ -972,6 +1021,16 @@ namespace AutoCnC.Reference.Logic
 				// to home ground changed the answer. See economy.harvester-declines-frontier.
 				var groundBlind = SelectFieldAvoiding(fields, -1, contested, state, tuning, homeGroundFirst: false);
 				var blindIsFrontier = groundBlind >= 0 && IsFrontier(fields[groundBlind], state, tuning);
+
+				// ...and without knowing how many of this side's harvesters are already bound for
+				// each field. Also trace-only: the phrase "already bound for it" in a reason is how
+				// the trace says a choice went elsewhere because the field every harvester would
+				// otherwise have picked was already spoken for. See FieldOption.Saturated.
+				var crowdBlind = SelectFieldAvoiding(fields, -1, contested, state, tuning, respectSaturation: false);
+				var spreads = crowdBlind >= 0 && crowdBlind != best && fields[crowdBlind].Saturated;
+				var crowdNote = spreads
+					? $", leaving {fields[crowdBlind].TotalDensity} to the {fields[crowdBlind].Claimants} harvester(s) already bound for it"
+					: string.Empty;
 
 				// Worked out: the patch we were sent to no longer holds MinFieldCells of anything,
 				// so the scan does not return it any more and there is nothing left to go back to.
@@ -1008,8 +1067,8 @@ namespace AutoCnC.Reference.Logic
 							? $", on home ground rather than {fields[groundBlind].TotalDensity} left on the frontier"
 							: string.Empty;
 
-					return Assign(f, ordered,
-						$"{activeStallPrefix}{why}{avoided}{ground}, harvesting {f.CellCount} cells ({f.TotalDensity} left) {f.DistanceUnits / 1024} cells out",
+					return Assign(f, ordered, state.WorldTick,
+						$"{activeStallPrefix}{why}{avoided}{ground}{crowdNote}, harvesting {f.CellCount} cells ({f.TotalDensity} left) {f.DistanceUnits / 1024} cells out",
 						reasonId: bestIsFrontier
 							? "economy.harvester-frontier-fallback"
 							: declined
@@ -1041,6 +1100,24 @@ namespace AutoCnC.Reference.Logic
 				// other side: a frontier field keeps a harvester only while it pays twice what
 				// home ground would. It cannot dither for the reason comingHome cannot: once on
 				// home ground, no frontier field is ever the best choice while home ground lasts.
+				//
+				// <b>And none of those four may move a harvester that has not yet worked the field
+				// it was sent to, except its own drive-off.</b> Each rule above is anti-dither on
+				// its own; together they were not, because each can undo another's move before the
+				// harvester arrives. The fleet's contested report has one slot, so two fields under
+				// fire at once read as "the other one is safe" in turn: on 16:9 (Nod v GDI) the
+				// fleet went frontier -> east field at 504s, east -> a 665-credit home patch at
+				// 535-549s, frontier at 566-581s, east at 586-593s, frontier at 597-599s, east at
+				// 608-610s, each leg 22 to 46 cells. That match made 76 field switches of more than
+				// 8 cells, 59 within 45 seconds of the one before, 2,186 cells of driving between
+				// fields — about 1,240 harvester-seconds, 41% of all the fleet lived — and income
+				// per harvester fell to 7 credits a second across 480-540s against the winner's 22.
+				// Every 16:9 fight on record did the same, 39 to 158 times. So an assignment now
+				// holds for one work cycle, WorkCycleTicks, which is one delivery: the fleet's
+				// report, the haul limit, home ground coming back and a better score all wait for
+				// it. A harvester shot off its own field still leaves at once — that is the
+				// withdrawal rule's lesson, paid for first-hand — and so does one whose field ran
+				// dry, which is the assigned < 0 branch above.
 				var evicted = assigned == contested;
 				var evictedByFleet = evicted && seen.InheritedContested;
 				var assignedScore = Score(fields[assigned], tuning);
@@ -1050,7 +1127,11 @@ namespace AutoCnC.Reference.Logic
 				var leavingFrontier = assignedIsFrontier
 					&& !bestIsFrontier
 					&& (long)bestScore * tuning.SwitchScoreMultiplier >= assignedScore;
-				if (best != assigned && (evicted || comingHome || leavingFrontier || bestScore >= (long)assignedScore * tuning.SwitchScoreMultiplier))
+				var wantsSwitch = best != assigned
+					&& (evicted || comingHome || leavingFrontier || bestScore >= (long)assignedScore * tuning.SwitchScoreMultiplier);
+				var committed = seen.CommittedAt(state.WorldTick, tuning.WorkCycleTicks);
+				var shotOffItHere = evicted && !evictedByFleet;
+				if (wantsSwitch && (!committed || shotOffItHere))
 				{
 					var f = fields[best];
 					var why = evictedByFleet
@@ -1065,7 +1146,7 @@ namespace AutoCnC.Reference.Logic
 					var leftFrontier = assignedIsFrontier && !bestIsFrontier;
 					var declined = !bestIsFrontier && blindIsFrontier && groundBlind != best;
 
-					return Assign(f, ordered, $"{activeStallPrefix}{why}",
+					return Assign(f, ordered, state.WorldTick, $"{activeStallPrefix}{why}{crowdNote}",
 						reasonId: leftFrontier
 							? "economy.harvester-leaves-frontier"
 							: bestIsFrontier
@@ -1075,6 +1156,19 @@ namespace AutoCnC.Reference.Logic
 									: evictedByFleet
 										? "economy.harvester-inherits-contested"
 										: "economy.harvester-assign-field");
+				}
+
+				if (wantsSwitch)
+				{
+					var trigger = evictedByFleet
+						? "the fleet's report of fire there"
+						: comingHome
+							? "the haul limit"
+							: leavingFrontier
+								? "home ground coming back"
+								: "a better field";
+					keptField = true;
+					keptReason = $"keeping the field it was sent to {(state.WorldTick - seen.AssignedTick) / 25}s ago, {fields[assigned].TotalDensity} left, until it has worked one cycle there, rather than moving for {trigger} to {fields[best].TotalDensity} left {fields[best].DistanceUnits / 1024} cells out";
 				}
 
 				// No move, but the ground-blind rule would have crossed to the frontier from home
@@ -1098,9 +1192,10 @@ namespace AutoCnC.Reference.Logic
 					if (seen.ProbeIndex == 0)
 					{
 						var f = fields[assigned];
-						return Assign(f, ordered,
+						return Assign(f, ordered, state.WorldTick,
 							$"{activeStallPrefix}stopped for {seen.StillEvaluations} evaluations, re-cutting {f.TotalDensity} left {f.DistanceUnits / 1024} cells out",
-							probeIndex: 1);
+							probeIndex: 1,
+							keepAssignedTick: true);
 					}
 
 					// 3b. Re-cutting did not start it either, so this ground is unreachable or
@@ -1114,7 +1209,7 @@ namespace AutoCnC.Reference.Logic
 					if (other >= 0)
 					{
 						var f = fields[other];
-						return Assign(f, ordered,
+						return Assign(f, ordered, state.WorldTick,
 							$"{activeStallPrefix}stopped for {seen.StillEvaluations} evaluations, giving that field up for {f.TotalDensity} left {f.DistanceUnits / 1024} cells out",
 							probeIndex: 1,
 							reasonId: IsFrontier(f, state, tuning)
@@ -1128,7 +1223,8 @@ namespace AutoCnC.Reference.Logic
 			//
 			//    Contact inside the earning window lands here rather than cancelling the load,
 			//    and is named so the trace can tell "the harvester kept working through fire"
-			//    from "nothing happened". So is a frontier crossing that home ground declined.
+			//    from "nothing happened". So is a frontier crossing that home ground declined,
+			//    and a switch the commitment rule deferred.
 			if (!stalled)
 				return new HarvesterOutcome(
 					workedThroughContact
@@ -1137,13 +1233,19 @@ namespace AutoCnC.Reference.Logic
 							Reason = $"harvester working through contact inside its earning window at {state.HealthPercent}%",
 							ReasonId = "economy.harvester-work-window"
 						}
-						: declinedFrontier
+						: keptField
 							? UnitDecision.Continue with
 							{
-								Reason = declinedReason,
-								ReasonId = "economy.harvester-declines-frontier"
+								Reason = keptReason,
+								ReasonId = "economy.harvester-keeps-field"
 							}
-							: UnitDecision.Continue,
+							: declinedFrontier
+								? UnitDecision.Continue with
+								{
+									Reason = declinedReason,
+									ReasonId = "economy.harvester-declines-frontier"
+								}
+								: UnitDecision.Continue,
 					seen);
 
 			// 5. Stopped, and naming a field has not helped — either nothing was scanned this
@@ -1251,10 +1353,22 @@ namespace AutoCnC.Reference.Logic
 		/// cell rather than its centre, because the centre drives the harvester through the field
 		/// to the far side. The <em>identity</em> we keep is the centre, because that is what
 		/// stays put between scans while the nearest cell walks in as the edge is cut away.
+		/// <para>
+		/// The tick it records is when this assignment began, which is what the commitment rule
+		/// and <see cref="Modes.FieldClaims"/> both read. Re-cutting the field already assigned
+		/// keeps the original tick: it is the same assignment, restarted, not a new one.
+		/// </para>
 		/// </remarks>
-		static HarvesterOutcome Assign(in FieldOption field, in HarvesterWatchdog seen, string reason, int probeIndex = 0, string reasonId = "economy.harvester-assign-field") =>
+		static HarvesterOutcome Assign(in FieldOption field, in HarvesterWatchdog seen, int tick, string reason, int probeIndex = 0, string reasonId = "economy.harvester-assign-field", bool keepAssignedTick = false) =>
 			new(UnitDecision.Harvest(field.NearestX, field.NearestY, reason, reasonId),
-				seen with { StillEvaluations = 0, ProbeIndex = probeIndex, AssignedX = field.CenterX, AssignedY = field.CenterY });
+				seen with
+				{
+					StillEvaluations = 0,
+					ProbeIndex = probeIndex,
+					AssignedX = field.CenterX,
+					AssignedY = field.CenterY,
+					AssignedTick = keepAssignedTick && seen.AssignedTick != int.MinValue ? seen.AssignedTick : tick
+				});
 
 		/// <summary>Picks a threat-opposite escape cell without abandoning a live refinery.</summary>
 		static (int X, int Y, bool PreservesRefineryAccess) ThreatEscapeCell(
@@ -1380,40 +1494,79 @@ namespace AutoCnC.Reference.Logic
 			int avoid,
 			in HarvesterState state,
 			in HarvesterTuning tuning,
-			bool homeGroundFirst = true)
+			bool homeGroundFirst = true,
+			bool respectSaturation = true)
 		{
 			if (avoid >= 0)
 			{
-				var elsewhere = SelectWithin(fields, exclude, avoid, state, tuning, homeGroundFirst);
+				var elsewhere = SelectWithin(fields, exclude, avoid, state, tuning, homeGroundFirst, respectSaturation);
 				if (elsewhere >= 0)
 					return elsewhere;
 			}
 
-			return SelectWithin(fields, exclude, -1, state, tuning, homeGroundFirst);
+			return SelectWithin(fields, exclude, -1, state, tuning, homeGroundFirst, respectSaturation);
 		}
 
 		/// <summary>
 		/// Home ground inside the haul ceiling, then anything inside it, then anything at all, over
-		/// whatever exclusions it is given.
+		/// whatever exclusions it is given — each tier tried first without the fields other
+		/// harvesters of this side have already filled.
 		/// </summary>
+		/// <remarks>
+		/// A saturated field (<see cref="FieldOption.Saturated"/>) is not home ground this
+		/// harvester can work, however near it is: the harvesters bound for it first will empty
+		/// it, and this one will arrive to nothing and be sent on half a minute later. So an open
+		/// field inside the haul ceiling, frontier or not, comes before a full one at home. That
+		/// does not reopen what <see cref="HarvesterTuning.HomeGroundRatioPercent"/> closed: the
+		/// fleet that died on the frontier left home ground that "still held thousands", and a
+		/// field with a load left for this harvester is still chosen at home first. The haul
+		/// ceiling keeps its rank — a full field inside it still beats an open one beyond it —
+		/// and every pass keeps the old rule's last resort: a list that is all saturated
+		/// answers exactly as it did before.
+		/// </remarks>
 		static int SelectWithin(
 			IReadOnlyList<FieldOption> fields,
 			int exclude,
 			int avoid,
 			in HarvesterState state,
 			in HarvesterTuning tuning,
-			bool homeGroundFirst)
+			bool homeGroundFirst,
+			bool respectSaturation)
 		{
 			var ceiling = HaulCeilingUnits(tuning);
+			if (respectSaturation)
+			{
+				if (homeGroundFirst)
+				{
+					var openHome = BestWithin(fields, exclude, avoid, state, tuning, ceiling, homeOnly: true, openOnly: true);
+					if (openHome >= 0)
+						return openHome;
+				}
+
+				var open = BestWithin(fields, exclude, avoid, state, tuning, ceiling, homeOnly: false, openOnly: true);
+				if (open >= 0)
+					return open;
+			}
+
 			if (homeGroundFirst)
 			{
-				var home = BestWithin(fields, exclude, avoid, state, tuning, ceiling, homeOnly: true);
+				var home = BestWithin(fields, exclude, avoid, state, tuning, ceiling, homeOnly: true, openOnly: false);
 				if (home >= 0)
 					return home;
 			}
 
-			var near = BestWithin(fields, exclude, avoid, state, tuning, ceiling, homeOnly: false);
-			return near >= 0 ? near : BestWithin(fields, exclude, avoid, state, tuning, int.MaxValue, homeOnly: false);
+			var near = BestWithin(fields, exclude, avoid, state, tuning, ceiling, homeOnly: false, openOnly: false);
+			if (near >= 0)
+				return near;
+
+			if (respectSaturation)
+			{
+				var openFar = BestWithin(fields, exclude, avoid, state, tuning, int.MaxValue, homeOnly: false, openOnly: true);
+				if (openFar >= 0)
+					return openFar;
+			}
+
+			return BestWithin(fields, exclude, avoid, state, tuning, int.MaxValue, homeOnly: false, openOnly: false);
 		}
 
 		/// <summary>How far out a harvester will be sent while anything closer is on offer.</summary>
@@ -1523,13 +1676,17 @@ namespace AutoCnC.Reference.Logic
 			in HarvesterState state,
 			in HarvesterTuning tuning,
 			int ceilingUnits,
-			bool homeOnly)
+			bool homeOnly,
+			bool openOnly)
 		{
 			var best = -1;
 			var bestScore = 0;
 			for (var i = 0; i < fields.Count; i++)
 			{
 				if (i == exclude || i == avoid || fields[i].DistanceUnits > ceilingUnits)
+					continue;
+
+				if (openOnly && fields[i].Saturated)
 					continue;
 
 				if (homeOnly && IsFrontier(fields[i], state, tuning))

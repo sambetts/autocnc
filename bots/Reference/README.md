@@ -2777,6 +2777,40 @@ tally with every replacement.
 Not addressed, and worth reading next time: `ScoutMode` in Opening and Scout still parks beside
 the first structure it sees until it dies.
 
+## The fleet moved as a herd
+
+The next `16:9` at Hard (Nod against GDI) was lost at 1,235s: spend 25.9% of the opponent's,
+11.03 credits per harvester-second against their 16.3, and 7-9 across 480-600s against their
+20-22, with nine harvesters alive until the first died at 598s. They were driving, not cutting:
+
+| | |
+| --- | --- |
+| 462-474s | home ground worked out; all eight harvesters sent 39-48 cells to one frontier field |
+| 482-490s | two turned back 16 seconds later — "past the 36 cell haul limit" — to a patch holding 560 |
+| 504-524s | one shot on the frontier; the fleet's one-slot report sends the rest 22 cells east |
+| 535-549s | one shot in the east; the report now names only the east, so all seven go to a 665-credit patch |
+| 566-610s | that patch is gone; frontier, east, frontier, east — each leg 22 to 46 cells |
+
+76 field switches of more than 8 cells, 59 of them within 45 seconds of the harvester's previous
+one: 2,186 cells between fields, about 1,240 harvester-seconds, 41% of the fleet's life. Every
+16:9 fight on record did the same, 39 to 158 times. Two causes, two rules, both in
+[`HarvesterLogic`](Logic/HarvesterLogic.cs):
+
+- **Commitment.** An assignment holds for one work cycle (`WorkCycleTicks`, a delivery). The
+  fleet's report, the haul limit, home ground coming back and a better score all wait for it;
+  the harvester's own drive-off and a field running dry do not. Deferrals are
+  `economy.harvester-keeps-field`.
+- **Saturation.** [`FieldClaims`](Modes/FieldClaims.cs) records where each harvester is bound and
+  since when. A field holding less than one load (`IStoresResources.Capacity` x value per unit) for
+  each harvester already bound for it, plus this one, is `FieldOption.Saturated`, and every tier of
+  field choice tries the open fields first. On its own field a harvester counts only earlier
+  claims, so the first to arrive keep it. A choice this changed says "already bound for it".
+
+The tiers keep their order otherwise: open home ground, then open ground inside the haul
+ceiling, then the old tiers exactly. A saturated home patch is not home ground that "still holds
+thousands", which is what `HomeGroundRatioPercent` protects. `ContestedGround` still has one
+slot; the commitment only limits how often it can move a harvester.
+
 ## Start your own
 
 

@@ -18,13 +18,22 @@
 # Forcing HoldFire is fully inert and needs no conditions: AutoTarget.Damaged() returns early on
 # `Stance < ReturnFire`, and TickIdle() returns early on `Stance < Defend`. ITick only decrements
 # a scan counter. EnableStances: False stops anything changing it back at runtime.
+#
+# HoldFire is for the players a battle bot drives, and only for them. The engine gives
+# InitialStance to playable players and InitialStanceAI to AI bots and script players. Nothing in
+# AutoC&C drives those: ModeExecutor runs the local player's modes and nobody else's. They keep
+# Tiberian Dawn's own targeting, AttackAnything with idle scanning. When InitialStanceAI was
+# HoldFire too, the Hard opponent's army still fought, because its squads attack-move. But its
+# guard towers, obelisks and SAM sites never fired: in 37 fights not one of our units was hit by
+# an enemy tower. Its idle units also stood still while being shot. ScanOnIdle: True changes
+# nothing for a HoldFire actor, because TickIdle() returns before it is read.
 
 ^AutoTargetGround:
 	AutoTarget:
 		InitialStance: HoldFire
-		InitialStanceAI: HoldFire
+		InitialStanceAI: AttackAnything
 		EnableStances: False
-		ScanOnIdle: False
+		ScanOnIdle: True
 	ProgrammableController:
 		TickInterval: 8
 		ScanRadius: 8c0
@@ -32,9 +41,9 @@
 ^AutoTargetAir:
 	AutoTarget:
 		InitialStance: HoldFire
-		InitialStanceAI: HoldFire
+		InitialStanceAI: AttackAnything
 		EnableStances: False
-		ScanOnIdle: False
+		ScanOnIdle: True
 	ProgrammableController:
 		TickInterval: 8
 		ScanRadius: 10c0
@@ -42,9 +51,9 @@
 ^AutoTargetAll:
 	AutoTarget:
 		InitialStance: HoldFire
-		InitialStanceAI: HoldFire
+		InitialStanceAI: AttackAnything
 		EnableStances: False
-		ScanOnIdle: False
+		ScanOnIdle: True
 	ProgrammableController:
 		TickInterval: 8
 		ScanRadius: 8c0

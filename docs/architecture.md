@@ -232,6 +232,12 @@ Deleting it breaks actors that add their own `AutoTargetPriority` (which declare
 condition linter. Forcing `HoldFire` is inert — `Damaged()` returns early below `ReturnFire`,
 `TickIdle()` below `Defend` — and needs no conditions.
 
+It is neutered only for the players a battle bot drives. The engine gives `InitialStance` to
+playable players and `InitialStanceAI` to AI bots and script players, and `InitialStanceAI` is
+`AttackAnything`. Nothing in AutoC&C drives the opponent AI's actors, so they need the engine's
+own targeting. When `InitialStanceAI` was `HoldFire` as well, the Hard opponent's towers never
+fired in 37 fights and its idle units never shot back.
+
 ---
 
 ## Verification strategy

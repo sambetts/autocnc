@@ -315,6 +315,13 @@ if ($Telemetry) {
 if ($BattleLog) {
     $battleArgs += "Launch.BattleLog=$BattleLog"
     Write-Host "==> Battle log: $BattleLog" -ForegroundColor Cyan
+
+    # Recorded beside the battle log so the cross-run trend compares only fights played under
+    # the same rules. See rules-fingerprint.ps1.
+    . (Join-Path $PSScriptRoot 'rules-fingerprint.ps1')
+    $rulesPath = Join-Path (Split-Path -Parent ([IO.Path]::GetFullPath($BattleLog))) 'rules-fingerprint.json'
+    $rules = Write-RulesFingerprint $repoRoot $rulesPath
+    Write-Host "==> Rules: $($rules.Fingerprint)" -ForegroundColor Cyan
 }
 
 if ($DecisionTrace) {

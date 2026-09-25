@@ -145,6 +145,16 @@ namespace AutoCnC.Evidence
 		public string Batch { get; set; }
 
 		public string Arm { get; set; }
+
+		/// <summary>
+		/// Which game rules the fight was played under, or null when it did not record them.
+		/// </summary>
+		/// <remarks>
+		/// Fights under different rules are different experiments. When the opponent AI's towers
+		/// started firing, the same champion went from 8 to 5 benchmark wins in 8, and every earlier
+		/// run then read as the bot regressing. The trend compares only runs that share this.
+		/// </remarks>
+		public string RulesFingerprint { get; set; }
 	}
 
 	/// <summary>

@@ -275,6 +275,92 @@ namespace AutoCnC.Evidence.Tests
 			Assert.That(effect.MeanFitnessDelta, Is.EqualTo(0.1).Within(0.0001));
 		}
 
+		/// <summary>
+		/// A rules change must not read as the bot regressing either.
+		/// </summary>
+		/// <remarks>
+		/// When the opponent AI's towers started firing, the same champion went from 8 to 5
+		/// benchmark wins in 8, and the first fight under the new rules reported five regressions
+		/// against runs that had never faced a working tower.
+		/// </remarks>
+		[Test]
+		public void ChangingTheGameRulesResetsTheComparisonRatherThanReportingARegression()
+		{
+			var history = new RunHistory { Bot = "TestBot" };
+			foreach (var (id, day, fitness) in new[]
+			{
+				("old-1", 0, 0.90), ("old-2", 1, 0.95), ("old-3", 2, 0.93)
+			})
+				RunIndex.Record(history, "TestBot", UnderRules(id, day, fitness, null));
+
+			RunIndex.Record(history, "TestBot", UnderRules("new-1", 3, 0.50, "towers-fire"));
+			RunIndex.Record(history, "TestBot", UnderRules("new-2", 4, 0.55, "towers-fire"));
+
+			var trend = RunIndex.Trend(history);
+
+			Assert.That(trend.RunsCompared, Is.EqualTo(2), "only the runs under the current rules");
+			Assert.That(trend.RulesChange, Does.Contain("unrecorded").And.Contain("towers-fire"));
+			Assert.That(trend.DifficultyChange, Is.Null, "the difficulty did not move");
+			Assert.That(trend.Metrics.Single(m => m.Name == "fitness").Recent, Is.EqualTo(new[] { 0.50, 0.55 }));
+			Assert.That(trend.Regressions, Is.Empty);
+			Assert.That(trend.Rendered, Does.Contain("towers-fire"));
+		}
+
+		[Test]
+		public void TheFirstRunUnderNewRulesIsTheBaselineRatherThanARegression()
+		{
+			var history = new RunHistory { Bot = "TestBot" };
+			RunIndex.Record(history, "TestBot", UnderRules("old-1", 0, 0.90, "towers-idle"));
+			RunIndex.Record(history, "TestBot", UnderRules("old-2", 1, 0.95, "towers-idle"));
+			RunIndex.Record(history, "TestBot", UnderRules("new-1", 2, 0.50, "towers-fire"));
+
+			var trend = RunIndex.Trend(history);
+
+			Assert.That(trend.RunsCompared, Is.EqualTo(1));
+			Assert.That(trend.Regressions, Is.Empty);
+			Assert.That(trend.Rendered, Does.Contain("towers-idle").And.Contain("towers-fire")
+				.And.Contain("under these rules").And.Contain("new baseline"));
+		}
+
+		[Test]
+		public void RunsUnderTheSameRulesStillTrendAcrossThem()
+		{
+			var history = new RunHistory { Bot = "TestBot" };
+			RunIndex.Record(history, "TestBot", UnderRules("r1", 0, 0.90, "same"));
+			RunIndex.Record(history, "TestBot", UnderRules("r2", 1, 0.90, "same"));
+			RunIndex.Record(history, "TestBot", UnderRules("r3", 2, 0.50, "same"));
+
+			var trend = RunIndex.Trend(history);
+
+			Assert.That(trend.RunsCompared, Is.EqualTo(3));
+			Assert.That(trend.RulesChange, Is.Null);
+			Assert.That(trend.Regressions.Single(), Does.StartWith("fitness"));
+		}
+
+		/// <summary>A prompt is not blamed for a fitness drop caused by a rules change.</summary>
+		[Test]
+		public void PromptEffectIgnoresDeltasThatStraddleARulesChange()
+		{
+			var history = new RunHistory { Bot = "TestBot" };
+
+			var lastOld = UnderRules("old-last", 0, 0.90, null);
+			lastOld.PromptId = "steady";
+			RunIndex.Record(history, "TestBot", lastOld);
+
+			var firstNew = UnderRules("new-1", 1, 0.40, "towers-fire");
+			firstNew.PromptId = "steady";
+			RunIndex.Record(history, "TestBot", firstNew);
+
+			var secondNew = UnderRules("new-2", 2, 0.50, "towers-fire");
+			secondNew.PromptId = "steady";
+			RunIndex.Record(history, "TestBot", secondNew);
+
+			var effect = RunIndex.PromptEffects(history).Single(e => e.PromptId == "steady");
+
+			Assert.That(effect.RoundsMeasured, Is.EqualTo(1));
+			Assert.That(effect.MeanFitnessDelta, Is.EqualTo(0.1).Within(0.0001));
+		}
+
 		[Test]
 		public void UndefinedAndFailedRunsAreExcludedFromTrendButLegacyWinsAndLossesRemain()
 		{
@@ -314,6 +400,16 @@ namespace AutoCnC.Evidence.Tests
 		{
 			var entry = Entry(id, days, 40, 100, "candidate", "Lost");
 			entry.Difficulty = difficulty;
+			entry.Fitness = fitness;
+			entry.Headline["fitness"] = fitness;
+			return entry;
+		}
+
+		static RunHistoryEntry UnderRules(string id, int days, double fitness, string rules)
+		{
+			var entry = Entry(id, days, 40, 100, "candidate", "Lost");
+			entry.Difficulty = "Hard";
+			entry.RulesFingerprint = rules;
 			entry.Fitness = fitness;
 			entry.Headline["fitness"] = fitness;
 			return entry;

@@ -125,7 +125,8 @@ namespace AutoCnC.Evidence
 					Seed = manifest.Seed,
 					Benchmark = manifest.Benchmark,
 					Batch = manifest.Batch,
-					Arm = manifest.Arm
+					Arm = manifest.Arm,
+					RulesFingerprint = evidence.RulesFingerprint
 				}
 			};
 

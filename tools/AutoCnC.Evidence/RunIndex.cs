@@ -70,6 +70,15 @@ namespace AutoCnC.Evidence
 
 		public int PromptCharacters { get; set; }
 		public int PromptHeadings { get; set; }
+
+		/// <summary>
+		/// Which game rules this run was played under, or null for a run that did not record them.
+		/// </summary>
+		/// <remarks>
+		/// The trend compares only runs that share it, exactly as it does for difficulty. See
+		/// <see cref="SummaryFight.RulesFingerprint"/>.
+		/// </remarks>
+		public string RulesFingerprint { get; set; }
 	}
 
 	public sealed class RunHistory
@@ -153,6 +162,16 @@ namespace AutoCnC.Evidence
 		/// of them explained by the opponent rather than the bot.
 		/// </remarks>
 		public string DifficultyChange { get; set; }
+
+		/// <summary>
+		/// Set when the game rules changed, naming what was excluded and why.
+		/// </summary>
+		/// <remarks>
+		/// When the opponent AI's towers started firing, the same champion went from 8 to 5
+		/// benchmark wins in 8. Compared with the runs before that, the next fight reported five
+		/// regressions at once, and every one of them was the opponent rather than the bot.
+		/// </remarks>
+		public string RulesChange { get; set; }
 
 		public List<TrendMetric> Metrics { get; set; } = [];
 		public List<string> Regressions { get; set; } = [];
@@ -283,7 +302,8 @@ namespace AutoCnC.Evidence
 				ChecksFailed = checks?.Failed ?? 0,
 				PromptId = prompt?.Id,
 				PromptCharacters = prompt?.Characters ?? 0,
-				PromptHeadings = prompt?.HeadingCount ?? 0
+				PromptHeadings = prompt?.HeadingCount ?? 0,
+				RulesFingerprint = summary.Fight.RulesFingerprint
 			};
 
 			foreach (var component in summary.Fitness?.Components ?? [])
@@ -350,9 +370,13 @@ namespace AutoCnC.Evidence
 			// every one of them the new opponent rather than the bot, and the next round would
 			// have been told to explain all nine before doing anything else.
 			var difficulty = candidates.LastOrDefault()?.Difficulty;
-			var comparable = string.IsNullOrEmpty(difficulty)
-				? candidates
-				: TrailingAtDifficulty(candidates, difficulty);
+
+			// And only runs played under the current game rules, for the same reason: a rules
+			// change alters the opponent as surely as a step up the ladder does. A run that did
+			// not record its rules is not assumed to match, because every run from before the
+			// opponent's towers were fixed is one of those.
+			var rules = candidates.LastOrDefault()?.RulesFingerprint;
+			var comparable = TrailingComparable(candidates, difficulty, rules);
 
 			var excluded = candidates.Count - comparable.Count;
 			var runs = comparable.TakeLast(Math.Max(2, window)).ToList();
@@ -369,24 +393,45 @@ namespace AutoCnC.Evidence
 
 			if (excluded > 0)
 			{
-				var previous = candidates[^(comparable.Count + 1)].Difficulty;
-				report.DifficultyChange =
-					$"Difficulty changed from {previous} to {difficulty}. " +
-					$"{excluded} earlier run(s) are excluded: a different difficulty is a different " +
-					"opponent personality and handicap, so nothing across that line is comparable. " +
-					"A fitness drop here is the ladder, not the bot.";
+				var boundary = candidates[^(comparable.Count + 1)];
+				if (!string.IsNullOrEmpty(difficulty) &&
+					!string.Equals(boundary.Difficulty, difficulty, StringComparison.OrdinalIgnoreCase))
+					report.DifficultyChange =
+						$"Difficulty changed from {boundary.Difficulty} to {difficulty}. " +
+						$"{excluded} earlier run(s) are excluded: a different difficulty is a different " +
+						"opponent personality and handicap, so nothing across that line is comparable. " +
+						"A fitness drop here is the ladder, not the bot.";
+
+				if (!string.Equals(boundary.RulesFingerprint, rules, StringComparison.Ordinal))
+					report.RulesChange =
+						$"The game rules changed from {boundary.RulesFingerprint ?? "unrecorded"} to " +
+						$"{rules ?? "unrecorded"}. {excluded} earlier run(s) are excluded: fights under " +
+						"different rules are different experiments, so nothing across that line is " +
+						"comparable. A drop here is the rules, not the bot; " +
+						"`git log -- mods/autocnc engine` says what changed.";
 			}
 
 			return Populate(report, runs, history);
 		}
 
-		/// <summary>The most recent unbroken stretch of runs played at one difficulty.</summary>
-		static List<RunHistoryEntry> TrailingAtDifficulty(List<RunHistoryEntry> runs, string difficulty)
+		/// <summary>
+		/// The most recent unbroken stretch of runs at one difficulty and under one set of rules.
+		/// </summary>
+		/// <remarks>
+		/// An empty difficulty matches any, as it always has. Rules match exactly, including a
+		/// null fingerprint only matching another null.
+		/// </remarks>
+		static List<RunHistoryEntry> TrailingComparable(List<RunHistoryEntry> runs, string difficulty,
+			string rules)
 		{
 			var matched = new List<RunHistoryEntry>();
 			for (var i = runs.Count - 1; i >= 0; i--)
 			{
-				if (!string.Equals(runs[i].Difficulty, difficulty, StringComparison.OrdinalIgnoreCase))
+				if (!string.IsNullOrEmpty(difficulty) &&
+					!string.Equals(runs[i].Difficulty, difficulty, StringComparison.OrdinalIgnoreCase))
+					break;
+
+				if (!string.Equals(runs[i].RulesFingerprint, rules, StringComparison.Ordinal))
 					break;
 
 				matched.Add(runs[i]);
@@ -503,6 +548,10 @@ namespace AutoCnC.Evidence
 				// so its lower fitness says nothing about the template that steered the round
 				// before it.
 				if (!string.Equals(run.Difficulty, next.Difficulty, StringComparison.OrdinalIgnoreCase))
+					continue;
+
+				// Likewise a delta that straddles a rules change measures the rules.
+				if (!string.Equals(run.RulesFingerprint, next.RulesFingerprint, StringComparison.Ordinal))
 					continue;
 
 				var delta = next.Fitness - run.Fitness;
@@ -648,10 +697,18 @@ namespace AutoCnC.Evidence
 		public static string Render(TrendReport report)
 		{
 			if (report.RunsCompared < 2)
-				return report.DifficultyChange != null
-					? report.DifficultyChange + "\nThere is not yet enough history at this " +
-						"difficulty to show a trend. Treat this fight as the new baseline."
-					: "Not enough history yet to show a trend.";
+			{
+				var changes = new[] { report.DifficultyChange, report.RulesChange }
+					.Where(change => change != null).ToList();
+				if (changes.Count == 0)
+					return "Not enough history yet to show a trend.";
+
+				var scope = report.RulesChange == null ? "at this difficulty"
+					: report.DifficultyChange == null ? "under these rules"
+					: "at this difficulty and under these rules";
+				return string.Join("\n", changes) + $"\nThere is not yet enough history {scope} " +
+					"to show a trend. Treat this fight as the new baseline.";
+			}
 
 			var text = new StringBuilder();
 			text.Append(CultureInfo.InvariantCulture,
@@ -660,6 +717,9 @@ namespace AutoCnC.Evidence
 
 			if (report.DifficultyChange != null)
 				text.Append(report.DifficultyChange).Append('\n');
+
+			if (report.RulesChange != null)
+				text.Append(report.RulesChange).Append('\n');
 
 			foreach (var metric in report.Metrics)
 				text.Append(CultureInfo.InvariantCulture,

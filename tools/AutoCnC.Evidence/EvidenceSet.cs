@@ -201,6 +201,7 @@ namespace AutoCnC.Evidence
 		public string TrendPath => Path.Combine(Directory, "trend.json");
 		public string PromptPath => Path.Combine(Directory, "agent-prompt.txt");
 		public string MechanicsPath => Path.Combine(Directory, "mechanics.md");
+		public string RulesFingerprintPath => Path.Combine(Directory, "rules-fingerprint.json");
 
 		public BattleEvents Battle { get; private set; }
 		public Telemetry Telemetry { get; private set; }
@@ -208,6 +209,17 @@ namespace AutoCnC.Evidence
 		public GameRules Rules { get; private set; }
 		public MapFacts Map { get; private set; }
 		public FightManifest Manifest { get; private set; }
+
+		/// <summary>
+		/// Which game rules the fight was played under, or null when it did not record them.
+		/// </summary>
+		/// <remarks>
+		/// Written beside the battle log by <c>scripts/run-bot.ps1</c> when the fight starts. It
+		/// is a hash of the AutoC&amp;C mod's own YAML and the engine commit it inherits the rest
+		/// from, so it identifies the rules the fight actually used rather than the ones in the
+		/// checkout when the evidence is derived later.
+		/// </remarks>
+		public string RulesFingerprint { get; private set; }
 
 		/// <summary>
 		/// Where to read the duel lab's matchups from, or <c>none</c> for none. Null finds them.
@@ -233,8 +245,31 @@ namespace AutoCnC.Evidence
 			Rules = GameRules.Read(GameRulesPath);
 			Map = MapFacts.Read(MapFactsPath);
 			Manifest = FightManifest.Read(FightManifestPath);
+			RulesFingerprint = ReadRulesFingerprint(RulesFingerprintPath);
 			Matchups = AutoCnC.Evidence.Matchups.Locate(Directory, MatchupsPath);
 			return this;
+		}
+
+		static string ReadRulesFingerprint(string path)
+		{
+			if (!File.Exists(path))
+				return null;
+
+			try
+			{
+				using var stream = File.OpenRead(path);
+				using var document = JsonDocument.Parse(stream);
+				return document.RootElement.ValueKind == JsonValueKind.Object &&
+					document.RootElement.TryGetProperty("fingerprint", out var value) &&
+					value.ValueKind == JsonValueKind.String &&
+					!string.IsNullOrWhiteSpace(value.GetString())
+						? value.GetString()
+						: null;
+			}
+			catch (JsonException)
+			{
+				return null;
+			}
 		}
 	}
 }

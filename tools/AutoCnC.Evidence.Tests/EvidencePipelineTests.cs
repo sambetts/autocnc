@@ -10,6 +10,7 @@
 #endregion
 
 using System.IO;
+using System.Linq;
 using NUnit.Framework;
 
 namespace AutoCnC.Evidence.Tests
@@ -75,6 +76,43 @@ namespace AutoCnC.Evidence.Tests
 			Assert.That(outcome.Indexed, Is.True);
 			Assert.That(outcome.Skipped, Is.Null);
 			Assert.That(RunIndex.Read(history).Runs.Count, Is.EqualTo(1));
+		}
+
+		/// <summary>
+		/// The rules a fight was played under are read from beside its battle log, where
+		/// run-bot.ps1 wrote them at launch, and carried into the summary and the index.
+		/// </summary>
+		[Test]
+		public void TheRulesFingerprintBesideTheBattleLogReachesTheSummaryAndTheHistory()
+		{
+			WriteFile("battle.csv", BattleHeader +
+				BattleRow(0, "player", "local", detail: "side=you faction=gdi bot=1 colour=gold") +
+				BattleRow(0, "player", "enemy", detail: "side=enemy faction=nod bot=0 colour=red") +
+				BattleRow(600, "over", "local", detail: "result=Won"));
+			WriteFile("telemetry.csv", TelemetryHeader +
+				TelemetryRow(0, "local", 1, 100, 600) +
+				TelemetryRow(600, "local", 1, 100, 600));
+			WriteFile("rules-fingerprint.json",
+				"{ \"schemaVersion\": 1, \"fingerprint\": \"44db50ef17715b00\", \"files\": [\"rules/units.yaml\"] }");
+
+			var history = Path.Combine(TempDirectory, "history.json");
+			var outcome = EvidencePipeline.Run(TempDirectory, history, bot: "TestBot");
+
+			Assert.That(outcome.Summary.Fight.RulesFingerprint, Is.EqualTo("44db50ef17715b00"));
+			Assert.That(RunIndex.Read(history).Runs.Single().RulesFingerprint, Is.EqualTo("44db50ef17715b00"));
+		}
+
+		[Test]
+		public void AFightWithoutARulesFingerprintRecordsNone()
+		{
+			WriteFile("battle.csv", BattleHeader +
+				BattleRow(0, "player", "local", detail: "side=you faction=gdi bot=1 colour=gold") +
+				BattleRow(600, "over", "local", detail: "result=Lost"));
+			WriteFile("rules-fingerprint.json", "not json");
+
+			var outcome = EvidencePipeline.Run(TempDirectory);
+
+			Assert.That(outcome.Summary.Fight.RulesFingerprint, Is.Null);
 		}
 
 		/// <summary>

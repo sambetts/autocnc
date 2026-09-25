@@ -46,7 +46,7 @@ builder trims its longest lists in a fixed order and records exactly what it tri
 | Field | Contents |
 | --- | --- |
 | `provenance` | Which inputs existed and at what schema. A missing number reads as unknown, not zero. |
-| `fight` | Map, difficulty, factions, outcome, duration, seed, benchmark, arm. |
+| `fight` | Map, difficulty, factions, outcome, duration, seed, benchmark, arm, rules fingerprint. |
 | `headline` | The flat block the cross-run index stores and the trend diffs. |
 | `fitness` | Graded score with named, separately reported components. |
 | `crossover` | Last second level-or-ahead and first second behind, for units, army and assets. |
@@ -206,6 +206,15 @@ the boundary for the same reason.
 A fitness score is therefore only comparable within a difficulty. Nothing here rescales it to make
 rungs comparable: a multiplier chosen to equate Normal with Hard would be invented, and an invented
 number that looks like a measurement is worse than an honest gap.
+
+The trend is scoped to one set of **game rules** in the same way. `scripts/run-bot.ps1` writes
+`rules-fingerprint.json` beside the battle log when a fight starts. It holds a hash of the AutoC&C
+mod's own YAML (comments and blank lines aside) and of the engine commit whose `cnc` mod supplies
+the rest, and the summary and the index carry it as `rulesFingerprint`. When the opponent AI's
+towers started firing, the same champion went from 8 to 5 benchmark wins in 8, and the first fight
+under the new rules reported five regressions against runs that had never faced a working tower.
+Runs under other rules, including runs that recorded none, are excluded and the report names both
+fingerprints. Prompt attribution discards deltas across that line too.
 
 Runs whose outcome is failed, unknown, or `Undefined` remain in `history.json` as durable evidence
 but are excluded from rolling trends and prompt effects. Prompt attribution also refuses to bridge

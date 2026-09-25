@@ -125,11 +125,11 @@ namespace AutoCnC.Reference.Logic
 	/// <see cref="BattleState"/> cannot see whether a vehicle factory is standing, so plan order
 	/// is the only evidence available that a harvester is buyable at all:
 	/// <see cref="ReferencePlans.Economy"/> buys <c>weap</c>/<c>afld</c> at its seventh rung and
-	/// its fourth <c>proc</c> at its tenth, so a side with four refineries has already bought the
+	/// its fourth <c>proc</c> at its ninth, so a side with four refineries has already bought the
 	/// factory. Handing over at three instead would arm this reservation in the very window the
 	/// yard needs 2,000 credits clear to buy that factory — the reservation would delay the thing
 	/// that makes it useful. Between three refineries and four, neither reservation is active and
-	/// the yard spends freely.
+	/// the yard spends freely on the factory, its power and the fourth refinery.
 	/// </para>
 	/// <para>
 	/// <paramref name="HarvestersPerRefinery"/> is the docking ratio the rest of the bot already
@@ -634,6 +634,29 @@ namespace AutoCnC.Reference.Logic
 		/// </remarks>
 		public static bool IsRecoveryRefinery(string item, IReadOnlyList<string> refineries) =>
 			!string.IsNullOrEmpty(item) && Names(refineries, item);
+
+		/// <summary>
+		/// Whether a refinery the yard is about to order is the one that follows the field: the
+		/// first past the opening bank's floor, ordered while no tech stands.
+		/// </summary>
+		/// <remarks>
+		/// A trace tag, never a gate. <see cref="ReferencePlans.Economy"/> now buys its fourth
+		/// refinery ahead of <c>hq</c>, because by then the first three have worked out the
+		/// ground they stand on and the fourth is sited on the next field. This is true exactly
+		/// when that rung fires in its new place — false for refineries one to three, which sit
+		/// below the floor, and false for any refinery ordered with the tech already up, which
+		/// is where the old order bought it and where a frontier refinery is bought.
+		/// </remarks>
+		public static bool IsFieldRefineryBeforeTech(
+			string item,
+			IReadOnlyList<string> refineries,
+			int standingRefineries,
+			int standingTech,
+			in OpeningBankTuning t) =>
+			IsRecoveryRefinery(item, refineries)
+			&& t.RefineryFloor > 0
+			&& standingRefineries >= t.RefineryFloor
+			&& standingTech <= 0;
 
 		/// <summary>
 		/// Whether every unit queue should stop spending until the base has its first gun.

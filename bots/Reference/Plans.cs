@@ -462,6 +462,8 @@ namespace AutoCnC.Reference
 		/// So <c>hq</c> moves one rung up, above the fourth refinery and below the third. The
 		/// economy keeps its lead — three refineries, a barracks and a factory all still precede
 		/// it — and the fourth refinery is displaced by 1,000 credits rather than by a doctrine.
+		/// (That fourth refinery moved back above <c>hq</c> once the first three were standing by
+		/// 155s; see the last paragraph here for the 16:9 haul that cost.)
 		/// </para>
 		/// <para>
 		/// <b>The second refinery now leads the barracks and the factory, because "the bank can
@@ -514,6 +516,27 @@ namespace AutoCnC.Reference
 		/// argument was written for was a factory at 474s, behind four refineries and the tech,
 		/// and one rung of 1,500 does not reproduce it.
 		/// </para>
+		/// <para>
+		/// <b>The fourth refinery now leads <c>hq</c> again, because it is the one that follows
+		/// the field.</b> Three harvesters work out the ground the first three refineries stand
+		/// on, and the fourth is the first refinery sited on the <em>next</em> field — the
+		/// factory's screen has surveyed it by the time the refinery is placed. Behind
+		/// <c>hq</c> it arrived after the ground it replaces was gone. On 16:9 (GDI v Nod) both
+		/// sides earned 21.6 credits per harvester-second from 120s to 240s; the home fields
+		/// were worked out at 214-241s, all three harvesters crossed 22 cells to the next patch,
+		/// and from 240s to 300s this side earned 10.3 against the opponent's 23.8. The refinery
+		/// beside that patch was ordered at 246s, behind <c>hq</c>, and stood at 335s — a
+		/// 37-second build that waited 52 seconds for cash while an <c>atwr</c>, two harvesters
+		/// and eight infantry shared the trickle. Over 0-480s the two fleets had the same
+		/// harvester-seconds (1,775 against 1,787) and this one earned 26,520 against 36,795.
+		/// Ahead of <c>hq</c> it is ordered as soon as the factory's power lands (about 220s
+		/// there), and nothing in <c>Support</c> can outbid it for GDI because <c>atwr</c> needs
+		/// <c>hq</c>. The cost is tech later, and it is stated rather than hidden: the harvester
+		/// recovery hold keeps <c>hq</c> until the fleet reaches its release band, so
+		/// <c>e2</c>/<c>e4</c>, the siege rung and <c>atwr</c> wait behind two more harvesters
+		/// rather than in front of them.
+		/// See <c>economy.field-refinery-before-tech</c> in <see cref="Modes.BuildBaseMode"/>.
+		/// </para>
 		/// </remarks>
 		public static IReadOnlyList<BuildStep> Economy { get; } =
 		[
@@ -525,8 +548,8 @@ namespace AutoCnC.Reference
 			new(["proc"], 3),                  // the third free harvester, while the opening bank lasts
 			new(["weap", "afld"], 1),          // ...and the means to replace a harvester that dies
 			new(["powr", "nuke"], 3),
-			new(["hq"], 1),                    // tech behind three earners: it unlocks ltnk and arty
-			new(["proc"], RefineryCore),       // four refineries is four harvesters, with no factory
+			new(["proc"], RefineryCore),       // the refinery that follows the field, before the home ground is gone
+			new(["hq"], 1),                    // tech behind four earners: it unlocks ltnk and arty
 		];
 
 		/// <summary>

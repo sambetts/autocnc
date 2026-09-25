@@ -1,54 +1,46 @@
 {
   "schemaVersion": 1,
-  "authoredForRevision": "d6cf3dca6c5f5c48a6579bfe01bf3188a26fdecb",
+  "authoredForRevision": "31ee989995aca3db07c38973f132cd2493bb9348",
   "checks": [
     {
-      "id": "commitment-runs",
+      "id": "field-refinery-before-tech",
       "category": "activation",
-      "description": "A harvester sent to a field less than one work cycle (60s) ago kept it instead of moving for the fleet's report, the haul limit, home ground coming back or a better score. Last fight had 59 switches of more than 8 cells within 45s of the previous one. Absent in a short win with no field changes is benign; absent in a loss with harvesters switching means the gate never ran.",
-      "query": "reason-id:economy.harvester-keeps-field",
-      "operator": ">=",
-      "value": "1"
-    },
-    {
-      "id": "saturation-spreads",
-      "category": "activation",
-      "description": "A field choice went elsewhere because the field the whole fleet would otherwise have picked holds less than a load for each harvester already bound for it. Last fight seven harvesters were sent to a 665-credit patch at 535-549s. Unique prose literal from the crowdNote in HarvesterLogic.Decide.",
-      "query": "reason:already bound for it",
+      "description": "The fourth refinery was ordered with three refineries standing and no hq/eye/tmpl: the Economy rung firing in its new place ahead of the tech. Last fight it was ordered at 246s behind hq, so this id could not fire. Absent means a match that never stood three refineries, or the swap did not take.",
+      "query": "reason-id:economy.field-refinery-before-tech",
       "operator": ">=",
       "value": "1"
     },
     {
       "id": "harvesters-earn-more",
       "category": "outcome",
-      "description": "Priority 1's per-harvester metric. Last fight 11.03 against the opponent's 16.3, and 7-9 across 480-600s while nine harvesters were alive; twelve prior 16:9 fights ran 8.2 to 13.1.",
+      "description": "Priority 1's per-harvester metric. Last fight 13.82 overall; over 0-480s 14.9 against the opponent's 20.6 on equal harvester-seconds (1,775 v 1,787), and 10.3 against 23.8 over 240-300s while the fleet hauled 22 cells for the 95s before refinery four stood at 335s.",
       "query": "summary.scale.ownEarnedPerHarvesterSecond",
       "operator": ">=",
-      "value": "13"
-    },
-    {
-      "id": "fewer-returns-from-frontier",
-      "category": "outcome",
-      "description": "Frontier-to-home switches (haul limit, home ground back, fleet report toward home) fall, because commitment defers them and saturated home patches no longer count as home ground. Last fight 19; losses on record 17-44, wins 0-19.",
-      "query": "reason-id:economy.harvester-leaves-frontier",
-      "operator": "<=",
-      "value": "10"
+      "value": "14.5"
     },
     {
       "id": "spend-keeps-up",
       "category": "outcome",
-      "description": "Priority 1's headline metric. Last fight 25.9; every loss on record was 41 or less and every win 77 or more. Diagnostic: dominated by the match outcome.",
+      "description": "Priority 1's headline metric. Last fight 60.5, but 84-100 until 480s; every loss on record before it was 41 or less and every win 71 or more. Diagnostic: dominated by the match outcome.",
       "query": "summary.scale.spendVsOpponentPercent",
       "operator": ">=",
-      "value": "40"
+      "value": "60"
     },
     {
-      "id": "harvesters-not-thrown-away",
+      "id": "tech-not-starved",
       "category": "invariant",
-      "description": "Commitment keeps a recently switched harvester on a field the fleet reported for up to a minute. It must not cost more harvesters than the ping-pong did: 10 lost last fight, all of them.",
-      "query": "summary.unitTypes[harv].lost",
+      "description": "hq now waits behind refinery four and the harvester recovery hold (release at six harvesters with four refineries). Last fight it stood at 245s; expected about 320-360s. Past 400s the swap is starving e2/e4, the siege rung and atwr.",
+      "query": "units.min(bornSeconds,type=hq)",
       "operator": "<=",
-      "value": "10"
+      "value": "400"
+    },
+    {
+      "id": "fleet-not-smaller",
+      "category": "invariant",
+      "description": "Moving the refinery ahead of the tech must not shrink the fleet. Last fight peaked at 8 against the opponent's 11.",
+      "query": "summary.headline.peakHarvesters",
+      "operator": ">=",
+      "value": "8"
     },
     {
       "id": "no-timeout",

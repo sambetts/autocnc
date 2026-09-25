@@ -415,6 +415,19 @@ namespace AutoCnC.Reference.Modes
 				deferredConstructionForHarvester = false;
 			}
 
+			// The fourth refinery is sited on the field the home ground's harvesters move to next,
+			// and the plan now buys it before the tech rather than after. Tagged so the trace shows
+			// that rung firing in its new place. See ReferencePlans.Economy.
+			if (order.Action == ConstructionAction.Produce
+				&& IncomeFirstLogic.IsFieldRefineryBeforeTech(
+					order.Item, ReferencePlans.Refineries, refineryCount,
+					ExpansionLogic.Standing(owned, ReferencePlans.TechStructures),
+					OpeningBankTuning.Default))
+			{
+				order = order with { Reason = $"{order.Reason}, the refinery that follows the field, ahead of the tech" };
+				orderReasonId = "economy.field-refinery-before-tech";
+			}
+
 			// --- Act ---------------------------------------------------------------
 			switch (order.Action)
 			{

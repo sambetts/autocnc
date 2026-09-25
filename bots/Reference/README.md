@@ -2811,6 +2811,45 @@ ceiling, then the old tiers exactly. A saturated home patch is not home ground t
 thousands", which is what `HomeGroundRatioPercent` protects. `ContestedGround` still has one
 slot; the commitment only limits how often it can move a harvester.
 
+## The home ground ran out before the refinery that follows it
+
+The next `16:9` at Hard (GDI against Nod) was lost at 870s, the first fight after the opponent's
+towers started firing (31ee989). Spend was 60.5% of the opponent's, but 84-100% of it until 480s,
+and at 420-480s this side had eight harvesters against their seven. The fleet was not smaller;
+each harvester earned less, and the gap opened on one date:
+
+| seconds | our credits per harvester-second | theirs |
+| --- | --- | --- |
+| 120-240 | 21.6 | 21.65 |
+| 240-300 | **10.3** | 23.8 |
+| 300-360 | 15.5 | 21.2 |
+| 0-480 | 14.9 on 1,775 harvester-seconds | 20.6 on 1,787 |
+
+The three home fields were worked out at 214-241s, and all three harvesters crossed 22 cells to the
+next patch. The refinery that ended that haul was sited beside it at (24,35), but it was the tenth
+rung, behind `hq`. It was ordered at 246s and stood at 335s: a 37-second build that waited 52
+seconds for cash while an `atwr`, two harvesters and eight infantry shared the trickle. The
+`production-budget` trace reads `inactive` from 160s to 340s, the gap between the opening bank
+(three refineries) and the harvester bank (four).
+
+**The fourth refinery now leads `hq`** ([`Plans.cs`](Plans.cs), `Economy`). It is ordered once the
+factory's power lands and placed after the screen has surveyed the next field. For GDI nothing in `Support`
+can outbid it, because `atwr` needs `hq`. The barracks is already capped by `IncomeFirstLogic.Hold`
+while harvesters are short. The cost is tech later: the recovery hold keeps `hq` until the sixth
+harvester. The order is tagged `economy.field-refinery-before-tech`, which fires only for a refinery
+past the opening floor with no tech standing. The old order never produced that combination.
+
+### Two things in this match that are not what they look like
+
+- **The value-exchange, kill and loss regressions are mostly the opponent's towers.** One enemy
+  `gtwr` at their forward base killed 14 `e1` and 4 `e2` in 32 seconds (439-471s), and `arty`, which
+  hit before it was first seen, killed 22 more `e1`. No enemy tower fired in any earlier run on
+  record.
+- **`harvesters-not-thrown-away` failed at 12 lost, and the harvester rule was not the cause.** Nine
+  died within 20 cells of home after the 415s push had spent the army. Two died on the road to
+  (37-39,7), past the forward base Nod built there at 433-442s. One died at (56,46), beside the
+  expansion first seen at 277s.
+
 ## Start your own
 
 

@@ -79,6 +79,12 @@ namespace AutoCnC.Evidence
 		/// <see cref="SummaryFight.RulesFingerprint"/>.
 		/// </remarks>
 		public string RulesFingerprint { get; set; }
+
+		/// <summary>
+		/// The <see cref="FitnessScore.ScaleVersion"/> this run's fitness was scored on, or null
+		/// for a run recorded before the index kept it, all of which were scored on scale 1.
+		/// </summary>
+		public int? FitnessScaleVersion { get; set; }
 	}
 
 	public sealed class RunHistory
@@ -172,6 +178,12 @@ namespace AutoCnC.Evidence
 		/// regressions at once, and every one of them was the opponent rather than the bot.
 		/// </remarks>
 		public string RulesChange { get; set; }
+
+		/// <summary>
+		/// Set when the fitness scale changed within the window, saying which runs the fitness
+		/// trend leaves out. Every other metric is measured, not scored, and keeps its history.
+		/// </summary>
+		public string FitnessScaleChange { get; set; }
 
 		public List<TrendMetric> Metrics { get; set; } = [];
 		public List<string> Regressions { get; set; } = [];
@@ -303,7 +315,8 @@ namespace AutoCnC.Evidence
 				PromptId = prompt?.Id,
 				PromptCharacters = prompt?.Characters ?? 0,
 				PromptHeadings = prompt?.HeadingCount ?? 0,
-				RulesFingerprint = summary.Fight.RulesFingerprint
+				RulesFingerprint = summary.Fight.RulesFingerprint,
+				FitnessScaleVersion = summary.Fitness?.ScaleVersion
 			};
 
 			foreach (var component in summary.Fitness?.Components ?? [])
@@ -453,6 +466,22 @@ namespace AutoCnC.Evidence
 					// make deleting old history the only way to see a new number. The trailing
 					// stretch avoids both.
 					var measured = Trailing(runs, name);
+
+					// Fitness is a score rather than a measurement, so a run scored on another
+					// scale is not comparable with the latest even under the same rules.
+					if (name == "fitness")
+					{
+						var scored = TrailingFitnessScale(measured);
+						if (scored.Count < measured.Count)
+							report.FitnessScaleChange =
+								$"Fitness is scored on scale {FitnessScale(measured[^1])} from " +
+								$"{scored[0].RunId}; the {measured.Count - scored.Count} earlier run(s) " +
+								$"scored on scale {FitnessScale(measured[^(scored.Count + 1)])} are left out " +
+								"of the fitness trend. Every other metric is unaffected.";
+
+						measured = scored;
+					}
+
 					if (measured.Count < 2)
 						continue;
 
@@ -554,6 +583,10 @@ namespace AutoCnC.Evidence
 				if (!string.Equals(run.RulesFingerprint, next.RulesFingerprint, StringComparison.Ordinal))
 					continue;
 
+				// And one that straddles a fitness scale change measures the scale.
+				if (FitnessScale(run) != FitnessScale(next))
+					continue;
+
 				var delta = next.Fitness - run.Fitness;
 
 				if (!effects.TryGetValue(run.PromptId, out var effect))
@@ -629,6 +662,24 @@ namespace AutoCnC.Evidence
 			measured.Reverse();
 			return measured;
 		}
+
+		/// <summary>The trailing runs scored on the same fitness scale as the last of them.</summary>
+		static List<RunHistoryEntry> TrailingFitnessScale(List<RunHistoryEntry> runs)
+		{
+			if (runs.Count == 0)
+				return runs;
+
+			var scale = FitnessScale(runs[^1]);
+			var matched = new List<RunHistoryEntry>();
+			for (var i = runs.Count - 1; i >= 0 && FitnessScale(runs[i]) == scale; i--)
+				matched.Add(runs[i]);
+
+			matched.Reverse();
+			return matched;
+		}
+
+		/// <summary>Runs recorded before the index kept a scale version were all scored on 1.</summary>
+		static int FitnessScale(RunHistoryEntry entry) => entry.FitnessScaleVersion ?? 1;
 
 		/// <summary>Candidate against control within the most recent benchmark sitting.</summary>
 		/// <remarks>
@@ -720,6 +771,9 @@ namespace AutoCnC.Evidence
 
 			if (report.RulesChange != null)
 				text.Append(report.RulesChange).Append('\n');
+
+			if (report.FitnessScaleChange != null)
+				text.Append(report.FitnessScaleChange).Append('\n');
 
 			foreach (var metric in report.Metrics)
 				text.Append(CultureInfo.InvariantCulture,

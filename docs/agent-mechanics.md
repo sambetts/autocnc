@@ -132,11 +132,16 @@ improved, which is the difference between partial progress and noise. Each compo
 is the value that scores 1.0, and those references are fixed constants — a score normalised
 against its own match would rate every match average and could never show a trend.
 
-**A fitness score is only comparable within one difficulty.** Difficulty selects a different
-opponent personality and handicap together, so the same bot scores lower against a harder one
-without having got worse. The trend therefore compares only runs at the current difficulty and
-says so when the ladder moves; nothing rescales a score between rungs, because a multiplier
-invented to equate them would look like a measurement while being a guess.
+`survival` is how long a lost match lasted, against 1,800 seconds. A won match scores it in full
+(`fitness.scaleVersion` 2), so a quicker win never scores below a slower one.
+
+**A fitness score is only comparable within one difficulty and one set of game rules.** Difficulty
+selects a different opponent personality and handicap together, and a rules change can alter the
+opponent just as much: when its towers started firing, the same bot won 5 benchmark games in 8
+instead of 8. The trend therefore compares only runs at the current difficulty and under the
+current rules (`fight.rulesFingerprint`), and says so when either moves. Nothing rescales a score
+across that line, because a multiplier invented to equate them would look like a measurement while
+being a guess.
 
 ### Your prompt is measured too
 

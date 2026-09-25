@@ -70,8 +70,13 @@ namespace AutoCnC.Evidence
 	/// </remarks>
 	public sealed class FitnessScore
 	{
-		/// <summary>Bumped whenever a reference value or weight changes.</summary>
-		public const int CurrentScaleVersion = 1;
+		/// <summary>Bumped whenever a reference value, a weight or how a component is scored changes.</summary>
+		/// <remarks>
+		/// 2: a won match scores full survival. Under 1, survival was game seconds against 1,800,
+		/// so of two wins the slower scored higher. Once the champion won every benchmark game,
+		/// that was the only way a candidate could tie-break its way to promotion.
+		/// </remarks>
+		public const int CurrentScaleVersion = 2;
 
 		public int ScaleVersion { get; set; } = CurrentScaleVersion;
 
@@ -137,9 +142,19 @@ namespace AutoCnC.Evidence
 				"cells ever observed", ExplorationReference, 0.10,
 				"distinct cells this side ever had eyes on"));
 
-			score.Components.Add(Component("survival", headline.DurationSeconds,
+			var survival = Component("survival", headline.DurationSeconds,
 				"game seconds", SurvivalReference, 0.10,
-				"how long this side lasted; weighted lightly, since hiding is not the goal"));
+				"how long this side lasted; weighted lightly, since hiding is not the goal");
+
+			// A win is survival to the end of the match, however soon that end came.
+			if (won)
+			{
+				survival.Score = 1;
+				survival.Contribution = survival.Weight;
+				survival.Explanation = "a won match counts as surviving it in full, so a quicker win never scores lower";
+			}
+
+			score.Components.Add(survival);
 
 			var known = score.Components.Where(c => c.Known).ToList();
 			var knownWeight = known.Sum(c => c.Weight);

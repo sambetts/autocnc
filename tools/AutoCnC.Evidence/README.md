@@ -216,6 +216,13 @@ under the new rules reported five regressions against runs that had never faced 
 Runs under other rules, including runs that recorded none, are excluded and the report names both
 fingerprints. Prompt attribution discards deltas across that line too.
 
+Fitness is a score rather than a measurement, so it is versioned as well: `fitness.scaleVersion`,
+recorded in the index as `fitnessScaleVersion` (absent means 1). Scale 2 scores `survival` in full
+for a won match; under scale 1 it was the match's length against 1,800 seconds, so of two wins the
+slower scored higher, and once every benchmark game was won that was the only way a candidate
+could tie-break its way to promotion. The fitness series in the trend uses only the trailing runs
+on the latest scale and says how many it left out. Every other metric keeps its history.
+
 Runs whose outcome is failed, unknown, or `Undefined` remain in `history.json` as durable evidence
 but are excluded from rolling trends and prompt effects. Prompt attribution also refuses to bridge
 across an invalid run to a later valid one.

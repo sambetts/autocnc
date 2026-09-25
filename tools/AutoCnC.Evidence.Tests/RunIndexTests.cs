@@ -361,6 +361,48 @@ namespace AutoCnC.Evidence.Tests
 			Assert.That(effect.MeanFitnessDelta, Is.EqualTo(0.1).Within(0.0001));
 		}
 
+		/// <summary>
+		/// A new fitness scale is not a change in the bot, but it changes only the score: every
+		/// measured metric keeps its history.
+		/// </summary>
+		[Test]
+		public void AFitnessScaleChangeLeavesEarlierScoresOutOfTheFitnessTrendOnly()
+		{
+			var history = new RunHistory { Bot = "TestBot" };
+			RunIndex.Record(history, "TestBot", Scaled("v1-a", 0, 0.99, null));
+			RunIndex.Record(history, "TestBot", Scaled("v1-b", 1, 0.99, null));
+			RunIndex.Record(history, "TestBot", Scaled("v2-a", 2, 0.60, 2));
+			RunIndex.Record(history, "TestBot", Scaled("v2-b", 3, 0.62, 2));
+
+			var trend = RunIndex.Trend(history);
+
+			Assert.That(trend.RunsCompared, Is.EqualTo(4));
+			Assert.That(trend.Metrics.Single(m => m.Name == "fitness").Recent, Is.EqualTo(new[] { 0.60, 0.62 }));
+			Assert.That(trend.Metrics.Single(m => m.Name == "creditsSpentPerSecond").RunsCompared, Is.EqualTo(4));
+			Assert.That(trend.Regressions, Is.Empty, "0.99 -> 0.60 is the scale, not the bot");
+			Assert.That(trend.FitnessScaleChange, Does.Contain("scale 2").And.Contain("scale 1").And.Contain("v2-a"));
+			Assert.That(trend.Rendered, Does.Contain(trend.FitnessScaleChange));
+		}
+
+		[Test]
+		public void PromptEffectIgnoresDeltasThatStraddleAFitnessScaleChange()
+		{
+			var history = new RunHistory { Bot = "TestBot" };
+			foreach (var entry in new[]
+			{
+				Scaled("v1", 0, 0.99, null), Scaled("v2-a", 1, 0.60, 2), Scaled("v2-b", 2, 0.70, 2)
+			})
+			{
+				entry.PromptId = "steady";
+				RunIndex.Record(history, "TestBot", entry);
+			}
+
+			var effect = RunIndex.PromptEffects(history).Single(e => e.PromptId == "steady");
+
+			Assert.That(effect.RoundsMeasured, Is.EqualTo(1));
+			Assert.That(effect.MeanFitnessDelta, Is.EqualTo(0.1).Within(0.0001));
+		}
+
 		[Test]
 		public void UndefinedAndFailedRunsAreExcludedFromTrendButLegacyWinsAndLossesRemain()
 		{
@@ -402,6 +444,13 @@ namespace AutoCnC.Evidence.Tests
 			entry.Difficulty = difficulty;
 			entry.Fitness = fitness;
 			entry.Headline["fitness"] = fitness;
+			return entry;
+		}
+
+		static RunHistoryEntry Scaled(string id, int days, double fitness, int? scale)
+		{
+			var entry = UnderRules(id, days, fitness, "same");
+			entry.FitnessScaleVersion = scale;
 			return entry;
 		}
 

@@ -10,7 +10,7 @@ the match needs. This one has four, and moves between them as the battle turns.
 | `Opening` | An economy, and enough army not to die | Where every match starts, and where the others fall back to |
 | `Scout` | Finding out where the enemy lives | Two refineries up and their base still unknown — or the push itself reporting there is nothing left to attack, or having seen nothing at all for five minutes, which both mean the base it knew is gone |
 | `Defence` | Static defence, cheap bodies, everything home | A building is lost, or enough enemies reach the base — three for a side with nothing to spend, and a quarter of our own unit count for one that has an army and a target |
-| `Attack` | Tech, more production, the whole army pushes | Army worth 6000 and their base is known, including straight out of a siege that has lifted |
+| `Attack` | Tech, more production, the whole army pushes while the light scouts watch their base | Army worth 6000 and their base is known, including straight out of a siege that has lifted |
 
 The rules are in [`Logic/ReferenceBotLogic.cs`](Logic/ReferenceBotLogic.cs) — a pure function of
 `BattleState`, so the interesting half of the bot can be read and reasoned about without a game
@@ -914,7 +914,9 @@ Reference/
 │   │                                 HarvesterLogic)
 │   ├── RunHomeMode.cs           ←   template: flees to a refinery when threatened
 │   ├── HarvesterEscortMode.cs   ←   guards a harvester
-│   └── ScoutMode.cs             ←   searches a ladder of objectives derived from the map
+│   ├── ScoutMode.cs             ←   searches a ladder of objectives derived from the map
+│   └── WatchMode.cs             ←   in Attack, the light scouts watch their base and look in
+│                                    (see WatchLogic)
 ├── Logic/                       ← pure decision functions, no engine
 │                                  (WeaponMatchLogic says what each warhead is good at killing,
 │                                   so a rifleman and a rocket soldier no longer share a
@@ -2736,6 +2738,44 @@ Not addressed this round, and worth measuring next: the push spent **20,261** ev
 `assault.sweep-for-targets`. After the last building of their main base fell at 605s it killed
 nothing for 96 seconds while the enemy had six buildings and no army, and the last expansion was
 on the sweep's sixth rung.
+
+## The push took the only eyes the side had
+
+The next `16:9` at Hard (GDI against Nod) was won at 639s, fitness 0.86, spend 105% of the
+opponent's. What it still lost it lost unannounced: `intel.lateSightingLossPercent` was **100**,
+and every enemy type was first seen 10 seconds or less before it first hit us. The cause is one
+assignment. The `Attack` doctrine gave `AttackBaseMode` to everything, screen vehicles included:
+
+| | |
+| --- | --- |
+| 205-225s | war factory, then two `jeep`; one starts the home tiberium survey |
+| 225s | `Attack`: both jeeps join the push; the survey stops at point **3 of 17** |
+| 246s, 248s | both jeeps dead at (32-33, 32-33), the first units to arrive, alone |
+| 248-639s | no scout at all — `AttackTrain` names none, and the doctrine never changed again |
+| 395-491s | `heli` hit our base and army; their `hpad`, five cells from the airfield first seen at 237s, was first seen at **587s** |
+| 445-630s | 7-9 harvesters share two worked-out patches (400-900 credits left) and fall back to frontier fields 41-52 cells out; income per harvester falls from about 16 to 9 credits a second |
+
+**In `Attack`, `jeep` and `bggy` now run [`WatchMode`](Modes/WatchMode.cs)** instead of joining the
+push. It finishes the home survey first (`TiberiumSurvey.TryStep`, as `ScoutMode` and
+`HarvesterEscortMode` already do). Then [`WatchLogic`](Logic/WatchLogic.cs) runs a cycle. The
+watcher stands on the approach 14 cells short of their base, towards ours, for a minute
+(`watch.to-post`, `watch.on-post`). Then it circles the base 8 cells out: one flank, the far side,
+the other flank (`watch.look-in`). Cycles alternate between the structure the side remembers and
+the point mirror of our own base, unless the two are within 16 cells. The army's memory follows
+the army, while the mirror is where a symmetric map put their yard. A static defence that reaches
+the post draws it back by up to 12 cells. A look-in that needs more than three go-arounds is
+dropped for the next cycle (`watch.look-in-contested`). Threats are stepped around (`watch.evade`).
+
+With nothing remembered, it searches `ScoutSearchLogic`'s ladder (`watch.search`), and it records
+a structure only when the side remembers none (`watch.found`). Assault units record their own
+objective every evaluation and stage on that one cell, so a second recorder would make the
+gathering point flicker. `WatchMode` never requests a doctrine. No plan changed: it only keeps
+alive the screen vehicles the side already had when the push began. A rung that re-bought them in
+`Attack` would pay 400 credits every time one died, and a floor of one resets the attrition
+tally with every replacement.
+
+Not addressed, and worth reading next time: `ScoutMode` in Opening and Scout still parks beside
+the first structure it sees until it dies.
 
 ## Start your own
 

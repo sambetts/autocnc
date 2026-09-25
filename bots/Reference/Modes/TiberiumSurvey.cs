@@ -30,11 +30,13 @@ namespace AutoCnC.Reference.Modes
 	/// restart it. Keyed on the owning player, like <see cref="EnemyBaseSightings"/>, so it
 	/// cannot leak between sides or matches.
 	/// <para>
-	/// Called at the top of every mode a <c>jeep</c> or <c>bggy</c> runs outside an assault —
+	/// Called at the top of every mode a <c>jeep</c> or <c>bggy</c> runs —
 	/// <see cref="ScoutMode"/> in Opening and Scout, <see cref="HarvesterEscortMode"/> in
-	/// Defence — because a survey that only ran in one doctrine would only run when that
-	/// doctrine happened to coincide with a live screen vehicle. On 16:9 that was 34 seconds of
-	/// a 1,405-second match. One surveyor at a time; the rest keep their doctrine's job.
+	/// Defence, <see cref="WatchMode"/> in Attack — because a survey that only ran in one
+	/// doctrine would only run when that doctrine happened to coincide with a live screen
+	/// vehicle. On 16:9 that was 34 seconds of a 1,405-second match; in a later one the Attack
+	/// doctrine, which then sent screen vehicles into the push, stopped it at point 3 of 17.
+	/// One surveyor at a time; the rest keep their doctrine's job.
 	/// </para>
 	/// <para>
 	/// Exploration is permanent, so once the route is done it is done: this answers false for

@@ -8,6 +8,7 @@
 //
 //  Builders, factories and harvesters keep their own modes — a unit-type
 //  assignment is more specific than ToAll, so they are not swept into the push.
+//  So do the light scout vehicles, which watch rather than fight: see WatchMode.
 //
 //  Licence: GPL-3.0-or-later. See LICENSE and NOTICE.md.
 // ============================================================================
@@ -33,6 +34,12 @@ namespace AutoCnC.Reference.Doctrines
 		{
 			b.Assign<AttackBaseMode>().ToAll();
 			b.Register<DefensiveMode>();
+
+			// The fastest things this bot builds reached their base first and alone: on 16:9 both
+			// jeeps joined the push at 225s and were dead by 248s, and for the 391 seconds after
+			// that nothing looked at anything the army was not standing next to. They finish the
+			// home survey and then keep eyes on their base instead. See WatchLogic.
+			b.Assign<WatchMode>().ToUnitType(ReferencePlans.ScreenVehicles);
 		}
 	}
 }

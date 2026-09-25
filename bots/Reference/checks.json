@@ -1,27 +1,67 @@
 {
   "schemaVersion": 1,
-  "authoredForRevision": "51e0e4c85457a953ca531639635215ea38b7ff6a",
+  "authoredForRevision": "21aff072f7634042a46aad55741c3160938544c7",
   "checks": [
     {
-      "id": "hunt-runs",
+      "id": "watch-posts",
       "category": "activation",
-      "description": "Once their main base has fallen and nothing more is in sight, the Scout doctrine's army, when worth 10,000 or more, hunts the map sector by sector instead of standing at home. On hard-16-9, seed 300008 went from a 2,400s timeout to a win at 1,007s. Absent means the fight never reached that state (lost, or won while their base was still in sight), not necessarily that the branch is broken.",
-      "query": "reason-id:hunt.sweep",
+      "description": "In Attack, a jeep or bggy stands watch on the approach to their base instead of joining the push (WatchMode). Last fight both jeeps joined the push at 225s and were dead by 248s. Absent means no screen vehicle was alive in Attack once their base was known, or Attack never ran.",
+      "query": "reason-id:watch.on-post",
       "operator": ">=",
       "value": "1"
     },
     {
-      "id": "hunt-finds-and-pushes",
+      "id": "watch-looks-in",
       "category": "activation",
-      "description": "A hunter that sees one of their structures records it and asks for Attack, and the Scout doctrine goes straight to Attack rather than home through Opening (doctrine.scout-found-push). Absent under the same conditions as hunt-runs.",
-      "query": "reason-id:hunt.found",
+      "description": "A watcher finished a one-minute dwell and circled their base (flank, far side, flank). Last fight their hpad, five cells from the first airfield seen, went unseen from 237s to 587s.",
+      "query": "reason-id:watch.look-in",
       "operator": ">=",
       "value": "1"
+    },
+    {
+      "id": "survey-finished",
+      "category": "activation",
+      "description": "The home tiberium survey is flown to its end, because WatchMode keeps the surveyor in Attack. Last fight it stopped at point 3 of 17 when Attack took the jeep at 225s, and was never completed.",
+      "query": "reason-id:economy.survey-complete",
+      "operator": ">=",
+      "value": "1"
+    },
+    {
+      "id": "fewer-unannounced-losses",
+      "category": "outcome",
+      "description": "Priority 2's metric. The share of value lost to enemy types first seen under 30s before they first hit us falls from 100.",
+      "query": "summary.intel.lateSightingLossPercent",
+      "operator": "<=",
+      "value": "90"
+    },
+    {
+      "id": "harvesters-earn-more",
+      "category": "outcome",
+      "description": "With the survey flown, harvesters can see home ground and stop sharing worked-out patches. Last fight: 12.88 credits per harvester-second against the opponent's 17.71, falling from about 16 to 9 after 420s.",
+      "query": "summary.scale.ownEarnedPerHarvesterSecond",
+      "operator": ">=",
+      "value": "14"
+    },
+    {
+      "id": "explores-more",
+      "category": "outcome",
+      "description": "The survey and the watcher's look-ins see more of the map. Last fight: 299 cells in 639s, prior median 393.",
+      "query": "summary.headline.cellsExplored",
+      "operator": ">=",
+      "value": "330"
+    },
+    {
+      "id": "watchers-outlive-the-push",
+      "category": "outcome",
+      "description": "Screen vehicles that ran WatchMode (either faction: mode= matches modesUsed) live longer than the 27s mean the two jeeps had when they pushed with the army last fight. Survivors count to the end of the match.",
+      "query": "units.mean(lifetimeSeconds,mode=WatchMode)",
+      "operator": ">=",
+      "value": "60"
     },
     {
       "id": "no-timeout",
       "category": "invariant",
-      "description": "No fight may run past the benchmark's 2,400s limit. A timed-out benchmark game voids its pair, and three voided pairs stopped training outright. The three that did at the previous champion ended with 380 to 700 of our units at home and one or two enemy buildings never found.",
+      "description": "No fight may run past the benchmark's 2,400s limit. A timed-out benchmark game voids its pair, and three voided pairs stop training.",
       "query": "summary.fight.durationSeconds",
       "operator": "<=",
       "value": "2400"
@@ -29,7 +69,7 @@
     {
       "id": "buildings-still-fall",
       "category": "invariant",
-      "description": "The hunt changes only what the Scout doctrine's army does once it is big, so base assaults must still finish buildings. 22 were destroyed two fights ago; 8 is the component's reference.",
+      "description": "The push without its screen vehicles still finishes buildings: 24 last fight, 8 is the component's reference.",
       "query": "summary.headline.buildingsKilled",
       "operator": ">=",
       "value": "8"

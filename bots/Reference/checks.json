@@ -1,44 +1,28 @@
 {
   "schemaVersion": 1,
-  "authoredForRevision": "31ee989995aca3db07c38973f132cd2493bb9348",
+  "authoredForRevision": "f80b7fc60903fe150e3f08ba445c84cded159af3",
   "checks": [
     {
-      "id": "field-refinery-before-tech",
+      "id": "stand-off-steps-out",
       "category": "activation",
-      "description": "The fourth refinery was ordered with three refineries standing and no hq/eye/tmpl: the Economy rung firing in its new place ahead of the tech. Last fight it was ordered at 246s behind hq, so this id could not fire. Absent means a match that never stood three refineries, or the swap did not take.",
-      "query": "reason-id:economy.field-refinery-before-tech",
+      "description": "A line unit inside the reach of an enemy tower that outranges it stepped out while our arty/msam stood within 14 cells of that tower. Last fight the riflemen first took tower fire at 5.7-6.0 cells at 577s, when the arty was about 14 cells out and closing, so this would have fired then. Absent means no push met an outranging tower with siege in position, or the rule never ran.",
+      "query": "reason-id:assault.stand-off-step-out",
       "operator": ">=",
       "value": "1"
     },
     {
-      "id": "harvesters-earn-more",
-      "category": "outcome",
-      "description": "Priority 1's per-harvester metric. Last fight 13.82 overall; over 0-480s 14.9 against the opponent's 20.6 on equal harvester-seconds (1,775 v 1,787), and 10.3 against 23.8 over 240-300s while the fleet hauled 22 cells for the 95s before refinery four stood at 335s.",
-      "query": "summary.scale.ownEarnedPerHarvesterSecond",
+      "id": "stand-off-holds",
+      "category": "activation",
+      "description": "A line unit held 1-4 cells outside an outranging tower's reach, with nothing in its own reach, while siege shelled the tower. Absent alongside a passing stand-off-steps-out means every held unit had something to screen (assault.stand-off-screen), not that the rule is wrong.",
+      "query": "reason-id:assault.stand-off-defence",
       "operator": ">=",
-      "value": "14.5"
+      "value": "1"
     },
     {
-      "id": "spend-keeps-up",
-      "category": "outcome",
-      "description": "Priority 1's headline metric. Last fight 60.5, but 84-100 until 480s; every loss on record before it was 41 or less and every win 71 or more. Diagnostic: dominated by the match outcome.",
-      "query": "summary.scale.spendVsOpponentPercent",
-      "operator": ">=",
-      "value": "60"
-    },
-    {
-      "id": "tech-not-starved",
+      "id": "pushes-still-finish-buildings",
       "category": "invariant",
-      "description": "hq now waits behind refinery four and the harvester recovery hold (release at six harvesters with four refineries). Last fight it stood at 245s; expected about 320-360s. Past 400s the swap is starving e2/e4, the siege rung and atwr.",
-      "query": "units.min(bornSeconds,type=hq)",
-      "operator": "<=",
-      "value": "400"
-    },
-    {
-      "id": "fleet-not-smaller",
-      "category": "invariant",
-      "description": "Moving the refinery ahead of the tech must not shrink the fleet. Last fight peaked at 8 against the opponent's 11.",
-      "query": "summary.headline.peakHarvesters",
+      "description": "Holding line units at a tower's edge must not stall the assault. The hold ends when the tower dies, when no siege piece is in position, or after 45 seconds of standing off in a unit's life. Last fight 33 enemy buildings destroyed; 8 is the fitness reference.",
+      "query": "summary.headline.buildingsKilled",
       "operator": ">=",
       "value": "8"
     },
@@ -49,6 +33,30 @@
       "query": "summary.fight.durationSeconds",
       "operator": "<=",
       "value": "2400"
+    },
+    {
+      "id": "fleet-not-smaller",
+      "category": "invariant",
+      "description": "Guards the previous round's refinery-before-tech order, still in the code. Last fight peaked at 9 harvesters against the opponent's 6.",
+      "query": "summary.headline.peakHarvesters",
+      "operator": ">=",
+      "value": "8"
+    },
+    {
+      "id": "army-held-longer",
+      "category": "outcome",
+      "description": "The only fitness component short of 1.0 last fight: mean army 4,775 against 6,000, score 0.796. The first push fell from 4,650 to 1,400 and 4,300 of its 9,700 lost went at one gun/gtwr pair (13 e1, then 5 unscreened arty). Diagnostic: dominated by the opponent and the match length.",
+      "query": "summary.fitness.components[armyValueIntegral].score",
+      "operator": ">=",
+      "value": "0.8"
+    },
+    {
+      "id": "artillery-survives",
+      "category": "outcome",
+      "description": "Last fight 9 of 27 arty died, five of them at 603-610s to enemy infantry after the screening riflemen had died at the towers. Diagnostic: depends on how many arty the match builds and how many pushes it runs.",
+      "query": "summary.unitTypes[arty].lost",
+      "operator": "<=",
+      "value": "6"
     }
   ]
 }

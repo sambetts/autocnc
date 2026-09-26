@@ -2850,6 +2850,54 @@ past the opening floor with no tech standing. The old order never produced that 
   (37-39,7), past the forward base Nod built there at 433-442s. One died at (56,46), beside the
   expansion first seen at 277s.
 
+## The riflemen walked into the tower the artillery was killing
+
+The next `16:9` at Hard (Nod against Nod) was won at 990s, fitness 0.959. Every component scored
+1.0 but `armyValueIntegral` (0.80, mean army 4,775 against 6,000). The first push launched at 470s
+with 4,650 of army and came home at 660s with 1,400, and 44% of what it lost went at one tower pair:
+
+| | |
+| --- | --- |
+| 572s | every `e1` advancing on a `gun` at (68,27) beside a `gtwr` at (69,26); both reach 6 cells, `e1` 4 |
+| 577-578s | riflemen hit at 5.7-6.0 cells; counter-battery closes them on whichever tower shot them |
+| 579-593s | **thirteen `e1` dead in fourteen seconds**, twelve to the `gtwr` |
+| 580-594s | our `arty`, 9.5-11.5 cells out, kills the `gun` (587s) and the `gtwr` (594s) untouched |
+| 601-610s | enemy `e1`/`e3` walk up to the `arty`; with the riflemen that screened them dead, five die |
+
+The duel lab says the same thing in its "Against defences" table: 2,400 credits of `e1`, `bggy` or
+`jeep` are wiped out by one `gtwr`, and `arty`/`msam` destroy every tower losing nothing.
+
+**A line unit now stands off a tower our siege is shelling** ([`StandOffLogic`](Logic/StandOffLogic.cs),
+wired into [`AttackBaseMode`](Modes/AttackBaseMode.cs)). It applies to anything short of
+`AttackBaseLogic.SiegeRangeUnits` that a visible, live enemy static defence outranges and can hit,
+while a mobile ally with siege reach stands within its own reach plus three cells of that defence.
+Inside the reach plus one cell it steps straight out (`assault.stand-off-step-out`). Within three
+cells beyond that it shoots whatever is in its own reach (`assault.stand-off-screen`), yields to a
+counter-battery answer on a mobile shooter standing outside the tower's reach, and otherwise holds
+(`assault.stand-off-defence`). With no siege in position, with the tower dead, for an equal-range
+duel (`e3` against `gtwr`), or after 45 seconds of standing off in a unit's life, the push behaves
+as before. The allowance is counted in ticks: a unit in this mode is evaluated about three times a
+game second (3.1-3.3 measured here), not once every 1.4 seconds as `CounterBatteryTuning` assumes,
+so its 24-evaluation budget lasts about eight seconds rather than 34.
+
+Not changed, and worth reading next time: `DefensiveMode` also walks units at towers (`engaging
+Defence at 3238u`). Here that cost two `e3` and an `arty` at 677-682s, none of which this rule
+covers. And the siege piece does not prefer the tower: with the line held back and the tower
+untouched, `SelectObjective` ranks a pristine structure (3,000) above it (1,000).
+
+### Two things in this match that are not what they look like
+
+- **`harvesters-earn-more` failed at 10.64 credits a harvester-second, and the refinery order was
+  not the cause.** The fourth refinery was ordered at 226s and stood at 312s, and 120-240s ran at
+  15.5. From 434-449s, with the three home fields worked out, 43% of all harvester time was bound
+  to fields 30 or more cells from a refinery, mostly the contested field at (36-42,1-7), which the
+  harvesters' own reasons put 34 to 47 cells out. The opponent's refineries stood on its fields,
+  one of them on ours at (28,28).
+- **`lateSightingLossPercent` read 100 without an intelligence failure behind the losses.** Both
+  towers were first seen at 253s, 326 seconds before the push reached them. The metric is per
+  type: all four enemy types first appeared in raids at our own door (177-183s and 412-418s), so
+  every later loss to those types counts as "late".
+
 ## Start your own
 
 

@@ -50,6 +50,7 @@ namespace AutoCnC.Reference.Modes
 		AssaultTuning tuning = AssaultTuning.Default;
 		MusterTuning musterTuning = MusterTuning.Default;
 		CounterBatteryTuning counterBatteryTuning = CounterBatteryTuning.Default;
+		StandOffTuning standOffTuning = StandOffTuning.Default;
 		AssaultSweepTuning sweepTuning = AssaultSweepTuning.Default;
 		MusterWatchdog musterWatchdog = MusterWatchdog.Start;
 		WeaponRole role = WeaponRole.Unknown;
@@ -67,11 +68,18 @@ namespace AutoCnC.Reference.Modes
 		int shellingTick;
 		int counterBatteryEvaluations;
 
+		// How long this unit has spent standing off a tower, across its whole life, and when it
+		// last did. Never reset, for the same reason as the counter-battery budget. See
+		// StandOffTuning.MaxTicks.
+		int standOffTicks;
+		int lastStandOffTick = int.MinValue;
+
 		public override void OnEnter(Actor self, ModeContext ctx)
 		{
 			tuning = AssaultTuning.Default;
 			musterTuning = MusterTuning.Default;
 			counterBatteryTuning = CounterBatteryTuning.Default;
+			standOffTuning = StandOffTuning.Default;
 			sweepTuning = AssaultSweepTuning.Default;
 
 			// A new push is a new situation, so whatever was shelling the last one is not
@@ -167,15 +175,29 @@ namespace AutoCnC.Reference.Modes
 			//
 			// The same answer decides whether this unit may go hunting below: walking away from
 			// something already inside our own weapon range is never the better trade.
-			var inReach = AttackBaseLogic.SelectLastStandTarget(state, role) != null;
-			if (!inReach)
+			var lastStand = AttackBaseLogic.SelectLastStandTarget(state, role);
+			var inReach = lastStand.HasValue;
+			var counterBattery = inReach ? null : CounterBattery(ctx, weaponRange);
+
+			// ...except from inside a tower's reach while our own siege is killing it for free.
+			// Asked first, because both the counter-battery rule and the objective rules below
+			// walk a rifleman into exactly that reach: on 16:9 the first push lost thirteen e1 to
+			// one gun and gtwr pair in fourteen seconds, the arty it was screening killed both
+			// towers without a scratch, and then five of those arty died with no screen left. It
+			// has no opinion once the tower is dead, when no siege piece is in position, or for a
+			// unit the tower does not outrange. See StandOffLogic.
+			var standOff = StandOff(self, ctx, weaponRange, lastStand, counterBattery.HasValue);
+			if (standOff.HasValue)
 			{
-				var counterBattery = CounterBattery(ctx, weaponRange);
-				if (counterBattery.HasValue)
-				{
-					counterBatteryEvaluations++;
-					return counterBattery.Value;
-				}
+				standOffTicks += StandOffLogic.TicksToCharge(ctx.WorldTick, lastStandOffTick, standOffTuning);
+				lastStandOffTick = ctx.WorldTick;
+				return standOff.Value;
+			}
+
+			if (counterBattery.HasValue)
+			{
+				counterBatteryEvaluations++;
+				return counterBattery.Value;
 			}
 
 			// Form up first. Staging is judged against the side's remembered sighting rather
@@ -439,6 +461,125 @@ namespace AutoCnC.Reference.Modes
 				MaxY: bounds.Top + bounds.Height - 1,
 				BaseX: home.X,
 				BaseY: home.Y);
+		}
+
+		/// <summary>
+		/// Stay out of the reach of a static defence that outranges this unit while a siege piece
+		/// of ours shells it, or null when the push's own rules should answer.
+		/// </summary>
+		/// <remarks>
+		/// The judgement lives in <see cref="StandOffLogic"/>; this only senses the defence this
+		/// unit is deepest into and whether a siege piece stands against it. Nothing is sensed for
+		/// a unit that cannot move, has no weapon, is itself a siege piece or has spent its
+		/// allowance, and allies are only sensed for a defence that already qualifies.
+		/// </remarks>
+		UnitDecision? StandOff(Actor self, ModeContext ctx, int weaponRange, ThreatSnapshot? inReach, bool counterBatteryAnswer)
+		{
+			if (!ctx.CanMove || !ctx.HasWeapon || !StandOffLogic.IsLineUnit(weaponRange)
+				|| standOffTicks >= standOffTuning.MaxTicks)
+				return null;
+
+			var structures = ctx.SenseStructures(new WDist(standOffTuning.SenseUnits));
+			ThreatSnapshot? defence = null;
+			string siegeType = null;
+			var deepest = int.MaxValue;
+			for (var i = 0; i < structures.Count; i++)
+			{
+				var s = structures[i];
+				if (s.Kind != ThreatKind.Defence || !s.IsAttackable || !s.CanHitUs)
+					continue;
+
+				if (!StandOffLogic.Concerns(s.DistanceUnits, s.WeaponRangeUnits, weaponRange, standOffTuning))
+					continue;
+
+				var depth = StandOffLogic.Depth(s.DistanceUnits, s.WeaponRangeUnits, standOffTuning);
+				if (defence.HasValue && (depth > deepest || (depth == deepest && s.ActorId > defence.Value.ActorId)))
+					continue;
+
+				var siege = SiegeAgainst(ctx, s);
+				if (siege == null)
+					continue;
+
+				defence = s;
+				siegeType = siege;
+				deepest = depth;
+			}
+
+			if (!defence.HasValue)
+				return null;
+
+			var d = defence.Value;
+			var bounds = ctx.World.Map.Bounds;
+			var home = ctx.BaseCenter;
+			var here = self.Location;
+
+			// The counter-battery answer only competes with holding when closing on the shooter
+			// would not mean walking into this defence's reach — the tower itself, or anything
+			// standing under it, is exactly what the hold is for.
+			var shooterAnswerable = false;
+			if (counterBatteryAnswer)
+			{
+				var shooter = ctx.ResolveActor(shellingActorId);
+				if (shooter != null && ModeContext.HasPosition(shooter))
+				{
+					var sx = shooter.Location.X - d.CellX;
+					var sy = shooter.Location.Y - d.CellY;
+					shooterAnswerable = StandOffLogic.Depth(
+						AssaultStagingLogic.IntSqrt(sx * sx + sy * sy) * 1024, d.WeaponRangeUnits, standOffTuning) > 0;
+				}
+			}
+
+			return StandOffLogic.Decide(
+				new StandOffState(
+					CanMove: true,
+					HasWeapon: true,
+					WeaponRangeUnits: weaponRange,
+					X: here.X,
+					Y: here.Y,
+					HomeX: home.X,
+					HomeY: home.Y,
+					MapMinX: bounds.Left,
+					MapMinY: bounds.Top,
+					MapMaxX: bounds.Left + bounds.Width - 1,
+					MapMaxY: bounds.Top + bounds.Height - 1,
+					HasDefence: true,
+					DefenceType: d.ActorType,
+					DefenceX: d.CellX,
+					DefenceY: d.CellY,
+					DefenceDistanceUnits: d.DistanceUnits,
+					DefenceRangeUnits: d.WeaponRangeUnits,
+					SiegeInPosition: true,
+					SiegeType: siegeType,
+					HasTargetInReach: inReach.HasValue,
+					TargetActorId: inReach?.ActorId ?? 0,
+					TargetType: inReach?.ActorType,
+					ShooterAnswerable: shooterAnswerable,
+					SpentTicks: standOffTicks),
+				standOffTuning);
+		}
+
+		/// <summary>The type of a siege piece of ours standing against this defence, or null.</summary>
+		/// <remarks>
+		/// Mobile allies only. A building's reach is not a siege: our own <c>sam</c> reaches 10
+		/// cells and shoots nothing on the ground.
+		/// </remarks>
+		string SiegeAgainst(ModeContext ctx, in ThreatSnapshot defence)
+		{
+			foreach (var ally in ctx.SenseAllies(new WDist(standOffTuning.SiegeSenseUnits)))
+			{
+				var kind = ModeContext.Classify(ally);
+				if (kind != ThreatKind.Vehicle && kind != ThreatKind.Infantry)
+					continue;
+
+				var snapshot = ctx.Snapshot(ally);
+				var dx = snapshot.CellX - defence.CellX;
+				var dy = snapshot.CellY - defence.CellY;
+				var toDefence = AssaultStagingLogic.IntSqrt(dx * dx + dy * dy) * 1024;
+				if (StandOffLogic.IsSiegeAgainst(snapshot.WeaponRangeUnits, toDefence, standOffTuning))
+					return snapshot.ActorType;
+			}
+
+			return null;
 		}
 
 		/// <summary>

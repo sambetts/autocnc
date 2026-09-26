@@ -11,8 +11,10 @@
 
 	A promoted bot is committed to the bot workspace, because a champion that exists only as
 	an uncommitted working tree is one manual edit away from being lost, and has been. Only
-	the workspace is staged, so the engine submodule's applied patch never rides along. Use
-	-NoCommit to leave version control alone.
+	the workspace is staged, so the engine submodule's applied patch never rides along. The
+	branch is then pushed to the remote it tracks, so every measured improvement is published
+	as it happens. Use -NoPush to keep promotions local, or -NoCommit to leave version
+	control alone.
 
 	This edits bot source and uses the configured agent's account and quota. Defaults to
 	Copilot CLI and the repository prompt, not the launcher's saved agent/prompt settings.
@@ -55,7 +57,8 @@
 .PARAMETER PromptTemplate
 	Optional prompt template file. Defaults to docs/agent-prompt-template.md. Once a round's
 	build is verified, its valid next-prompt proposal replaces this file's contents and is
-	archived to LOCALAPPDATA\AutoCnC\PromptHistory. The file is never committed.
+	archived to LOCALAPPDATA\AutoCnC\PromptHistory. When the checkout tracks the file, each
+	promotion commits it after the bot, and it is pushed with the bot.
 
 .PARAMETER RestoreRun
 	Recovery only: discard edits to the bot since this unresolved run's pre-agent snapshot
@@ -73,6 +76,13 @@
 	Do not commit promoted bots. By default every promotion is committed to the bot workspace,
 	so an improvement the paired gate measured survives the next round instead of living only
 	in the working tree. Nothing else in the checkout is staged, and a restore never commits.
+	Without a commit there is nothing to push either.
+
+.PARAMETER NoPush
+	Commit promoted bots but do not push them. By default the branch is pushed to the remote
+	it tracks after every promotion commit, taking any earlier unpushed commits with it. Only
+	a fast-forward is attempted, it never prompts for credentials, and a push that fails is
+	reported while training carries on.
 
 .PARAMETER NoColor
 	Print the agent and script output without colour. Colour is on by default and is dropped
@@ -148,6 +158,8 @@ param(
 	[Parameter(ParameterSetName = 'Loop')]
 	[switch]$NoCommit,
 	[Parameter(ParameterSetName = 'Loop')]
+	[switch]$NoPush,
+	[Parameter(ParameterSetName = 'Loop')]
 	[switch]$DeleteBlockingRun,
 	[switch]$NoColor,
 	[Parameter(Mandatory, ParameterSetName = 'Restore')]
@@ -198,6 +210,7 @@ $options = @{
 	RestoreRun = Resolve-OptionalFile $RestoreRun
 	DeleteBlockingRun = $DeleteBlockingRun.IsPresent
 	Commit = -not $NoCommit
+	Push = -not $NoPush
 	Color = -not $NoColor
 }
 

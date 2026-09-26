@@ -168,6 +168,109 @@ namespace AutoCnC.Launcher
 			return new CommitOutcome(true, Git(root, "rev-parse", "--short", "HEAD"), null);
 		}
 
+		/// <summary>Whether the branch reached its remote, and where, or the reason it did not.</summary>
+		public readonly record struct PushOutcome(bool Pushed, string Destination, string Reason);
+
+		/// <summary>
+		/// Commits one file the checkout already tracks, when it differs from HEAD. A file that is
+		/// unchanged, untracked or outside any working tree is left alone with no reason given,
+		/// because there is nothing wrong with it; only a commit that was attempted and failed
+		/// carries a <see cref="CommitOutcome.Reason"/>.
+		/// </summary>
+		/// <remarks>
+		/// Tracked-only on purpose: a template a player keeps beside the checkout, or one they
+		/// have not added yet, is theirs rather than history's. The commit is confined to the one
+		/// path, so anything else staged or dirty in the checkout stays out of it.
+		/// </remarks>
+		public static CommitOutcome CommitFile(string path, string message)
+		{
+			if (string.IsNullOrWhiteSpace(message))
+				throw new ArgumentException("A commit message is required.", nameof(message));
+			if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+				return new CommitOutcome(false, null, null);
+
+			var full = Path.GetFullPath(path);
+			var directory = Path.GetDirectoryName(full);
+			var name = Path.GetFileName(full);
+			if (Run(directory, "rev-parse", "--is-inside-work-tree").ExitCode != 0 ||
+				Run(directory, "ls-files", "--error-unmatch", "--", name).ExitCode != 0 ||
+				Run(directory, "diff", "--quiet", "HEAD", "--", name).ExitCode == 0)
+				return new CommitOutcome(false, null, null);
+
+			var committed = Run(directory, "commit", "--message", message, "--", name);
+			if (committed.ExitCode != 0)
+				return new CommitOutcome(false, null, Explain("git commit failed", committed));
+
+			return new CommitOutcome(true, Git(directory, "rev-parse", "--short", "HEAD"), null);
+		}
+
+		/// <summary>
+		/// Publishes the checked-out branch to the remote it tracks, so a measured improvement is
+		/// visible beyond this machine as soon as it is committed.
+		/// </summary>
+		/// <remarks>
+		/// The whole branch goes, not only the latest commit, because a branch cannot be published
+		/// in part: a hand-made commit or a promotion whose push failed earlier travels with the
+		/// next one, which is what keeps the remote from drifting behind.
+		/// <para>
+		/// Only a fast-forward is attempted. A remote that has moved on is reported rather than
+		/// merged, rebased or forced, because rewriting someone else's history is not bookkeeping.
+		/// It never prompts either: credentials are either already cached or the push fails and
+		/// says so, and a hung credential dialog would stall an unattended loop, which is why it
+		/// has a deadline as well.
+		/// </para>
+		/// </remarks>
+		public static PushOutcome Push(string root, TimeSpan timeout)
+		{
+			if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
+				return new PushOutcome(false, null, "the bot workspace does not exist");
+
+			var branch = Git(root, "symbolic-ref", "--quiet", "--short", "HEAD");
+			if (string.IsNullOrEmpty(branch))
+				return new PushOutcome(false, null, "the checkout is not on a branch");
+
+			var remote = Git(root, "config", "--get", $"branch.{branch}.remote");
+			if (string.IsNullOrEmpty(remote))
+				return new PushOutcome(false, null, $"{branch} does not track a remote branch");
+
+			var upstream = Git(root, "config", "--get", $"branch.{branch}.merge");
+			if (string.IsNullOrEmpty(upstream))
+				upstream = "refs/heads/" + branch;
+
+			var target = upstream.StartsWith("refs/heads/", StringComparison.Ordinal)
+				? upstream["refs/heads/".Length..]
+				: upstream;
+			var destination = $"{remote}/{target}";
+			var pushed = Run(root, timeout, NonInteractive, "push", remote, "HEAD:" + upstream);
+			return pushed.ExitCode == 0
+				? new PushOutcome(true, destination, null)
+				: new PushOutcome(false, destination, ExplainPush(pushed));
+		}
+
+		/// <summary>Stops git and its credential helper asking a question nobody is there to answer.</summary>
+		static readonly (string Name, string Value)[] NonInteractive =
+		[
+			("GIT_TERMINAL_PROMPT", "0"),
+			("GCM_INTERACTIVE", "never")
+		];
+
+		/// <summary>
+		/// The line of a failed push that says why. Git leads with "To &lt;url&gt;", which is
+		/// where it tried, not what went wrong.
+		/// </summary>
+		static string ExplainPush((int ExitCode, string Output, string Error) result)
+		{
+			var lines = $"{result.Error}\n{result.Output}".Split('\n')
+				.Select(line => line.Trim())
+				.Where(line => line.Length > 0)
+				.ToList();
+			var reason = lines.FirstOrDefault(line => line.StartsWith("! ", StringComparison.Ordinal)) ??
+				lines.FirstOrDefault(line => line.StartsWith("fatal:", StringComparison.OrdinalIgnoreCase)) ??
+				lines.FirstOrDefault(line => line.StartsWith("error:", StringComparison.OrdinalIgnoreCase)) ??
+				lines.FirstOrDefault(line => !line.StartsWith("To ", StringComparison.Ordinal));
+			return reason ?? $"git push exited with code {result.ExitCode}";
+		}
+
 		static string Explain(string summary, (int ExitCode, string Output, string Error) result)
 		{
 			var detail = result.Error?.Trim();
@@ -185,7 +288,11 @@ namespace AutoCnC.Launcher
 			return result.ExitCode == 0 ? result.Output.Trim() : null;
 		}
 
-		static (int ExitCode, string Output, string Error) Run(string root, params string[] arguments)
+		static (int ExitCode, string Output, string Error) Run(string root, params string[] arguments) =>
+			Run(root, null, [], arguments);
+
+		static (int ExitCode, string Output, string Error) Run(string root, TimeSpan? timeout,
+			IReadOnlyList<(string Name, string Value)> environment, params string[] arguments)
 		{
 			try
 			{
@@ -203,15 +310,31 @@ namespace AutoCnC.Launcher
 				start.ArgumentList.Add(root);
 				foreach (var argument in arguments)
 					start.ArgumentList.Add(argument);
+				foreach (var (name, value) in environment)
+					start.Environment[name] = value;
 
 				using var process = Process.Start(start);
 
 				// Drained concurrently, because a commit that fails writes enough to standard
 				// error to fill its pipe, and a reader waiting on the other stream would deadlock.
 				var error = process.StandardError.ReadToEndAsync();
-				var output = process.StandardOutput.ReadToEnd();
+				var output = process.StandardOutput.ReadToEndAsync();
+				if (timeout is { } limit && !process.WaitForExit(limit))
+				{
+					try
+					{
+						process.Kill(entireProcessTree: true);
+					}
+					catch (InvalidOperationException)
+					{
+					}
+
+					process.WaitForExit();
+					return (-1, "", $"git {arguments.FirstOrDefault()} did not finish within {limit.TotalSeconds:0} seconds");
+				}
+
 				process.WaitForExit();
-				return (process.ExitCode, output, error.GetAwaiter().GetResult());
+				return (process.ExitCode, output.GetAwaiter().GetResult(), error.GetAwaiter().GetResult());
 			}
 			catch (System.ComponentModel.Win32Exception)
 			{

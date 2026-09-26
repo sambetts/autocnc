@@ -60,6 +60,8 @@ namespace AutoCnC.Launcher.Tests
 				Assert.That(options.GetProperty("Benchmark").GetString(), Is.EqualTo("hard-16-9"));
 				Assert.That(options.GetProperty("BenchmarkDifficulty").GetString(), Is.EqualTo("Hard"));
 				Assert.That(options.GetProperty("Commit").GetBoolean(), Is.True);
+				Assert.That(options.GetProperty("Push").GetBoolean(), Is.True,
+					"Promotions are published unless the caller opts out.");
 				Assert.That(options.GetProperty("Color").GetBoolean(), Is.True);
 				Assert.That(options.GetProperty("DeleteBlockingRun").GetBoolean(), Is.False);
 			});
@@ -77,14 +79,15 @@ namespace AutoCnC.Launcher.Tests
 		}
 
 		[Test]
-		public async Task NoCommitAndNoColorAreForwardedAsTheirOppositeOptions()
+		public async Task NoCommitNoPushAndNoColorAreForwardedAsTheirOppositeOptions()
 		{
-			var result = await Invoke("-Rounds 1 -NoCommit -NoColor");
+			var result = await Invoke("-Rounds 1 -NoCommit -NoPush -NoColor");
 			Assert.That(result.ExitCode, Is.Zero, result.Output);
 			using var captured = JsonDocument.Parse(File.ReadAllText(Path.Combine(root, "captured.json")));
 			Assert.Multiple(() =>
 			{
 				Assert.That(captured.RootElement.GetProperty("Commit").GetBoolean(), Is.False);
+				Assert.That(captured.RootElement.GetProperty("Push").GetBoolean(), Is.False);
 				Assert.That(captured.RootElement.GetProperty("Color").GetBoolean(), Is.False);
 			});
 			AssertTemporaryOptionsDeleted();

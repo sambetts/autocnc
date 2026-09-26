@@ -521,6 +521,9 @@ round's valid proposal as soon as the build is verified, before the benchmark de
 code. It writes the proposal back to the loop's template file, marks the run
 (`SuggestedNextPromptAccepted`, and `PromptRewriteFrozen = false`), and archives it with the
 `continuous` origin. It renders that round's contract to say the proposal will be used unreviewed.
+When a round is promoted, the loop commits the bot workspace, then the template if the checkout
+tracks it, and pushes the branch to its upstream (`BotWorkspace.Commit`, `CommitFile`, `Push`).
+The push is a fast-forward that never prompts, and it times out rather than stall the loop.
 Script queue activity is mirrored to Windows taskbar indeterminate
 progress and cleared on every terminal state.
 

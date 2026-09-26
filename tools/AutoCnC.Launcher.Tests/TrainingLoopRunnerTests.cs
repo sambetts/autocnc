@@ -209,6 +209,185 @@ namespace AutoCnC.Launcher.Tests
 		}
 
 		[Test]
+		public void APromotionIsPushedToTheBranchItTracks()
+		{
+			RequireGitCheckout();
+			var remote = RequireRemote();
+			File.WriteAllText(Path.Combine(repo.Root, "docs", "agent-game-guide.md"), "edited while training ran");
+			improve = () => File.WriteAllText(source, "candidate-" + improvements);
+
+			Run();
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(Git("log", "-1", "--format=%s"), Is.EqualTo("Promote the bot hard-16-9 preferred"));
+				Assert.That(RemoteHead(remote), Is.EqualTo(Git("rev-parse", "HEAD")),
+					"A promotion must reach the remote as soon as it is committed.");
+				Assert.That(Git("status", "--porcelain", "--", "docs"), Does.Contain("agent-game-guide.md"),
+					"Only commits are published; uncommitted work elsewhere stays where it was.");
+				Assert.That(messages, Has.Some.StartsWith("Pushed "));
+			});
+		}
+
+		[Test]
+		public void AHandMadeCommitTravelsWithTheNextPromotion()
+		{
+			RequireGitCheckout();
+			var remote = RequireRemote();
+			File.WriteAllText(Path.Combine(Path.GetDirectoryName(project), "Opening.cs"), "adopted by hand");
+			Git("add", "--", "bots/Reference/Opening.cs");
+			Git("commit", "--quiet", "--message", "Adopted by hand");
+			var handMade = Git("rev-parse", "HEAD");
+			improve = () => File.WriteAllText(source, "candidate");
+
+			Run();
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(RemoteHead(remote), Is.EqualTo(Git("rev-parse", "HEAD")));
+				Assert.That(Git("merge-base", "--is-ancestor", handMade, RemoteHead(remote)), Is.Not.Null,
+					"The whole branch is published, so nothing committed before the promotion is left behind.");
+			});
+		}
+
+		[Test]
+		public void ARestoredCandidateIsNeverPushed()
+		{
+			RequireGitCheckout();
+			var remote = RequireRemote();
+			var before = RemoteHead(remote);
+			candidateWins = false;
+			improve = () => File.WriteAllText(source, "candidate");
+
+			Run();
+
+			Assert.That(RemoteHead(remote), Is.EqualTo(before));
+			Assert.That(messages, Has.None.StartsWith("Pushed "));
+		}
+
+		[Test]
+		public void NoPushCommitsButLeavesTheRemoteAlone()
+		{
+			RequireGitCheckout();
+			var remote = RequireRemote();
+			var before = RemoteHead(remote);
+			options.Push = false;
+			improve = () => File.WriteAllText(source, "candidate");
+
+			Run();
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(Git("log", "-1", "--format=%s"), Is.EqualTo("Promote the bot hard-16-9 preferred"));
+				Assert.That(RemoteHead(remote), Is.EqualTo(before));
+				Assert.That(messages, Has.None.StartsWith("Pushed "));
+			});
+		}
+
+		[Test]
+		public void APushThatFailsIsReportedAndTrainingContinues()
+		{
+			RequireGitCheckout();
+			var branch = Git("symbolic-ref", "--short", "HEAD");
+			Git("remote", "add", "origin", Path.Combine(root, "missing remote.git"));
+			Git("config", $"branch.{branch}.remote", "origin");
+			Git("config", $"branch.{branch}.merge", "refs/heads/" + branch);
+			options.Rounds = 2;
+			improve = () => File.WriteAllText(source, "candidate-" + improvements);
+
+			Run();
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(improvements, Is.EqualTo(2), "A push is bookkeeping; it cannot stop training.");
+				Assert.That(messages.Count(message => message.Contains("but did not push it to origin/", StringComparison.Ordinal)),
+					Is.EqualTo(2));
+				Assert.That(messages, Has.Some.Contains("It stays committed locally"));
+				Assert.That(Git("log", "--format=%s").Split('\n')
+					.Count(line => line.Trim() == "Promote the bot hard-16-9 preferred"), Is.EqualTo(2));
+			});
+		}
+
+		[Test]
+		public void ABranchThatTracksNothingIsCommittedAndReportedAsUnpushed()
+		{
+			RequireGitCheckout();
+			improve = () => File.WriteAllText(source, "candidate");
+
+			Run();
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(Git("log", "-1", "--format=%s"), Is.EqualTo("Promote the bot hard-16-9 preferred"));
+				Assert.That(messages, Has.Some.Contains("does not track a remote branch"));
+			});
+		}
+
+		[Test]
+		public void APromotionCommitsThePromptInForceAndPushesItWithTheBot()
+		{
+			RequireGitCheckout();
+			var remote = RequireRemote();
+			improve = () => File.WriteAllText(source, "candidate");
+			proposal = _ => Template("Lesson from a promoted round.");
+
+			Run();
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(Git("log", "-1", "--format=%s", "HEAD~1"), Is.EqualTo("Promote the bot hard-16-9 preferred"));
+				Assert.That(Git("log", "-1", "--format=%s"),
+					Is.EqualTo($"Record the training prompt in force when {Git("rev-parse", "--short", "HEAD~1")} was promoted"));
+				Assert.That(Git("show", "--name-only", "--format=", "HEAD"), Is.EqualTo("docs/agent-prompt-template.md"),
+					"The prompt goes in its own commit, and nothing else rides along with it.");
+				Assert.That(Git("show", "HEAD:docs/agent-prompt-template.md"), Does.Contain("Lesson from a promoted round."));
+				Assert.That(Git("status", "--porcelain", "--", "docs/agent-prompt-template.md"), Is.Empty);
+				Assert.That(RemoteHead(remote), Is.EqualTo(Git("rev-parse", "HEAD")));
+				Assert.That(messages, Has.Some.StartsWith("Pushed ").And.Contains("and the prompt"));
+			});
+		}
+
+		[Test]
+		public void ARestoredRoundsPromptIsAdoptedButNotCommitted()
+		{
+			RequireGitCheckout();
+			candidateWins = false;
+			improve = () => File.WriteAllText(source, "candidate");
+			proposal = _ => Template("Lesson from a restored round.");
+
+			Run();
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(Git("log", "--format=%s"), Is.EqualTo("checkout"));
+				Assert.That(File.ReadAllText(RepoTemplate), Does.Contain("Lesson from a restored round."));
+				Assert.That(Git("status", "--porcelain", "--", "docs/agent-prompt-template.md"),
+					Does.Contain("agent-prompt-template.md"),
+					"An adoption is committed with the next promotion, not on its own.");
+			});
+		}
+
+		[Test]
+		public void APromptTemplateOutsideTheCheckoutIsNeverCommitted()
+		{
+			RequireGitCheckout();
+			var custom = Path.Combine(root, "custom prompt.md");
+			File.WriteAllText(custom, Template("Custom baseline."));
+			options.PromptTemplate = custom;
+			improve = () => File.WriteAllText(source, "candidate");
+			proposal = _ => Template("Custom lineage.");
+
+			Run();
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(Git("log", "-1", "--format=%s"), Is.EqualTo("Promote the bot hard-16-9 preferred"));
+				Assert.That(File.ReadAllText(custom), Does.Contain("Custom lineage."));
+				Assert.That(messages, Has.None.Contains("prompt in force"));
+			});
+		}
+
+		[Test]
 		public void ThePromotionCommitMessageCarriesTheEvidenceThatAllowedIt()
 		{
 			var message = TrainingLoopRunner.PromotionCommitMessage(new PairedBenchmarkEvaluation
@@ -700,6 +879,22 @@ namespace AutoCnC.Launcher.Tests
 			if (Git("commit", "--message", "checkout") == null)
 				Assert.Ignore("Git could not commit in this environment.");
 		}
+
+		/// <summary>A bare repository the fake checkout's branch tracks, standing in for GitHub.</summary>
+		string RequireRemote()
+		{
+			var remote = Path.Combine(root, "remote.git");
+			if (Git("init", "--quiet", "--bare", remote) == null)
+				Assert.Ignore("Git could not create a bare repository in this environment.");
+
+			Git("remote", "add", "origin", remote);
+			if (Git("push", "--quiet", "--set-upstream", "origin", "HEAD") == null)
+				Assert.Ignore("Git could not push to a local bare repository in this environment.");
+			return remote;
+		}
+
+		string RemoteHead(string remote) =>
+			Git("ls-remote", remote, "refs/heads/" + Git("symbolic-ref", "--short", "HEAD"))?.Split('\t')[0];
 
 		string Git(params string[] arguments)
 		{

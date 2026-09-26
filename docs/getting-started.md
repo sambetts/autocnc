@@ -685,8 +685,9 @@ template file and becomes the next round's prompt. It is also archived to
 `%LOCALAPPDATA%\AutoCnC\PromptHistory`. Each round is told this in its contract. A proposal that
 fails validation is reported and discarded, and the current prompt carries on. Because the file is
 the prompt in force, a restart carries on from the latest adoption, and editing the file between
-runs is how you steer it. The loop never commits it: `git diff docs/agent-prompt-template.md` shows
-what training has changed, and committing it keeps a revision you like.
+runs is how you steer it. Adoptions are not committed one by one. Each promotion commits the
+template, when the checkout tracks it, so the prompt in force when a round improved the bot is kept
+and pushed with it. `git diff docs/agent-prompt-template.md` shows what training has changed since.
 
 Every round prints `AUTOCNC_TRAINING_RUN=...`. Evidence, agent transcripts, snapshot and paired
 results are saved beneath `%LOCALAPPDATA%\AutoCnC\TrainingRuns`, where the launcher can find them.
@@ -700,8 +701,17 @@ in an uncommitted working tree is one manual edit away from being lost, which is
 best bot of 21 September was displaced by hand-written commits that scored worse. Only the
 workspace pathspec is staged, so the engine submodule's applied patch and any unrelated work
 elsewhere in the checkout stay out of it, and a restored candidate is never committed. The commit
-message carries the wins, median paired delta and pair breadth that allowed the promotion. Pass
-`-NoCommit` to leave version control alone; nothing is ever pushed.
+message carries the wins, median paired delta and pair breadth that allowed the promotion. If the
+prompt template has changed and the checkout tracks it, it follows in a second commit of its own.
+
+Each promotion is then pushed to the remote the branch tracks, so every measured improvement
+is published as it happens. The whole branch goes, so a commit you made by hand, or one whose push
+failed earlier, is published with the next promotion. Only commits are pushed: uncommitted work
+anywhere in the checkout stays local. The push is a plain fast-forward. It never forces, never
+prompts for credentials, and gives up after two minutes. A push that fails, for example because
+the remote has moved on or credentials have expired, is reported and training carries on with the
+promotion committed locally. Pass `-NoPush` to keep promotions local, or `-NoCommit` to leave
+version control alone.
 
 Agent and script output keeps its colour. Pass `-NoColor`, set `NO_COLOR`, or redirect the output
 to turn that off.

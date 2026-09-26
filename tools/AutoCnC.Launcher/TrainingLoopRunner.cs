@@ -35,6 +35,11 @@ namespace AutoCnC.Launcher
 		RepoLayout repo;
 		TrainingRun activeRun;
 
+		// The template file the loop renders and adopts into, and the archive revision of the
+		// latest adoption, so a promotion can commit the prompt in force alongside the bot.
+		string promptTemplatePath;
+		int? adoptedRevision;
+
 		public TrainingLoopRunner(TrainingLoopOptions options, Action<string> output)
 			: this(options, output, null) { }
 
@@ -60,6 +65,7 @@ namespace AutoCnC.Launcher
 			repo = RepoLayout.For(options.RepoRoot);
 			var project = options.Validate(repo);
 			var promptPath = options.PromptTemplate ?? repo.AgentPromptTemplate;
+			promptTemplatePath = promptPath;
 			var prompt = File.ReadAllText(promptPath);
 			if (!TrainingAgent.ValidatePromptTemplate(prompt, out var error))
 				throw new ArgumentException(error);
@@ -368,6 +374,7 @@ namespace AutoCnC.Launcher
 			{
 				promptHistory.Record(current, PromptOrigin.Baseline);
 				revision = promptHistory.Record(next, PromptOrigin.Continuous, activeRun);
+				adoptedRevision = revision?.Revision ?? adoptedRevision;
 			}
 			catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
 			{
@@ -429,12 +436,16 @@ namespace AutoCnC.Launcher
 			}
 		}
 
-		/// <summary>Puts a promoted bot in version control, where the next round cannot lose it.</summary>
+		/// <summary>
+		/// Puts a promoted bot in version control, where the next round cannot lose it, and
+		/// publishes it.
+		/// </summary>
 		/// <remarks>
 		/// Only the paired gate reaches this, so the evidence for the commit is the same evidence
-		/// that allowed the promotion. Committing is bookkeeping rather than training: a failure
-		/// here is reported and the loop carries on, because the promotion itself was already
-		/// measured, applied and recorded in the run.
+		/// that allowed the promotion. Committing and pushing are bookkeeping rather than training:
+		/// a failure here is reported and the loop carries on, because the promotion itself was
+		/// already measured, applied and recorded in the run. A push that fails leaves the commit
+		/// in place, and the next promotion's push carries it with it.
 		/// </remarks>
 		void CommitPromotion(PairedBenchmarkEvaluation evaluation)
 		{
@@ -457,6 +468,83 @@ namespace AutoCnC.Launcher
 			output(result.Committed
 				? $"Committed the promoted bot as {result.Revision}."
 				: $"Promoted, but not committed, because {result.Reason}.");
+			if (!result.Committed)
+				return;
+
+			var promptRevision = CommitPromptInForce(result.Revision);
+			if (options.Push)
+				PushPromotion(workspace, promptRevision == null
+					? result.Revision
+					: $"{result.Revision} and the prompt {promptRevision}");
+		}
+
+		/// <summary>
+		/// Commits the prompt template the loop adopts into, when it is tracked and has changed,
+		/// so the instructions behind a measured improvement are kept with it. Returns the new
+		/// revision, or null when there was nothing to commit.
+		/// </summary>
+		/// <remarks>
+		/// Only at a promotion, never after each adoption: a round's proposal is written before
+		/// the benchmark decides the round, and a prompt history that recorded every rejected
+		/// round would bury the ones that produced something. The template may carry several
+		/// adoptions by then, and the commit records all of them as the prompt in force.
+		/// </remarks>
+		string CommitPromptInForce(string botRevision)
+		{
+			BotWorkspace.CommitOutcome committed;
+			try
+			{
+				committed = BotWorkspace.CommitFile(promptTemplatePath, PromptCommitMessage(botRevision, adoptedRevision));
+			}
+			catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
+				InvalidOperationException)
+			{
+				output("The promoted bot is committed, but the prompt in force is not: " + ex.Message);
+				return null;
+			}
+
+			if (committed.Committed)
+				output($"Committed the prompt in force as {committed.Revision}.");
+			else if (committed.Reason != null)
+				output($"The promoted bot is committed, but the prompt in force is not, because {committed.Reason}.");
+			return committed.Committed ? committed.Revision : null;
+		}
+
+		internal static string PromptCommitMessage(string botRevision, int? archiveRevision)
+		{
+			var message = new StringBuilder();
+			message.Append(CultureInfo.InvariantCulture,
+				$"Record the training prompt in force when {botRevision} was promoted\n\n");
+			message.Append("scripts/train-loop.ps1 adopts each round's proposed prompt unreviewed and commits\n");
+			message.Append("the template when a round is promoted, so the instructions behind each measured\n");
+			message.Append("improvement are kept with it.\n");
+			if (archiveRevision is int number)
+				message.Append(CultureInfo.InvariantCulture,
+					$"\nLatest adoption: revision {number} in %LOCALAPPDATA%\\AutoCnC\\PromptHistory.\n");
+			return message.ToString();
+		}
+
+		/// <summary>How long a push may take before the loop gives up on it and trains on.</summary>
+		static readonly TimeSpan PushTimeout = TimeSpan.FromMinutes(2);
+
+		void PushPromotion(string workspace, string revision)
+		{
+			BotWorkspace.PushOutcome pushed;
+			try
+			{
+				pushed = BotWorkspace.Push(workspace, PushTimeout);
+			}
+			catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
+				InvalidOperationException)
+			{
+				output($"Committed {revision}, but the push failed: {ex.Message} It stays committed locally.");
+				return;
+			}
+
+			output(pushed.Pushed
+				? $"Pushed {revision} to {pushed.Destination}."
+				: $"Committed {revision}, but did not push it{(pushed.Destination == null ? "" : " to " + pushed.Destination)}: " +
+					$"{pushed.Reason}. It stays committed locally, and the next promotion pushes it too.");
 		}
 
 		internal static string PromotionCommitMessage(PairedBenchmarkEvaluation evaluation)

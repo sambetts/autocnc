@@ -44,6 +44,12 @@ namespace AutoCnC.Launcher
 		/// <summary>Commit the bot workspace whenever the paired gate promotes a candidate.</summary>
 		public bool Commit { get; set; } = true;
 
+		/// <summary>
+		/// Push the branch to the remote it tracks after each promotion commit, so every measured
+		/// improvement is published without anyone asking.
+		/// </summary>
+		public bool Push { get; set; } = true;
+
 		/// <summary>Forward the agent's own colours to the console.</summary>
 		public bool Color { get; set; } = true;
 

@@ -24,7 +24,7 @@ namespace AutoCnC.Reference.Doctrines
 	{
 		public override string Name => ReferenceDoctrines.Attack;
 
-		public override string Description => "Push: tech, more production, and the whole army goes to their base.";
+		public override string Description => "Push: tech, a fifth refinery, and the whole army goes to their base.";
 
 		protected override IEnumerable<BuildStep> BuildSteps => ReferencePlans.AttackBuild;
 

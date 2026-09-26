@@ -3,6 +3,8 @@
 //
 //  Runs on production buildings (barracks, war factory). Each building drives
 //  only the queue it owns, so two barracks don't both order the same infantry.
+//  Only the first building of a group ever owns it (ModeContext.QueueFor), so a
+//  second barracks or factory idles until the first dies: see AttackBuild.
 //
 //  Licence: GPL-3.0-or-later. See LICENSE and NOTICE.md.
 // ============================================================================

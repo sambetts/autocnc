@@ -787,14 +787,28 @@ namespace AutoCnC.Reference
 			new(InfantryQueue, RifleBodies, int.MaxValue),   // ...and the body that beats what we have seen: see ArmyMixLogic
 		];
 
-		/// <summary>Pushing: more production, better units, and the tech to make them worth having.</summary>
+		/// <summary>Pushing: the tech that makes units worth having, and the refinery that pays for them.</summary>
+		/// <remarks>
+		/// <b>No second barracks or vehicle factory, because a second one never produces.</b> Each
+		/// of these buildings carries its own <c>ProductionQueue</c>, and the SDK addresses a queue
+		/// by group: <c>QueueFor</c> returns the group's first enabled queue, <c>OwnsQueue</c> is
+		/// true only for that building, and every <c>Produce</c> is sent to it. So the second of
+		/// each is a spare that only starts working when the first dies. On 16:9 this plan stood a
+		/// second <c>afld</c> at 454s and a second <c>hand</c> at 526s. They made 324 and 252
+		/// evaluations, every one <c>Continue</c>, while all 28 vehicles came out of the first
+		/// airfield and all 132 infantry out of the first barracks. They cost 2,500 credits in the
+		/// window where cash read 0 at 500-520s and 560s and both real queues stood idle. The
+		/// airfield's 40 power took the margin from 55 to 15, so the next <c>sam</c> browned the
+		/// base out at 476-486s. The yard's time went on them too, which held the fifth refinery
+		/// back to 569s. A lost factory is still rebuilt, because
+		/// <see cref="Economy"/>'s rung for it comes first. If the SDK ever lets a mode drive its
+		/// own building's queue, a second factory is worth having again.
+		/// </remarks>
 		public static IReadOnlyList<BuildStep> AttackBuild { get; } =
 		[
 			.. Economy,
 			.. HomeDefence,
 			new(["hq", "eye", "tmpl"], 1),     // tech
-			new(["weap", "afld"], 2),
-			new(["pyle", "hand"], 2),
 			new(["powr", "nuke"], 5),
 			new(["proc"], RefineryCore + 1),
 		];

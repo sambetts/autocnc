@@ -10,7 +10,7 @@ the match needs. This one has four, and moves between them as the battle turns.
 | `Opening` | An economy, and enough army not to die | Where every match starts, and where the others fall back to |
 | `Scout` | Finding out where the enemy lives | Two refineries up and their base still unknown — or the push itself reporting there is nothing left to attack, or having seen nothing at all for five minutes, which both mean the base it knew is gone |
 | `Defence` | Static defence, cheap bodies, everything home | A building is lost, or enough enemies reach the base — three for a side with nothing to spend, and a quarter of our own unit count for one that has an army and a target |
-| `Attack` | Tech, more production, the whole army pushes while the light scouts watch their base | Army worth 6000 and their base is known, including straight out of a siege that has lifted |
+| `Attack` | Tech, a fifth refinery, the whole army pushes while the light scouts watch their base | Army worth 6000 and their base is known, including straight out of a siege that has lifted |
 
 The rules are in [`Logic/ReferenceBotLogic.cs`](Logic/ReferenceBotLogic.cs) — a pure function of
 `BattleState`, so the interesting half of the bot can be read and reasoned about without a game
@@ -2920,6 +2920,37 @@ the champion's 1,400. By eight minutes the averages were level (28,020 against 2
 placement and were decided long after the opening, and a change this small is inside the gate's
 own noise: the previous champion, `f80b7fc`, scored 6 and 7 on identical code the same day. The
 player judged the opening a definite improvement and kept it.
+
+## The second factory never produced
+
+The next `16:9` at Hard (Nod against Nod) was won at 778s, fitness 0.965. Every component scored
+1.0 except `armyValueIntegral`: 0.825, a mean army of 4,951 against 6,000. The three flagged
+regressions come from the quicker win. The opponent spent about 43,800 in all and this side killed
+39,450 of it, which is the `creditsKilled` drop. The push levelled the base by 760s, so the
+Scout-doctrine hunt, which explores most of the map in longer wins, ran for 18 seconds. That is
+the `cellsExplored` drop, and the shorter game is the `durationSeconds` drop.
+
+`AttackBuild` asked for a second `afld` and a second `hand`. Each production building has its own
+`ProductionQueue`, and `ModeContext.QueueFor` returns a group's first enabled queue, so
+`OwnsQueue` is true for the first building only and every `Produce` goes there. The second airfield
+(454s) and barracks (526s) made 324 and 252 evaluations, all `Continue`. All 28 vehicles came out
+at the first airfield's exit and all 132 infantry at the first barracks'. They cost 2,500 credits in
+the 454-590s window, when cash read 0 at 500-520s and 560s and both real queues had gaps. The
+airfield's 40 power cut the margin to 15, and the next `sam` browned the base out at 476-486s. The
+yard's time went on them too, which kept the fifth refinery back to 569s.
+
+**Those two rungs are gone** ([`Plans.cs`](Plans.cs), `AttackBuild`). Traced through this fight:
+the yard orders the fifth plant at 405s instead of the airfield, and the fifth refinery stands
+at about 455s. The base does not brown out after 386s, and the 2,500 credits fill the idle unit
+queues in 455-600s. The spare factories only mattered as insurance. A lost barracks or factory is now rebuilt
+by `Economy`'s rung instead of being covered by the spare. Nothing was lost here, and the plan
+reaches `Frontier` and `AirDefence` about 110 seconds sooner.
+
+Worth reading next time: the late game is capped by throughput, not cash. One airfield turns out an
+`arty` every 15 seconds and one barracks an `e1` every 3, about 73 credits a second between them.
+From 600s to 720s this side spent 73.3 a second and earned 85. Cash climbed from 2,100 to 3,500,
+and ended the match at 4,000.
+Under this SDK, only a queue in another group (a helipad's `Aircraft`) adds throughput.
 
 ## Start your own
 

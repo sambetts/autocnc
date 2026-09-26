@@ -365,10 +365,11 @@ replacement is saved in the player's launcher settings.
 
 Because each approval overwrites that single saved template, every template ever adopted is also
 appended to `%LOCALAPPDATA%\AutoCnC\PromptHistory` as a numbered plain-text file, oldest first,
-with an `index.json` recording when it was adopted, whether a player approved it or continuous
-improvement did in older releases, and the bot, session and outcome behind it. New continuous
-rounds keep their proposal on the run for later manual review and do not add an unreviewed
-revision. Diff two consecutive files to see what a round changed. A template identical to the one
+with an `index.json` recording when it was adopted, whether a player approved it or unattended
+training did, and the bot, session and outcome behind it. The launcher's continuous rounds keep
+their proposal on the run for later manual review and add no revision. The PowerShell training
+loop adopts every valid proposal for the round after and archives it as a `continuous` revision,
+after the template it replaced. Diff two consecutive files to see what a round changed. A template identical to the one
 before it is not recorded. Nothing reads the archive back, so editing or deleting it only loses
 history; it changes no behaviour.
 
@@ -411,7 +412,8 @@ workspace edit or edit-capable agent chat invalidates the result and requires re
 launcher never restores over those unbenchmarked edits. Each automatic improvement uses the
 battle just fought. Continuous mode does not pause for feedback or prompt review: an agent-authored
 next prompt remains a draft on the run, the current prompt stays frozen, and the player can review
-the draft after the loop stops.
+the draft after the loop stops. The PowerShell training loop does not wait for that review; it adopts
+each valid draft for the next round.
 
 The default continuous gate is `hard-16-9` at `Hard`. Each arm receives those explicit arguments,
 and results naming any other benchmark or difficulty are `Undefined`. Isolated builds record

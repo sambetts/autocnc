@@ -677,7 +677,16 @@ the next fight; an agent/build failure or invalid evaluation stops the loop with
 By default the command uses Copilot CLI and `docs/agent-prompt-template.md`, **not** the launcher's
 saved agent settings or edited prompt. Pass `-AgentConfiguration 'C:\path\agent.json'` for the
 provider-neutral command/arguments/stdin JSON used by `train-bot.ps1`, and `-PromptTemplate` for
-a different prompt template file. Next-prompt proposals remain drafts for manual review.
+a different prompt template file.
+
+The loop adopts each round's next-prompt proposal unreviewed. Once the round's build is verified,
+and before the benchmark decides whether its code is kept, a valid proposal is written back to the
+template file and becomes the next round's prompt. It is also archived to
+`%LOCALAPPDATA%\AutoCnC\PromptHistory`. Each round is told this in its contract. A proposal that
+fails validation is reported and discarded, and the current prompt carries on. Because the file is
+the prompt in force, a restart carries on from the latest adoption, and editing the file between
+runs is how you steer it. The loop never commits it: `git diff docs/agent-prompt-template.md` shows
+what training has changed, and committing it keeps a revision you like.
 
 Every round prints `AUTOCNC_TRAINING_RUN=...`. Evidence, agent transcripts, snapshot and paired
 results are saved beneath `%LOCALAPPDATA%\AutoCnC\TrainingRuns`, where the launcher can find them.

@@ -31,6 +31,7 @@ namespace AutoCnC.Launcher
 		readonly Action<string> output;
 		readonly Func<ScriptJob, CancellationToken, TrainingScriptResult> execute;
 		readonly ContinuousPromotionRunner promotion = new();
+		readonly PromptHistory promptHistory;
 		RepoLayout repo;
 		TrainingRun activeRun;
 
@@ -38,11 +39,13 @@ namespace AutoCnC.Launcher
 			: this(options, output, null) { }
 
 		internal TrainingLoopRunner(TrainingLoopOptions options, Action<string> output,
-			Func<ScriptJob, CancellationToken, TrainingScriptResult> execute)
+			Func<ScriptJob, CancellationToken, TrainingScriptResult> execute,
+			PromptHistory promptHistory = null)
 		{
 			this.options = options ?? throw new ArgumentNullException(nameof(options));
 			this.output = output ?? throw new ArgumentNullException(nameof(output));
 			this.execute = execute ?? ExecuteScript;
+			this.promptHistory = promptHistory ?? new PromptHistory();
 		}
 
 		public void Run(CancellationToken cancellationToken)
@@ -56,7 +59,8 @@ namespace AutoCnC.Launcher
 
 			repo = RepoLayout.For(options.RepoRoot);
 			var project = options.Validate(repo);
-			var prompt = File.ReadAllText(options.PromptTemplate ?? repo.AgentPromptTemplate);
+			var promptPath = options.PromptTemplate ?? repo.AgentPromptTemplate;
+			var prompt = File.ReadAllText(promptPath);
 			if (!TrainingAgent.ValidatePromptTemplate(prompt, out var error))
 				throw new ArgumentException(error);
 			var agent = ReadAgentConfiguration();
@@ -126,9 +130,11 @@ namespace AutoCnC.Launcher
 					RequireSuccess(Execute(repo.ExportAgentRulesScript,
 						["-Output", activeRun.GameRulesPath], "Exporting game rules", cancellationToken));
 					TrainingAgent.Prepare(activeRun, repo.AgentGameGuide, repo.AgentMechanics,
-						activeRun.GameRulesPath, prompt, agent.Command, agent.Arguments, agent.Stdin);
+						activeRun.GameRulesPath, prompt, agent.Command, agent.Arguments, agent.Stdin,
+						adoptsNextPrompt: true);
 					activeRun.ContinuousAgentStarted(agent.Command);
 					Improve(project, cancellationToken);
+					prompt = AdoptNextPrompt(promptPath, prompt);
 					Evaluate(cancellationToken);
 					output($"Round {round}: {activeRun.Manifest.Status}. {activeRun.Manifest.Experiment.Reason}");
 				}
@@ -277,6 +283,105 @@ namespace AutoCnC.Launcher
 				promotion.ApplyDecision(activeRun, null, failure.Evaluation);
 				throw new InvalidOperationException("Improvement failed; training stopped. See agent-transcript.txt in the saved run.");
 			}
+		}
+
+		/// <summary>
+		/// Makes the round's proposed template the prompt every later round is given, or keeps the
+		/// one in force when there is nothing valid to adopt. Returns the prompt the next round uses.
+		/// </summary>
+		/// <remarks>
+		/// <para>
+		/// Adopted as soon as the build is verified and before the paired benchmark runs, whichever
+		/// way that goes. The prompt steers the analysis rather than the play, so the benchmark says
+		/// nothing about it; its measure is the trend's report of what each revision did to the
+		/// rounds it steered. Adopting before the evaluation also means a loop stopped during the
+		/// benchmark, and then resumed from it, has already taken the proposal.
+		/// </para>
+		/// <para>
+		/// The checks and repairs are the ones a player's approval gets. A proposal missing
+		/// <c>{gameMechanics}</c> or a required placeholder was already mended by
+		/// <see cref="TrainingAgent.FindSuggestedNextPrompt"/>, and one that still fails
+		/// validation is reported and discarded rather than stopping training.
+		/// </para>
+		/// <para>
+		/// Written back to the template file the loop read, so a restart carries on from the latest
+		/// adoption and editing that file is still how a player steers it. Archived as a
+		/// <see cref="PromptOrigin.Continuous"/> revision after the template it replaces, so the
+		/// lineage stays diffable.
+		/// </para>
+		/// </remarks>
+		string AdoptNextPrompt(string path, string current)
+		{
+			var proposal = activeRun.Manifest.Agent?.SuggestedNextPrompt;
+			if (string.IsNullOrWhiteSpace(proposal))
+			{
+				output("Next prompt: the round proposed none, so the current prompt carries on.");
+				return current;
+			}
+
+			var adopted = TrainingAgent.EnsureMechanicsPlaceholder(proposal).Trim();
+			if (!TrainingAgent.ValidatePromptTemplate(adopted, out var error))
+			{
+				output("Next prompt: the proposal is invalid, so the current prompt carries on. " + error);
+				return current;
+			}
+
+			// The file keeps its own line endings, so a tracked template's diff shows what the round
+			// changed rather than every line.
+			var newline = current.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
+			var next = adopted.ReplaceLineEndings(newline) + newline;
+			var unchanged = string.Equals(next.Trim(), current.ReplaceLineEndings(newline).Trim(),
+				StringComparison.Ordinal);
+			if (!unchanged)
+			{
+				try
+				{
+					var temporary = path + ".tmp";
+					File.WriteAllText(temporary, next);
+					File.Move(temporary, path, true);
+				}
+				catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+				{
+					output($"Next prompt: could not write {path}, so the current prompt carries on. {ex.Message}");
+					return current;
+				}
+			}
+
+			try
+			{
+				activeRun = TrainingRun.AdoptLatestSuggestedNextPrompt(activeRun, adopted);
+			}
+			catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
+				InvalidOperationException or JsonException)
+			{
+				output("Next prompt: adopted, but the run could not record it. " + ex.Message);
+			}
+
+			if (unchanged)
+			{
+				output("Next prompt: the round proposed the prompt it was given, unchanged.");
+				return current;
+			}
+
+			PromptRevision revision = null;
+			try
+			{
+				promptHistory.Record(current, PromptOrigin.Baseline);
+				revision = promptHistory.Record(next, PromptOrigin.Continuous, activeRun);
+			}
+			catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+			{
+				output("Next prompt: adopted, but it could not be archived. " + ex.Message);
+			}
+
+			var archived = revision == null
+				? ""
+				: "; archived as revision " + revision.Revision.ToString(CultureInfo.InvariantCulture);
+			output("Next prompt: adopted the round's proposal (" +
+				next.Length.ToString("N0", CultureInfo.InvariantCulture) + " characters, was " +
+				current.Length.ToString("N0", CultureInfo.InvariantCulture) + ") for the next round" +
+				archived + ".");
+			return next;
 		}
 
 		void Evaluate(CancellationToken token)

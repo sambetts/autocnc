@@ -516,8 +516,11 @@ workspace, evidence, result, and recursive next-template contract values without
 additive guidance. `docs/agent-prompt-template.md` is the repository default, while an approved
 replacement is user state. Since approval overwrites that state, each adopted template is also
 appended to `%LOCALAPPDATA%\AutoCnC\PromptHistory` as a numbered file plus an `index.json` of
-provenance; legacy entries retain their `continuous` origin even though unattended prompt
-acceptance is no longer performed.
+provenance. The PowerShell training loop is the unattended exception. `TrainingLoopRunner` adopts each
+round's valid proposal as soon as the build is verified, before the benchmark decides the round's
+code. It writes the proposal back to the loop's template file, marks the run
+(`SuggestedNextPromptAccepted`, and `PromptRewriteFrozen = false`), and archives it with the
+`continuous` origin. It renders that round's contract to say the proposal will be used unreviewed.
 Script queue activity is mirrored to Windows taskbar indeterminate
 progress and cleared on every terminal state.
 

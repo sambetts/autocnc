@@ -215,8 +215,11 @@ namespace AutoCnC.Launcher
 		public bool? CanResumeEvaluation { get; set; }
 
 		/// <summary>
-		/// True records that continuous mode kept the current prompt until a player reviewed the
-		/// proposal. Nullable so manifests written before this policy remain valid.
+		/// True records that this round's proposal did not replace the prompt in force: the
+		/// launcher's continuous mode always keeps it until a player reviews the draft, and the
+		/// unattended loop keeps it only when the round proposed nothing valid. False records that
+		/// the loop adopted the proposal for the next round. Nullable so manifests written before
+		/// this policy remain valid.
 		/// </summary>
 		public bool? PromptRewriteFrozen { get; set; }
 	}
@@ -1315,6 +1318,33 @@ namespace AutoCnC.Launcher
 			return MutateLatest(staleRun, rejectAnyBusyOwner: true,
 				current => current.AcceptSuggestedNextPrompt(approvedPrompt));
 		}
+
+		/// <summary>
+		/// Records that the unattended loop adopted this round's proposal, unreviewed, as the prompt
+		/// every later round is given.
+		/// </summary>
+		/// <remarks>
+		/// Separate from <see cref="AcceptSuggestedNextPrompt"/> because the caller is the worker
+		/// that owns the run: the loop still holds its candidate when the prompt is adopted, which
+		/// the player-facing accept rightly refuses.
+		/// </remarks>
+		public void AdoptSuggestedNextPrompt(string adoptedPrompt)
+		{
+			if (Manifest.Agent == null)
+				throw new InvalidOperationException("This run has no next prompt to adopt.");
+
+			Manifest.Agent.SuggestedNextPrompt = adoptedPrompt;
+			Manifest.Agent.SuggestedNextPromptAccepted = true;
+			Manifest.Agent.SuggestedNextPromptRejected = false;
+			if (Manifest.Experiment != null)
+				Manifest.Experiment.PromptRewriteFrozen = false;
+			Save();
+		}
+
+		public static TrainingRun AdoptLatestSuggestedNextPrompt(
+			TrainingRun staleRun, string adoptedPrompt) =>
+			MutateLatest(staleRun, rejectAnyBusyOwner: false,
+				current => current.AdoptSuggestedNextPrompt(adoptedPrompt));
 
 		/// <summary>Records that the player turned this round's proposed prompt down.</summary>
 		public void RejectSuggestedNextPrompt()

@@ -16,6 +16,8 @@
 
 	This edits bot source and uses the configured agent's account and quota. Defaults to
 	Copilot CLI and the repository prompt, not the launcher's saved agent/prompt settings.
+	Each round's valid next-prompt proposal is adopted unreviewed for the round after, and
+	written back to that prompt template file, so a restart continues from the latest one.
 	Run setup.ps1 and install the game content and an authenticated coding agent first.
 
 .PARAMETER BattleBot
@@ -51,8 +53,9 @@
 	by train-bot.ps1. Defaults to Copilot CLI. Paths and prompts use the same placeholders.
 
 .PARAMETER PromptTemplate
-	Optional prompt template file. Defaults to docs/agent-prompt-template.md. Agent proposals
-	are saved for review, never automatically adopted during the loop.
+	Optional prompt template file. Defaults to docs/agent-prompt-template.md. Once a round's
+	build is verified, its valid next-prompt proposal replaces this file's contents and is
+	archived to LOCALAPPDATA\AutoCnC\PromptHistory. The file is never committed.
 
 .PARAMETER RestoreRun
 	Recovery only: discard edits to the bot since this unresolved run's pre-agent snapshot

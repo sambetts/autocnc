@@ -235,8 +235,9 @@ history never reaches a running bot.
 
 ### Measuring the prompt itself
 
-The prompt can be revised after manual review and was once rewritten unattended every round, while
-remaining the one artifact in the loop with no fitness function at all. Bot code faces a match;
+The PowerShell training loop rewrites the prompt unattended every round, and the launcher revises it
+after manual review. The first time the prompt was rewritten unattended, it was the one artifact in
+the loop with no fitness function at all. Bot code faces a match;
 the prompt faced nothing. That asymmetry is why a saved template grew to 27,250 characters of
 triage recipes, why one claimed an API did not exist
 for many rounds after it shipped, and why a rule stated only in the mutable half was dropped — and

@@ -33,8 +33,13 @@ namespace AutoCnC.Launcher.Tests
 		readonly List<string> messages = [];
 		Func<ScriptJob, int?> intercept;
 		Action improve;
+		Func<int, string> proposal;
 		int improvements;
 		bool candidateWins;
+
+		string PromptHistoryRoot => Path.Combine(root, "prompt-history");
+
+		string RepoTemplate => Path.Combine(repo.Root, "docs", "agent-prompt-template.md");
 
 		[SetUp]
 		public void SetUp()
@@ -78,6 +83,7 @@ namespace AutoCnC.Launcher.Tests
 			messages.Clear();
 			intercept = null;
 			improve = null;
+			proposal = null;
 			improvements = 0;
 			candidateWins = true;
 		}
@@ -516,8 +522,113 @@ namespace AutoCnC.Launcher.Tests
 			Assert.That(fight.Arguments, Does.Not.Contain("-PerformanceReport"));
 		}
 
+		[Test]
+		public void EachRoundIsGivenThePromptTheRoundBeforeItProposed()
+		{
+			options.Rounds = 2;
+			proposal = round => Template($"Round {round} lesson.");
+
+			Run();
+
+			var runs = runDirectories.Select(TrainingRun.Load).ToList();
+			var revisions = new PromptHistory(PromptHistoryRoot).Read().Revisions;
+			Assert.Multiple(() =>
+			{
+				Assert.That(File.ReadAllText(runs[0].PromptPath), Does.Not.Contain("lesson."),
+					"The first round renders the template the loop started with.");
+				Assert.That(File.ReadAllText(runs[1].PromptPath), Does.Contain("Round 1 lesson."),
+					"The second round is given the first round's proposal.");
+				Assert.That(File.ReadAllText(runs[1].PromptPath), Does.Contain("Nobody reviews it."),
+					"A round must be told its proposal is adopted unreviewed.");
+				Assert.That(File.ReadAllText(RepoTemplate), Does.Contain("Round 2 lesson."),
+					"The template file carries the latest adoption into the next start.");
+				Assert.That(File.ReadAllText(RepoTemplate), Does.Not.Contain("\r\n"),
+					"An LF template stays LF, so its diff shows what the round changed.");
+				Assert.That(runs.Select(run => run.Manifest.Agent.SuggestedNextPromptAccepted), Is.All.True);
+				Assert.That(runs.Select(run => run.Manifest.Experiment.PromptRewriteFrozen), Is.All.False);
+				Assert.That(revisions.Select(revision => revision.Origin),
+					Is.EqualTo(new[] { "baseline", "continuous", "continuous" }));
+				Assert.That(revisions.Skip(1).Select(revision => revision.RunId),
+					Is.EqualTo(runs.Select(run => run.Manifest.Id)));
+				Assert.That(messages.Count(message => message.StartsWith("Next prompt: adopted", StringComparison.Ordinal)),
+					Is.EqualTo(2));
+			});
+		}
+
+		[Test]
+		public void ARestoredCandidateStillHandsItsProposalToTheNextRound()
+		{
+			options.Rounds = 2;
+			candidateWins = false;
+			improve = () => File.WriteAllText(source, "candidate-" + improvements);
+			proposal = round => round == 1 ? Template("Lesson from a restored round.") : null;
+
+			Run();
+
+			var runs = runDirectories.Select(TrainingRun.Load).ToList();
+			Assert.Multiple(() =>
+			{
+				Assert.That(runs[0].Manifest.Status, Is.EqualTo("restored"));
+				Assert.That(runs[0].Manifest.Agent.SuggestedNextPromptAccepted, Is.True);
+				Assert.That(File.ReadAllText(runs[1].PromptPath), Does.Contain("Lesson from a restored round."));
+				Assert.That(runs[1].Manifest.Experiment.PromptRewriteFrozen, Is.True,
+					"A round that proposed nothing leaves the prompt in force.");
+				Assert.That(File.ReadAllText(RepoTemplate), Does.Contain("Lesson from a restored round."));
+				Assert.That(messages, Has.Some.Contains("proposed none"));
+			});
+		}
+
+		[Test]
+		public void AProposalThatFailsValidationLeavesThePromptInForce()
+		{
+			var before = File.ReadAllText(RepoTemplate);
+			proposal = _ => Template("No workspace rule.").Replace("Edit only", "Change", StringComparison.Ordinal);
+
+			Run();
+
+			var run = TrainingRun.Load(runDirectories.Single());
+			Assert.Multiple(() =>
+			{
+				Assert.That(File.ReadAllText(RepoTemplate), Is.EqualTo(before));
+				Assert.That(run.Manifest.Agent.SuggestedNextPromptAccepted, Is.False);
+				Assert.That(run.Manifest.Experiment.PromptRewriteFrozen, Is.True);
+				Assert.That(new PromptHistory(PromptHistoryRoot).Read().Revisions, Is.Empty);
+				Assert.That(messages, Has.Some.Contains("the proposal is invalid"));
+				Assert.That(run.Manifest.Status, Is.EqualTo("promoted"),
+					"An unusable proposal is the prompt's problem, not a reason to stop training.");
+			});
+		}
+
+		[Test]
+		public void AnExplicitTemplateFileIsTheOneThatEvolvesAndKeepsItsLineEndings()
+		{
+			var custom = Path.Combine(root, "custom prompt.md");
+			File.WriteAllText(custom, Template("Custom baseline.").Replace("\n", "\r\n") + "\r\n");
+			options.PromptTemplate = custom;
+			var repoBefore = File.ReadAllText(RepoTemplate);
+			proposal = _ => Template("Custom lineage.");
+
+			Run();
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(File.ReadAllText(custom), Does.Contain("Custom lineage."));
+				Assert.That(File.ReadAllText(custom), Does.Contain("\r\n"));
+				Assert.That(File.ReadAllText(custom).Replace("\r\n", "", StringComparison.Ordinal), Does.Not.Contain("\n"));
+				Assert.That(File.ReadAllText(RepoTemplate), Is.EqualTo(repoBefore));
+				Assert.That(File.Exists(custom + ".tmp"), Is.False);
+			});
+		}
+
 		void Run(CancellationToken token = default) =>
-			new TrainingLoopRunner(options, messages.Add, Execute).Run(token);
+			new TrainingLoopRunner(options, messages.Add, Execute, new PromptHistory(PromptHistoryRoot)).Run(token);
+
+		/// <summary>A valid template carrying a line the rendered prompt can be searched for.</summary>
+		static string Template(string lesson) =>
+			"Edit only {workspace}. " + lesson + " {gameMechanics} {gameGuide} {gameRules} {fightManifest} " +
+			"{battleLog} {telemetry} {decisionTrace} {summary} {units} {mapFacts} {checks} " +
+			"{checkResults} {trend} {checkReport} {trendReport} {botAudit} {battle} {result} {sourceRevision}\n" +
+			"{nextPromptContract}";
 
 		TrainingScriptResult Execute(ScriptJob job, CancellationToken token)
 		{
@@ -547,6 +658,15 @@ namespace AutoCnC.Launcher.Tests
 			{
 				improvements++;
 				improve?.Invoke();
+				var proposed = proposal?.Invoke(improvements);
+				if (proposed != null)
+					return new TrainingScriptResult(0,
+					[
+						"Diagnosis, changes and checks.",
+						TrainingAgent.NextPromptBegin,
+						.. proposed.Split('\n'),
+						TrainingAgent.NextPromptEnd
+					]);
 			}
 			else if (job.ScriptPath == repo.BuildExperimentArmScript)
 			{

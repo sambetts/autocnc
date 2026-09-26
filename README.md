@@ -399,8 +399,10 @@ project file.
 
 Resolved rules and fight JSON use lazy, collapsible trees rather than raw text. At the end of an
 improvement the agent drafts an entirely new prompt template in **Next prompt***. In manual mode the
-player can edit and approve it. Continuous mode stores the draft but freezes the template in force
-until a player reviews it; it never accepts an agent rewrite unattended. An approved manual
+player can edit and approve it. The launcher's continuous mode stores the draft but freezes the
+template in force until a player reviews it. The unattended PowerShell loop, `scripts/train-loop.ps1`,
+adopts each round's valid draft instead: it writes it back to its template file for the next round
+and archives it. An adopted
 template is rendered next round with fresh paths, fight, result, and evidence inserted through
 required placeholders. Every adopted template is archived to
 `%LOCALAPPDATA%\AutoCnC\PromptHistory` as numbered plain-text files you can diff. Long-running

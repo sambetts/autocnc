@@ -181,8 +181,15 @@ namespace AutoCnC.Launcher
 			CarriesPrompt(arguments) ? null :
 			string.IsNullOrWhiteSpace(stdin) ? DefaultStdin : stdin;
 
+		/// <param name="adoptsNextPrompt">
+		/// True when whoever runs this round will adopt its proposed template for the next round
+		/// without review, as the unattended training loop does. The rendered contract then says
+		/// so, because an agent writing for a reviewer and one writing the next round's actual
+		/// instructions should not be told the same thing.
+		/// </param>
 		public static void PrepareContext(TrainingRun run, string gameGuidePath, string mechanicsPath,
-			string gameRulesPath, string promptTemplate, string recoveryContext = null)
+			string gameRulesPath, string promptTemplate, string recoveryContext = null,
+			bool adoptsNextPrompt = false)
 		{
 			if (!run.IsEditable)
 				throw new InvalidOperationException("AI improvement requires a battle bot project, not a prebuilt assembly.");
@@ -208,17 +215,18 @@ namespace AutoCnC.Launcher
 				File.Copy(gameRulesPath, run.GameRulesPath, true);
 			run.ExportFightManifest();
 			File.WriteAllText(run.PromptPath,
-				RenderPrompt(run, promptTemplate, recoveryContext));
+				RenderPrompt(run, promptTemplate, recoveryContext, adoptsNextPrompt));
 		}
 
 		public static void Prepare(TrainingRun run, string gameGuidePath, string mechanicsPath,
 			string gameRulesPath, string promptTemplate, string command, IReadOnlyList<string> arguments,
-			string stdin = null, string recoveryContext = null)
+			string stdin = null, string recoveryContext = null, bool adoptsNextPrompt = false)
 		{
 			if (string.IsNullOrWhiteSpace(command))
 				throw new InvalidOperationException("The agent command is empty.");
 
-			PrepareContext(run, gameGuidePath, mechanicsPath, gameRulesPath, promptTemplate, recoveryContext);
+			PrepareContext(run, gameGuidePath, mechanicsPath, gameRulesPath, promptTemplate, recoveryContext,
+				adoptsNextPrompt);
 			WriteConfiguration(run, command, arguments, stdin);
 		}
 
@@ -487,10 +495,10 @@ namespace AutoCnC.Launcher
 		}
 
 		public static string RenderPrompt(TrainingRun run, string template,
-			string recoveryContext = null)
+			string recoveryContext = null, bool adoptsNextPrompt = false)
 		{
 			var prompt = template;
-			foreach (var replacement in PromptReplacements(run))
+			foreach (var replacement in PromptReplacements(run, adoptsNextPrompt))
 				prompt = prompt.Replace(replacement.Placeholder, replacement.Value,
 					StringComparison.Ordinal);
 
@@ -499,7 +507,8 @@ namespace AutoCnC.Launcher
 				: recoveryContext.Trim() + Environment.NewLine + Environment.NewLine + prompt;
 		}
 
-		static (string Placeholder, string Value)[] PromptReplacements(TrainingRun run)
+		static (string Placeholder, string Value)[] PromptReplacements(TrainingRun run,
+			bool adoptsNextPrompt = false)
 		{
 			var result = run.Manifest.Result;
 			var battle = run.Manifest.Battle;
@@ -550,7 +559,7 @@ namespace AutoCnC.Launcher
 				("{gameMechanics}", Mechanics(run)),
 
 				// This must stay last so placeholders inside the contract remain literal.
-				(NextPromptContractPlaceholder, NextPromptContract())
+				(NextPromptContractPlaceholder, NextPromptContract(adoptsNextPrompt))
 			];
 		}
 
@@ -742,7 +751,7 @@ namespace AutoCnC.Launcher
 			return count;
 		}
 
-		static string NextPromptContract() =>
+		static string NextPromptContract(bool adoptedAutomatically) =>
 			$$"""
 			## Create the complete prompt for the next round
 
@@ -810,8 +819,30 @@ namespace AutoCnC.Launcher
 			<complete replacement prompt template>
 			{{NextPromptEnd}}
 
+			{{(adoptedAutomatically ? AutomaticAdoptionNotice : ManualReviewNotice)}}
+			""";
+
+		const string ManualReviewNotice =
+			"""
 			The player will review and edit it before it is saved. Continuous improvement records
 			the draft but keeps the current prompt unchanged until that manual review.
+			""";
+
+		/// <remarks>
+		/// Adoption happens as soon as the round's build is verified, before the paired benchmark
+		/// decides whether its code survives, so the proposal cannot assume it does: most candidates
+		/// are restored, and a template that points the next round at code that was never kept
+		/// sends it looking for something that is not there.
+		/// </remarks>
+		const string AutomaticAdoptionNotice =
+			"""
+			Nobody reviews it. The training loop adopts a valid template as the next round's prompt
+			as soon as this round's build is verified, before the paired benchmark decides whether
+			this round's code is kept, and it adopts it whichever way that goes. So write it as the
+			next round's complete instructions, and do not assume your change survives: if the
+			benchmark restores the champion, the next round reads source without it. A proposal
+			missing a required placeholder is repaired, and one that fails validation is discarded
+			and the current prompt carries on.
 			""";
 	}
 }

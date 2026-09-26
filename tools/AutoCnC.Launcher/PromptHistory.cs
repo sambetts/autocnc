@@ -21,8 +21,9 @@ namespace AutoCnC.Launcher
 		Manual,
 
 		/// <summary>
-		/// A legacy continuous-improvement revision accepted before automatic prompt rewriting was
-		/// disabled. Kept so existing prompt-history indexes remain readable.
+		/// Unattended training adopted the agent's proposal without review: every revision the
+		/// PowerShell training loop takes, and those the launcher's continuous mode took before it
+		/// began keeping proposals as drafts.
 		/// </summary>
 		Continuous
 	}
@@ -193,13 +194,21 @@ namespace AutoCnC.Launcher
 		/// Explains the folder to whoever opens it, which — since nothing in the launcher displays
 		/// this archive — is the only explanation they are going to get.
 		/// </summary>
+		/// <remarks>
+		/// Refreshed whenever its text differs rather than written once, because it says what each
+		/// origin means and that has changed: <c>continuous</c> was legacy-only until the unattended
+		/// loop began adopting prompts again.
+		/// </remarks>
 		void WriteReadMe()
 		{
 			var path = Path.Combine(Root, "README.txt");
-			if (File.Exists(path))
+			if (File.Exists(path) && string.Equals(File.ReadAllText(path), ReadMeText, StringComparison.Ordinal))
 				return;
 
-			File.WriteAllText(path,
+			File.WriteAllText(path, ReadMeText);
+		}
+
+		const string ReadMeText =
 				"""
 				AutoC&C prompt history
 				======================
@@ -216,10 +225,12 @@ namespace AutoCnC.Launcher
 				                      bot, recorded session and battle outcome behind it.
 
 				Origins:
-				  baseline     docs/agent-prompt-template.md, recorded so revision 2 has something
-				               to diff against.
+				  baseline     The template in force before a revision replaced it, usually
+				               docs/agent-prompt-template.md, recorded so the next revision has
+				               something to diff against.
 				  manual       The player reviewed and approved the proposal.
-				  continuous   Legacy continuous improvement accepted it unreviewed.
+				  continuous   Unattended training adopted it unreviewed: scripts/train-loop.ps1
+				               takes every valid proposal for the round after.
 
 				A template identical to the previous one is not recorded, so consecutive files
 				always differ.
@@ -230,8 +241,7 @@ namespace AutoCnC.Launcher
 
 				Nothing here is read back by the launcher: deleting or editing these files changes
 				no behaviour, it only loses the history.
-				""");
-		}
+				""";
 
 		static string BotName(TrainingRun run)
 		{

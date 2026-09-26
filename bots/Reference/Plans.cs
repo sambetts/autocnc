@@ -537,13 +537,24 @@ namespace AutoCnC.Reference
 		/// rather than in front of them.
 		/// See <c>economy.field-refinery-before-tech</c> in <see cref="Modes.BuildBaseMode"/>.
 		/// </para>
+		/// <para>
+		/// <b>The second refinery now leads the second power plant, because that plant powered
+		/// nothing yet.</b> The yard builds one item at a time, so the 13-second plant held up the
+		/// 37-second refinery behind it, and the free harvester with it: on 16:9 the second refinery
+		/// stood at 103s behind a plant finished at 65s. The first plant gives 100 and each refinery
+		/// drains 40, so two refineries leave 20, which is not below the low-power threshold in
+		/// <c>BaseBuildLogic.ChooseNext</c>. The first thing that needs more is the barracks, which
+		/// drains 15, and no <c>Support</c> item can start before it stands. So the second refinery
+		/// stands at 89s, the plant still lands before the barracks, and nothing after the barracks
+		/// moves. It was adopted by hand against a 5-7 benchmark; see README.md.
+		/// </para>
 		/// </remarks>
 		public static IReadOnlyList<BuildStep> Economy { get; } =
 		[
 			new(["powr", "nuke"], 1),          // power
 			new(["proc"], 1),                  // income before anything else
-			new(["powr", "nuke"], 2),
 			new(["proc"], 2),                  // the second free harvester, before anything that earns nothing
+			new(["powr", "nuke"], 2),          // ...including this plant: 100 less two refineries' 40 still leaves 20
 			new(["pyle", "hand"], 1),          // barracks
 			new(["proc"], 3),                  // the third free harvester, while the opening bank lasts
 			new(["weap", "afld"], 1),          // ...and the means to replace a harvester that dies

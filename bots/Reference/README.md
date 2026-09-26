@@ -2898,6 +2898,29 @@ untouched, `SelectObjective` ranks a pristine structure (3,000) above it (1,000)
   type: all four enemy types first appeared in raids at our own door (177-183s and 412-418s), so
   every later loss to those types counts as "late".
 
+## The second power plant came before the second refinery
+
+Watching a `16:9` game showed the opening ordered power, refinery, power, refinery. The
+construction yard builds one item at a time, so the second plant (13 seconds) held up the second
+refinery (37 seconds) behind it, and with it the second free harvester: the refinery stood at
+103s, behind a plant finished at 65s.
+
+That plant powered nothing yet. The first plant gives 100 power and each refinery drains 40, so
+two refineries leave 20, which is not below the low-power threshold in `BaseBuildLogic.ChooseNext`.
+The first thing that needs more is the barracks, which drains 15, and nothing in the `Support`
+queue can start before it stands.
+
+**`Economy` now reads power, refinery, refinery, power** ([`Plans.cs`](Plans.cs)). In all eight
+`hard-16-9` games the second refinery stood at 89s instead of 103s, the second plant at 103s, and
+the barracks at 117s as before. Every one of those games had earned 2,100 by two minutes, against
+the champion's 1,400. By eight minutes the averages were level (28,020 against 27,900).
+
+**It was adopted by hand, against the benchmark.** The paired gate scored it 5 wins to the 7 of
+`ec86e32` and restored it. The two games it lost that the champion won used identical building
+placement and were decided long after the opening, and a change this small is inside the gate's
+own noise: the previous champion, `f80b7fc`, scored 6 and 7 on identical code the same day. The
+player judged the opening a definite improvement and kept it.
+
 ## Start your own
 
 

@@ -59,6 +59,13 @@
 	and restore that snapshot, then exit. This also discards subsequent manual source edits.
 	Refuses to restore while another worker owns the run. Supports -WhatIf.
 
+.PARAMETER DeleteBlockingRun
+	Override for "An unfinished experiment blocks training": restore that run's pre-agent
+	snapshot exactly as -RestoreRun would, delete the run from the training history, then
+	carry on training. This discards every source edit since the snapshot, including subsequent
+	manual edits. A verified candidate is still resumed rather than deleted, and a run whose
+	worker is still active is never touched. Does nothing when no run blocks training.
+
 .PARAMETER NoCommit
 	Do not commit promoted bots. By default every promotion is committed to the bot workspace,
 	so an improvement the paired gate measured survives the next round instead of living only
@@ -87,6 +94,10 @@
 .EXAMPLE
 	./scripts/train-loop.ps1 -RestoreRun 'C:\path\to\training-run'
 	Restores an unresolved run's pre-agent source snapshot without starting training.
+
+.EXAMPLE
+	./scripts/train-loop.ps1 -DeleteBlockingRun
+	Discards and deletes an interrupted improvement that blocks training, then trains.
 #>
 [CmdletBinding(DefaultParameterSetName = 'Loop', SupportsShouldProcess = $true)]
 param(
@@ -133,6 +144,8 @@ param(
 	[string]$PromptTemplate,
 	[Parameter(ParameterSetName = 'Loop')]
 	[switch]$NoCommit,
+	[Parameter(ParameterSetName = 'Loop')]
+	[switch]$DeleteBlockingRun,
 	[switch]$NoColor,
 	[Parameter(Mandatory, ParameterSetName = 'Restore')]
 	[string]$RestoreRun,
@@ -145,7 +158,9 @@ if (-not $IsWindows -and $PSVersionTable.PSVersion.Major -ge 6) {
 }
 
 $target = if ($RestoreRun) { $RestoreRun } else { $BattleBot }
-$action = if ($RestoreRun) { 'Discard source edits and restore the pre-agent snapshot' } else {
+$action = if ($RestoreRun) { 'Discard source edits and restore the pre-agent snapshot' } elseif ($DeleteBlockingRun) {
+	'Restore and delete any run blocking training, discarding its source edits, then run agent-driven training with paired benchmark promotion'
+} else {
 	'Run agent-driven training with paired benchmark promotion'
 }
 if (-not $PSCmdlet.ShouldProcess($target, $action)) { return }
@@ -178,6 +193,7 @@ $options = @{
 	AgentConfiguration = Resolve-OptionalFile $AgentConfiguration
 	PromptTemplate = Resolve-OptionalFile $PromptTemplate
 	RestoreRun = Resolve-OptionalFile $RestoreRun
+	DeleteBlockingRun = $DeleteBlockingRun.IsPresent
 	Commit = -not $NoCommit
 	Color = -not $NoColor
 }

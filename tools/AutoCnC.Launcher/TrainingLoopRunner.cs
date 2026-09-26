@@ -72,17 +72,36 @@ namespace AutoCnC.Launcher
 						string.Join(", ", unresolved.Select(run => run.RunDirectory)));
 				if (unresolved.Count == 1)
 				{
+					TrainingRun restored = null;
 					using (var mutation = TrainingRun.AcquireMutation(unresolved[0]))
 					{
 						var run = mutation.Run;
-						if (run.IsBusy || !run.CanResumeContinuousEvaluation)
+						if (run.IsBusy)
 							throw new InvalidOperationException(
 								$"An unfinished experiment blocks training: {run.RunDirectory}. " +
-								"Wait for its worker, or use -RestoreRun to explicitly discard its edits.");
-						run.ResumeContinuousExperiment();
-						activeRun = run;
+								"Its worker is still running; wait for it or stop it first.");
+						if (run.CanResumeContinuousEvaluation)
+						{
+							run.ResumeContinuousExperiment();
+							activeRun = run;
+						}
+						else if (options.DeleteBlockingRun)
+						{
+							RestoreSnapshot(run);
+							restored = run;
+						}
+						else
+							throw new InvalidOperationException(
+								$"An unfinished experiment blocks training: {run.RunDirectory}. " +
+								"Rerun with -DeleteBlockingRun to discard its edits and delete it, " +
+								"or use -RestoreRun to only discard its edits.");
 					}
-					output($"Resuming paired evaluation: {activeRun.RunDirectory}");
+
+					// Deletion takes the run lock itself, so it can only start once ours is released.
+					if (restored != null)
+						DeleteRestoredRun(restored);
+					else
+						output($"Resuming paired evaluation: {activeRun.RunDirectory}");
 				}
 
 				if (!repo.EngineBuilt)
@@ -137,7 +156,10 @@ namespace AutoCnC.Launcher
 					}
 					output($"Run saved: {activeRun.RunDirectory}");
 					if (activeRun.HasUnresolvedContinuousExperiment)
-						output("Rerun this command to resume a verified candidate, or use -RestoreRun with this directory to discard its edits.");
+						output(activeRun.CanResumeContinuousEvaluation
+							? "Rerun this command to resume the verified candidate's evaluation."
+							: "Rerun with -DeleteBlockingRun to discard its edits and delete this run, " +
+								"or use -RestoreRun with this directory to only discard its edits.");
 				}
 				throw;
 			}
@@ -365,14 +387,46 @@ namespace AutoCnC.Launcher
 			var run = TrainingRun.Load(directory) ?? throw new ArgumentException("No training run found: " + directory);
 			using var workspace = TrainingRun.AcquireWorkspaceMutation(run);
 			using var mutation = TrainingRun.AcquireMutation(run);
-			run = mutation.Run;
+			RestoreSnapshot(mutation.Run);
+		}
+
+		/// <summary>Puts back a run's pre-agent source; the caller holds the workspace and run locks.</summary>
+		void RestoreSnapshot(TrainingRun run)
+		{
 			if (run.IsBusy)
 				throw new InvalidOperationException("An active worker still owns this run; stop it before restoring.");
 			if (!run.HasUnresolvedContinuousExperiment)
 				throw new InvalidOperationException("RestoreRun requires an unresolved continuous experiment.");
+
+			// Read before anything changes, so an unreadable snapshot leaves the run as it was.
+			var changes = WorkspaceSnapshot.Compare(run);
+			output(changes.Count == 0
+				? "No source edits since the pre-agent snapshot."
+				: $"Discarding {changes.Count} source edit(s) since the pre-agent snapshot:");
+			foreach (var change in changes)
+				output($"  {change.Kind} {change.RelativePath}");
+
 			run.MarkContinuousRestoring();
 			WorkspaceSnapshot.Restore(run);
 			output($"Restored the pre-agent source snapshot: {run.Manifest.BotDirectory}");
+		}
+
+		/// <summary>
+		/// Removes a run that no longer blocks training. The restore already made training safe, so a
+		/// run that cannot be deleted is reported and training carries on.
+		/// </summary>
+		void DeleteRestoredRun(TrainingRun run)
+		{
+			try
+			{
+				run.Delete(options.RunsRoot);
+				output($"Deleted the blocking run: {run.RunDirectory}");
+			}
+			catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
+				InvalidOperationException or InvalidDataException)
+			{
+				output($"Restored, but could not delete {run.RunDirectory}: {ex.Message} It no longer blocks training.");
+			}
 		}
 
 		TrainingScriptResult Execute(string script, IReadOnlyList<string> arguments, string title,

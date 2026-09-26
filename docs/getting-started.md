@@ -710,6 +710,17 @@ verified blocks new fights until explicitly restored:
 Restoration discards **all source edits since that run's snapshot**, including subsequent manual
 edits. It restores source only and exits; the next training command rebuilds it. Recovery also
 works if the candidate deleted its `.csproj`, but refuses while a worker still owns the run.
+
+To throw the interrupted run away and keep training in one step, add `-DeleteBlockingRun`. It
+lists and restores the same source edits as `-RestoreRun`, deletes the run from the training
+history, then starts the next round. A verified candidate is still resumed rather than deleted,
+a run whose worker is still active is refused, and without a blocking run the switch does nothing:
+
+```powershell
+./scripts/train-loop.ps1 -DeleteBlockingRun -WhatIf
+./scripts/train-loop.ps1 -DeleteBlockingRun
+```
+
 Use `Get-Help ./scripts/train-loop.ps1 -Detailed` for parameter help.
 
 ---

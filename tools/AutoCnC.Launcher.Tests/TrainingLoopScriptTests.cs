@@ -61,7 +61,18 @@ namespace AutoCnC.Launcher.Tests
 				Assert.That(options.GetProperty("BenchmarkDifficulty").GetString(), Is.EqualTo("Hard"));
 				Assert.That(options.GetProperty("Commit").GetBoolean(), Is.True);
 				Assert.That(options.GetProperty("Color").GetBoolean(), Is.True);
+				Assert.That(options.GetProperty("DeleteBlockingRun").GetBoolean(), Is.False);
 			});
+			AssertTemporaryOptionsDeleted();
+		}
+
+		[Test]
+		public async Task DeleteBlockingRunIsForwardedAsABoolean()
+		{
+			var result = await Invoke("-Rounds 1 -DeleteBlockingRun");
+			Assert.That(result.ExitCode, Is.Zero, result.Output);
+			using var captured = JsonDocument.Parse(File.ReadAllText(Path.Combine(root, "captured.json")));
+			Assert.That(captured.RootElement.GetProperty("DeleteBlockingRun").ValueKind, Is.EqualTo(JsonValueKind.True));
 			AssertTemporaryOptionsDeleted();
 		}
 
@@ -90,6 +101,7 @@ namespace AutoCnC.Launcher.Tests
 
 		[TestCase("-Rounds -1")]
 		[TestCase("-RestoreRun . -Rounds 2")]
+		[TestCase("-RestoreRun . -DeleteBlockingRun")]
 		public async Task InvalidParametersDoNotStartTheHost(string arguments)
 		{
 			var result = await Invoke(arguments);
@@ -99,6 +111,7 @@ namespace AutoCnC.Launcher.Tests
 
 		[TestCase("-Rounds 1 -WhatIf")]
 		[TestCase("-RestoreRun . -WhatIf")]
+		[TestCase("-DeleteBlockingRun -WhatIf")]
 		public async Task WhatIfDoesNotStartTheHost(string arguments)
 		{
 			var result = await Invoke(arguments);

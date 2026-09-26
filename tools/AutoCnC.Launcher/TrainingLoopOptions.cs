@@ -35,6 +35,12 @@ namespace AutoCnC.Launcher
 		public string PromptTemplate { get; set; }
 		public string RestoreRun { get; set; }
 
+		/// <summary>
+		/// Restore and delete an unfinished experiment that would otherwise block training, then
+		/// carry on. A resumable candidate is still resumed, and a live worker's run is refused.
+		/// </summary>
+		public bool DeleteBlockingRun { get; set; }
+
 		/// <summary>Commit the bot workspace whenever the paired gate promotes a candidate.</summary>
 		public bool Commit { get; set; } = true;
 

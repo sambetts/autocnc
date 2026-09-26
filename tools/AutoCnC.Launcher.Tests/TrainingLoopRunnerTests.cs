@@ -314,7 +314,8 @@ namespace AutoCnC.Launcher.Tests
 			Assert.That(run.CanResumeContinuousEvaluation, Is.False);
 			Assert.That(File.ReadAllText(source), Is.EqualTo("unfinished candidate"));
 
-			Assert.That(() => Run(), Throws.InvalidOperationException.With.Message.Contains("unfinished experiment"));
+			Assert.That(() => Run(), Throws.InvalidOperationException.With.Message.Contains("unfinished experiment")
+				.And.Message.Contains("-DeleteBlockingRun"));
 			File.Delete(project);
 			options.RestoreRun = run.RunDirectory;
 			Run();
@@ -324,7 +325,43 @@ namespace AutoCnC.Launcher.Tests
 		}
 
 		[Test]
-		public void VerifiedCandidateResumesEvaluationBeforeAnotherFight()
+		public void DeleteBlockingRunDiscardsAnInterruptedImprovementAndKeepsTraining()
+		{
+			using var stop = new CancellationTokenSource();
+			var added = Path.Combine(Path.GetDirectoryName(project), "Added.cs");
+			improve = () =>
+			{
+				File.WriteAllText(source, "unfinished candidate");
+				File.WriteAllText(added, "half-written by a cancelled agent");
+				stop.Cancel();
+			};
+			Assert.That(() => Run(stop.Token), Throws.TypeOf<OperationCanceledException>());
+			var blocking = runDirectories.Single();
+			Assert.That(messages, Has.Some.Contains("-DeleteBlockingRun"));
+
+			improve = null;
+			messages.Clear();
+			options.DeleteBlockingRun = true;
+			Run();
+
+			Assert.Multiple(() =>
+			{
+				Assert.That(Directory.Exists(blocking), Is.False);
+				Assert.That(File.Exists(added), Is.False);
+				Assert.That(foughtSources.Last(), Is.EqualTo("champion"),
+					"The next round must fight the champion, not the cancelled agent's edits.");
+				Assert.That(runDirectories, Has.Count.EqualTo(2));
+				Assert.That(TrainingRun.Load(runDirectories.Last()).Manifest.Status, Is.EqualTo("promoted"));
+				Assert.That(messages, Has.Some.Contains("Discarding 2 source edit(s)"));
+				Assert.That(messages, Has.Some.EqualTo("  added Added.cs"));
+				Assert.That(messages, Has.Some.EqualTo("  modified Strategy.cs"));
+				Assert.That(messages, Has.Some.Contains("Deleted the blocking run"));
+			});
+		}
+
+		[TestCase(false)]
+		[TestCase(true)]
+		public void VerifiedCandidateResumesEvaluationBeforeAnotherFight(bool deleteBlockingRun)
 		{
 			using var stop = new CancellationTokenSource();
 			improve = () => File.WriteAllText(source, "candidate");
@@ -343,6 +380,7 @@ namespace AutoCnC.Launcher.Tests
 			jobs.Clear();
 			intercept = null;
 			improve = null;
+			options.DeleteBlockingRun = deleteBlockingRun;
 			Run();
 			Assert.That(jobs[0].ScriptPath, Is.EqualTo(repo.BuildExperimentArmScript));
 			Assert.That(TrainingRun.Load(interrupted.RunDirectory).Manifest.Status, Is.EqualTo("promoted"));
@@ -370,6 +408,10 @@ namespace AutoCnC.Launcher.Tests
 			new ContinuousPromotionRunner().CaptureChampion(run);
 			run.ContinuousAgentStarted("fake");
 			Assert.That(() => Run(), Throws.InvalidOperationException);
+			Assert.That(jobs, Is.Empty);
+			options.DeleteBlockingRun = true;
+			Assert.That(() => Run(), Throws.InvalidOperationException.With.Message.Contains("still running"));
+			Assert.That(Directory.Exists(run.RunDirectory), Is.True);
 			Assert.That(jobs, Is.Empty);
 			options.RestoreRun = run.RunDirectory;
 			Assert.That(() => Run(), Throws.InvalidOperationException.With.Message.Contains("active worker"));

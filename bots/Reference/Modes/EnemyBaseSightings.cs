@@ -77,6 +77,19 @@ namespace AutoCnC.Reference.Modes
 		}
 
 		/// <summary>
+		/// Whether somebody on this side has seen one of their structures recently enough to
+		/// vouch for the sighting — the same test <see cref="Forget"/> refuses to forget under.
+		/// </summary>
+		/// <remarks>
+		/// Read by <see cref="TrainUnitsMode"/> to decide whether a new scout has anything left to
+		/// find. See <see cref="ScoutRungLogic"/>.
+		/// </remarks>
+		public static bool IsCorroborated(Player owner, int tick, in SightingMemoryTuning tuning) =>
+			owner != null
+			&& Sightings.TryGetValue(owner, out var sighting)
+			&& SightingMemoryLogic.Corroborated(sighting.Memory, tick, tuning);
+
+		/// <summary>
 		/// Drops the sighting, for when a unit has arrived and found nothing there — but only if
 		/// nobody else on this side can still see their base.
 		/// </summary>

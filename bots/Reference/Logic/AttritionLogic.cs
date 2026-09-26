@@ -152,7 +152,9 @@ namespace AutoCnC.Reference.Logic
 		/// lone screen vehicle is the bot's only scout, and exploration is a tenth of the fitness
 		/// score and a precondition for reading the resource layer beyond the base. Writing that
 		/// off would trade a permanent economic ceiling for 300 credits. Depth is what the
-		/// evidence indicts: the rung that spent 6,000 credits on 16:9 asked for two.
+		/// evidence indicts: the rung that spent 6,000 credits on 16:9 asked for two. Once that
+		/// scout's two jobs are done — the home survey flown and their base freshly sighted — the
+		/// rung is stood down instead, by <see cref="ScoutRungLogic"/>, not written off here.
 		/// </remarks>
 		public static bool Exhausted(int losses, int standing, int target, in AttritionTuning t)
 		{

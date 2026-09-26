@@ -105,7 +105,9 @@ namespace AutoCnC.Reference
 		public const int DefenceArmourCore = 2;
 
 		// Scout targets the pair. Defence keeps one strict and lets that survivor release the
-		// second slot so repeated screen losses cannot pin the Vehicle queue.
+		// second slot so repeated screen losses cannot pin the Vehicle queue. In Opening and Scout
+		// TrainUnitsMode stands both scout rungs down while the home survey is flown and their base
+		// is freshly sighted, because a new scout then has nothing left to find: see ScoutRungLogic.
 		const int ScreenVehicleCore = 2;
 
 		/// <summary>

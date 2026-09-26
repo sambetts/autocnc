@@ -1,44 +1,68 @@
 {
   "schemaVersion": 1,
-  "authoredForRevision": "fe2129bc83b0460f77acd3624159861b4f03b3b5",
+  "authoredForRevision": "52e65823200aeaa28e2e01833894d35d9b36c729",
   "checks": [
     {
-      "id": "no-idle-second-factory",
+      "id": "scout-rung-stands-down",
       "category": "activation",
-      "description": "AttackBuild no longer asks for a second barracks or vehicle factory, because a second one never produces: QueueFor/OwnsQueue hand every Produce to the group's first building. Last fight peaked at 4 unit factories (2 hand, 2 afld); the second afld (454s) and hand (526s) made 324 and 252 evaluations, all Continue, and delivered nothing. A replacement for a dead factory is built only after the first is gone, so the peak stays at 2.",
-      "query": "summary.scale.ownUnitFactoriesPeak",
-      "operator": "<=",
-      "value": "2"
-    },
-    {
-      "id": "army-held-longer",
-      "category": "outcome",
-      "description": "The gap this round targets and the only fitness component short of 1.0 last fight: mean army 4,951 against 6,000, score 0.825. The 2,500 credits the dead factories cost fell in 454-590s, when cash read 0 at 500-520s and 560s and both producing queues had gaps. Spent on units instead, that is about 2,500 more army from about 500s. Diagnostic: dominated by the opponent and match length.",
-      "query": "summary.fitness.components[armyValueIntegral].score",
+      "description": "The new branch runs. In Opening and Scout, while the home survey is flown and their base was seen in the last 90s, TrainUnitsMode marks the scout rungs met at what is standing, and tags any production order that changed as a result. Traced through the last fight, it would have fired at 275s (Scout: harv ordered instead of the jeep bought ahead of harvester recovery) and 466s (Opening: msam instead of a jeep). A FAIL in a fight where the survey completed and their base was found means the branch never ran.",
+      "query": "reason-id:production.scout-rung-stood-down",
       "operator": ">=",
-      "value": "0.85"
+      "value": "1"
     },
     {
-      "id": "fewer-brownouts",
+      "id": "fewer-scouts-thrown-away-gdi",
       "category": "outcome",
-      "description": "Last fight spent 51s in low power across three windows: 206-225s (first afld), 367-386s (hq) and 476-486s, which started once the second afld's 40 power had cut the margin to 15. Without it the third window should not happen. Diagnostic: faction and build timing move the other two windows.",
-      "query": "summary.economy.secondsInLowPower",
+      "description": "The metric this round targets, as GDI. Last fight 6 jeeps ran ScoutMode (94, 116, 128, 151, 255, 276). Five of them were bought after their base was seen at 270s and died at rung 0 with 0 kills. Only scouts bought before the base is found, or after the sighting goes stale, should run ScoutMode now. Reads 0 and passes when we play Nod.",
+      "query": "units.count(type=jeep,owner=Commander,mode=ScoutMode)",
       "operator": "<=",
-      "value": "45"
+      "value": "3"
+    },
+    {
+      "id": "fewer-scouts-thrown-away-nod",
+      "category": "outcome",
+      "description": "The same claim when we play Nod, whose screen vehicle is bggy. Reads 0 and passes when we play GDI.",
+      "query": "units.count(type=bggy,owner=Commander,mode=ScoutMode)",
+      "operator": "<=",
+      "value": "3"
+    },
+    {
+      "id": "siege-sooner-gdi",
+      "category": "outcome",
+      "description": "Knock-on of the stand-down. Last fight the scout re-buys put the recovery harvester behind two jeeps (ordered 310s, not 275s), the yard held its hq for it, and the first msam was born at 408s. With the harvester first and 2,400 credits not spent on jeeps, the hq and first msam should land sooner. Diagnostic: an early rush moves this. Reads 0 and passes as Nod, or if no msam was built at all.",
+      "query": "units.min(bornSeconds,type=msam,owner=Commander)",
+      "operator": "<=",
+      "value": "395"
+    },
+    {
+      "id": "spend-gap-narrower",
+      "category": "outcome",
+      "description": "The Scale gap this round works on. Last fight spent 56.9% of the opponent (losses sit at 26-61, wins at 77-149). The opponent's expansions dominate this number, so it is an observation, not a claim the change can carry alone.",
+      "query": "summary.scale.spendVsOpponentPercent",
+      "operator": ">=",
+      "value": "60"
+    },
+    {
+      "id": "exploration-holds",
+      "category": "outcome",
+      "description": "What the stand-down could cost. The re-bought scouts re-drove the corridor to their base. Last fight explored 393 cells against the fitness reference of 300. The survey and the first scout's run to their base still happen, so this should stay at or above 300 unless the win comes very quickly.",
+      "query": "summary.headline.cellsExplored",
+      "operator": ">=",
+      "value": "300"
+    },
+    {
+      "id": "survey-still-flown",
+      "category": "invariant",
+      "description": "The stand-down needs the home survey to be complete, so it can never stop the survey that lets the resource layer see home ground. Last fight completed it at 265s.",
+      "query": "reason-id:economy.survey-complete",
+      "operator": ">=",
+      "value": "1"
     },
     {
       "id": "fleet-not-smaller",
       "category": "invariant",
-      "description": "The fifth refinery now follows tech and the fifth plant directly, with no factories ahead of it (last fight it stood at 569s behind both). The fleet must not shrink: last fight peaked at 9 harvesters against the opponent's 5.",
+      "description": "Credits taken off scouts go to the harvester rung first. The fleet must not shrink: last fight peaked at 8 harvesters.",
       "query": "summary.headline.peakHarvesters",
-      "operator": ">=",
-      "value": "8"
-    },
-    {
-      "id": "pushes-still-finish-buildings",
-      "category": "invariant",
-      "description": "Losing the spare factories must not weaken the push. Last fight destroyed 17 enemy buildings; 8 is the fitness reference.",
-      "query": "summary.headline.buildingsKilled",
       "operator": ">=",
       "value": "8"
     },

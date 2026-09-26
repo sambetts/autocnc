@@ -36,7 +36,10 @@ namespace AutoCnC.Reference.Doctrines
 			// defenders. They are not defenders: four of them finished that match with 0 kills,
 			// 11,064 damage dealt and 30,539 taken. Finding the other side is the only thing a
 			// jeep does that this bot cannot do without, because the Attack doctrine is gated on
-			// it, so a jeep should be doing it whenever it is alive.
+			// it, so a jeep should be doing it whenever it is alive. Once the home survey is flown
+			// and their base is freshly sighted the plan stops buying another, because rung 0 of
+			// the search is their base and the new one only parks there and dies: see
+			// Logic.ScoutRungLogic.
 			b.Assign<ScoutMode>().ToUnitType("jeep", "bggy");
 		}
 	}

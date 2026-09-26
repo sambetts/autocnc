@@ -287,6 +287,24 @@ namespace AutoCnC.Reference.Modes
 				plan, owned, ReferencePlans.ScreenVehicles, screenAttrition.Losses, attrition);
 			plan = screenAttritionRelease.Plan;
 
+			// A scout rung with nothing left to find stands down. In Opening and Scout a screen
+			// vehicle runs ScoutMode, whose only jobs are the home survey and finding their base;
+			// once both are answered a new one is driven to the mirror of our base and parked by
+			// the first structure it sees, where it dies. On 16:9 that bought five jeeps after
+			// their base was seen at 270s, two of them ahead of the recovery harvester the yard
+			// was holding its tech for. Applied before the screen's funding hold and recovery
+			// exemption below, so both stand down with it. See ScoutRungLogic.
+			var preStandDown = plan;
+			var scoutStandDown = new FloorRelease(plan, 0, 0);
+			if ((ctx.Doctrine == ReferenceDoctrines.Opening || ctx.Doctrine == ReferenceDoctrines.Scout)
+				&& ScoutRungLogic.NothingLeftToFind(
+					TiberiumSurvey.IsFlown(ctx.Owner),
+					EnemyBaseSightings.IsCorroborated(ctx.Owner, ctx.WorldTick, SightingMemoryTuning.Default)))
+			{
+				scoutStandDown = ScoutRungLogic.StandDown(plan, owned, ReferencePlans.ScreenVehicles);
+				plan = scoutStandDown.Plan;
+			}
+
 			// One faction-equivalent tank gives the defensive screen a durable line unit without
 			// turning a dying two-tank floor into the next permanent Vehicle-queue blocker.
 			// Zero remains strict; one survivor releases the second slot to siege and income.
@@ -662,6 +680,57 @@ namespace AutoCnC.Reference.Modes
 			if (armourFloorWrittenOff)
 				why += $", armour floor written off after {armourAttritionRelease.Losses} lost without {armourAttritionRelease.Target} standing";
 
+			// The scout stand-down claims its branch on the same terms: only when the plan that
+			// still carried the scout rung, with every later rewrite and both funding caps
+			// re-derived against that rung, would have bought a scout here. The armour write-off,
+			// retarget and rocket ceiling only touch rungs other than the scout's, so replaying
+			// them keeps the comparison to one variable.
+			var scoutRungStoodDown = false;
+			if (scoutStandDown.Released
+				&& !ArmyMixLogic.Names(ReferencePlans.ScreenVehicles, choice.ActorType))
+			{
+				var scoutRung = ExpansionLogic.FirstRungNaming(preStandDown, ReferencePlans.ScreenVehicles);
+				var scoutShortBelow = ArmyBalanceLogic.ReleaseAt(
+					scoutRung >= 0 ? preStandDown[scoutRung].DesiredCount : 0, balance);
+
+				var baseline = AttritionLogic.Release(
+					preStandDown, owned, ReferencePlans.DefenceArmourVehicles,
+					armourAttrition.Losses, attrition).Plan;
+				if (retargeted)
+					baseline = ArmyMixLogic.Retarget(
+						baseline, ReferencePlans.InfantryQueue,
+						ReferencePlans.RifleBodies, ReferencePlans.RocketBodies);
+
+				if (rocketsCapped)
+					baseline = ArmyMixLogic.CapBounded(
+						baseline, ReferencePlans.InfantryQueue, ReferencePlans.RocketBodies, rocketCeiling);
+
+				baseline = IncomeFirstLogic.HoldForPriority(
+					baseline, ReferencePlans.InfantryQueue, ctx.Cash,
+					standingScreenVehicles, scoutShortBelow,
+					screenVehicleBuildable, income.ScreenVehiclePrice, income).Plan;
+				baseline = IncomeFirstLogic.Hold(
+					baseline, ReferencePlans.InfantryQueue, ctx.Cash,
+					standingHarvesters, shortBelow, factories > 0, income).Plan;
+
+				var baselinePreservesScreen =
+					standingHarvesters > 0
+					&& standingHarvesters < shortBelow
+					&& standingScreenVehicles < scoutShortBelow
+					&& screenVehicleBuildable;
+				if (!baselinePreservesScreen)
+					baseline = IncomeFirstLogic.PrioritizeRecovery(
+						baseline, ReferencePlans.HarvesterUnits,
+						standingHarvesters, shortBelow, factories > 0);
+
+				var before = UnitProductionLogic.ChooseNext(state, baseline);
+				scoutRungStoodDown = before.IsValid
+					&& ArmyMixLogic.Names(ReferencePlans.ScreenVehicles, before.ActorType);
+			}
+
+			if (scoutRungStoodDown)
+				why += $", scout rung stood down: their base is freshly sighted and the home survey is flown, {scoutStandDown.Standing} of {scoutStandDown.Target} scouts standing";
+
 			if (screenFloorWrittenOff)
 				return UnitDecision.Produce(
 					choice.Queue, choice.ActorType, why, "production.screen-floor-written-off");
@@ -669,6 +738,10 @@ namespace AutoCnC.Reference.Modes
 			if (armourFloorWrittenOff)
 				return UnitDecision.Produce(
 					choice.Queue, choice.ActorType, why, "production.armour-floor-written-off");
+
+			if (scoutRungStoodDown)
+				return UnitDecision.Produce(
+					choice.Queue, choice.ActorType, why, ScoutRungLogic.StoodDownReasonId);
 
 			return rocketsCapChangedChoice
 				? UnitDecision.Produce(

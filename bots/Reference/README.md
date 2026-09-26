@@ -2952,6 +2952,41 @@ From 600s to 720s this side spent 73.3 a second and earned 85. Cash climbed from
 and ended the match at 4,000.
 Under this SDK, only a queue in another group (a helipad's `Aircraft`) adds throughput.
 
+## The scouts kept looking for a base they had already found
+
+The next `16:9` at Hard (GDI against Nod) was lost at 918s, fitness 0.570, on 57% of the
+opponent's spend (`scale.spendVsOpponentPercent` 56.9; it earned 91.8 a second to our 48.7).
+Every flagged regression is that loss set against the previous round's 778s Nod-against-Nod win.
+Nod built four construction yards: one at (62,45) by 270s, one on the contested north field at
+(44,8) by 501s, and one on our own north-east field at (33,19) by 566s. Our first home field was
+worked out at 216s. Of the carried-in checks, `no-idle-second-factory` passed with
+`ownUnitFactoriesPeak` 2, so the previous change ran. `army-held-longer`, `fewer-brownouts` and
+`pushes-still-finish-buildings` failed on the loss.
+
+Of what the first 600s bought, jeeps returned nothing. Nine were built and nine lost, for zero
+kills, 3,600 credits (6.4% of spend) and a mean life of 37 seconds. The home survey was done at
+265s and their base was seen at 270s. After that the Scout and Opening scout rungs bought five
+more. `ScoutMode` sent each one to rung 0 at (78,21), where it died within 17 to 43 seconds. At
+275s and 286s the Scout rung bought two of them ahead of the recovery harvester ("first light
+screen before harvester recovery"), and it capped the barracks at four bodies a rung to pay for
+them. Meanwhile the yard held its `hq` for that same harvester (281-336s). So the harvester was
+ordered at 310s instead of 275s, the `hq` at 361s, and the first `msam` at 386s.
+
+**In Opening and Scout, the scout rungs now stand down while the home survey is flown and
+their base was seen in the last 90 seconds** ([`ScoutRungLogic`](Logic/ScoutRungLogic.cs), wired
+into [`TrainUnitsMode`](Modes/TrainUnitsMode.cs) ahead of the screen's funding hold and recovery
+exemption, so both stand down with it). The rung is marked met at what is standing. It comes back
+as soon as the survey is unflown or the sighting goes stale. A stale sighting is exactly when
+looking again is worth a jeep, as it is for a Scout doctrine entered on lost contact. A scout that
+is already alive keeps its old behaviour. An order the stand-down changed carries
+`production.scout-rung-stood-down`.
+
+Traced through this fight: the Vehicle queue orders the harvester at 275s, and the 116/128/151/
+255/276/303 jeeps are never bought. That is 2,400 credits and about 60 seconds of factory time,
+which go to the `hq`, and from 466s to `msam`. It changes nothing before 265s or outside Opening
+and Scout. In a win it fires in the same windows, where it only stops scout re-buys. What it gives
+up is the push's watcher: Attack's `WatchMode` jeeps here lived 14 and 76 seconds.
+
 ## Start your own
 
 

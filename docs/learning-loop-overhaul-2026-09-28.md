@@ -203,6 +203,19 @@ champion games are cached.
   - Large moves are listed as leads rather than "regressions to explain before doing anything else".
   - Per-prompt "effects" are no longer rendered.
 
+### Holdout audit (`TrainingLoopRunner.AuditPromotion`)
+
+After every promotion the loop plays the new champion on `hard-holdout`, whose maps no training set
+uses. The first time, it also plays the champion that was replaced, as the baseline.
+
+- The results go to `<runs>/<bot>/audit.jsonl` and the loop output.
+- They never decide a promotion and are not shown to the agent: a set that steers selection stops
+  being a holdout.
+- Holdout games are deterministic, so the baseline is played only once.
+
+This is the out-of-sample reading the week's promotions never had. `-AuditBenchmark ''` turns it
+off.
+
 ## Validation
 
 - **Evidence tests:** 140 passed, 19 of them new, covering:
@@ -221,10 +234,12 @@ champion games are cached.
   - fresh-seed promotion;
   - cache reuse with a single canary;
   - cache abandonment after a failed canary;
+  - a canary whose game failed to run, which leaves the cache trusted;
   - pool retirement on promotion;
   - candidate checks in candidate games;
   - adoption after the verdict;
   - restored-file timestamps;
+  - the holdout audit, including a baseline played once;
   - the checked-in prompt and gate.
 - **Real builds:** the stale-DLL table above.
 - **Real games:**
@@ -237,8 +252,8 @@ champion games are cached.
 ## What this does not fix
 
 - **One map, one opponent.** The gate and the training fights still use `16-9` against Hard HAL
-  9001. `hard-holdout` is still run only by hand, and no audit against a frozen baseline runs
-  automatically.
+  9001. The holdout audit reports on two other maps after each promotion but decides nothing, and
+  nothing rolls back a champion automatically when the audit shows no gain.
 - **Small effects stay invisible.** A +10-point change passes about a third of the time. Bigger,
   coherent changes are what this gate can see, and the prompt now says so.
 - **Fitness is a diagnostic, not a gate.** Its capped components are unchanged.

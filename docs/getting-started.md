@@ -697,6 +697,13 @@ saved agent settings or edited prompt. Pass `-AgentConfiguration 'C:\path\agent.
 provider-neutral command/arguments/stdin JSON used by `train-bot.ps1`, and `-PromptTemplate` for
 a different prompt template file.
 
+After every promotion the new champion is also played on `-AuditBenchmark` (default
+`hard-holdout`, whose maps no training set uses), and the first time the champion it replaced is
+played there as a baseline. This is for the record only. It never decides a promotion and is not
+shown to the agent, because a set that steers selection stops being a holdout. Results are
+appended to `<runs>\<bot>\audit.jsonl` and printed by the loop. Pass `-AuditBenchmark ''` to skip
+it.
+
 Every verdict is appended to the bot's experiment ledger, `<runs>\<bot>\experiments.jsonl`: the
 files the candidate changed, the reason ids it added and how many of its own benchmark games logged
 each, its `checks.json` tallied across those games, its one-sentence `hypothesis`, and the gate's

@@ -479,6 +479,10 @@ cache being used for that pool. The sitting is composed into the same `benchmark
 candidate's `checks.json` is passed to every one of its games (`-ChecksFile`), and after the verdict
 `RecordExperiment` appends what was tried and concluded to `<runs>/<bot>/experiments.jsonl`
 (`AutoCnC.Evidence.ExperimentLedger`), which `train-bot.ps1` renders into `{experimentLedger}`.
+After a promotion the PowerShell loop also plays the new champion on its audit set (`hard-holdout`
+by default), and once the champion it replaced as a baseline, into `<runs>/<bot>/audit.jsonl`
+(`TrainingLoopRunner.AuditPromotion`). That result is for the record only: it decides nothing and
+is never shown to the agent.
 
 The champion snapshot is captured with the training run before its fight starts, so a queued chat
 turn after the result cannot silently redefine the control. Experiment metadata is created

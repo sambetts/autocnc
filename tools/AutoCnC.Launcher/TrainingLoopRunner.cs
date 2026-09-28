@@ -497,7 +497,10 @@ namespace AutoCnC.Launcher
 				if (decision != ContinuousEvaluationDecision.Reevaluate)
 					prompt = AdoptNextPrompt(promptTemplatePath, prompt);
 				if (decision == ContinuousEvaluationDecision.Promote)
+				{
 					CommitPromotion(completion.Evaluation);
+					AuditPromotion(plan, token);
+				}
 				if (decision != ContinuousEvaluationDecision.Reevaluate)
 					return;
 			}
@@ -512,6 +515,109 @@ namespace AutoCnC.Launcher
 
 			reported = progress.StagesPlayed;
 			output($"Stage {progress.StagesPlayed}: {progress.Decision.Reason}");
+		}
+
+		/// <summary>One champion's result on the holdout set, as <c>audit.jsonl</c> keeps it.</summary>
+		internal sealed class HoldoutAudit
+		{
+			public DateTime RecordedUtc { get; set; }
+			public string Role { get; set; }
+			public string RunId { get; set; }
+			public string Fingerprint { get; set; }
+			public string Benchmark { get; set; }
+			public int Wins { get; set; }
+			public int Played { get; set; }
+			public int TimedOut { get; set; }
+			public double? MedianFitness { get; set; }
+		}
+
+		static readonly JsonSerializerOptions AuditJson = new()
+		{
+			PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+			PropertyNameCaseInsensitive = true
+		};
+
+		/// <summary>
+		/// Plays a newly promoted champion on the holdout set, and the first time the champion it
+		/// replaced as the baseline, so progress can be read on maps nothing is selected on.
+		/// </summary>
+		/// <remarks>
+		/// For the record only: the result never decides a promotion and is not shown to the
+		/// agent, because a set that steers selection stops being a holdout. Deterministic, so the
+		/// baseline is played once. Bookkeeping like a commit: a failure is reported and training
+		/// carries on.
+		/// </remarks>
+		void AuditPromotion(ContinuousEvaluationPlan plan, CancellationToken token)
+		{
+			var benchmark = options.AuditBenchmark;
+			if (plan == null || plan.NoChanges || string.IsNullOrWhiteSpace(benchmark) ||
+				plan.CandidateAssemblyPath == null || plan.ControlAssemblyPath == null)
+				return;
+
+			try
+			{
+				ContinuousPromotionRunner.ValidateSelection(repo, benchmark, options.BenchmarkDifficulty);
+			}
+			catch (Exception ex) when (ex is InvalidOperationException or InvalidDataException or JsonException)
+			{
+				output($"No holdout audit: {ex.Message}");
+				return;
+			}
+
+			var path = Path.Combine(Path.GetDirectoryName(activeRun.RunDirectory) ?? activeRun.RunDirectory, "audit.jsonl");
+			try
+			{
+				var records = File.Exists(path)
+					? File.ReadLines(path).Where(line => !string.IsNullOrWhiteSpace(line))
+						.Select(line => JsonSerializer.Deserialize<HoldoutAudit>(line, AuditJson)).Where(r => r != null).ToList()
+					: [];
+				var previous = records.LastOrDefault(r => r.Role == "champion");
+				var baseline = records.FirstOrDefault(r => r.Role == "baseline");
+				if (baseline == null)
+				{
+					baseline = PlayHoldout(plan.ControlAssemblyPath, "baseline", plan.ChampionFingerprint, benchmark, token);
+					File.AppendAllText(path, JsonSerializer.Serialize(baseline, AuditJson) + "\n");
+				}
+
+				var champion = PlayHoldout(plan.CandidateAssemblyPath, "champion", plan.CandidateFingerprint, benchmark, token);
+				File.AppendAllText(path, JsonSerializer.Serialize(champion, AuditJson) + "\n");
+				output($"Holdout audit on {benchmark}, never used for promotion: the new champion won " +
+					$"{champion.Wins} of {champion.Played}; the baseline won {baseline.Wins} of {baseline.Played}" +
+					(previous == null ? "." : $"; the previous champion won {previous.Wins} of {previous.Played}."));
+			}
+			catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or
+				InvalidOperationException or JsonException)
+			{
+				output("The holdout audit did not complete, and training carries on: " + ex.Message);
+			}
+		}
+
+		HoldoutAudit PlayHoldout(string assembly, string role, string fingerprint, string benchmark,
+			CancellationToken token)
+		{
+			var directory = Path.Combine(activeRun.ExperimentDirectory, "audit-" + role);
+			var result = directory + "-result.json";
+			RequireSuccess(Execute(repo.BenchmarkBotScript,
+				[
+					"-BattleBot", assembly, "-Benchmark", benchmark, "-OutputDirectory", directory,
+					"-ResultPath", result, "-AllowIncomplete",
+					"-Parallel", (options.Parallel > 0 ? options.Parallel : ContinuousPromotionRunner.DefaultParallel).ToString()
+				],
+				$"Auditing the {role} on {benchmark} (for the record, never for promotion)", token));
+			var arm = PairedBenchmarkEvaluator.ReadResult(result)?.Candidate ??
+				throw new InvalidDataException("The holdout audit wrote no result.");
+			return new HoldoutAudit
+			{
+				RecordedUtc = DateTime.UtcNow,
+				Role = role,
+				RunId = activeRun.Manifest.Id,
+				Fingerprint = fingerprint,
+				Benchmark = benchmark,
+				Wins = arm.Wins,
+				Played = arm.Played,
+				TimedOut = arm.TimedOut,
+				MedianFitness = arm.MedianFitness
+			};
 		}
 
 		/// <summary>

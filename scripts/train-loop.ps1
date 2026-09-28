@@ -55,6 +55,12 @@
 	0 (the default) uses half the logical processors, at most four. Games replay identically
 	whether they run alone or side by side, so this changes the wall time and nothing else.
 
+.PARAMETER AuditBenchmark
+	After every promotion, the new champion is also played on this set, and the first time the
+	champion it replaced as a baseline, for the record only: it never decides a promotion and is
+	not shown to the agent. Defaults to hard-holdout, whose maps no training set uses. Results go
+	to audit.jsonl beside the bot's runs and the loop's output. Pass '' to skip the audit.
+
 .PARAMETER BenchmarkDifficulty
 	Explicit difficulty for both benchmark arms. Defaults to Hard, independently of Difficulty.
 
@@ -165,6 +171,9 @@ param(
 	[ValidateRange(0, 16)]
 	[int]$Parallel = 0,
 	[Parameter(ParameterSetName = 'Loop')]
+	[AllowEmptyString()]
+	[string]$AuditBenchmark = 'hard-holdout',
+	[Parameter(ParameterSetName = 'Loop')]
 	[string]$RunsRoot,
 	[Parameter(ParameterSetName = 'Loop')]
 	[string]$AgentConfiguration,
@@ -220,6 +229,7 @@ $options = @{
 	Benchmark = $Benchmark
 	BenchmarkDifficulty = $BenchmarkDifficulty
 	Parallel = $Parallel
+	AuditBenchmark = $AuditBenchmark
 	RunsRoot = if ($RunsRoot) { $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($RunsRoot) } else { $null }
 	AgentConfiguration = Resolve-OptionalFile $AgentConfiguration
 	PromptTemplate = Resolve-OptionalFile $PromptTemplate

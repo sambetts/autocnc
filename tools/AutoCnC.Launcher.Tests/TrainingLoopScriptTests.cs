@@ -62,6 +62,7 @@ namespace AutoCnC.Launcher.Tests
 				Assert.That(options.GetProperty("BenchmarkDifficulty").GetString(), Is.EqualTo("Hard"));
 				Assert.That(options.GetProperty("Parallel").GetInt32(), Is.Zero,
 					"Zero asks the host for its default concurrency.");
+				Assert.That(options.GetProperty("AuditBenchmark").GetString(), Is.EqualTo("hard-holdout"));
 				Assert.That(options.GetProperty("Commit").GetBoolean(), Is.True);
 				Assert.That(options.GetProperty("Push").GetBoolean(), Is.True,
 					"Promotions are published unless the caller opts out.");

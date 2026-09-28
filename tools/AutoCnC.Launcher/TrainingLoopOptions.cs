@@ -59,6 +59,12 @@ namespace AutoCnC.Launcher
 		/// </summary>
 		public int Parallel { get; set; }
 
+		/// <summary>
+		/// The set a newly promoted champion is played on afterwards, for the record only. Empty
+		/// turns the audit off; a set the catalogue does not define is skipped with a note.
+		/// </summary>
+		public string AuditBenchmark { get; set; } = "hard-holdout";
+
 		internal string Validate(RepoLayout repo)
 		{
 			if (repo?.SupportsTraining != true)

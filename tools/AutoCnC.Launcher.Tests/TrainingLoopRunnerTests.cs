@@ -181,6 +181,25 @@ namespace AutoCnC.Launcher.Tests
 		}
 
 		[Test]
+		public void APromotedChampionIsAuditedOnTheHoldoutAndTheBaselineOnlyOnce()
+		{
+			UseSequentialGate();
+			options.Rounds = 2;
+			stageOutcome = (candidate, _, _) => candidate ? "Won" : "Lost";
+			improve = () => File.WriteAllText(source, "candidate-" + improvements);
+			Run();
+
+			var audits = jobs.Where(job => job.ScriptPath == repo.BenchmarkBotScript &&
+				Path.GetFileName(Argument(job, "-ResultPath")).StartsWith("audit-", StringComparison.Ordinal)).ToList();
+			Assert.That(audits.Select(job => Path.GetFileName(Argument(job, "-ResultPath"))),
+				Is.EqualTo(new[] { "audit-baseline-result.json", "audit-champion-result.json", "audit-champion-result.json" }));
+			Assert.That(audits.All(job => Argument(job, "-Benchmark") == "hard-holdout"), Is.True);
+			var ledger = File.ReadAllLines(Path.Combine(options.RunsRoot, "ReferenceBot", "audit.jsonl"));
+			Assert.That(ledger, Has.Length.EqualTo(3));
+			Assert.That(messages, Has.Some.StartsWith("Holdout audit on hard-holdout, never used for promotion"));
+		}
+
+		[Test]
 		public void TheSameChampionsCachedGamesAreReusedAndOneIsReplayedAsACanary()
 		{
 			UseSequentialGate();
@@ -1075,6 +1094,8 @@ namespace AutoCnC.Launcher.Tests
 			File.WriteAllText(Path.Combine(repo.ScriptsDir, "benchmarks.json"),
 				"{\"sets\":[{\"name\":\"hard-16-9\",\"matches\":[" +
 				"{\"map\":\"map\",\"faction\":\"gdi\",\"botFaction\":\"nod\",\"seed\":123}]}," +
+				"{\"name\":\"hard-holdout\",\"difficulty\":\"Hard\",\"matches\":[" +
+				"{\"map\":\"other\",\"faction\":\"gdi\",\"botFaction\":\"nod\",\"seed\":400001}]}," +
 				"{\"name\":\"hard-16-9-fresh\",\"difficulty\":\"Hard\",\"maxGameSeconds\":2400,\"sequential\":{" +
 				"\"maps\":[\"map\"],\"pairings\":[{\"faction\":\"gdi\",\"botFaction\":\"nod\"}," +
 				"{\"faction\":\"nod\",\"botFaction\":\"gdi\"},{\"faction\":\"gdi\",\"botFaction\":\"gdi\"}," +

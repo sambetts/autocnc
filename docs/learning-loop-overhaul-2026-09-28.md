@@ -248,6 +248,18 @@ off.
     `TimedOut` rows, each played once, with check results, `reason-ids.json` and
     `bot-assembly.json` beside them, and no support directories left behind.
 - **Rules fingerprint:** `44db50ef17715b00` in child processes and in-process alike, after the fix.
+- **The first real round on the new gate** (`20260928-122503`) ran four stages, 64 fresh pairs.
+  - The champion won 46 of its 64 fresh games (72%): well short of the 8 of 8 it managed on the
+    pinned seeds, so there is room to measure.
+  - The candidate held the first push until two siege pieces stood. It won 8 games the champion
+    lost and lost 8 the champion won, so the test crossed its lower bound (LLR −2.30) and restored
+    it as "not better".
+  - Its ledger entry shows the change really ran: its new reason ids fired in 57 and 58 of its 64
+    games. It also carries the candidate's own `hypothesis` and its check tallies.
+  - The next round's prompt was given that entry.
+  - The fought-assembly tripwire then fired on a valid fight. The SDK stamps the checkout's HEAD
+    into the assembly's informational version, and a commit had moved HEAD between rounds. It now
+    compares assemblies only within one source and one commit.
 
 ## What this does not fix
 

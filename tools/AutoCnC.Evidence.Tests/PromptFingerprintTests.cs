@@ -103,6 +103,32 @@ namespace AutoCnC.Evidence.Tests
 			Assert.That(PromptFingerprint.Read(Write("flat.txt", "no headings at all\n"), null), Is.Null);
 		}
 
+		/// <summary>
+		/// A template the loop rewrites every round keeps its headings while its body changes, and
+		/// ten such revisions once shared one id. With the unrendered template kept beside the
+		/// fight, identity is its content: different bodies differ, the same body rendered twice
+		/// does not.
+		/// </summary>
+		[Test]
+		public void TheKeptTemplateIdentifiesThePromptByItsContent()
+		{
+			string Fight(string name, string template, string rendered)
+			{
+				var fight = Directory.CreateDirectory(Path.Combine(directory, name)).FullName;
+				File.WriteAllText(Path.Combine(fight, PromptFingerprint.TemplateFileName), template);
+				var prompt = Path.Combine(fight, "agent-prompt.txt");
+				File.WriteAllText(prompt, rendered);
+				return prompt;
+			}
+
+			var first = PromptFingerprint.Read(Fight("one", "## Work\nFix harvesters.\n", "## Work\nFix harvesters. run 1\n"), null);
+			var reworded = PromptFingerprint.Read(Fight("two", "## Work\nFix pushes.\n", "## Work\nFix pushes. run 2\n"), null);
+			var again = PromptFingerprint.Read(Fight("three", "## Work\r\nFix harvesters.\r\n", "## Work\nFix harvesters. run 3\n"), null);
+
+			Assert.That(reworded.Id, Is.Not.EqualTo(first.Id), "same headings, different template");
+			Assert.That(again.Id, Is.EqualTo(first.Id), "same template, rendered for another fight");
+		}
+
 		string Write(string name, string text)
 		{
 			var path = Path.Combine(directory, name);

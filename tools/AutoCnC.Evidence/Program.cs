@@ -83,6 +83,12 @@ namespace AutoCnC.Evidence
 			UnitLedger.Write(evidence.UnitsPath, units);
 			outcome.Written.Add(evidence.UnitsPath);
 
+			// Every reason id the trace logged and how often. Tiny, and it is what lets the harness
+			// say whether a candidate's new code ran in the games that judged it without reparsing
+			// tens of megabytes of trace per game.
+			ExperimentLedger.WriteReasonIdCounts(evidence.Directory, evidence.Trace.ReasonIdCounts);
+			outcome.Written.Add(Path.Combine(evidence.Directory, ExperimentLedger.ReasonIdCountsFile));
+
 			var resolvedChecks = checksPath ?? evidence.ChecksPath;
 			var document = Checks.Read(resolvedChecks);
 			if (document != null)
@@ -154,6 +160,7 @@ namespace AutoCnC.Evidence
 					"summarise" or "summarize" => Summarise(args),
 					"trend" => Trend(args),
 					"prompts" => Prompts(args),
+					"ledger" => Ledger(args),
 					"audit-bot" => Audit(args),
 					"--help" or "-h" or "help" => Usage(),
 					_ => Usage($"Unknown command '{args[0]}'.")
@@ -227,6 +234,17 @@ namespace AutoCnC.Evidence
 			Console.WriteLine(BotSourceAudit.Render(findings));
 
 			// Advisory: reported, never fatal. See BotSourceAudit for why.
+			return 0;
+		}
+
+		static int Ledger(string[] args)
+		{
+			if (args.Length < 2)
+				return Usage("ledger needs an experiments.jsonl file.");
+
+			var options = Options(args);
+			var last = int.TryParse(options.GetValueOrDefault("last"), out var parsed) && parsed > 0 ? parsed : 12;
+			Console.WriteLine(ExperimentLedger.Render(ExperimentLedger.Read(args[1]), last));
 			return 0;
 		}
 
@@ -333,6 +351,11 @@ namespace AutoCnC.Evidence
 				  prompts <historyFile> [--archive <dir>]
 				      Compares prompt revisions: what each one did to the rounds it steered,
 				      and where to read the text of each.
+
+				  ledger <experimentsFile> [--last <n>]
+				      Renders the most recent experiments the training loop recorded: what each
+				      round changed, whether its new reason ids fired in its own games, its
+				      checks, and the gate's conclusion.
 
 				  audit-bot <botSourceDir>
 				      Reports map coordinates or opponent names hardcoded into strategy.

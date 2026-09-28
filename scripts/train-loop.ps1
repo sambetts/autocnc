@@ -18,8 +18,11 @@
 
 	This edits bot source and uses the configured agent's account and quota. Defaults to
 	Copilot CLI and the repository prompt, not the launcher's saved agent/prompt settings.
-	Each round's valid next-prompt proposal is adopted unreviewed for the round after, and
-	written back to that prompt template file, so a restart continues from the latest one.
+	Each round's valid next-prompt proposal is adopted unreviewed once the round's verdict is
+	in, and written back to that prompt template file, so a restart continues from the latest
+	one. Every verdict is also appended to the bot's experiment ledger (experiments.jsonl beside
+	its runs), which the next prompt is given: what the round changed, whether its new code ran
+	in its own benchmark games, and what the gate concluded.
 	Run setup.ps1 and install the game content and an authenticated coding agent first.
 
 .PARAMETER BattleBot
@@ -41,7 +44,16 @@
 	time limits come from the selected set in scripts/benchmarks.json instead.
 
 .PARAMETER Benchmark
-	Paired promotion gate from scripts/benchmarks.json. Defaults to hard-16-9.
+	Promotion gate from scripts/benchmarks.json. Defaults to hard-16-9-fresh: fresh seeds for
+	every champion, played in stages until a sequential test on the games only one arm won
+	decides (see that set's comment). A pinned set such as hard-16-9 is still accepted; it is
+	judged on its fixed matches as before, which is only sound while the champion has not been
+	selected on them.
+
+.PARAMETER Parallel
+	Benchmark games to play at once, each in its own process and OpenRA support directory.
+	0 (the default) uses half the logical processors, at most four. Games replay identically
+	whether they run alone or side by side, so this changes the wall time and nothing else.
 
 .PARAMETER BenchmarkDifficulty
 	Explicit difficulty for both benchmark arms. Defaults to Hard, independently of Difficulty.
@@ -56,7 +68,7 @@
 
 .PARAMETER PromptTemplate
 	Optional prompt template file. Defaults to docs/agent-prompt-template.md. Once a round's
-	build is verified, its valid next-prompt proposal replaces this file's contents and is
+	verdict is in, its valid next-prompt proposal replaces this file's contents and is
 	archived to LOCALAPPDATA\AutoCnC\PromptHistory. When the checkout tracks the file, each
 	promotion commits it after the bot, and it is pushed with the bot.
 
@@ -146,9 +158,12 @@ param(
 	[ValidateRange(0, [int]::MaxValue)]
 	[int]$MaxGameSeconds = 5400,
 	[Parameter(ParameterSetName = 'Loop')]
-	[string]$Benchmark = 'hard-16-9',
+	[string]$Benchmark = 'hard-16-9-fresh',
 	[Parameter(ParameterSetName = 'Loop')]
 	[string]$BenchmarkDifficulty = 'Hard',
+	[Parameter(ParameterSetName = 'Loop')]
+	[ValidateRange(0, 16)]
+	[int]$Parallel = 0,
 	[Parameter(ParameterSetName = 'Loop')]
 	[string]$RunsRoot,
 	[Parameter(ParameterSetName = 'Loop')]
@@ -204,6 +219,7 @@ $options = @{
 	MaxGameSeconds = $MaxGameSeconds
 	Benchmark = $Benchmark
 	BenchmarkDifficulty = $BenchmarkDifficulty
+	Parallel = $Parallel
 	RunsRoot = if ($RunsRoot) { $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($RunsRoot) } else { $null }
 	AgentConfiguration = Resolve-OptionalFile $AgentConfiguration
 	PromptTemplate = Resolve-OptionalFile $PromptTemplate

@@ -103,6 +103,11 @@
     Optional directory for the built bot assembly. Defaults to engine\bin\bots. Benchmark arms use
     distinct directories so one build cannot overwrite another before their matches run.
 
+.PARAMETER SupportDirectory
+    Optional OpenRA support directory (settings, logs, replays and game content) for this match
+    only. Benchmarks give each concurrent match its own, so parallel games never write one
+    settings file or replay folder at once. It must already contain Content\cnc.
+
 .EXAMPLE
     ./scripts/run-bot.ps1
     Build the reference bot and play it from the menu.
@@ -148,6 +153,7 @@ param(
     [int]$MaxGameSeconds = 5400,
     [switch]$NoLaunch,
     [string]$InstallDirectory,
+    [string]$SupportDirectory,
     [ValidateSet('Debug', 'Release')]
     [string]$Configuration = 'Release'
 )
@@ -161,10 +167,11 @@ $botDir = if ($InstallDirectory) {
 } else {
     Join-Path $binDir 'bots'
 }
+$supportDir = if ($SupportDirectory) { [IO.Path]::GetFullPath($SupportDirectory) } else { $null }
 
 if ($ExecutionMode -eq 'Headless' -and -not $NoLaunch) {
     . (Join-Path $PSScriptRoot 'game-content.ps1')
-    Assert-CncContent $engineDir
+    Assert-CncContent $engineDir $supportDir
 }
 
 # ---------------------------------------------------------------------------
@@ -254,7 +261,13 @@ $botPath = $source.Path
 
 if ($source.Kind -eq 'Project') {
     Write-Host "==> Building $($source.Project.BaseName)" -ForegroundColor Cyan
-    dotnet build $source.Project.FullName -c $Configuration -v quiet --nologo `
+
+    # Always a full rebuild. The training loop restores a rejected candidate's files with their
+    # original, older timestamps, and an incremental build compares timestamps, so it kept the
+    # rejected candidate's newer output and fought with it: 11 of 52 "champion" fights between
+    # 24 and 27 September ran code the gate had just thrown out. A bot is one small project, so
+    # compiling it from source every time costs a few seconds and removes the question.
+    dotnet build $source.Project.FullName -c $Configuration -v quiet --nologo --no-incremental `
         /p:AutoCnCPath="$repoRoot" /p:BattleBotInstallDirectory="$botDir" `
         /p:RestoreAdditionalProjectSources="$(Join-Path $repoRoot 'packages')" `
         /p:RestoreIgnoreFailedSources=true
@@ -322,6 +335,32 @@ if ($BattleLog) {
     $rulesPath = Join-Path (Split-Path -Parent ([IO.Path]::GetFullPath($BattleLog))) 'rules-fingerprint.json'
     $rules = Write-RulesFingerprint $repoRoot $rulesPath
     Write-Host "==> Rules: $($rules.Fingerprint)" -ForegroundColor Cyan
+
+    # Which assembly fought, by content. A fight is evidence about the code that played it, and
+    # the workspace alone cannot say what that was: an incremental build once kept a rejected
+    # candidate's output for weeks of "champion" fights. The hash is what the training loop
+    # compares between fights of the same source.
+    if ($BattleLog -ne 'none') {
+        $assemblyFiles = if (Test-Path -LiteralPath $botPath -PathType Container) {
+            @(Get-ChildItem -LiteralPath $botPath -Filter *.dll -File | Sort-Object Name)
+        } else {
+            @(Get-Item -LiteralPath $botPath)
+        }
+        [ordered]@{
+            SchemaVersion = 1
+            Path = [IO.Path]::GetFullPath($botPath)
+            Kind = $source.Kind
+            Project = if ($source.Project) { $source.Project.FullName } else { $null }
+            Assemblies = @($assemblyFiles | ForEach-Object {
+                    [ordered]@{
+                        Name = $_.Name
+                        Sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+                        Bytes = $_.Length
+                    }
+                })
+        } | ConvertTo-Json -Depth 4 |
+            Set-Content -LiteralPath (Join-Path (Split-Path -Parent $rulesPath) 'bot-assembly.json') -Encoding utf8
+    }
 }
 
 if ($DecisionTrace) {
@@ -400,6 +439,7 @@ $gameArgs = @(
     'Game.Mod=autocnc',
     "Launch.BattleBotPath=$botPath"
 )
+if ($supportDir) { $gameArgs += "Engine.SupportDir=$supportDir" }
 
 # Name the platform on every launch, not just the headless one. Game.Platform is a saved setting,
 # so whatever was used last time is what a launch that stays quiet about it inherits - which is how

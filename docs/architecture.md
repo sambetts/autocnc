@@ -457,11 +457,28 @@ again before restoration or promotion, and immediately before the next fight. An
 change or edit-capable agent chat after capture marks the experiment for reevaluation. An invalid
 result is never used to restore over those unbenchmarked edits.
 
-Continuous evaluation defaults to benchmark `hard-16-9` at difficulty `Hard`. Both are explicit
+Continuous evaluation defaults to benchmark `hard-16-9` at difficulty `Hard` in the launcher, and
+to `hard-16-9-fresh` in the PowerShell loop. Both are explicit
 arguments on each arm invocation and are checked against each returned result before composition.
 The isolated build helper asks evaluated MSBuild for `TargetPath` and records it in a build result;
 the launcher never guesses from project or assembly-name text, so imports, conditions and property
 expansion remain authoritative.
+
+Benchmark steps are driven through `NextBenchmarkStep` and `CaptureBenchmarkStep`, which both the
+launcher and the loop call until the runner has a verdict. A pinned set is two steps, the candidate
+arm and then the control arm. A set with a `sequential` block (`hard-16-9-fresh`) is judged by
+`AutoCnC.Evidence.SequentialGate`: a pool of seeds nothing was selected on is drawn per champion
+fingerprint and kept in `<runs>/<bot>/gate/<set>.json`, the candidate plays it a stage at a time
+through `benchmark-bot.ps1 -MatchesFile`, the champion plays only the seeds the pool has not cached
+plus one cached canary per evaluation, and Wald's sequential probability ratio test on the pairs
+exactly one arm won decides after each stage. A promotion retires the pool. A change to the
+engine binaries, rules fingerprint, difficulty table, time limit or fitness scale (the harness key)
+discards the cached games but keeps the seeds, and a canary that does not replay exactly stops the
+cache being used for that pool. The sitting is composed into the same `benchmark-result.json` and
+`promotion-evaluation.json` a pinned set writes, with the test's state under `sequential`. The
+candidate's `checks.json` is passed to every one of its games (`-ChecksFile`), and after the verdict
+`RecordExperiment` appends what was tried and concluded to `<runs>/<bot>/experiments.jsonl`
+(`AutoCnC.Evidence.ExperimentLedger`), which `train-bot.ps1` renders into `{experimentLedger}`.
 
 The champion snapshot is captured with the training run before its fight starts, so a queued chat
 turn after the result cannot silently redefine the control. Experiment metadata is created
@@ -517,8 +534,8 @@ additive guidance. `docs/agent-prompt-template.md` is the repository default, wh
 replacement is user state. Since approval overwrites that state, each adopted template is also
 appended to `%LOCALAPPDATA%\AutoCnC\PromptHistory` as a numbered file plus an `index.json` of
 provenance. The PowerShell training loop is the unattended exception. `TrainingLoopRunner` adopts each
-round's valid proposal as soon as the build is verified, before the benchmark decides the round's
-code. It writes the proposal back to the loop's template file, marks the run
+round's valid proposal once the benchmark has decided the round, whichever way it went, and before
+a promotion is committed. It writes the proposal back to the loop's template file, marks the run
 (`SuggestedNextPromptAccepted`, and `PromptRewriteFrozen = false`), and archives it with the
 `continuous` origin. It renders that round's contract to say the proposal will be used unreviewed.
 When a round is promoted, the loop commits the bot workspace, then the template if the checkout

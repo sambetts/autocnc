@@ -28,6 +28,21 @@ namespace AutoCnC.Launcher
 		public string Title { get; init; }
 		public string ScriptPath { get; init; }
 		public IReadOnlyList<string> Arguments { get; init; } = [];
+
+		/// <summary>The arm a benchmark step plays, so its result can be captured; null otherwise.</summary>
+		public ContinuousEvaluationArm? Arm { get; init; }
+
+		/// <summary>True for one stage of a sequential gate, whose result must be captured.</summary>
+		public bool Sequential { get; init; }
+
+		/// <summary>The zero-based stage a sequential step belongs to.</summary>
+		public int Stage { get; init; }
+
+		/// <summary>Where the step writes its machine-readable result.</summary>
+		public string ResultPath { get; init; }
+
+		/// <summary>The fresh-seed matches a sequential step plays.</summary>
+		public IReadOnlyList<SequentialMatch> Matches { get; init; } = [];
 	}
 
 	public sealed class ContinuousEvaluationPlan
@@ -51,6 +66,40 @@ namespace AutoCnC.Launcher
 		public string CandidateAssemblySha256 { get; set; }
 		public string ControlAssemblySha256 { get; set; }
 		public bool NoChanges { get; init; }
+
+		/// <summary>Set for a sequential set: fresh seeds, stages and Wald's test. Null for a pinned set.</summary>
+		public SequentialSetDefinition Sequential { get; init; }
+
+		/// <summary>Where the sequential gate keeps its pool and cached champion games.</summary>
+		public string GateStatePath { get; init; }
+
+		/// <summary>Anything worth reporting about the pool, such as a new one being drawn.</summary>
+		public string Note { get; set; }
+
+		/// <summary>Set when a step found something the caller should report at once, then cleared by it.</summary>
+		public string Warning { get; set; }
+
+		internal ContinuousEvaluationProgress Progress { get; } = new();
+	}
+
+	/// <summary>How far one evaluation has got, between the steps its caller runs.</summary>
+	internal sealed class ContinuousEvaluationProgress
+	{
+		public int PinnedArmsBenchmarked { get; set; }
+		public int Steps { get; set; }
+		public int Stage { get; set; }
+		public bool CandidateStageDone { get; set; }
+		public bool ControlStageDone { get; set; }
+		public bool Finished { get; set; }
+		public int StagesPlayed { get; set; }
+		public List<BenchmarkMatchResult> Candidate { get; } = [];
+		public Dictionary<int, BenchmarkMatchResult> FreshControl { get; } = [];
+		public HashSet<int> CachedScenarios { get; } = [];
+		public int? CanaryScenario { get; set; }
+		public bool? CanaryReproduced { get; set; }
+		public SequentialDecision Decision { get; set; }
+		public List<string> CandidateBatches { get; } = [];
+		public List<string> ControlBatches { get; } = [];
 	}
 
 	public sealed class ContinuousBenchmarkScenario
@@ -83,6 +132,21 @@ namespace AutoCnC.Launcher
 	{
 		public const string DefaultBenchmark = "hard-16-9";
 		public const string DefaultDifficulty = "Hard";
+
+		/// <summary>The sequential fresh-seed gate the unattended loop uses by default.</summary>
+		public const string SequentialBenchmark = "hard-16-9-fresh";
+
+		/// <summary>
+		/// Benchmark games played at once when nobody says otherwise: half the logical processors,
+		/// at most four. A headless game is one busy thread; the other half stays free for the
+		/// evidence tool, which summarises each game while the next ones play.
+		/// </summary>
+		public static int DefaultParallel => Math.Clamp(Environment.ProcessorCount / 2, 1, 4);
+
+		/// <summary>Benchmark games to play at once. Zero or less means <see cref="DefaultParallel"/>.</summary>
+		public int Parallel { get; set; }
+
+		int EffectiveParallel => Parallel > 0 ? Parallel : DefaultParallel;
 
 		public static void ValidateSelection(RepoLayout repo, string benchmark, string difficulty) =>
 			ValidateBenchmarkSelection(repo, benchmark, difficulty);
@@ -192,6 +256,8 @@ namespace AutoCnC.Launcher
 			DeleteIfExists(run.CandidateBenchmarkResultPath);
 			DeleteIfExists(run.ControlBenchmarkResultPath);
 			DeleteIfExists(run.BenchmarkResultPath);
+			foreach (var stageFile in Directory.EnumerateFiles(run.ExperimentDirectory, "*-stage-*.json"))
+				DeleteIfExists(stageFile);
 			var candidateBuildResult = Path.Combine(
 				run.ExperimentDirectory, "candidate-build.json");
 			var controlBuildResult = Path.Combine(
@@ -211,6 +277,21 @@ namespace AutoCnC.Launcher
 			run.BeginContinuousEvaluation(candidateFingerprint, championFingerprint,
 				benchmark, difficulty);
 			var experiment = run.Manifest.Experiment;
+
+			// A sequential set judges this champion on seeds it was never selected on. The pool
+			// is drawn the first time a champion is evaluated and kept, with its cached games,
+			// until a promotion retires it.
+			string gateStatePath = null;
+			string note = null;
+			if (selection.Sequential != null)
+			{
+				gateStatePath = GateStatePath(run, benchmark);
+				var state = SequentialGate.Read(gateStatePath, benchmark);
+				SequentialGate.EnsurePool(state, selection.Sequential, championFingerprint,
+					HarnessKey(repo, run, difficulty, selection), run.Manifest.Id, out note);
+				SequentialGate.Write(gateStatePath, state);
+			}
+
 			return new ContinuousEvaluationPlan
 			{
 				Run = run,
@@ -225,9 +306,11 @@ namespace AutoCnC.Launcher
 				CandidateBuildResultPath = candidateBuildResult,
 				ControlBuildResultPath = controlBuildResult,
 				CandidateFingerprint = candidateFingerprint,
-				ChampionFingerprint = championFingerprint
-				,
-				Scenarios = selection.Scenarios
+				ChampionFingerprint = championFingerprint,
+				Scenarios = selection.Scenarios,
+				Sequential = selection.Sequential,
+				GateStatePath = gateStatePath,
+				Note = note
 			};
 		}
 
@@ -320,26 +403,388 @@ namespace AutoCnC.Launcher
 			run = plan?.Run ?? run;
 			EnsureReadyForBenchmark(run, plan);
 			var candidate = arm == ContinuousEvaluationArm.Candidate;
+			var arguments = new List<string>
+			{
+				"-BattleBot", candidate
+					? plan.CandidateAssemblyPath
+					: plan.ControlAssemblyPath,
+				"-OutputDirectory", candidate
+					? run.CandidateBenchmarkRunsDirectory
+					: run.ControlBenchmarkRunsDirectory,
+				"-ResultPath", candidate
+					? run.CandidateBenchmarkResultPath
+					: run.ControlBenchmarkResultPath,
+				"-Benchmark", plan.Benchmark,
+				"-Difficulty", plan.Difficulty,
+				"-MaxGameSeconds", plan.MaxGameSeconds.ToString(),
+				"-Parallel", EffectiveParallel.ToString()
+			};
+			AddCandidateChecks(run, arm, arguments);
 			return new ContinuousScriptPlan
 			{
 				Title = $"Benchmarking immutable {arm.ToString().ToLowerInvariant()} arm",
 				ScriptPath = repo.BenchmarkBotScript,
-				Arguments =
-				[
-					"-BattleBot", candidate
-						? plan.CandidateAssemblyPath
-						: plan.ControlAssemblyPath,
-					"-OutputDirectory", candidate
-						? run.CandidateBenchmarkRunsDirectory
-						: run.ControlBenchmarkRunsDirectory,
-					"-ResultPath", candidate
-						? run.CandidateBenchmarkResultPath
-						: run.ControlBenchmarkResultPath,
-					"-Benchmark", plan.Benchmark,
-					"-Difficulty", plan.Difficulty,
-					"-MaxGameSeconds", plan.MaxGameSeconds.ToString()
-				]
+				Arguments = arguments,
+				Arm = arm,
+				ResultPath = candidate ? run.CandidateBenchmarkResultPath : run.ControlBenchmarkResultPath
 			};
+		}
+
+		/// <summary>
+		/// The candidate's own checks, evaluated in the games that judge it. Before this they were
+		/// only ever evaluated against the next round's opening fight, which runs the champion
+		/// whenever the candidate is restored - so a rejected candidate's claims were never tested.
+		/// </summary>
+		static void AddCandidateChecks(TrainingRun run, ContinuousEvaluationArm arm, List<string> arguments)
+		{
+			var checks = Path.Combine(run.CandidateSourceDirectory, "checks.json");
+			if (arm == ContinuousEvaluationArm.Candidate && File.Exists(checks))
+				arguments.AddRange(["-ChecksFile", checks]);
+		}
+
+		/// <summary>
+		/// The next benchmark script to run for this evaluation, or null once the evidence for a
+		/// verdict is complete and <see cref="CompleteEvaluation"/> can be called.
+		/// </summary>
+		/// <remarks>
+		/// A pinned set is two steps, the candidate arm and then the control arm. A sequential set
+		/// is a stage at a time: the candidate on the stage's fresh seeds, then the champion on
+		/// whichever of them the pool has not cached, then Wald's test, which either decides or
+		/// asks for the next stage. Every step must be followed by <see cref="CaptureBenchmarkStep"/>.
+		/// </remarks>
+		public ContinuousScriptPlan NextBenchmarkStep(RepoLayout repo, TrainingRun run,
+			ContinuousEvaluationPlan plan)
+		{
+			ArgumentNullException.ThrowIfNull(plan);
+			run = plan.Run ?? run;
+			if (plan.NoChanges)
+				return null;
+
+			var progress = plan.Progress;
+			if (plan.Sequential == null)
+				return progress.PinnedArmsBenchmarked switch
+				{
+					0 => BenchmarkArm(repo, run, plan, ContinuousEvaluationArm.Candidate),
+					1 => BenchmarkArm(repo, run, plan, ContinuousEvaluationArm.Control),
+					_ => null
+				};
+
+			EnsureReadyForBenchmark(run, plan);
+			var state = SequentialGate.Read(plan.GateStatePath, plan.Benchmark);
+			var pool = RequirePool(state, plan);
+			while (!progress.Finished)
+			{
+				var stage = SequentialGate.Stage(pool, plan.Sequential, progress.Stage);
+				if (!progress.CandidateStageDone)
+					return SequentialStep(repo, run, plan, ContinuousEvaluationArm.Candidate, stage);
+
+				if (!progress.ControlStageDone)
+				{
+					var needed = ControlNeeded(pool, progress, stage);
+					if (needed.Count > 0)
+						return SequentialStep(repo, run, plan, ContinuousEvaluationArm.Control, needed);
+					progress.ControlStageDone = true;
+				}
+
+				FinishStage(plan, pool);
+			}
+
+			return null;
+		}
+
+		/// <summary>Takes in what a step from <see cref="NextBenchmarkStep"/> played.</summary>
+		public void CaptureBenchmarkStep(TrainingRun run, ContinuousEvaluationPlan plan,
+			ContinuousScriptPlan step)
+		{
+			ArgumentNullException.ThrowIfNull(plan);
+			ArgumentNullException.ThrowIfNull(step);
+			run = plan.Run ?? run;
+			var progress = plan.Progress;
+			if (!step.Sequential)
+			{
+				progress.PinnedArmsBenchmarked++;
+				return;
+			}
+
+			var result = PairedBenchmarkEvaluator.ReadResult(step.ResultPath);
+			var arm = step.Arm == ContinuousEvaluationArm.Candidate ? "candidate" : "control";
+			var rows = ValidateStageResult(plan, result, step, arm);
+			if (step.Arm == ContinuousEvaluationArm.Candidate)
+			{
+				progress.Candidate.RemoveAll(row => rows.Any(added => added.Scenario == row.Scenario));
+				progress.Candidate.AddRange(rows);
+				progress.CandidateBatches.Add(result.Batch);
+				progress.CandidateStageDone = true;
+				return;
+			}
+
+			progress.ControlBatches.Add(result.Batch);
+			var state = SequentialGate.Read(plan.GateStatePath, plan.Benchmark);
+			var pool = RequirePool(state, plan);
+			var canaryFailed = false;
+			foreach (var row in rows)
+			{
+				var cached = pool.Champion.FirstOrDefault(result => result.Scenario == row.Scenario);
+				if (row.Scenario == progress.CanaryScenario && cached != null)
+				{
+					if (!SequentialGate.Decided(row))
+					{
+						// A replay whose game never reached a result says nothing about whether
+						// the cache reproduces. The cached game stands in for it, and the cache
+						// is checked again next evaluation.
+						progress.CachedScenarios.Add(row.Scenario);
+						plan.Note = (plan.Note == null ? "" : plan.Note + " ") +
+							$"The canary replay of seed {row.Seed} did not complete, so the cache was not checked this time.";
+						continue;
+					}
+
+					pool.CanaryChecks++;
+					progress.CanaryReproduced = cached.Reproduces(row);
+					if (progress.CanaryReproduced == false)
+					{
+						canaryFailed = true;
+						pool.Reproducible = false;
+						pool.CanaryFailure = string.Create(System.Globalization.CultureInfo.InvariantCulture,
+							$"Seed {row.Seed} replayed as {row.Outcome} in {row.DurationSeconds}s at fitness {row.Fitness}, " +
+							$"but was cached as {cached.Outcome} in {cached.DurationSeconds}s at fitness {cached.Fitness} " +
+							$"({run.Manifest.Id}).");
+					}
+				}
+				else if (cached == null && pool.Reproducible && SequentialGate.Decided(row))
+					pool.Champion.Add(SequentialChampionResult.From(row, RulesFingerprint(row.Evidence),
+						plan.ControlAssemblySha256));
+
+				progress.FreshControl[row.Scenario] = row;
+			}
+
+			SequentialGate.Write(plan.GateStatePath, state);
+			if (canaryFailed)
+			{
+				// The cache is not to be trusted, so every champion game this evaluation relied on
+				// is played again rather than taken from it.
+				progress.CachedScenarios.Clear();
+				plan.Warning = "A replayed champion game did not reproduce its cached result, so the cache is no " +
+					"longer used for this pool: " + pool.CanaryFailure;
+				plan.Note = (plan.Note == null ? "" : plan.Note + " ") + plan.Warning;
+				progress.ControlStageDone = false;
+				return;
+			}
+
+			progress.ControlStageDone = true;
+		}
+
+		ContinuousScriptPlan SequentialStep(RepoLayout repo, TrainingRun run, ContinuousEvaluationPlan plan,
+			ContinuousEvaluationArm arm, IReadOnlyList<SequentialMatch> matches)
+		{
+			var progress = plan.Progress;
+			var candidate = arm == ContinuousEvaluationArm.Candidate;
+			progress.Steps++;
+			var name = $"{(candidate ? "candidate" : "control")}-stage-{progress.Stage + 1}-{progress.Steps:D2}";
+			var matchesPath = Path.Combine(run.ExperimentDirectory, name + "-matches.json");
+			var resultPath = Path.Combine(run.ExperimentDirectory, name + "-result.json");
+			SequentialGate.WriteMatches(matchesPath, matches);
+			DeleteIfExists(resultPath);
+
+			var arguments = new List<string>
+			{
+				"-BattleBot", candidate ? plan.CandidateAssemblyPath : plan.ControlAssemblyPath,
+				"-OutputDirectory", Path.Combine(candidate
+					? run.CandidateBenchmarkRunsDirectory
+					: run.ControlBenchmarkRunsDirectory, $"stage-{progress.Stage + 1}"),
+				"-ResultPath", resultPath,
+				"-Benchmark", plan.Benchmark,
+				"-MatchesFile", matchesPath,
+				"-Difficulty", plan.Difficulty,
+				"-MaxGameSeconds", plan.MaxGameSeconds.ToString(),
+				"-Parallel", EffectiveParallel.ToString(),
+
+				// The gate judges every pair itself - a crashed candidate game is a loss, a crashed
+				// champion game drops its pair - so a step of a few games must not fail as a whole.
+				"-AllowIncomplete"
+			};
+			AddCandidateChecks(run, arm, arguments);
+
+			var stages = SequentialGate.Stages(plan.Sequential);
+			return new ContinuousScriptPlan
+			{
+				Title = candidate
+					? $"Benchmarking the candidate on fresh seeds, stage {progress.Stage + 1} of at most {stages}"
+					: $"Benchmarking the champion on {matches.Count} fresh seed(s) not yet cached, stage {progress.Stage + 1}",
+				ScriptPath = repo.BenchmarkBotScript,
+				Arguments = arguments,
+				Arm = arm,
+				Sequential = true,
+				Stage = progress.Stage,
+				ResultPath = resultPath,
+				Matches = matches
+			};
+		}
+
+		/// <summary>
+		/// The champion games a stage still needs: those the pool has not cached, plus one cached
+		/// game replayed per evaluation to show the cache still reproduces.
+		/// </summary>
+		static List<SequentialMatch> ControlNeeded(SequentialPool pool, ContinuousEvaluationProgress progress,
+			IReadOnlyList<SequentialMatch> stage)
+		{
+			if (progress.Stage == 0 && progress.CanaryScenario == null && pool.Reproducible)
+			{
+				var cached = pool.Champion.OrderBy(result => result.Scenario).ToList();
+				if (cached.Count > 0)
+					progress.CanaryScenario = cached[pool.Evaluations % cached.Count].Scenario;
+			}
+
+			var needed = new List<SequentialMatch>();
+			foreach (var match in stage)
+			{
+				if (progress.FreshControl.ContainsKey(match.Scenario))
+					continue;
+				if (match.Scenario != progress.CanaryScenario && pool.Cached(match.Scenario) != null)
+				{
+					progress.CachedScenarios.Add(match.Scenario);
+					continue;
+				}
+
+				needed.Add(match);
+			}
+
+			if (progress.Stage == 0 && progress.CanaryScenario is int canary &&
+				!progress.FreshControl.ContainsKey(canary) && needed.All(match => match.Scenario != canary))
+			{
+				var match = pool.Matches.FirstOrDefault(m => m.Scenario == canary);
+				if (match != null)
+					needed.Add(match);
+			}
+
+			return needed;
+		}
+
+		static void FinishStage(ContinuousEvaluationPlan plan, SequentialPool pool)
+		{
+			var progress = plan.Progress;
+			var pairs = SequentialGate.Pairs(pool, progress.Candidate, ControlRows(pool, progress),
+				progress.CachedScenarios, out _);
+			var final = progress.Stage + 1 >= SequentialGate.Stages(plan.Sequential);
+			progress.Decision = SequentialGate.Decide(pairs, plan.Sequential, final);
+			progress.StagesPlayed = progress.Stage + 1;
+			if (progress.Decision.Verdict == SequentialDecision.Continue)
+			{
+				progress.Stage++;
+				progress.CandidateStageDone = false;
+				progress.ControlStageDone = false;
+			}
+			else
+				progress.Finished = true;
+		}
+
+		/// <summary>The champion's row for every scenario played so far: fresh first, then cached.</summary>
+		static Dictionary<int, BenchmarkMatchResult> ControlRows(SequentialPool pool,
+			ContinuousEvaluationProgress progress)
+		{
+			var rows = new Dictionary<int, BenchmarkMatchResult>(progress.FreshControl);
+			foreach (var scenario in progress.CachedScenarios)
+			{
+				if (rows.ContainsKey(scenario))
+					continue;
+				var cached = pool.Cached(scenario);
+				var match = pool.Matches.FirstOrDefault(m => m.Scenario == scenario);
+				if (cached != null && match != null)
+					rows[scenario] = cached.ToMatch(match, null, null);
+			}
+
+			return rows;
+		}
+
+		static SequentialPool RequirePool(SequentialGateState state, ContinuousEvaluationPlan plan)
+		{
+			var pool = state.Pool;
+			if (pool == null ||
+				!string.Equals(pool.ChampionFingerprint, plan.ChampionFingerprint, StringComparison.Ordinal))
+				throw new InvalidDataException(
+					"The sequential gate's pool no longer belongs to this champion; evaluate the candidate again.");
+			return pool;
+		}
+
+		static List<BenchmarkMatchResult> ValidateStageResult(ContinuousEvaluationPlan plan,
+			BenchmarkResultDocument result, ContinuousScriptPlan step, string arm)
+		{
+			if (result == null)
+				throw new InvalidDataException($"The {arm} stage result is empty.");
+			if (!string.Equals(result.Benchmark, plan.Benchmark, StringComparison.OrdinalIgnoreCase) ||
+				!string.Equals(result.Difficulty, plan.Difficulty, StringComparison.OrdinalIgnoreCase) ||
+				result.MaxGameSeconds != plan.MaxGameSeconds)
+				throw new InvalidDataException(
+					$"The {arm} stage result was not played on {plan.Benchmark} at {plan.Difficulty} " +
+					$"with a {plan.MaxGameSeconds}-second limit.");
+
+			var rows = result.Matches ?? [];
+			if (result.ExpectedMatchesPerArm != step.Matches.Count || rows.Count != step.Matches.Count)
+				throw new InvalidDataException(
+					$"The {arm} stage result has {rows.Count} row(s) for the {step.Matches.Count} match(es) it was given.");
+
+			foreach (var expected in step.Matches)
+			{
+				var row = rows.SingleOrDefault(r => r?.Scenario == expected.Scenario);
+				if (row == null ||
+					!string.Equals(row.Arm, "candidate", StringComparison.OrdinalIgnoreCase) ||
+					!string.Equals(row.Map, expected.Map, StringComparison.OrdinalIgnoreCase) ||
+					!string.Equals(row.Faction, expected.Faction, StringComparison.OrdinalIgnoreCase) ||
+					!string.Equals(row.BotFaction, expected.BotFaction, StringComparison.OrdinalIgnoreCase) ||
+					row.Seed != expected.Seed)
+					throw new InvalidDataException(
+						$"The {arm} stage result does not match fresh-seed scenario {expected.Scenario}.");
+			}
+
+			return rows;
+		}
+
+		static string GateStatePath(TrainingRun run, string benchmark) =>
+			Path.Combine(Path.GetDirectoryName(run.RunDirectory) ?? run.RunDirectory, "gate",
+				string.Concat(benchmark.Select(c => char.IsLetterOrDigit(c) || c is '-' or '_' ? c : '-')) + ".json");
+
+		/// <summary>
+		/// Everything besides the bot that decides how a seed plays out. When it changes the
+		/// cached champion games are discarded; see <see cref="SequentialGate.EnsurePool"/>.
+		/// </summary>
+		static string HarnessKey(RepoLayout repo, TrainingRun run, string difficulty, BenchmarkSelection selection)
+		{
+			var parts = new List<string>
+			{
+				"difficulty=" + difficulty,
+				"limit=" + selection.MaxGameSeconds,
+				"rules=" + (RulesFingerprint(run.EvidenceDirectory) ?? "unrecorded"),
+				"difficulties=" + FileHash(repo.DifficultiesFile),
+				"fitness=" + FitnessScore.CurrentScaleVersion
+			};
+			foreach (var name in new[]
+			{
+				"OpenRA.Game.dll", "OpenRA.Mods.Common.dll", "OpenRA.Mods.Cnc.dll",
+				"AutoCnC.Platform.dll", "AutoCnC.Core.dll", "AutoCnC.Sdk.dll"
+			})
+				parts.Add(name + "=" + FileHash(Path.Combine(repo.EngineBinDir, name)));
+			return SequentialGate.HarnessKey(parts);
+		}
+
+		static string FileHash(string path) => File.Exists(path) ? BotWorkspace.Sha256(path) : "absent";
+
+		/// <summary>The rules a fight or benchmark game recorded beside its battle log.</summary>
+		static string RulesFingerprint(string evidenceDirectory)
+		{
+			var path = Path.Combine(evidenceDirectory ?? "", "rules-fingerprint.json");
+			if (!File.Exists(path))
+				return null;
+			try
+			{
+				using var document = JsonDocument.Parse(File.ReadAllText(path));
+				return document.RootElement.TryGetProperty("fingerprint", out var value) &&
+					value.ValueKind == JsonValueKind.String
+					? value.GetString()
+					: null;
+			}
+			catch (JsonException)
+			{
+				return null;
+			}
 		}
 
 		public ContinuousEvaluationCompletion CompleteEvaluation(TrainingRun run,
@@ -353,6 +798,20 @@ namespace AutoCnC.Launcher
 			if (exitCode != 0)
 				evaluation = PairedBenchmarkEvaluator.Undefined(
 					$"The immutable control benchmark exited with code {exitCode}.");
+			else if (plan?.Sequential != null)
+				try
+				{
+					EnsureReadyForBenchmark(run, plan);
+					evaluation = CompleteSequential(run, plan);
+				}
+				catch (Exception ex) when (ex is InvalidDataException or IOException or
+					UnauthorizedAccessException or System.Text.Json.JsonException or
+					InvalidOperationException)
+				{
+					evaluation = PairedBenchmarkEvaluator.Undefined(
+						"The sequential evaluation could not be completed: " + ex.Message,
+						plan.Benchmark, plan.Batch);
+				}
 			else
 				try
 				{
@@ -389,6 +848,204 @@ namespace AutoCnC.Launcher
 				RequiresReevaluation = true,
 				InvalidationReason = invalidation
 			};
+		}
+
+		/// <summary>
+		/// Composes a finished sequential sitting into the same documents a pinned set leaves: the
+		/// per-arm and paired benchmark results, and the promotion evaluation.
+		/// </summary>
+		PairedBenchmarkEvaluation CompleteSequential(TrainingRun run, ContinuousEvaluationPlan plan)
+		{
+			var progress = plan.Progress;
+			if (!progress.Finished || progress.Decision == null)
+				throw new InvalidDataException("The sequential gate had not reached a verdict.");
+
+			var state = SequentialGate.Read(plan.GateStatePath, plan.Benchmark);
+			var pool = RequirePool(state, plan);
+			var pairs = SequentialGate.Pairs(pool, progress.Candidate, ControlRows(pool, progress),
+				progress.CachedScenarios, out var dropped);
+			if (pairs.Count == 0)
+				throw new InvalidDataException("No fresh-seed pair completed in both arms.");
+
+			var final = progress.StagesPlayed >= SequentialGate.Stages(plan.Sequential);
+			var decision = SequentialGate.Decide(pairs, plan.Sequential, final);
+			var (result, evaluation) = SequentialGate.Compose(plan.Benchmark, plan.Batch, plan.Difficulty,
+				plan.MaxGameSeconds, plan.Sequential, pool, pairs, dropped, progress.StagesPlayed, decision,
+				progress.CanaryScenario, progress.CanaryReproduced, plan.Note);
+
+			PairedBenchmarkEvaluator.WriteResult(run.BenchmarkResultPath, result);
+			PairedBenchmarkEvaluator.WriteResult(run.CandidateBenchmarkResultPath,
+				SingleArm(result, "candidate", string.Join(",", progress.CandidateBatches)));
+			PairedBenchmarkEvaluator.WriteResult(run.ControlBenchmarkResultPath,
+				SingleArm(result, "control", string.Join(",", progress.ControlBatches)));
+			run.RecordContinuousBenchmarkBatches(string.Join(",", progress.CandidateBatches),
+				string.Join(",", progress.ControlBatches));
+
+			pool.Evaluations++;
+			SequentialGate.Write(plan.GateStatePath, state);
+			return evaluation;
+		}
+
+		/// <summary>One arm of a composed sequential result, in the single-arm form a benchmark writes.</summary>
+		static BenchmarkResultDocument SingleArm(BenchmarkResultDocument combined, string arm, string batch) => new()
+		{
+			SchemaVersion = 1,
+			GeneratedUtc = combined.GeneratedUtc,
+			Benchmark = combined.Benchmark,
+			Batch = string.IsNullOrWhiteSpace(batch) ? combined.Batch : batch,
+			Difficulty = combined.Difficulty,
+			MaxGameSeconds = combined.MaxGameSeconds,
+			ExpectedMatchesPerArm = combined.ExpectedMatchesPerArm,
+			Candidate = arm == "candidate" ? combined.Candidate : combined.Control,
+			Matches = combined.Matches
+				.Where(row => string.Equals(row.Arm, arm, StringComparison.OrdinalIgnoreCase))
+				.Select(row => new BenchmarkMatchResult
+				{
+					RunId = row.RunId, Evidence = row.Evidence, Arm = "candidate", Repeat = row.Repeat,
+					Scenario = row.Scenario, Map = row.Map, Faction = row.Faction, BotFaction = row.BotFaction,
+					Seed = row.Seed, Outcome = row.Outcome, Fitness = row.Fitness,
+					EarnedPerSecond = row.EarnedPerSecond, SpentPerSecond = row.SpentPerSecond,
+					Exchange = row.Exchange, BuildingsKilled = row.BuildingsKilled,
+					DurationSeconds = row.DurationSeconds, Benchmark = row.Benchmark, Batch = row.Batch,
+					Status = row.Status, Succeeded = row.Succeeded, Error = row.Error
+				}).ToList()
+		};
+
+		/// <summary>
+		/// Appends what this round tried and what the gate concluded to the bot's experiment ledger.
+		/// </summary>
+		/// <remarks>
+		/// Called once the decision has been applied. Everything in the record comes from the
+		/// immutable candidate and control copies and from the candidate's own benchmark games, so
+		/// it is right whether or not the live workspace has since been restored.
+		/// </remarks>
+		public ExperimentRecord RecordExperiment(TrainingRun run, ContinuousEvaluationPlan plan,
+			PairedBenchmarkEvaluation evaluation, ContinuousEvaluationDecision decision)
+		{
+			ArgumentNullException.ThrowIfNull(run);
+			if (decision == ContinuousEvaluationDecision.Reevaluate || evaluation == null)
+				return null;
+
+			var experiment = run.Manifest.Experiment;
+			var candidateSource = run.CandidateSourceDirectory;
+			var controlSource = run.ControlSourceDirectory;
+			var evidence = CandidateEvidence(run, plan);
+			var newIds = ExperimentLedger.NewReasonIds(candidateSource, controlSource);
+			var fight = run.Manifest.Result;
+			var record = new ExperimentRecord
+			{
+				RunId = run.Manifest.Id,
+				RecordedUtc = DateTime.UtcNow,
+				Benchmark = evaluation.Benchmark ?? plan?.Benchmark,
+				Basis = evaluation.Basis,
+				Verdict = evaluation.Verdict,
+				Conclusion = plan?.NoChanges == true
+					? "no-change"
+					: decision == ContinuousEvaluationDecision.Undefined
+						? "undefined"
+						: decision == ContinuousEvaluationDecision.Promote
+							? "promoted"
+							: evaluation.Sequential?.Conclusion ?? "restored",
+				Reason = evaluation.Reason,
+				ChampionRevision = experiment?.ChampionSourceRevision ?? run.Manifest.SourceRevision,
+				ChampionFingerprint = experiment?.ChampionFingerprint,
+				CandidateFingerprint = experiment?.CandidateFingerprint,
+				Hypothesis = Hypothesis(candidateSource),
+				FightOutcome = fight?.Outcome,
+				FightMatchup = run.Manifest.Battle == null ? null : Matchup(run),
+				ChangedFiles = ChangedFiles(candidateSource, controlSource),
+				PairsCompared = evaluation.PairsCompared,
+				CandidateWins = evaluation.CandidateWins,
+				ControlWins = evaluation.ControlWins,
+				CandidateOnlyWins = evaluation.Sequential?.CandidateOnlyWins,
+				ControlOnlyWins = evaluation.Sequential?.ControlOnlyWins,
+				LogLikelihoodRatio = evaluation.Sequential?.LogLikelihoodRatio,
+				CandidateGames = evidence.Count,
+				NewReasonIds = ExperimentLedger.Activations(newIds, evidence),
+				Checks = ExperimentLedger.TallyChecks(evidence)
+			};
+
+			ExperimentLedger.Append(LedgerPath(run), record);
+			return record;
+		}
+
+		public static string LedgerPath(TrainingRun run) =>
+			Path.Combine(Path.GetDirectoryName(run.RunDirectory) ?? run.RunDirectory, ExperimentLedger.FileName);
+
+		static List<string> CandidateEvidence(TrainingRun run, ContinuousEvaluationPlan plan)
+		{
+			if (plan?.Sequential != null)
+				return plan.Progress.Candidate.Select(row => row.Evidence)
+					.Where(path => !string.IsNullOrWhiteSpace(path) && Directory.Exists(path)).ToList();
+
+			if (!File.Exists(run.CandidateBenchmarkResultPath))
+				return [];
+			try
+			{
+				return (PairedBenchmarkEvaluator.ReadResult(run.CandidateBenchmarkResultPath)?.Matches ?? [])
+					.Select(row => row.Evidence)
+					.Where(path => !string.IsNullOrWhiteSpace(path) && Directory.Exists(path)).ToList();
+			}
+			catch (Exception ex) when (ex is JsonException or IOException)
+			{
+				return [];
+			}
+		}
+
+		static string Hypothesis(string candidateSource)
+		{
+			try
+			{
+				return Checks.Read(Path.Combine(candidateSource, "checks.json"))?.Hypothesis;
+			}
+			catch (Exception ex) when (ex is JsonException or IOException or InvalidDataException)
+			{
+				return null;
+			}
+		}
+
+		static string Matchup(TrainingRun run)
+		{
+			try
+			{
+				var summary = Path.Combine(run.EvidenceDirectory, "summary.json");
+				if (File.Exists(summary))
+				{
+					using var document = JsonDocument.Parse(File.ReadAllText(summary));
+					if (document.RootElement.TryGetProperty("fight", out var fight) &&
+						fight.TryGetProperty("faction", out var faction) &&
+						fight.TryGetProperty("opponentFaction", out var opponent))
+						return $"{faction.GetString()} against {opponent.GetString()}";
+				}
+			}
+			catch (Exception ex) when (ex is JsonException or IOException or InvalidOperationException)
+			{
+			}
+
+			return null;
+		}
+
+		/// <summary>Source files that differ between the immutable candidate and champion copies.</summary>
+		static List<string> ChangedFiles(string candidateSource, string championSource)
+		{
+			if (!Directory.Exists(candidateSource) || !Directory.Exists(championSource))
+				return [];
+
+			static Dictionary<string, string> Index(string root) =>
+				Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
+					.Select(file => (Relative: Path.GetRelativePath(root, file).Replace('\\', '/'), File: file))
+					.Where(entry => !entry.Relative.StartsWith("bin/", StringComparison.OrdinalIgnoreCase) &&
+						!entry.Relative.StartsWith("obj/", StringComparison.OrdinalIgnoreCase))
+					.ToDictionary(entry => entry.Relative, entry => BotWorkspace.Sha256(entry.File),
+						StringComparer.OrdinalIgnoreCase);
+
+			var candidate = Index(candidateSource);
+			var champion = Index(championSource);
+			return candidate.Keys.Union(champion.Keys, StringComparer.OrdinalIgnoreCase)
+				.Where(path => !candidate.TryGetValue(path, out var left) || !champion.TryGetValue(path, out var right) ||
+					!string.Equals(left, right, StringComparison.OrdinalIgnoreCase))
+				.OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+				.ToList();
 		}
 
 		public ContinuousEvaluationCompletion FailEvaluation(TrainingRun run,
@@ -546,6 +1203,7 @@ namespace AutoCnC.Launcher
 			public string Difficulty { get; init; }
 			public int MaxGameSeconds { get; init; }
 			public IReadOnlyList<ContinuousBenchmarkScenario> Scenarios { get; init; } = [];
+			public SequentialSetDefinition Sequential { get; init; }
 		}
 
 		static BenchmarkSelection ValidateBenchmarkSelection(
@@ -590,11 +1248,6 @@ namespace AutoCnC.Launcher
 				throw new InvalidOperationException(
 					$"Continuous difficulty '{difficulty}' is not defined.");
 
-			if (!selectedSet.TryGetProperty("matches", out var matches) ||
-				matches.ValueKind != JsonValueKind.Array ||
-				matches.GetArrayLength() == 0)
-				throw new InvalidDataException(
-					$"Continuous benchmark '{benchmark}' defines no scenarios.");
 			var maxGameSeconds = 5400;
 			if (selectedSet.TryGetProperty("maxGameSeconds", out var maximum))
 			{
@@ -605,6 +1258,23 @@ namespace AutoCnC.Launcher
 					throw new InvalidDataException(
 						$"Continuous benchmark '{benchmark}' has an invalid match time limit.");
 			}
+
+			// A sequential set has no fixed matches: its seeds are drawn per champion.
+			if (selectedSet.TryGetProperty("sequential", out var sequential) &&
+				sequential.ValueKind == JsonValueKind.Object)
+				return new BenchmarkSelection
+				{
+					Benchmark = Text(selectedSet, "name"),
+					Difficulty = resolvedDifficulty,
+					MaxGameSeconds = maxGameSeconds,
+					Sequential = SequentialSetDefinition.Parse(sequential)
+				};
+
+			if (!selectedSet.TryGetProperty("matches", out var matches) ||
+				matches.ValueKind != JsonValueKind.Array ||
+				matches.GetArrayLength() == 0)
+				throw new InvalidDataException(
+					$"Continuous benchmark '{benchmark}' defines no scenarios.");
 
 			var scenarios = new List<ContinuousBenchmarkScenario>();
 			var index = 0;

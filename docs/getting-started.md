@@ -605,7 +605,9 @@ instead of treating an unmeasured edit as progress. A match that fails is droppe
 together rather than voiding the sitting, and only a sitting that loses more than a quarter of its
 scenarios is `Undefined`. Candidate and champion are copied from the live workspace and its
 pre-agent snapshot, built into separate immutable directories, and benchmarked from those copied
-assemblies. The default continuous gate is `hard-16-9` at `Hard`; both values are passed explicitly
+assemblies. The launcher's continuous gate defaults to `hard-16-9` at `Hard` (the PowerShell loop
+below defaults to the fresh-seed `hard-16-9-fresh`, which the launcher can also select); both values
+are passed explicitly
 and the result must report them back. This also supports an uncommitted champion from a previous promotion. If the live
 workspace changes or an agent chat starts after capture, the result is invalidated and reevaluated
 rather than restoring over unbenchmarked edits. A chat that changes no source leaves a restored
@@ -669,8 +671,24 @@ source and consumes the configured agent's account/quota. Preserve important wor
 The defaults are **Headless**, `16-9.oramap`, **Hard**, one opponent and random factions.
 `-ExecutionMode Rendered -GameSpeed maximum` shows the training fights instead.
 `-Faction`, `-BotFaction`, `-Opponents`, `-Seed` and `-MaxGameSeconds` control those fights.
-The promotion gate is independently selected by `-Benchmark hard-16-9 -BenchmarkDifficulty Hard`;
-its fixed scenarios and time limit come from `scripts/benchmarks.json`. Evaluation stays headless.
+Every training fight rebuilds the bot from source (`dotnet build --no-incremental`) and records
+the hash of the assembly that played in `evidence\bot-assembly.json`, so a fight is always evidence
+about the source it is filed under.
+
+The promotion gate is selected by `-Benchmark` and `-BenchmarkDifficulty`, and defaults to
+`hard-16-9-fresh` at `Hard`. That set has no fixed matches. For each champion it draws a pool of
+fresh seeds on the training map that nothing has been selected on, and plays the candidate and the
+champion on them 16 at a time, spread evenly over the four faction pairings. Only games exactly one
+arm won count: Wald's sequential test promotes when the candidate clearly wins more of them,
+restores when it clearly does not, and restores as *inconclusive* after 96 pairs. The champion's
+games on the pool are cached, because a seed replays exactly, and one of them is replayed each
+evaluation to prove it still does. A promotion retires the pool, so no champion is ever judged on
+the seeds it was chosen on. The pool and cache live in `<runs>\<bot>\gate\hard-16-9-fresh.json`;
+the set's comment in `scripts/benchmarks.json` gives the measured error rates. A pinned set such as
+`hard-16-9` is still accepted and judged as before. Benchmark games run `-Parallel` at a time
+(default: half the logical processors, at most four), each in its own OpenRA support directory;
+parallel games replay exactly like serial ones. A game still running at the set's time limit is a
+decided non-win, `TimedOut`, and keeps its pair. Evaluation stays headless.
 Each new round uses a fresh fight and source snapshot. A rejected candidate is restored before
 the next fight; an agent/build failure or invalid evaluation stops the loop with an error.
 
@@ -679,8 +697,16 @@ saved agent settings or edited prompt. Pass `-AgentConfiguration 'C:\path\agent.
 provider-neutral command/arguments/stdin JSON used by `train-bot.ps1`, and `-PromptTemplate` for
 a different prompt template file.
 
-The loop adopts each round's next-prompt proposal unreviewed. Once the round's build is verified,
-and before the benchmark decides whether its code is kept, a valid proposal is written back to the
+Every verdict is appended to the bot's experiment ledger, `<runs>\<bot>\experiments.jsonl`: the
+files the candidate changed, the reason ids it added and how many of its own benchmark games logged
+each, its `checks.json` tallied across those games, its one-sentence `hypothesis`, and the gate's
+conclusion (`promoted`, `measured-worse`, `not-better` or `inconclusive`). The next prompt is given
+the latest entries through `{experimentLedger}`, with the current champion's record in its
+random-seed opening fights. `dotnet tools\AutoCnC.Evidence\bin\Release\net8.0\AutoCnC.Evidence.dll
+ledger <file>` prints the same view.
+
+The loop adopts each round's next-prompt proposal unreviewed. Once the benchmark has decided the
+round, whichever way it went, a valid proposal is written back to the
 template file and becomes the next round's prompt. It is also archived to
 `%LOCALAPPDATA%\AutoCnC\PromptHistory`. Each round is told this in its contract. A proposal that
 fails validation is reported and discarded, and the current prompt carries on. Because the file is

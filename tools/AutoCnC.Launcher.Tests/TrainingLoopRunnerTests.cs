@@ -146,6 +146,166 @@ namespace AutoCnC.Launcher.Tests
 		}
 
 		[Test]
+		public void ACandidateThatWinsWhatTheChampionLosesIsPromotedOnFreshSeeds()
+		{
+			UseSequentialGate();
+			stageOutcome = (candidate, _, _) => candidate ? "Won" : "Lost";
+			improve = () => File.WriteAllText(source, "candidate-" + improvements);
+			Run();
+
+			var run = TrainingRun.Load(runDirectories.Single());
+			var state = SequentialGate.Read(GatePath, "hard-16-9-fresh");
+			var evaluation = JsonSerializer.Deserialize<PairedBenchmarkEvaluation>(
+				File.ReadAllText(run.PromotionEvaluationPath), new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+			Assert.Multiple(() =>
+			{
+				Assert.That(run.Manifest.Status, Is.EqualTo("promoted"));
+				Assert.That(evaluation.Basis, Is.EqualTo("sequential"));
+				Assert.That(evaluation.Sequential.CandidateOnlyWins, Is.EqualTo(8),
+					"four decisive wins are not enough; the second stage settles it");
+				Assert.That(StageJobs(candidate: true).Select(MatchCount), Is.EqualTo(new[] { 4, 4 }));
+				Assert.That(StageJobs(candidate: false).Select(MatchCount), Is.EqualTo(new[] { 4, 4 }));
+				Assert.That(StageJobs(candidate: true).All(job => Argument(job, "-Parallel") == "2"), Is.True);
+				Assert.That(jobs.Where(job => job.ScriptPath == repo.BenchmarkBotScript)
+					.All(job => job.Arguments.Contains("-AllowIncomplete")), Is.True,
+					"the gate judges each pair, so a step with a crashed game must not fail whole");
+				Assert.That(state.Pool.Matches.Select(m => m.Seed), Is.EqualTo(Enumerable.Range(1000001, 8)));
+				Assert.That(state.Pool.Champion, Has.Count.EqualTo(8), "every champion game is cached");
+				Assert.That(File.ReadAllText(source), Is.EqualTo("candidate-1"));
+			});
+
+			var record = ExperimentLedger.Read(LedgerPath).Single();
+			Assert.That(record.Conclusion, Is.EqualTo("promoted"));
+			Assert.That(record.ChangedFiles, Does.Contain("Strategy.cs"));
+			Assert.That(record.CandidateGames, Is.EqualTo(8));
+		}
+
+		[Test]
+		public void TheSameChampionsCachedGamesAreReusedAndOneIsReplayedAsACanary()
+		{
+			UseSequentialGate();
+			options.Rounds = 2;
+			stageOutcome = (candidate, _, _) => candidate ? "Lost" : "Won";
+			improve = () => File.WriteAllText(source, "candidate-" + improvements);
+			Run();
+
+			Assert.That(runDirectories.Select(path => TrainingRun.Load(path).Manifest.Status),
+				Is.All.EqualTo("restored"));
+			Assert.That(StageJobs(candidate: true).Select(MatchCount), Is.EqualTo(new[] { 4, 4 }),
+				"losing four decisive games ends each round after one stage");
+			Assert.That(StageJobs(candidate: false).Select(MatchCount), Is.EqualTo(new[] { 4, 1 }),
+				"the second round replays one cached champion game, not the stage");
+			var state = SequentialGate.Read(GatePath, "hard-16-9-fresh");
+			Assert.That(state.Pool.Epoch, Is.EqualTo(1));
+			Assert.That(state.Pool.CanaryChecks, Is.EqualTo(1));
+			Assert.That(state.Pool.Reproducible, Is.True);
+			Assert.That(ExperimentLedger.Read(LedgerPath).Select(r => r.Conclusion),
+				Is.All.EqualTo("measured-worse"));
+			Assert.That(File.ReadAllText(source), Is.EqualTo("champion"));
+		}
+
+		[Test]
+		public void AChampionGameThatDoesNotReplayAsCachedAbandonsTheCache()
+		{
+			UseSequentialGate();
+			options.Rounds = 2;
+			stageOutcome = (candidate, _, round) => candidate ? "Lost" : round == 1 ? "Won" : "Lost";
+			improve = () => File.WriteAllText(source, "candidate-" + improvements);
+			Run();
+
+			var state = SequentialGate.Read(GatePath, "hard-16-9-fresh");
+			Assert.That(state.Pool.Reproducible, Is.False);
+			Assert.That(state.Pool.CanaryFailure, Does.Contain("cached as Won"));
+			Assert.That(StageJobs(candidate: false).Select(MatchCount), Is.EqualTo(new[] { 4, 1, 3, 4 }),
+				"after the failed canary the rest of the stage, and the next, are played rather than read");
+			Assert.That(messages, Has.Some.Contains("did not reproduce its cached result"));
+		}
+
+		[Test]
+		public void ACanaryWhoseGameFailedToRunLeavesTheCacheTrusted()
+		{
+			UseSequentialGate();
+			options.Rounds = 2;
+			stageOutcome = (candidate, _, round) => candidate ? "Lost" : round == 1 ? "Won" : "Failed";
+			improve = () => File.WriteAllText(source, "candidate-" + improvements);
+			Run();
+
+			var state = SequentialGate.Read(GatePath, "hard-16-9-fresh");
+			Assert.That(state.Pool.Reproducible, Is.True, "a crash is not evidence the cache is wrong");
+			Assert.That(state.Pool.CanaryChecks, Is.Zero);
+			Assert.That(StageJobs(candidate: false).Select(MatchCount), Is.EqualTo(new[] { 4, 1 }));
+			Assert.That(ExperimentLedger.Read(LedgerPath).Select(r => r.Conclusion), Is.All.EqualTo("measured-worse"),
+				"the cached champion game stood in for the one that failed to replay");
+		}
+
+		[Test]
+		public void APromotionRetiresThePoolSoTheNewChampionIsJudgedOnSeedsNobodyPlayed()
+		{
+			UseSequentialGate();
+			options.Rounds = 2;
+			stageOutcome = (candidate, _, round) => candidate == (round == 1) ? "Won" : "Lost";
+			improve = () => File.WriteAllText(source, "candidate-" + improvements);
+			Run();
+
+			var state = SequentialGate.Read(GatePath, "hard-16-9-fresh");
+			Assert.That(state.Pool.Epoch, Is.EqualTo(2));
+			Assert.That(state.Pool.Matches.Min(m => m.Seed), Is.EqualTo(1000009));
+			Assert.That(state.Retired.Single().Reason, Is.EqualTo("the champion changed"));
+			Assert.That(messages, Has.Some.Contains("Pool 1 was retired"));
+		}
+
+		[Test]
+		public void TheCandidatesOwnChecksAreEvaluatedInItsOwnGames()
+		{
+			UseSequentialGate();
+			stageOutcome = (candidate, _, _) => candidate ? "Lost" : "Won";
+			improve = () =>
+			{
+				File.WriteAllText(source, "candidate-" + improvements);
+				File.WriteAllText(Path.Combine(Path.GetDirectoryName(source), "checks.json"),
+					"{\"hypothesis\":\"Pushes wait for siege\",\"checks\":[]}");
+			};
+			Run();
+
+			var candidateStage = StageJobs(candidate: true).Single();
+			Assert.That(Argument(candidateStage, "-ChecksFile"),
+				Does.EndWith(Path.Combine("candidate-source", "checks.json")));
+			Assert.That(StageJobs(candidate: false).Single().Arguments, Does.Not.Contain("-ChecksFile"));
+			Assert.That(ExperimentLedger.Read(LedgerPath).Single().Hypothesis, Is.EqualTo("Pushes wait for siege"));
+		}
+
+		[Test]
+		public void TheNextPromptIsAdoptedOnlyAfterTheVerdict()
+		{
+			proposal = round => Template("lesson " + round);
+			improve = () => File.WriteAllText(source, "candidate-" + improvements);
+			Run();
+
+			var evaluation = messages.FindIndex(message => message.StartsWith("Evaluation:", StringComparison.Ordinal));
+			var adoption = messages.FindIndex(message => message.StartsWith("Next prompt:", StringComparison.Ordinal));
+			Assert.That(evaluation, Is.GreaterThanOrEqualTo(0));
+			Assert.That(adoption, Is.GreaterThan(evaluation));
+		}
+
+		[Test]
+		public void ARestoredFileIsNewerThanTheCandidateItReplaced()
+		{
+			File.SetLastWriteTimeUtc(source, new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+			candidateWins = false;
+			DateTime candidateWritten = default;
+			improve = () =>
+			{
+				File.WriteAllText(source, "candidate");
+				candidateWritten = File.GetLastWriteTimeUtc(source);
+			};
+			Run();
+
+			Assert.That(File.ReadAllText(source), Is.EqualTo("champion"));
+			Assert.That(File.GetLastWriteTimeUtc(source), Is.GreaterThanOrEqualTo(candidateWritten),
+				"an incremental build must see the restored source as newer than the candidate's output");
+		}
+
+		[Test]
 		public void PromotionIsCommittedToTheBotWorkspaceAndNothingElse()
 		{
 			RequireGitCheckout();
@@ -857,10 +1017,85 @@ namespace AutoCnC.Launcher.Tests
 			}
 			else if (job.ScriptPath == repo.BenchmarkBotScript)
 			{
-				var candidate = Argument(job, "-ResultPath").Contains("candidate-result", StringComparison.Ordinal);
-				WriteBenchmark(Argument(job, "-ResultPath"), candidate == candidateWins);
+				var candidate = Path.GetFileName(Argument(job, "-ResultPath")).StartsWith("candidate", StringComparison.Ordinal);
+				if (job.Arguments.Contains("-MatchesFile"))
+					WriteStage(job, candidate);
+				else
+					WriteBenchmark(Argument(job, "-ResultPath"), candidate == candidateWins);
 			}
 			return new TrainingScriptResult(0, []);
+		}
+
+		/// <summary>How a fake sequential stage plays: (candidate arm?, scenario, round) to outcome.</summary>
+		Func<bool, int, int, string> stageOutcome;
+
+		void WriteStage(ScriptJob job, bool candidate)
+		{
+			using var document = JsonDocument.Parse(File.ReadAllText(Argument(job, "-MatchesFile")));
+			var batch = Guid.NewGuid().ToString("N");
+			var output = Argument(job, "-OutputDirectory");
+			var result = new BenchmarkResultDocument
+			{
+				SchemaVersion = 1, Benchmark = Argument(job, "-Benchmark"), Batch = batch,
+				Difficulty = Argument(job, "-Difficulty"), MaxGameSeconds = int.Parse(Argument(job, "-MaxGameSeconds")),
+				Candidate = new BenchmarkArmResult { Arm = "candidate" }
+			};
+			foreach (var match in document.RootElement.GetProperty("matches").EnumerateArray())
+			{
+				var scenario = match.GetProperty("scenario").GetInt32();
+				var outcome = stageOutcome(candidate, scenario, improvements);
+				var failed = outcome == "Failed";
+				var evidence = Path.Combine(output, $"{batch}-{scenario}", "evidence");
+				Directory.CreateDirectory(evidence);
+				ExperimentLedger.WriteReasonIdCounts(evidence, new System.Collections.Generic.Dictionary<string, int>
+				{
+					["assault.new-rule"] = candidate && scenario % 2 == 0 ? 3 : 0
+				});
+				result.Matches.Add(new BenchmarkMatchResult
+				{
+					RunId = $"{batch}-{scenario}", Evidence = evidence, Arm = "candidate", Repeat = 1, Scenario = scenario,
+					Map = match.GetProperty("map").GetString(), Faction = match.GetProperty("faction").GetString(),
+					BotFaction = match.GetProperty("botFaction").GetString(), Seed = match.GetProperty("seed").GetInt32(),
+					Outcome = failed ? "Undefined" : outcome, Fitness = outcome == "Won" ? 1 : 0.4, EarnedPerSecond = 60,
+					SpentPerSecond = 60, Exchange = 2, BuildingsKilled = 10, DurationSeconds = failed ? 0 : 900,
+					Succeeded = !failed, Status = failed ? "Undefined" : "Completed",
+					Error = failed ? "Battle process failed with exit code 1." : ""
+				});
+			}
+
+			result.ExpectedMatchesPerArm = result.Matches.Count;
+			result.Candidate.Played = result.Matches.Count;
+			result.Candidate.Wins = result.Matches.Count(m => m.Outcome == "Won");
+			PairedBenchmarkEvaluator.WriteResult(Argument(job, "-ResultPath"), result);
+		}
+
+		/// <summary>Switches the loop to a small sequential set: stages of 4, a pool of 8.</summary>
+		void UseSequentialGate(int stagePairs = 4, int maxPairs = 8)
+		{
+			File.WriteAllText(Path.Combine(repo.ScriptsDir, "benchmarks.json"),
+				"{\"sets\":[{\"name\":\"hard-16-9\",\"matches\":[" +
+				"{\"map\":\"map\",\"faction\":\"gdi\",\"botFaction\":\"nod\",\"seed\":123}]}," +
+				"{\"name\":\"hard-16-9-fresh\",\"difficulty\":\"Hard\",\"maxGameSeconds\":2400,\"sequential\":{" +
+				"\"maps\":[\"map\"],\"pairings\":[{\"faction\":\"gdi\",\"botFaction\":\"nod\"}," +
+				"{\"faction\":\"nod\",\"botFaction\":\"gdi\"},{\"faction\":\"gdi\",\"botFaction\":\"gdi\"}," +
+				"{\"faction\":\"nod\",\"botFaction\":\"nod\"}],\"seedBase\":1000001," +
+				$"\"stagePairs\":{stagePairs},\"maxPairs\":{maxPairs}" + "}}]}");
+			options.Benchmark = "hard-16-9-fresh";
+			options.Parallel = 2;
+		}
+
+		string GatePath => Path.Combine(options.RunsRoot, "ReferenceBot", "gate", "hard-16-9-fresh.json");
+
+		string LedgerPath => Path.Combine(options.RunsRoot, "ReferenceBot", ExperimentLedger.FileName);
+
+		List<ScriptJob> StageJobs(bool candidate) => jobs.Where(job => job.ScriptPath == repo.BenchmarkBotScript &&
+			Path.GetFileName(Argument(job, "-ResultPath")).StartsWith(candidate ? "candidate-stage" : "control-stage",
+				StringComparison.Ordinal)).ToList();
+
+		static int MatchCount(ScriptJob job)
+		{
+			using var document = JsonDocument.Parse(File.ReadAllText(Argument(job, "-MatchesFile")));
+			return document.RootElement.GetProperty("matches").GetArrayLength();
 		}
 
 		static string Argument(ScriptJob job, string name) =>

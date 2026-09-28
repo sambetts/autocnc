@@ -28,8 +28,25 @@ something a bad round can overwrite.
 
 ## How a bot is measured
 
-- A bot is judged by whether it wins, which no assertion can tell you. The verification for a
-  strategy change is the next recorded fight and the evidence it leaves behind.
+- A bot is judged by whether it wins, which no assertion can tell you, on games nothing was
+  selected on.
+- **The promotion gate** (`hard-16-9-fresh` in `scripts/benchmarks.json`) plays your candidate and
+  the champion on the same fresh seeds of the training map, 16 at a time, spread evenly over the
+  four faction pairings. The seeds are drawn new for every champion, so the champion is never
+  judged on the games it was chosen on. Only games exactly one side won count. A sequential test
+  promotes when the candidate wins clearly more of those games than it loses (three to one is the
+  design point), restores when it clearly does not, and restores as *inconclusive* after 96 pairs.
+  A game still running at 2,400 seconds is not a win, and a candidate game that crashes is a loss.
+- So a change is kept only if it **changes who wins**: it has to win games the champion loses, or
+  stop losing ones it wins. Tidier wins, bigger margins and faster wins are not scored at all. A
+  change that rarely comes into play rarely flips a game and usually ends inconclusive. The gate
+  sees about +15 points of win rate or more; +10 points passes about a third of the time. Prefer
+  a change that fires in most games of the matchup it targets.
+- *Inconclusive* and *not better* mean the gate could not see an effect, not that the idea is
+  wrong. The experiment ledger in your prompt says which verdict every recent round got, and
+  whether its new code ran at all.
+- The fight you are given ran exactly the champion's source: it is rebuilt from source before
+  every fight, and `bot-assembly.json` beside the battle log records the hash of what played.
 - **Do not write unit tests, and do not add a test project to a bot workspace.** Not for changed
   strategy logic, not for a helper you extracted, not to show a change is safe. Budget spent on a
   suite is budget not spent on battle logic, and the suite measures nothing the next fight does not
@@ -43,8 +60,9 @@ something a bad round can overwrite.
 - An invariant worth remembering belongs in prose beside the code it constrains, which is what the
   next round actually reads.
 - A claim about what a change will do belongs in `checks.json`, not in prose. The harness evaluates
-  the previous round's checks against the next fight and reports pass or fail with actual values,
-  so a prediction is settled by the harness rather than by a later round taking your word for it.
+  your checks in **every one of your candidate's benchmark games** and records the tallies, with
+  how often each new reason id fired, in the experiment ledger. A promoted candidate's checks are
+  also carried into the next round's fight.
 
 ## The evidence a fight leaves behind
 
@@ -61,9 +79,11 @@ than a broken file.
 | --- | --- |
 | `summary.json` | Almost everything. Held under 20 KB so it can be read whole in one go. |
 | `units.csv` | One row per unit, whole lifecycle. |
-| `check-results.json` | The previous round's checks, evaluated against this fight. |
-| `trend.json` | This bot's headline metrics across recent runs, with regressions flagged. |
+| `check-results.json` | The champion's checks, evaluated against this fight. |
+| `trend.json` | This bot's headline metrics across recent runs; big single-fight shifts are listed as leads. |
 | `map.json` | Map dimensions, spawn cells, home-to-enemy distance, resource cells, random seed. |
+| `reason-ids.json` | How many times every reason id appeared in the trace. |
+| `bot-assembly.json` | The path and SHA-256 of the bot assembly that actually played. |
 
 `summary.json` (`schemaVersion` 1) holds: `provenance` (which inputs existed and at what schema —
 so a missing number reads as unknown rather than as zero), `fight`, `headline`, `fitness`,

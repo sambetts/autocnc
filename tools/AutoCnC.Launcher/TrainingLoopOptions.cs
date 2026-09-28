@@ -53,12 +53,18 @@ namespace AutoCnC.Launcher
 		/// <summary>Forward the agent's own colours to the console.</summary>
 		public bool Color { get; set; } = true;
 
+		/// <summary>
+		/// Benchmark games to play at once. Zero, the default, means
+		/// <see cref="ContinuousPromotionRunner.DefaultParallel"/>.
+		/// </summary>
+		public int Parallel { get; set; }
+
 		internal string Validate(RepoLayout repo)
 		{
 			if (repo?.SupportsTraining != true)
 				throw new ArgumentException("Select an AutoC&C checkout with the current authoring API.");
-			if (Rounds < 0 || MaxGameSeconds < 0 || Opponents < 1)
-				throw new ArgumentException("Rounds and MaxGameSeconds must be nonnegative; Opponents must be positive.");
+			if (Rounds < 0 || MaxGameSeconds < 0 || Opponents < 1 || Parallel < 0 || Parallel > 16)
+				throw new ArgumentException("Rounds and MaxGameSeconds must be nonnegative; Opponents must be positive; Parallel must be 0 to 16.");
 			if (string.IsNullOrWhiteSpace(Map))
 				throw new ArgumentException("A map is required for unattended training.");
 			if (ExecutionMode != BattleExecutionModes.Headless && ExecutionMode != BattleExecutionModes.Rendered)

@@ -388,7 +388,10 @@ Git revision. Workspace edits or agent chat after capture invalidate the result 
 evaluation; restoration never overwrites those unbenchmarked edits.
 Continuous evaluation explicitly runs `hard-16-9` at `Hard` by default (overridable through
 launcher settings), passes both values to every arm, and rejects results that report a different
-benchmark or difficulty.
+benchmark or difficulty. The unattended PowerShell loop gates on `hard-16-9-fresh` instead: fresh
+seeds for every champion, played in stages until a sequential test on the games only one arm won
+decides, with the champion's games cached and one replayed each evaluation as a check (see
+[docs/learning-loop-overhaul-2026-09-28.md](docs/learning-loop-overhaul-2026-09-28.md)).
 The champion snapshot is captured when the continuous fight is created, before any queued
 edit-capable chat can run. If the launcher exits mid-candidate, the manifest is durably marked
 aborted on reload: new fights stay blocked until the candidate is reevaluated or explicitly
@@ -401,8 +404,9 @@ Resolved rules and fight JSON use lazy, collapsible trees rather than raw text. 
 improvement the agent drafts an entirely new prompt template in **Next prompt***. In manual mode the
 player can edit and approve it. The launcher's continuous mode stores the draft but freezes the
 template in force until a player reviews it. The unattended PowerShell loop, `scripts/train-loop.ps1`,
-adopts each round's valid draft instead: it writes it back to its template file for the next round
-and archives it. An adopted
+adopts each round's valid draft instead, once the round's verdict is in: it writes it back to its
+template file for the next round and archives it. It also records every verdict in the bot's
+experiment ledger, which the next prompt is given. An adopted
 template is rendered next round with fresh paths, fight, result, and evidence inserted through
 required placeholders. Every adopted template is archived to
 `%LOCALAPPDATA%\AutoCnC\PromptHistory` as numbered plain-text files you can diff. Long-running

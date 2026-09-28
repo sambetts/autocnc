@@ -413,9 +413,13 @@ launcher never restores over those unbenchmarked edits. Each automatic improveme
 battle just fought. Continuous mode does not pause for feedback or prompt review: an agent-authored
 next prompt remains a draft on the run, the current prompt stays frozen, and the player can review
 the draft after the loop stops. The PowerShell training loop does not wait for that review; it adopts
-each valid draft for the next round.
+each valid draft for the next round once that round's verdict is in.
 
-The default continuous gate is `hard-16-9` at `Hard`. Each arm receives those explicit arguments,
+The launcher's default continuous gate is `hard-16-9` at `Hard`; the PowerShell loop defaults to
+`hard-16-9-fresh`, which judges every champion on seeds it was never selected on, a stage at a
+time, by a sequential test on the games only one arm won (see `scripts/benchmarks.json` and
+[learning-loop-overhaul-2026-09-28.md](learning-loop-overhaul-2026-09-28.md)). Each arm receives
+explicit benchmark and difficulty arguments,
 and results naming any other benchmark or difficulty are `Undefined`. Isolated builds record
 MSBuild's evaluated `TargetPath`; imported, conditional, or property-expanded assembly names are
 not guessed. Failed planned-match rows may carry null metrics, but their explicit

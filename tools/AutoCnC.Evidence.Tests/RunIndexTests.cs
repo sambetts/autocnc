@@ -55,6 +55,50 @@ namespace AutoCnC.Evidence.Tests
 			Assert.That(creditsLost.Regression, Is.False);
 		}
 
+		/// <summary>
+		/// A quick win used to be called a regression in match length, exploration and idle time,
+		/// and every round was told to explain the three before doing anything else.
+		/// </summary>
+		[Test]
+		public void MatchLengthExplorationAndIdleTimeAreShownButNeverFlagged()
+		{
+			var history = new RunHistory { Bot = "TestBot" };
+			for (var i = 0; i < 3; i++)
+				RunIndex.Record(history, "TestBot", Entry("run-" + i, i, 40, 100, "candidate", "Won"));
+			var quick = Entry("quick", 4, 40, 100, "candidate", "Won");
+			quick.Headline["durationSeconds"] = 300;
+			quick.Headline["cellsExplored"] = 40;
+			quick.Headline["idleUnitSeconds"] = 90;
+			RunIndex.Record(history, "TestBot", quick);
+
+			var trend = RunIndex.Trend(history);
+
+			foreach (var name in new[] { "durationSeconds", "cellsExplored", "idleUnitSeconds" })
+			{
+				var metric = trend.Metrics.Single(m => m.Name == name);
+				Assert.That(metric.Regression, Is.False, name);
+				Assert.That(metric.Latest, Is.Not.EqualTo(metric.PriorMedian), name + " is still reported");
+			}
+			Assert.That(trend.Regressions, Is.Empty);
+		}
+
+		[Test]
+		public void TheRenderedTrendMakesNoClaimAboutPromptRevisions()
+		{
+			var history = new RunHistory { Bot = "TestBot" };
+			for (var i = 0; i < 4; i++)
+			{
+				var entry = Entry("run-" + i, i, 40 - 5 * i, 100, "candidate", "Lost");
+				entry.PromptId = "prompt-" + (i % 2);
+				RunIndex.Record(history, "TestBot", entry);
+			}
+
+			var trend = RunIndex.Trend(history);
+
+			Assert.That(trend.Prompts, Is.Not.Empty, "the data is still kept in trend.json");
+			Assert.That(trend.Rendered, Does.Not.Contain("prompt-0").And.Not.Contain("prompt revision"));
+		}
+
 		[Test]
 		public void RecordReplacesRunsWithTheSameRunId()
 		{

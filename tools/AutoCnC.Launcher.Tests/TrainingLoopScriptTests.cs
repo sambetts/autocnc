@@ -57,8 +57,11 @@ namespace AutoCnC.Launcher.Tests
 				Assert.That(options.GetProperty("ExecutionMode").GetString(), Is.EqualTo("Headless"));
 				Assert.That(options.GetProperty("AgentConfiguration").GetString(), Is.EqualTo(Path.Combine(root, "agent.json")));
 				Assert.That(options.GetProperty("RunsRoot").GetString(), Is.EqualTo(Path.Combine(root, "new runs")));
-				Assert.That(options.GetProperty("Benchmark").GetString(), Is.EqualTo("hard-16-9"));
+				Assert.That(options.GetProperty("Benchmark").GetString(), Is.EqualTo("hard-16-9-fresh"),
+					"The unattended loop gates on fresh seeds, never on a set its champion was selected on.");
 				Assert.That(options.GetProperty("BenchmarkDifficulty").GetString(), Is.EqualTo("Hard"));
+				Assert.That(options.GetProperty("Parallel").GetInt32(), Is.Zero,
+					"Zero asks the host for its default concurrency.");
 				Assert.That(options.GetProperty("Commit").GetBoolean(), Is.True);
 				Assert.That(options.GetProperty("Push").GetBoolean(), Is.True,
 					"Promotions are published unless the caller opts out.");
@@ -130,6 +133,24 @@ namespace AutoCnC.Launcher.Tests
 			using var captured = JsonDocument.Parse(File.ReadAllText(Path.Combine(root, "captured.json")));
 			Assert.That(captured.RootElement.GetProperty("RestoreRun").GetString(), Is.EqualTo(root));
 			AssertTemporaryOptionsDeleted();
+		}
+
+		/// <summary>
+		/// The template the loop starts from is the one file the unattended loop cannot run
+		/// without, and the gate's default set is the one it gates on.
+		/// </summary>
+		[Test]
+		public void TheCheckedInPromptAndGateAreUsable()
+		{
+			var repo = RepoLayout.Discover(null, [AppContext.BaseDirectory]);
+			var template = File.ReadAllText(repo.AgentPromptTemplate);
+
+			Assert.That(TrainingAgent.ValidatePromptTemplate(template, out var error), Is.True, error);
+			Assert.That(template, Does.Contain("{experimentLedger}"));
+			Assert.That(template, Does.Not.Contain("Identical code has scored"),
+				"that claim was a changed denominator from a dropped pair, not observed non-determinism");
+			Assert.That(() => ContinuousPromotionRunner.ValidateSelection(repo,
+				ContinuousPromotionRunner.SequentialBenchmark, "Hard"), Throws.Nothing);
 		}
 
 		void AssertTemporaryOptionsDeleted()

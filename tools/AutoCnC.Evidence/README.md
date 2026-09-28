@@ -27,12 +27,13 @@ launcher solution, is `IsPackable=false`, and targets plain `net8.0` so CI can t
 ```
 dotnet AutoCnC.Evidence.dll summarise <evidenceDir> [--history <file>] [--checks <file>] [--bot <name>] [--matchups <file>|none]
 dotnet AutoCnC.Evidence.dll trend <historyFile> [--out <file>]
+dotnet AutoCnC.Evidence.dll ledger <experimentsFile> [--last <n>]
 dotnet AutoCnC.Evidence.dll audit-bot <botSourceDir>
 ```
 
 `summarise` is the one the harness runs. It writes `units.csv`, `summary.json`,
-`check-results.json` and `trend.json` into the evidence directory, and folds the run into the
-per-bot history.
+`reason-ids.json`, `check-results.json` and `trend.json` into the evidence directory, and folds the
+run into the per-bot history.
 
 ## Artifacts
 
@@ -159,9 +160,12 @@ benchmark, batch or configuration produce an `Undefined` verdict, which cannot p
 Failure rows may serialize null duration and metric values. Those fields are required and checked
 for finiteness only when `succeeded` is true.
 
-A scenario that did not complete in both arms — a failed status, an outcome other than `Won` or
-`Lost`, or non-finite metrics — is *dropped from both arms together* and counted in
-`droppedPairs`, so one crashed match no longer discards the rest of the sitting. Wins are counted
+A scenario that did not complete in both arms — a failed status, an outcome other than `Won`,
+`Lost` or `TimedOut`, or non-finite metrics — is *dropped from both arms together* and counted in
+`droppedPairs`, so one crashed match no longer discards the rest of the sitting. A `TimedOut` game
+reached the set's time limit: it is a decided result that is not a win, and it keeps its pair, so a
+change that stops a bot finishing its games cannot erase the opposite arm's win on those seeds.
+Wins are counted
 over the surviving pairs, and the verdict is `Undefined` only when fewer than three quarters of
 `expectedMatchesPerArm` survive. Incompleteness is thereby distinguished from inconsistency: the
 first is absent evidence, the second is corrupt evidence and still voids the batch.
@@ -177,12 +181,51 @@ champion. The result is written as `promotion-evaluation.json` with `Promote`, `
 validated pair. The launcher composes two immutable single-arm runs into this paired batch,
 preserving their raw batch ids in the training manifest. It never uses check pass percentage.
 
+### Sequential fresh-seed gate — `SequentialGate`, `gate/<set>.json`
+
+A benchmark set with a `sequential` block (`hard-16-9-fresh`) has no fixed matches, because a small
+fixed set stops working as a gate once the champion has been selected on it. For each champion
+source fingerprint the gate draws a pool of `maxPairs` seeds, starting at `seedBase` and never
+reusing one, stratified so that every stage of `stagePairs` holds each faction pairing equally.
+Candidates play the pool a stage at a time; the champion's games on it are cached in
+`<runs>/<bot>/gate/<set>.json`, and one cached game is replayed per evaluation as a canary. A
+promotion retires the pool. A changed harness key — engine binaries, rules fingerprint, difficulty
+table, time limit, fitness scale — discards the cached games and keeps the seeds, and a canary that
+does not replay exactly stops the cache being used for that pool.
+
+After each stage, Wald's sequential probability ratio test runs on the *decisive* pairs, the games
+exactly one arm won: `alpha` is the promotion rate for a change that does nothing, `beta` the miss
+rate at `discordantWinShare`. Pairs both arms won or lost carry no information about which is
+better and do not move it, and fitness plays no part. A candidate game that failed on every
+attempt counts as a loss; a champion game that failed drops its pair. An undecided test at
+`maxPairs` restores as `inconclusive`. The composed sitting is written in the same
+`benchmark-result.json` and `promotion-evaluation.json` shapes, with the test under `sequential`:
+`candidateOnlyWins`, `controlOnlyWins`, `logLikelihoodRatio`, both bounds, the `conclusion`
+(`measured-better`, `measured-worse`, `not-better`, `inconclusive`), the pool's seeds and epoch,
+how many champion games came from the cache, and the canary's result.
+
+### `reason-ids.json` and the experiment ledger
+
+`summarise` writes `reason-ids.json` beside every fight: each reason id the trace logged and how
+often. After every verdict the training loop appends one line to `<runs>/<bot>/experiments.jsonl`
+(`ExperimentLedger`): the candidate's changed files, the reason-id literals its source adds and
+in how many of its own benchmark games each fired, its `checks.json` tallied across those games,
+its `hypothesis`, the opening fight it read, and the gate's conclusion. `ledger <file>` renders the
+newest entries with the current champion's record in its random-seed opening fights, which is what
+`train-bot.ps1` inserts for `{experimentLedger}`.
+
 ### `history.json` and `trend.json` — `schemaVersion` 1
 
 Per-bot index of every run, and a rolled-up diff of the last `RunIndex.TrendWindow` (10) runs on
 the headline metrics. A metric that falls by `RunIndex.RegressionThreshold` (15%) against the
 **median of earlier runs** — not against the previous run, which at n=1 is as noisy as the thing it
-is measuring — is flagged as a regression and named in the next prompt.
+is measuring — is flagged and listed in the next prompt as a lead to check, not a finding: one
+fight is one matchup and one seed. `durationSeconds`, `cellsExplored` and `idleUnitSeconds` are
+shown but never flagged, because a quicker win shortens, explores less and idles differently
+without being worse. The rendered trend no longer reports per-prompt "effects": every prompt now
+steers a single round, so the adjacent-fight difference compared two random matchups under two
+prompts. `trend.json` still carries the data, and a prompt's id is the hash of its unrendered
+template (`agent-prompt-template.md` beside the fight) when that was kept.
 
 Three of the tracked metrics come from `intel` and `scale`: `lateSightingLossPercent` (lower is
 better), `counterMatchPercent` and `spendVsOpponentPercent`. Runs recorded before they existed

@@ -177,6 +177,12 @@ $trendReport = if (Test-Path -LiteralPath $trendPath) {
 
 $botAudit = & { dotnet $evidenceDll audit-bot $workspace } | Out-String
 
+# The loop's memory of its own experiments, written by the harness after every verdict. The
+# ledger lives beside the bot's runs, one directory up from this one.
+$ledgerPath = Join-Path (Split-Path -Parent $run) 'experiments.jsonl'
+$experimentLedger = (& { dotnet $evidenceDll ledger $ledgerPath --last 12 } | Out-String).Trim()
+if (-not $experimentLedger) { $experimentLedger = 'No experiment has been recorded for this bot yet.' }
+
 $promptFile = Join-Path $evidence 'agent-prompt.txt'
 $transcript = Join-Path $run 'agent-transcript.txt'
 $statusFile = Join-Path $run 'agent-status.json'
@@ -270,13 +276,18 @@ already been done, which is the single largest thing that was wrong with this lo
 ``{decisionTrace}`` only for a question the summary genuinely cannot answer, and say which.
 
 Put {checkReport} and {trendReport} on lines by themselves where those sections belong. They are
-generated: {checkReport} is the harness evaluating the checks the previous round wrote, and
-{trendReport} is the cross-run comparison. Do not write either by hand, and do not maintain a
-prose list of "already diagnosed, verify this" - that list is exactly what checks.json is for.
+generated: {checkReport} is the harness evaluating the checks the champion's round wrote, and
+{trendReport} is the cross-run comparison. Do not write either by hand.
+
+Put {experimentLedger} on a line by itself too. It is the harness's record of past experiments,
+written after every verdict from the candidate's own games: what changed, whether its new reason
+ids fired, how its checks fared and what the gate concluded. Do not keep your own list of what was
+tried; "inconclusive" is not "refuted", and a reason id that fired in no game was never tested.
 
 Keep a section telling the next round to write ``checks.json`` into {workspace} before it finishes,
-and to give any new code path a reason literal nothing else uses so a ``reason:`` check can prove
-it ran. That is what distinguishes "the new branch is wrong" from "the new branch never ran".
+with a one-sentence ``hypothesis``, and to give any new code path a reason literal nothing else
+uses so a ``reason-id:`` check can prove it ran. That is what distinguishes "the new branch is
+wrong" from "the new branch never ran".
 
 Put {nextPromptContract} on a line by itself where this section belongs. Do not copy this contract
 text or its marker example into the replacement; that placeholder inserts the current contract when
@@ -315,6 +326,7 @@ accept a valid template automatically.
         # hand and the next round was supposed to verify by eye.
         '{checkReport}' = $checkReport
         '{trendReport}' = $trendReport
+        '{experimentLedger}' = $experimentLedger
         '{botAudit}' = $botAudit.Trim()
 
         '{battle}' = "map=$($battle.Map), difficulty=$($battle.Difficulty), opponents=$($battle.Opponents), faction=$($battle.Faction), opponent faction=$($battle.BotFaction), speed=$($battle.GameSpeed), execution=$($battle.ExecutionMode)"
@@ -363,9 +375,11 @@ $derivedReplacements = [ordered]@{
     '{trend}' = $trendPath
     '{checkReport}' = $checkReport
     '{trendReport}' = $trendReport
+    '{experimentLedger}' = $experimentLedger
     '{botAudit}' = $botAudit.Trim()
 }
 
+$hadLedger = $head.Contains('{experimentLedger}') -or $prompt.Contains($experimentLedger)
 $before = $head
 foreach ($replacement in $derivedReplacements.GetEnumerator()) {
     $head = $head.Replace([string]$replacement.Key, [string]$replacement.Value)
@@ -373,6 +387,19 @@ foreach ($replacement in $derivedReplacements.GetEnumerator()) {
 
 if ($head -ne $before) {
     $prompt = $head + $tail
+    Set-Content -LiteralPath $promptFile -Value $prompt -Encoding utf8
+}
+
+# A template that dropped the ledger still gets it: it is the only record of what earlier rounds
+# tried and what the gate made of it, and without it a round repeats them.
+if (-not $hadLedger) {
+    $ledgerSection = "`n## Experiment ledger (appended by the harness)`n`n$experimentLedger`n`n"
+    $contractAt = $prompt.IndexOf($contractHeading)
+    $prompt = if ($contractAt -ge 0) {
+        $prompt.Substring(0, $contractAt) + $ledgerSection + $prompt.Substring($contractAt)
+    } else {
+        $prompt + $ledgerSection
+    }
     Set-Content -LiteralPath $promptFile -Value $prompt -Encoding utf8
 }
 

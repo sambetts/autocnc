@@ -94,6 +94,13 @@ namespace AutoCnC.Evidence
 		public int SchemaVersion { get; set; } = 1;
 		public string AuthoredForRevision { get; set; }
 		public string AuthoredUtc { get; set; }
+
+		/// <summary>
+		/// The candidate's claim in one sentence: what it changed and what that should move. The
+		/// harness copies it into the experiment ledger, so the next rounds know what was tried.
+		/// </summary>
+		public string Hypothesis { get; set; }
+
 		public List<Check> Checks { get; set; } = [];
 	}
 

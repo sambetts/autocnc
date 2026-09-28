@@ -40,6 +40,10 @@ namespace AutoCnC.Launcher
 		string promptTemplatePath;
 		int? adoptedRevision;
 
+		// The prompt the next round is given: the template file's contents at start, then each
+		// verdict's adopted proposal.
+		string prompt;
+
 		public TrainingLoopRunner(TrainingLoopOptions options, Action<string> output)
 			: this(options, output, null) { }
 
@@ -66,7 +70,7 @@ namespace AutoCnC.Launcher
 			var project = options.Validate(repo);
 			var promptPath = options.PromptTemplate ?? repo.AgentPromptTemplate;
 			promptTemplatePath = promptPath;
-			var prompt = File.ReadAllText(promptPath);
+			prompt = File.ReadAllText(promptPath);
 			if (!TrainingAgent.ValidatePromptTemplate(prompt, out var error))
 				throw new ArgumentException(error);
 			var agent = ReadAgentConfiguration();
@@ -116,6 +120,7 @@ namespace AutoCnC.Launcher
 
 				if (!repo.EngineBuilt)
 					RequireSuccess(Execute(repo.BuildScript, ["-SkipBots"], "Building engine", cancellationToken));
+				promotion.Parallel = options.Parallel;
 				if (activeRun != null)
 					Evaluate(cancellationToken);
 
@@ -140,7 +145,6 @@ namespace AutoCnC.Launcher
 						adoptsNextPrompt: true);
 					activeRun.ContinuousAgentStarted(agent.Command);
 					Improve(project, cancellationToken);
-					prompt = AdoptNextPrompt(promptPath, prompt);
 					Evaluate(cancellationToken);
 					output($"Round {round}: {activeRun.Manifest.Status}. {activeRun.Manifest.Experiment.Reason}");
 				}
@@ -209,6 +213,7 @@ namespace AutoCnC.Launcher
 				arguments.AddRange(["-CancellationFile", run.CancellationPath, "-PerformanceReport", run.PerformancePath]);
 
 			TrainingScriptResult result;
+			var fought = BotWorkspace.Fingerprint(Path.GetDirectoryName(project));
 			try
 			{
 				result = Execute(repo.RunBotScript, arguments, "Fighting", token,
@@ -224,7 +229,46 @@ namespace AutoCnC.Launcher
 			if (!run.HasImprovementEvidence || !run.HasRecordedBattle ||
 				!new[] { "Won", "Lost", "Draw" }.Contains(run.Manifest.Result.Outcome, StringComparer.OrdinalIgnoreCase))
 				throw new InvalidDataException("The battle did not produce complete, decided training evidence.");
+			CheckFoughtAssembly(run, fought);
 			CaptureReplay(run);
+		}
+
+		// The assembly each source fingerprint has fought with in this session.
+		readonly Dictionary<string, string> foughtAssemblies = new(StringComparer.Ordinal);
+
+		/// <summary>
+		/// Warns when the same bot source fights with a different assembly than it did before.
+		/// </summary>
+		/// <remarks>
+		/// A tripwire for the fault that once ran rejected candidates as the champion: restored
+		/// files kept older timestamps, an incremental build kept the candidate's output, and 11 of
+		/// 52 "champion" fights ran code the gate had just thrown out. run-bot.ps1 now always
+		/// rebuilds, and a deterministic build of the same source yields the same bytes, so a
+		/// changed hash here means the fight is not evidence about the source it is filed under.
+		/// </remarks>
+		void CheckFoughtAssembly(TrainingRun run, string fingerprint)
+		{
+			var path = Path.Combine(run.EvidenceDirectory, "bot-assembly.json");
+			if (!File.Exists(path))
+				return;
+			try
+			{
+				using var document = JsonDocument.Parse(File.ReadAllText(path));
+				if (!document.RootElement.TryGetProperty("Assemblies", out var assemblies) ||
+					assemblies.ValueKind != JsonValueKind.Array)
+					return;
+				var hash = string.Join(",", assemblies.EnumerateArray()
+					.Select(item => item.TryGetProperty("Sha256", out var sha) ? sha.GetString() : ""));
+				if (foughtAssemblies.TryGetValue(fingerprint, out var previous) &&
+					!string.Equals(previous, hash, StringComparison.OrdinalIgnoreCase))
+					output("WARNING: this fight's bot assembly differs from the one the same source fought with " +
+						$"earlier ({previous[..Math.Min(12, previous.Length)]} then, {hash[..Math.Min(12, hash.Length)]} now). " +
+						"The build may not match the source; treat this fight's evidence with suspicion.");
+				foughtAssemblies[fingerprint] = hash;
+			}
+			catch (Exception ex) when (ex is JsonException or IOException or InvalidOperationException)
+			{
+			}
 		}
 
 		void FinishBattle(string status)
@@ -297,11 +341,11 @@ namespace AutoCnC.Launcher
 		/// </summary>
 		/// <remarks>
 		/// <para>
-		/// Adopted as soon as the build is verified and before the paired benchmark runs, whichever
-		/// way that goes. The prompt steers the analysis rather than the play, so the benchmark says
-		/// nothing about it; its measure is the trend's report of what each revision did to the
-		/// rounds it steered. Adopting before the evaluation also means a loop stopped during the
-		/// benchmark, and then resumed from it, has already taken the proposal.
+		/// Adopted once the paired benchmark has decided the round, whichever way it went. The
+		/// prompt steers the analysis rather than the play, so the benchmark says nothing about it,
+		/// but it was written before the verdict and cannot know it: the next round learns what
+		/// happened from the experiment ledger the harness renders into it. Adopting only after a
+		/// verdict also means a round whose evaluation never finished hands nothing on.
 		/// </para>
 		/// <para>
 		/// The checks and repairs are the ones a player's approval gets. A proposal missing
@@ -399,7 +443,13 @@ namespace AutoCnC.Launcher
 				var plan = promotion.PrepareEvaluation(repo, activeRun, options.Benchmark, options.BenchmarkDifficulty);
 				activeRun = plan.Run;
 				if (plan.NoChanges)
+				{
+					RecordExperiment(plan, ContinuousEvaluationDecision.Promote);
+					prompt = AdoptNextPrompt(promptTemplatePath, prompt);
 					return;
+				}
+				if (plan.Note != null)
+					output(plan.Note);
 				ContinuousEvaluationCompletion completion;
 				try
 				{
@@ -409,10 +459,19 @@ namespace AutoCnC.Launcher
 						RequireSuccess(Execute(step.ScriptPath, step.Arguments, step.Title, token));
 						promotion.CaptureBuiltArm(activeRun, plan, arm);
 					}
-					foreach (var arm in new[] { ContinuousEvaluationArm.Candidate, ContinuousEvaluationArm.Control })
+
+					ContinuousScriptPlan benchmark;
+					var reported = 0;
+					while ((benchmark = promotion.NextBenchmarkStep(repo, activeRun, plan)) != null)
 					{
-						var step = promotion.BenchmarkArm(repo, activeRun, plan, arm);
-						RequireSuccess(Execute(step.ScriptPath, step.Arguments, step.Title, token));
+						ReportStage(plan, ref reported);
+						RequireSuccess(Execute(benchmark.ScriptPath, benchmark.Arguments, benchmark.Title, token));
+						promotion.CaptureBenchmarkStep(activeRun, plan, benchmark);
+						if (plan.Warning != null)
+						{
+							output("WARNING: " + plan.Warning);
+							plan.Warning = null;
+						}
 					}
 					completion = promotion.CompleteEvaluation(activeRun, plan, 0);
 				}
@@ -427,12 +486,53 @@ namespace AutoCnC.Launcher
 					? ContinuousEvaluationDecision.Reevaluate
 					: promotion.ApplyDecision(activeRun, plan, completion.Evaluation);
 				output($"Evaluation: {decision}. {completion.InvalidationReason ?? completion.Evaluation.Reason}");
+				if (decision != ContinuousEvaluationDecision.Reevaluate)
+					RecordExperiment(plan, decision, completion.Evaluation);
 				if (decision == ContinuousEvaluationDecision.Undefined)
 					throw new InvalidOperationException("Evaluation evidence was invalid. The champion was restored and training stopped.");
+
+				// After the verdict, not before it: the next round is told by the ledger whether
+				// this round's code was kept, and a round that never reached a verdict hands
+				// nothing on. Before the commit, so a promotion commits the prompt now in force.
+				if (decision != ContinuousEvaluationDecision.Reevaluate)
+					prompt = AdoptNextPrompt(promptTemplatePath, prompt);
 				if (decision == ContinuousEvaluationDecision.Promote)
 					CommitPromotion(completion.Evaluation);
 				if (decision != ContinuousEvaluationDecision.Reevaluate)
 					return;
+			}
+		}
+
+		/// <summary>Says where a sequential test stands each time a stage leaves it undecided.</summary>
+		void ReportStage(ContinuousEvaluationPlan plan, ref int reported)
+		{
+			var progress = plan.Progress;
+			if (progress.StagesPlayed <= reported || progress.Decision?.Verdict != SequentialDecision.Continue)
+				return;
+
+			reported = progress.StagesPlayed;
+			output($"Stage {progress.StagesPlayed}: {progress.Decision.Reason}");
+		}
+
+		/// <summary>
+		/// Appends the round to the experiment ledger. Bookkeeping, like a commit: a ledger that
+		/// cannot be written is reported and training carries on.
+		/// </summary>
+		void RecordExperiment(ContinuousEvaluationPlan plan, ContinuousEvaluationDecision decision,
+			PairedBenchmarkEvaluation evaluation = null)
+		{
+			try
+			{
+				evaluation ??= File.Exists(activeRun.PromotionEvaluationPath)
+					? JsonSerializer.Deserialize<PairedBenchmarkEvaluation>(
+						File.ReadAllText(activeRun.PromotionEvaluationPath), JsonOptions)
+					: null;
+				promotion.RecordExperiment(activeRun, plan, evaluation, decision);
+			}
+			catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
+				InvalidDataException or JsonException)
+			{
+				output("Could not record the experiment in the ledger: " + ex.Message);
 			}
 		}
 

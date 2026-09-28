@@ -17,13 +17,34 @@
     Every match writes a full evidence directory and is folded into the bot's cross-run history,
     so the trend and the regression alarm work exactly as they do for a single fight.
 
-    Matches run headless at maximum speed. Use -Parallel to run several at once.
+    Matches run headless at maximum speed. Use -Parallel to run several at once, each in its own
+    OpenRA support directory.
+
+    A match that reaches the time limit is a decided result, TimedOut, which is not a win: it
+    stays in its pair rather than being dropped, so a change that stops a bot finishing its games
+    is measured instead of excused. Only a match whose process fails on every attempt is
+    Undefined.
 
 .PARAMETER BattleBot
     The bot to measure: a folder name under bots/, or a path to a project or built .dll.
 
 .PARAMETER Benchmark
     The named set from scripts/benchmarks.json. Defaults to the set marked default in that file.
+
+.PARAMETER MatchesFile
+    Optional JSON file listing the matches to play instead of the set's own: an array, or an
+    object with a "matches" array, of { map, faction, botFaction, seed, scenario }. The set still
+    supplies the name, difficulty and time limit. This is how the training loop plays the fresh
+    seeds of a sequential gate, a stage at a time.
+
+.PARAMETER ChecksFile
+    Optional checks.json evaluated against every match's evidence, so a candidate's own claims
+    about its new code are tested in the games that decide it.
+
+.PARAMETER AllowIncomplete
+    Exit successfully however many matches failed, leaving the failed rows in the result for the
+    caller to judge. A sequential gate step plays a handful of matches and decides on each pair
+    itself, so the three-quarters rule below would turn one crashed game into a stopped loop.
 
 .PARAMETER Repeats
     How many times to play the whole set. Repeats use the set's seeds, so they measure the bot's
@@ -34,9 +55,11 @@
     alone: the revision is checked out into a temporary worktree and built there.
 
 .PARAMETER Parallel
-    Reserved concurrency ceiling. Multiple OpenRA processes currently share local-random/profile
-    state on supported desktop platforms, so matches run sequentially for reliable retries and
-    evidence even when a larger value is supplied.
+    How many matches to play at once. Each concurrent match runs in its own process with its own
+    copy of the OpenRA support directory, so no two games share a settings file, a log or a
+    replay folder; the engine's local random stream is seeded from the lobby seed
+    (patches/openra-local-random.patch), so a match does not depend on what runs beside it.
+    1, the default, plays them one after another in this process.
 
 .PARAMETER MatchRetries
     How many times to retry a match whose game process fails before recording it as Undefined.
@@ -67,6 +90,9 @@
 param(
     [string]$BattleBot = 'Reference',
     [string]$Benchmark,
+    [string]$MatchesFile,
+    [string]$ChecksFile,
+    [switch]$AllowIncomplete,
     [ValidateRange(1, 50)]
     [int]$Repeats = 1,
     [string]$Control,
@@ -93,6 +119,31 @@ $catalog = Get-Content -LiteralPath $catalogPath -Raw | ConvertFrom-Json
 $setName = if ($Benchmark) { $Benchmark } else { $catalog.default }
 $set = $catalog.sets | Where-Object { $_.name -eq $setName } | Select-Object -First 1
 if (-not $set) { throw "Unknown benchmark '$setName'. Available: $(($catalog.sets.name) -join ', ')." }
+
+# The matches to play: the set's own, or an explicit list. A sequential set has no fixed list at
+# all - its seeds are drawn fresh for every champion - so it can only be played from a file.
+$setMatches = @($set.matches | Where-Object { $_ })
+if ($MatchesFile) {
+    $listed = Get-Content -LiteralPath $MatchesFile -Raw | ConvertFrom-Json
+    $setMatches = if ($listed -is [array]) { @($listed) } else { @($listed.matches) }
+    foreach ($match in $setMatches) {
+        if (-not $match.map -or -not $match.faction -or -not $match.botFaction -or -not $match.seed) {
+            throw "Every match in $MatchesFile needs a map, faction, botFaction and nonzero seed."
+        }
+    }
+}
+if ($setMatches.Count -eq 0) {
+    throw "Benchmark '$setName' lists no matches of its own. Pass -MatchesFile with the matches to play."
+}
+
+$checksPath = $null
+if ($ChecksFile) {
+    if (Test-Path -LiteralPath $ChecksFile -PathType Leaf) {
+        $checksPath = (Resolve-Path -LiteralPath $ChecksFile).Path
+    } else {
+        Write-Warning "Checks file not found, so no checks are evaluated: $ChecksFile"
+    }
+}
 
 $botName = [IO.Path]::GetFileNameWithoutExtension((Split-Path -Leaf $BattleBot))
 if (-not $OutputDirectory) {
@@ -179,9 +230,13 @@ function New-MatchPlan($arm, $root, $revision, $bot) {
 
     $plan = @()
     for ($repeat = 1; $repeat -le $Repeats; $repeat++) {
-        $index = 0
-        foreach ($match in $set.matches) {
-            $index++
+        $position = 0
+        foreach ($match in $setMatches) {
+            $position++
+
+            # A listed match keeps the scenario number it was given, so a stage of a sequential
+            # gate pairs with the same scenario whichever arm or stage played it.
+            $index = if ($match.scenario) { [int]$match.scenario } else { $position }
             $stamp = (Get-Date).ToString('yyyyMMdd-HHmmss-fff')
             $id = "$stamp-$([guid]::NewGuid().ToString('N').Substring(0,12))"
             $runDirectory = Join-Path $OutputDirectory $id
@@ -202,8 +257,10 @@ function New-MatchPlan($arm, $root, $revision, $bot) {
                 Seed = $match.seed
                 Script = (Join-Path $repoRoot 'scripts\run-bot.ps1')
                 Succeeded = $false
+                TimedOut = $false
                 Attempts = 0
                 Error = $null
+                Result = $null
 
                 # A hashtable, not an array. Array splatting binds positionally, so
                 # @('-Map', 'x', '-Seed', 1) reaches run-bot.ps1 as -BattleBot '-Map' and fails on
@@ -231,56 +288,180 @@ function New-MatchPlan($arm, $root, $revision, $bot) {
 }
 
 <#
-    Plays every match in the plan.
+    Plays every match in the plan and returns one result per match.
 
-    The parallel body is written out in full rather than shared with the sequential path through a
-    variable, because PowerShell 7 refuses to marshal a script block into ForEach-Object -Parallel
-    at all: "A ForEach-Object -Parallel using variable cannot be a script block." It throws before
-    a single match starts. Each job therefore carries its own argument list, which reduces both
-    bodies to the same two lines and leaves nothing worth sharing.
+    Each match is completed - its evidence derived and its row built - as soon as it finishes,
+    rather than after the whole plan, so the summarising of one match overlaps the games still
+    running beside it.
 #>
 function Invoke-Arm($plan) {
-    $runSequentially = {
-        param($jobs)
+    $plan = @($plan)
+    if ($Parallel -gt 1 -and $plan.Count -gt 1) {
+        return Invoke-Parallel $plan ([math]::Min($Parallel, $plan.Count))
+    }
 
-        foreach ($job in $jobs) {
-            Write-Host "    [$($job.Arm)] $($job.Map) $($job.Faction) vs $($job.BotFaction) seed $($job.Seed)" -ForegroundColor DarkGray
-            New-Item -ItemType Directory -Path $job.Evidence -Force | Out-Null
+    $results = @()
+    foreach ($job in $plan) {
+        Write-Host "    [$($job.Arm)] $($job.Map) $($job.Faction) vs $($job.BotFaction) seed $($job.Seed)" -ForegroundColor DarkGray
+        New-Item -ItemType Directory -Path $job.Evidence -Force | Out-Null
 
-            for ($attempt = 1; $attempt -le $MatchRetries + 1; $attempt++) {
-                $job.Attempts = $attempt
-                try {
-                    # Splatting needs a variable: `@($job.Arguments)` is array syntax, and an
-                    # array splat binds positionally rather than by name.
-                    $arguments = $job.Arguments
-                    & $job.Script @arguments 2>&1 | Out-String -Width 200 | Write-Verbose
-                    $job.Succeeded = $true
-                    $job.Error = $null
-                    break
-                }
-                catch {
-                    $job.Succeeded = $false
-                    $job.Error = $_.Exception.Message
-                    if ($attempt -le $MatchRetries) {
-                        Write-Warning ("Match failed; retrying attempt {0} of {1}. {2}" -f `
-                                ($attempt + 1), ($MatchRetries + 1), $job.Error)
-                    }
+        for ($attempt = 1; $attempt -le $MatchRetries + 1; $attempt++) {
+            $job.Attempts = $attempt
+            try {
+                # Splatting needs a variable: `@($job.Arguments)` is array syntax, and an array
+                # splat binds positionally rather than by name.
+                $arguments = $job.Arguments
+                & $job.Script @arguments 2>&1 | Out-String -Width 200 | Write-Verbose
+                $job.Succeeded = $true
+                $job.Error = $null
+                break
+            }
+            catch {
+                $job.Error = $_.Exception.Message
+                if (Test-TimedOut $job) { break }
+                $job.Succeeded = $false
+                if ($attempt -le $MatchRetries) {
+                    Write-Warning ("Match failed; retrying attempt {0} of {1}. {2}" -f `
+                            ($attempt + 1), ($MatchRetries + 1), $job.Error)
                 }
             }
+        }
 
-            if (-not $job.Succeeded) {
-                Write-Warning ("Match remained Undefined after {0} attempt(s): {1}" -f `
-                        $job.Attempts, $job.Error)
+        if (-not $job.Succeeded) {
+            Write-Warning ("Match remained Undefined after {0} attempt(s): {1}" -f `
+                    $job.Attempts, $job.Error)
+        }
+        $results += Complete-Match $job
+    }
+    return $results
+}
+
+<#
+    A match that ran to the time limit is a result, not a failure.
+
+    run-bot.ps1 throws for it, because for a single fight a stalemate is not usable training
+    evidence. For a benchmark it is the answer to "did this bot win?", and it is deterministic, so
+    retrying it only spends another full-length game to learn the same thing.
+#>
+function Test-TimedOut($job) {
+    $report = $job.Arguments.PerformanceReport
+    if (-not (Test-Path -LiteralPath $report)) { return $false }
+    try {
+        $status = (Get-Content -LiteralPath $report -Raw | ConvertFrom-Json).status
+    }
+    catch {
+        return $false
+    }
+    if ($status -ne 'timed-out') { return $false }
+
+    $job.TimedOut = $true
+    $job.Succeeded = $true
+    $job.Error = $null
+    return $true
+}
+
+<#
+    Plays the plan several matches at a time, one child process per match.
+
+    Every worker gets its own support directory - settings, logs, replays and a copy of the game
+    content - so concurrent games share nothing but read-only files. Child processes rather than
+    runspaces keep this working in Windows PowerShell 5.1, which the launcher falls back to, and
+    make a crashed game cost only its own process.
+#>
+function Invoke-Parallel($plan, [int]$workers) {
+    . (Join-Path $PSScriptRoot 'game-content.ps1')
+    $engineDirectory = Join-Path $repoRoot 'engine'
+    $content = Join-Path (Get-OpenRASupportDirectory $engineDirectory) 'Content'
+    Assert-CncContent $engineDirectory
+
+    $supportRoot = Join-Path $OutputDirectory ".support-$([guid]::NewGuid().ToString('N').Substring(0, 8))"
+    $supports = @()
+    for ($i = 1; $i -le $workers; $i++) {
+        $directory = Join-Path $supportRoot "w$i"
+        New-Item -ItemType Directory -Path $directory -Force | Out-Null
+        Copy-Item -LiteralPath $content -Destination (Join-Path $directory 'Content') -Recurse -Force
+        $supports += $directory
+    }
+
+    $shell = (Get-Process -Id $PID).Path
+    $queue = New-Object System.Collections.Queue
+    foreach ($job in $plan) { $queue.Enqueue($job) }
+    $running = @{}
+    $results = @()
+    Write-Host "    Playing $($plan.Count) match(es), $workers at a time." -ForegroundColor DarkGray
+
+    try {
+        while ($queue.Count -gt 0 -or $running.Count -gt 0) {
+            for ($slot = 0; $slot -lt $workers -and $queue.Count -gt 0; $slot++) {
+                if ($running.ContainsKey($slot)) { continue }
+
+                $job = $queue.Dequeue()
+                $job.Attempts++
+                New-Item -ItemType Directory -Path $job.Evidence -Force | Out-Null
+                Remove-Item -LiteralPath $job.Arguments.PerformanceReport -Force -ErrorAction SilentlyContinue
+                Write-Host "    [$($job.Arm)] $($job.Map) $($job.Faction) vs $($job.BotFaction) seed $($job.Seed)" -ForegroundColor DarkGray
+
+                $arguments = @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+                    '-File', (Quote-Argument $job.Script))
+                foreach ($name in $job.Arguments.Keys) {
+                    $arguments += "-$name"
+                    $arguments += Quote-Argument ([string]$job.Arguments[$name])
+                }
+                $arguments += '-SupportDirectory'
+                $arguments += Quote-Argument $supports[$slot]
+
+                $log = Join-Path $job.RunDirectory 'run-bot.log'
+                $process = Start-Process -FilePath $shell -ArgumentList ($arguments -join ' ') `
+                    -NoNewWindow -PassThru -RedirectStandardOutput $log `
+                    -RedirectStandardError (Join-Path $job.RunDirectory 'run-bot.err.log')
+
+                # Touching the handle keeps it, which is what lets ExitCode be read once the
+                # process has gone. Without it Windows PowerShell reports an exit code of null.
+                $null = $process.Handle
+                $running[$slot] = [pscustomobject]@{ Job = $job; Process = $process }
+            }
+
+            Start-Sleep -Milliseconds 500
+            foreach ($slot in @($running.Keys)) {
+                $entry = $running[$slot]
+                if (-not $entry.Process.HasExited) { continue }
+
+                $entry.Process.WaitForExit()
+                $job = $entry.Job
+                $running.Remove($slot)
+
+                if ($entry.Process.ExitCode -eq 0) {
+                    $job.Succeeded = $true
+                    $job.Error = $null
+                } elseif (-not (Test-TimedOut $job)) {
+                    $job.Succeeded = $false
+                    $job.Error = "run-bot.ps1 exited with code $($entry.Process.ExitCode); see $(Join-Path $job.RunDirectory 'run-bot.log')."
+                    if ($job.Attempts -le $MatchRetries) {
+                        Write-Warning ("Match failed; retrying attempt {0} of {1}. {2}" -f `
+                                ($job.Attempts + 1), ($MatchRetries + 1), $job.Error)
+                        $queue.Enqueue($job)
+                        continue
+                    }
+                    Write-Warning ("Match remained Undefined after {0} attempt(s): {1}" -f $job.Attempts, $job.Error)
+                }
+
+                $results += Complete-Match $job
             }
         }
     }
-
-    if ($Parallel -gt 1) {
-        Write-Warning ('Parallel game processes share OpenRA local-random/profile state on this ' +
-            'platform. Running sequentially so retries and evidence status remain reliable.')
+    finally {
+        foreach ($entry in $running.Values) {
+            if (-not $entry.Process.HasExited) { Stop-Process -Id $entry.Process.Id -Force -ErrorAction SilentlyContinue }
+        }
+        Remove-Item -LiteralPath $supportRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
 
-    & $runSequentially $plan
+    # In plan order, so a parallel sitting reads and serializes exactly like a sequential one.
+    return @($plan | ForEach-Object { $job = $_; $results | Where-Object { $_.RunId -eq $job.Id } | Select-Object -First 1 })
+}
+
+function Quote-Argument([string]$value) {
+    return '"' + $value.Replace('"', '\"') + '"'
 }
 
 <#
@@ -349,23 +530,41 @@ function Complete-Match($job) {
     }
 
     # The battle log's closing row is the authoritative result: it is written by the engine at
-    # game over, not inferred from an exit code.
+    # game over, not inferred from an exit code. A match stopped at the time limit closes with
+    # result=Undefined, and is recorded as the stalemate it was.
     $rows = Import-Csv -LiteralPath $battleLog
     $over = $rows | Where-Object { $_.event -eq 'over' } | Select-Object -Last 1
-    $outcome = if ($over -and $over.detail -match 'result=(\w+)') { $Matches[1] } else { 'Unknown' }
+    $outcome = if ($job.TimedOut) {
+        'TimedOut'
+    } elseif ($over -and $over.detail -match 'result=(\w+)') {
+        $Matches[1]
+    } else {
+        'Unknown'
+    }
     $duration = if ($rows) { [int]($rows | Select-Object -Last 1).seconds } else { 0 }
 
     Write-FightManifest $job $outcome $duration
 
+    # The rules are the same for every match of a sitting, so they are exported once and copied.
     $rulesPath = Join-Path $job.Evidence 'game-rules.json'
     if (-not (Test-Path -LiteralPath $rulesPath)) {
-        & (Join-Path $PSScriptRoot 'export-agent-rules.ps1') -Output $rulesPath | Out-Null
+        if (-not $script:exportedRules -or -not (Test-Path -LiteralPath $script:exportedRules)) {
+            & (Join-Path $PSScriptRoot 'export-agent-rules.ps1') -Output $rulesPath | Out-Null
+            $script:exportedRules = $rulesPath
+        } else {
+            Copy-Item -LiteralPath $script:exportedRules -Destination $rulesPath
+        }
     }
 
-    dotnet $evidenceDll summarise $job.Evidence --history $historyPath --bot $botName | Out-Null
+    $checkArguments = if ($checksPath) { @('--checks', $checksPath) } else { @() }
+    dotnet $evidenceDll summarise $job.Evidence --history $historyPath --bot $botName @checkArguments | Out-Null
 
     $summary = Get-Content -LiteralPath (Join-Path $job.Evidence 'summary.json') -Raw | ConvertFrom-Json
-    $valid = $summary.fight.outcome -in @('Won', 'Lost')
+    $valid = $job.TimedOut -or $summary.fight.outcome -in @('Won', 'Lost')
+    $recorded = if ($job.TimedOut) { 'TimedOut' } else { $summary.fight.outcome }
+    if ($recorded -eq 'Won' -or $recorded -eq 'Lost' -or $recorded -eq 'TimedOut') {
+        Write-Host "    [$($job.Arm)] seed $($job.Seed): $recorded" -ForegroundColor DarkGray
+    }
     return [pscustomobject]@{
         RunId = $job.Id
         Evidence = $job.Evidence
@@ -386,7 +585,7 @@ function Complete-Match($job) {
         } else {
             "Outcome was $($summary.fight.outcome)."
         }
-        Outcome = $summary.fight.outcome
+        Outcome = $recorded
         Fitness = $summary.fitness.total
         EarnedPerSecond = $summary.headline.creditsEarnedPerSecond
         SpentPerSecond = $summary.headline.creditsSpentPerSecond
@@ -413,11 +612,13 @@ function Show-Arm($name, $results) {
 
     $completed = @($results | Where-Object { $_.Succeeded })
     $wins = @($completed | Where-Object { $_.Outcome -eq 'Won' }).Count
+    $timedOut = @($completed | Where-Object { $_.Outcome -eq 'TimedOut' }).Count
     $summary = [pscustomobject]@{
         Arm = $name
         Wins = $wins
         Expected = $results.Count
         Played = $completed.Count
+        TimedOut = $timedOut
         Undefined = $results.Count - $completed.Count
         MedianFitness = [math]::Round((Get-Median ($completed | ForEach-Object { $_.Fitness })), 4)
         MedianEarnedPerSecond = [math]::Round((Get-Median ($completed | ForEach-Object { $_.EarnedPerSecond })), 2)
@@ -426,8 +627,8 @@ function Show-Arm($name, $results) {
         MedianBuildingsKilled = Get-Median ($completed | ForEach-Object { $_.BuildingsKilled })
     }
 
-    Write-Host ("  {0,-10} {1} of {2} completed won ({3} undefined); median fitness {4}, spend {5} cr/s, exchange {6}, buildings {7}" -f `
-            $name, $wins, $completed.Count, $summary.Undefined, $summary.MedianFitness, $summary.MedianSpentPerSecond,
+    Write-Host ("  {0,-10} {1} of {2} completed won ({3} timed out, {4} undefined); median fitness {5}, spend {6} cr/s, exchange {7}, buildings {8}" -f `
+            $name, $wins, $completed.Count, $timedOut, $summary.Undefined, $summary.MedianFitness, $summary.MedianSpentPerSecond,
         $summary.MedianExchange, $summary.MedianBuildingsKilled) -ForegroundColor Green
     return $summary
 }
@@ -545,16 +746,17 @@ function Build-ArmBot([string]$bot, [string]$arm, [string]$revision) {
 # ---------------------------------------------------------------------------
 # Run the arms
 # ---------------------------------------------------------------------------
-$matchCount = $set.matches.Count * $Repeats
+$matchCount = $setMatches.Count * $Repeats
 
 # One id per invocation of this script. It is what keeps a re-run of the same benchmark from
 # being compared against the previous revision's runs, which would silently invalidate the
 # candidate-versus-control win count.
 $batch = "$($set.name)-$((Get-Date).ToString('yyyyMMdd-HHmmss'))-$([guid]::NewGuid().ToString('N').Substring(0,6))"
 
-Write-Host "==> Benchmark '$($set.name)': $($set.matches.Count) match(es) x $Repeats repeat(s) = $matchCount per arm" -ForegroundColor Cyan
+Write-Host "==> Benchmark '$($set.name)': $($setMatches.Count) match(es) x $Repeats repeat(s) = $matchCount per arm" -ForegroundColor Cyan
 Write-Host "    $($set.summary)" -ForegroundColor DarkGray
 Write-Host "    Batch: $batch" -ForegroundColor DarkGray
+if ($checksPath) { Write-Host "    Checks: $checksPath" -ForegroundColor DarkGray }
 
 $controlWorktree = $null
 try {
@@ -573,13 +775,7 @@ try {
         }
     }
 
-    Invoke-Arm $plan
-
-    $results = @()
-    foreach ($job in $plan) {
-        $result = Complete-Match $job
-        if ($result) { $results += $result }
-    }
+    $results = @(Invoke-Arm $plan | Where-Object { $_ })
 
     Write-Host ''
     Write-Host "==> Benchmark '$($set.name)' result" -ForegroundColor Cyan
@@ -668,7 +864,7 @@ try {
         Write-Host ("  {0} match(es) failed; {1} of {2} pair(s) survived, {3} required." -f `
                 $failed.Count, $completePairs, $matchCount, $required) -ForegroundColor Yellow
 
-        if ($completePairs -lt $required) {
+        if ($completePairs -lt $required -and -not $AllowIncomplete) {
             Write-Host '  Too little of the set completed to decide anything.' -ForegroundColor Yellow
             exit 1
         }

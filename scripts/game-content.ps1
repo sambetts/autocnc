@@ -45,8 +45,9 @@ function Get-CncRequiredContent([string]$EngineDirectory) {
 	throw "Required C&C content metadata was not found in $manifest. Run ./scripts/setup.ps1 first."
 }
 
-function Assert-CncContent([string]$EngineDirectory) {
-	$directory = Join-Path (Get-OpenRASupportDirectory $EngineDirectory) 'Content/cnc'
+function Assert-CncContent([string]$EngineDirectory, [string]$SupportDirectory) {
+	$support = if ($SupportDirectory) { $SupportDirectory } else { Get-OpenRASupportDirectory $EngineDirectory }
+	$directory = Join-Path $support 'Content/cnc'
 	$missing = @(Get-CncRequiredContent $EngineDirectory | Where-Object {
 		-not (Test-Path -LiteralPath (Join-Path $directory $_) -PathType Leaf)
 	})

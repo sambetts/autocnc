@@ -32,6 +32,10 @@ namespace AutoCnC.Evidence
 		public string Arm { get; set; }
 		public int Wins { get; set; }
 		public int Played { get; set; }
+
+		/// <summary>Games that reached the time limit: played, and not won.</summary>
+		public int TimedOut { get; set; }
+
 		public double? MedianFitness { get; set; }
 		public double? MedianEarnedPerSecond { get; set; }
 		public double? MedianSpentPerSecond { get; set; }
@@ -226,6 +230,7 @@ namespace AutoCnC.Evidence
 				Arm = arm,
 				Wins = source.Wins,
 				Played = source.Played,
+				TimedOut = source.TimedOut,
 				MedianFitness = source.MedianFitness,
 				MedianEarnedPerSecond = source.MedianEarnedPerSecond,
 				MedianSpentPerSecond = source.MedianSpentPerSecond,
@@ -307,9 +312,45 @@ namespace AutoCnC.Evidence
 		public double MedianPairedFitnessDelta { get; set; }
 		public List<PairedScenarioEvaluation> Scenarios { get; set; } = [];
 
+		/// <summary>The sequential test behind a fresh-seed verdict, or null for a pinned set.</summary>
+		public SequentialEvaluation Sequential { get; set; }
+
 		[JsonIgnore]
 		public bool CanPromote =>
 			string.Equals(Verdict, PromotionVerdicts.Promote, StringComparison.OrdinalIgnoreCase);
+	}
+
+	/// <summary>How a sequential set reached its verdict. See <see cref="SequentialGate"/>.</summary>
+	public sealed class SequentialEvaluation
+	{
+		public int PoolEpoch { get; set; }
+		public int FirstSeed { get; set; }
+		public int LastSeed { get; set; }
+		public int StagesPlayed { get; set; }
+		public int StagePairs { get; set; }
+		public int MaxPairs { get; set; }
+		public double Alpha { get; set; }
+		public double Beta { get; set; }
+		public double DiscordantWinShare { get; set; }
+		public int CandidateOnlyWins { get; set; }
+		public int ControlOnlyWins { get; set; }
+		public int BothWon { get; set; }
+		public int NeitherWon { get; set; }
+		public double LogLikelihoodRatio { get; set; }
+		public double UpperBound { get; set; }
+		public double LowerBound { get; set; }
+
+		/// <summary>measured-better, measured-worse, not-better or inconclusive.</summary>
+		public string Conclusion { get; set; }
+
+		/// <summary>Champion games taken from the pool's cache rather than played this evaluation.</summary>
+		public int CachedControlPairs { get; set; }
+
+		public int CandidateFailures { get; set; }
+		public int CandidateTimeouts { get; set; }
+		public int? CanaryScenario { get; set; }
+		public bool? CanaryReproduced { get; set; }
+		public string Note { get; set; }
 	}
 
 	/// <summary>
@@ -699,7 +740,13 @@ namespace AutoCnC.Evidence
 
 		static bool ValidOutcome(string outcome) =>
 			string.Equals(outcome, "Won", StringComparison.OrdinalIgnoreCase) ||
-			string.Equals(outcome, "Lost", StringComparison.OrdinalIgnoreCase);
+			string.Equals(outcome, "Lost", StringComparison.OrdinalIgnoreCase) ||
+
+			// A game stopped at the time limit is a result - not a win - rather than missing
+			// evidence. Dropping it used to remove the opposite arm's win on that seed too, so a
+			// candidate that stopped finishing its games was excused exactly the games that
+			// counted against it, and a champion's 7 of 8 was reported as 6 of 7.
+			string.Equals(outcome, "TimedOut", StringComparison.OrdinalIgnoreCase);
 
 		static bool Won(BenchmarkMatchResult match) =>
 			string.Equals(match.Outcome, "Won", StringComparison.OrdinalIgnoreCase);

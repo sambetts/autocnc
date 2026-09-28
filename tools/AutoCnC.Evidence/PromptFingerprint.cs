@@ -71,9 +71,20 @@ namespace AutoCnC.Evidence
 	/// stored beside the fight. Otherwise a change to version-controlled gospel would read as the
 	/// agent having rewritten its template.
 	/// </para>
+	/// <para>
+	/// When the launcher kept the unrendered template beside the fight
+	/// (<see cref="TemplateFileName"/>), identity is its content instead. Headings once served,
+	/// but a template the loop rewrites every round keeps its headings while its body changes: ten
+	/// successive revisions shared one id, and their rounds were scored as ten trials of a single
+	/// prompt. The template has no fight values in it, so hashing it neither forks identical
+	/// templates nor merges different ones.
+	/// </para>
 	/// </remarks>
 	public static class PromptFingerprint
 	{
+		/// <summary>The unrendered template the launcher saves beside the rendered prompt.</summary>
+		public const string TemplateFileName = "agent-prompt-template.md";
+
 		public static PromptIdentity Read(string promptPath, string mechanicsPath)
 		{
 			if (!File.Exists(promptPath))
@@ -97,9 +108,14 @@ namespace AutoCnC.Evidence
 				? Math.Max(0, prompt.Length - mechanics.Trim().Length)
 				: prompt.Length;
 
+			var template = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(promptPath)) ?? "", TemplateFileName);
+			var id = File.Exists(template)
+				? Hash(File.ReadAllText(template).ReplaceLineEndings("\n").Trim())
+				: Hash(string.Join('\n', headings));
+
 			return new PromptIdentity
 			{
-				Id = Hash(string.Join('\n', headings)),
+				Id = id,
 				Headings = headings,
 				Characters = learned,
 				RenderedCharacters = prompt.Length

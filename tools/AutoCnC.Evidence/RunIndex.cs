@@ -247,29 +247,37 @@ namespace AutoCnC.Evidence
 			Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
 		};
 
-		/// <summary>Metrics the trend tracks, and whether more of each is better.</summary>
+		/// <summary>Metrics the trend tracks, whether more of each is better, and whether a fall is flagged.</summary>
 		/// <remarks>
+		/// <para>
 		/// The last three come from <c>intel</c> and <c>scale</c>: whether this side saw the army
 		/// that hurt it in time, whether what it built answers what it saw, and whether it produced
 		/// as much as the opponent. They are tracked so a round that improves or regresses them is
 		/// told so, whichever of them it set out to move.
+		/// </para>
+		/// <para>
+		/// Three are shown but never flagged. Match length is better longer in a loss and shorter
+		/// in a win, so a quick win was called a regression. Idle seconds grow with the size of a
+		/// standing army in a long win, and cells explored shrink when a win comes sooner. Flagged,
+		/// they asked every round to explain the same three artefacts before doing anything else.
+		/// </para>
 		/// </remarks>
-		static readonly (string Name, bool HigherIsBetter)[] Tracked =
+		static readonly (string Name, bool HigherIsBetter, bool Flagged)[] Tracked =
 		[
-			("fitness", true),
-			("creditsEarnedPerSecond", true),
-			("creditsSpentPerSecond", true),
-			("valueExchangeRatio", true),
-			("meanArmyValue", true),
-			("buildingsKilled", true),
-			("creditsKilled", true),
-			("creditsLost", false),
-			("durationSeconds", true),
-			("cellsExplored", true),
-			("idleUnitSeconds", false),
-			("lateSightingLossPercent", false),
-			("counterMatchPercent", true),
-			("spendVsOpponentPercent", true)
+			("fitness", true, true),
+			("creditsEarnedPerSecond", true, true),
+			("creditsSpentPerSecond", true, true),
+			("valueExchangeRatio", true, true),
+			("meanArmyValue", true, true),
+			("buildingsKilled", true, true),
+			("creditsKilled", true, true),
+			("creditsLost", false, true),
+			("durationSeconds", true, false),
+			("cellsExplored", true, false),
+			("idleUnitSeconds", false, false),
+			("lateSightingLossPercent", false, true),
+			("counterMatchPercent", true, true),
+			("spendVsOpponentPercent", true, true)
 		];
 
 		public static RunHistory Read(string path)
@@ -457,7 +465,7 @@ namespace AutoCnC.Evidence
 		static TrendReport Populate(TrendReport report, List<RunHistoryEntry> runs, RunHistory history)
 		{
 			if (runs.Count >= 2)
-				foreach (var (name, higherIsBetter) in Tracked)
+				foreach (var (name, higherIsBetter, flagged) in Tracked)
 				{
 					// Only the most recent unbroken stretch of runs that actually recorded this
 					// metric. Substituting zero for a run that never measured it would manufacture
@@ -507,7 +515,7 @@ namespace AutoCnC.Evidence
 					// Measured against the prior median rather than the previous run, because a
 					// single noisy match either side would otherwise be enough to raise or hide an
 					// alarm at n=1.
-					if (priorMedian != 0)
+					if (priorMedian != 0 && flagged)
 					{
 						var drift = (latest - priorMedian) / Math.Abs(priorMedian);
 						metric.Regression = higherIsBetter
@@ -791,22 +799,16 @@ namespace AutoCnC.Evidence
 					$"against {report.Benchmark.ControlMedianFitness:0.###}.\n");
 
 			if (report.Regressions.Count > 0)
-				text.Append("Regressions to explain before doing anything else:\n")
+				text.Append("Moved more than ").Append((RegressionThreshold * 100).ToString("0", CultureInfo.InvariantCulture))
+					.Append("% against the prior median. One fight is one matchup and one seed, so these are leads to check " +
+						"against the summary, not findings:\n")
 					.Append("- ").Append(string.Join("\n- ", report.Regressions)).Append('\n');
 
-			if (report.Prompts.Count > 0)
-			{
-				// Prompt revisions used to be accepted unattended and were never graded. Showing
-				// a round what manually adopted predecessors actually did is the point of the id.
-				text.Append("\nWhat each prompt revision did to the rounds it steered " +
-					"(fitness change from the round it was given to the round after):\n");
-
-				foreach (var prompt in report.Prompts)
-					text.Append(CultureInfo.InvariantCulture,
-						$"- {prompt.PromptId} ({prompt.Characters:N0} chars, {prompt.Headings} sections): " +
-						$"{prompt.MeanFitnessDelta:+0.###;-0.###;0} mean over {prompt.RoundsMeasured} round(s), " +
-						$"{prompt.Improved} better / {prompt.Worsened} worse — {prompt.Verdict}\n");
-			}
+			// Prompt revisions are not shown. Every round now proposes the next template, so each
+			// revision steers one round, and "the fitness change from the round a prompt was given
+			// to the round after" compared two different random matchups under two different
+			// prompts. It told rounds that templates were "consistently making the bot worse" on
+			// nothing but that noise. The data stays in trend.json and `prompts` still lists it.
 
 			return text.ToString().TrimEnd('\n');
 		}

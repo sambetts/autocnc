@@ -246,6 +246,11 @@ namespace AutoCnC.Launcher
 			{
 				Directory.CreateDirectory(Path.GetDirectoryName(destination));
 				File.Copy(source, destination, true);
+
+				// File.Copy keeps the snapshot's older timestamp, and an incremental build that
+				// compares timestamps then sees nothing newer than the rejected candidate's
+				// output and keeps it. A restored file was written just now, so it says so.
+				File.SetLastWriteTimeUtc(destination, DateTime.UtcNow);
 			}
 
 			foreach (var (entry, _, destination) in files)

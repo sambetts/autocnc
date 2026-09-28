@@ -8,7 +8,11 @@
     "Seeds are arbitrary constants. Their only job is to be the same next time, so do not change",
     "one to chase a nicer number - that silently invalidates every stored result for the set.",
     "Add a new set instead. Factions are pinned for the same reason: consecutive rounds that",
-    "played GDI then Nod were comparing two different games."
+    "played GDI then Nod were comparing two different games.",
+    "",
+    "A fixed list is also something a champion can be fitted to by repeated selection, which is",
+    "why the training loop's gate is hard-16-9-fresh: a set with a 'sequential' block instead of",
+    "matches, whose seeds are drawn fresh for every champion. See that set's own comment."
   ],
   "default": "smoke",
   "sets": [
@@ -125,6 +129,50 @@
         { "map": "carters-ridge.oramap", "faction": "gdi", "botFaction": "gdi", "seed": 400011 },
         { "map": "carters-ridge.oramap", "faction": "nod", "botFaction": "nod", "seed": 400012 }
       ]
+    },
+    {
+      "name": "hard-16-9-fresh",
+      "summary": "The promotion gate: fresh Hard seeds on the training map for every champion, played in stages of 16 until a sequential test decides.",
+      "$comment": [
+        "Eight pinned seeds stopped working as a gate once the champion had been selected on them.",
+        "By 27 September the champion won all eight, a candidate could at best tie, the fitness",
+        "tie-break caps at 1.0 in a win, and twenty rounds running promoted nothing - while the same",
+        "champion won only 4 of the 7 random-seed fights it provably played. Selecting repeatedly on",
+        "a small fixed set had fitted the champion to that set.",
+        "",
+        "This set has no fixed matches. When a champion is first evaluated, the gate draws a pool",
+        "of maxPairs seeds it has never used before, starting at seedBase and never reusing one,",
+        "stratified so every stage holds each faction pairing equally. Candidates play the pool a",
+        "stage at a time; the champion's games on it are cached, because a seed replays exactly",
+        "(one cached game is replayed per evaluation to show it still does). A promotion retires",
+        "the pool, so no champion is ever judged on the seeds it was chosen on.",
+        "",
+        "The verdict is Wald's sequential probability ratio test on the games only one arm won:",
+        "alpha is the rate at which a change that does nothing is promoted, beta the rate at which",
+        "one that wins discordantWinShare of those games is missed. Simulated against this bot's",
+        "measured behaviour (a 60% win rate, 30% of games decided differently), a neutral change is",
+        "promoted about 2% of the time and a 10-point-worse one never; a change worth +10 points",
+        "of win rate passes about 37% of the time, +15 points 72% and +20 points 95%, after 50 to",
+        "70 pairs on average. Smaller effects are invisible at this budget, and 'inconclusive' says",
+        "so rather than calling them failures. State lives in <runs>/<bot>/gate/<set>.json."
+      ],
+      "difficulty": "Hard",
+      "maxGameSeconds": 2400,
+      "sequential": {
+        "maps": [ "16-9.oramap" ],
+        "pairings": [
+          { "faction": "gdi", "botFaction": "nod" },
+          { "faction": "nod", "botFaction": "gdi" },
+          { "faction": "gdi", "botFaction": "gdi" },
+          { "faction": "nod", "botFaction": "nod" }
+        ],
+        "seedBase": 1000001,
+        "stagePairs": 16,
+        "maxPairs": 96,
+        "alpha": 0.05,
+        "beta": 0.2,
+        "discordantWinShare": 0.75
+      }
     }
   ]
 }

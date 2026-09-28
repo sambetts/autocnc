@@ -34,8 +34,12 @@ function Get-RulesFingerprint([Parameter(Mandatory)][string]$RepoRoot) {
     $engine = $null
     $engineDir = Join-Path $RepoRoot 'engine'
     if (Test-Path -LiteralPath $engineDir) {
-        $engine = (git -C $engineDir rev-parse HEAD 2>$null | Select-Object -First 1)
-        if ($LASTEXITCODE -ne 0 -or -not $engine) { $engine = $null } else { $engine = $engine.Trim() }
+        # All of git's output is taken before looking at it. Piping it into Select-Object -First 1
+        # stopped git as soon as the first line arrived, and whether git had exited by then was a
+        # race: under load it had not, $LASTEXITCODE read as failure, and the same rules got a
+        # second fingerprint that split the trend and the gate's champion cache in two.
+        $output = @(git -C $engineDir rev-parse HEAD 2>$null)
+        $engine = if ($LASTEXITCODE -eq 0 -and $output.Count -gt 0 -and $output[0]) { ([string]$output[0]).Trim() } else { $null }
     }
     [void]$text.Append('engine ').Append($(if ($engine) { $engine } else { 'unknown' })).Append("`n")
 

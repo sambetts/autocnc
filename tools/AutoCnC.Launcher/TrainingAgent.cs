@@ -14,6 +14,7 @@ using System.IO;
 using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using AutoCnC.Evidence;
 
 namespace AutoCnC.Launcher
 {
@@ -216,6 +217,11 @@ namespace AutoCnC.Launcher
 			run.ExportFightManifest();
 			File.WriteAllText(run.PromptPath,
 				RenderPrompt(run, promptTemplate, recoveryContext, adoptsNextPrompt));
+
+			// The template as given, before any value was inlined, so the prompt this round was
+			// steered by can be identified by its content (see PromptFingerprint).
+			File.WriteAllText(Path.Combine(run.EvidenceDirectory, PromptFingerprint.TemplateFileName),
+				promptTemplate);
 		}
 
 		public static void Prepare(TrainingRun run, string gameGuidePath, string mechanicsPath,
@@ -789,23 +795,29 @@ namespace AutoCnC.Launcher
 			for a question the summary genuinely cannot answer, and say which.
 
 			Put {checkReport} and {trendReport} on lines by themselves where those sections belong.
-			They are generated: {checkReport} is the harness evaluating the checks the previous
-			round wrote, and {trendReport} is the cross-run comparison, including what each prompt
-			revision did to the rounds it steered. Do not write either by hand, and do not maintain
-			a prose list of "already diagnosed, verify this" — that list is what checks.json is for.
+			They are generated: {checkReport} is the harness evaluating the checks the champion's
+			round wrote, and {trendReport} is the cross-run comparison. Do not write either by hand.
+
+			Put {experimentLedger} on a line by itself where the record of past experiments belongs.
+			The harness writes it after every verdict, from the candidate's own benchmark games:
+			what each round changed, whether its new reason ids fired, how its checks fared, and
+			whether the gate found it better, worse or could not tell. It is the loop's memory, so
+			do not keep a prose list of what was tried and rejected; point at the ledger instead.
+			An "inconclusive" or "not better" entry is not a refutation, and a change whose new
+			reason ids fired in no game was never tested at all.
 
 			Keep a section telling the next round to write checks.json into {workspace} before it
-			finishes, and to give any new code path a reason literal nothing else uses so a
-			`reason:` check can prove it ran. Categorize checks as `activation`, `invariant`, or
-			`outcome`. Outcome checks are observations, not a promotion pass-rate gate; paired
-			benchmark wins and fitness decide promotion.
+			finishes, with a one-sentence `hypothesis` saying what the change should move, and to
+			give any new code path a reason literal nothing else uses so a `reason-id:` check can
+			prove it ran. Categorize checks as `activation`, `invariant`, or `outcome`. The checks
+			are evaluated in every one of the candidate's own benchmark games, and the tallies go
+			into the ledger; they are observations, not a gate. Wins on fresh seeds decide promotion.
 
-			Your template is measured. Each run records which prompt steered it, and the trend
-			reports the mean fitness change from the round a prompt was given to the round after
-			it. Templates here have grown to twenty-seven thousand characters of recipes and lost
-			fitness doing it. Make yours shorter and more specific than this one, not longer; if
-			the report shows the current template losing fitness across several rounds, prefer
-			reverting toward what came before it over adding more advice on top.
+			Your template is not scored: the gate measures the code, and the prompt is judged only
+			by whether rounds under it find changes that pass. Templates here have grown to
+			twenty-seven thousand characters of recipes before. Make yours shorter and more specific
+			than this one, not longer, and do not restate how the gate works: that is in the
+			mechanics reference above, which is kept current.
 
 			It must explicitly restrict edits to {workspace}.
 
@@ -829,20 +841,22 @@ namespace AutoCnC.Launcher
 			""";
 
 		/// <remarks>
-		/// Adoption happens as soon as the round's build is verified, before the paired benchmark
-		/// decides whether its code survives, so the proposal cannot assume it does: most candidates
-		/// are restored, and a template that points the next round at code that was never kept
-		/// sends it looking for something that is not there.
+		/// Adoption happens once the paired benchmark has decided the round, whichever way it went,
+		/// but the proposal is written before that and cannot know the verdict. Most candidates are
+		/// restored, and a template that points the next round at code that was never kept sends it
+		/// looking for something that is not there, so the notice says so and the ledger carries
+		/// the verdict instead.
 		/// </remarks>
 		const string AutomaticAdoptionNotice =
 			"""
 			Nobody reviews it. The training loop adopts a valid template as the next round's prompt
-			as soon as this round's build is verified, before the paired benchmark decides whether
-			this round's code is kept, and it adopts it whichever way that goes. So write it as the
-			next round's complete instructions, and do not assume your change survives: if the
-			benchmark restores the champion, the next round reads source without it. A proposal
-			missing a required placeholder is repaired, and one that fails validation is discarded
-			and the current prompt carries on.
+			once the benchmark has decided whether this round's code is kept, and it adopts it
+			whichever way that goes. So write it as the next round's complete instructions, and do
+			not assume your change survives: if the benchmark restores the champion, the next round
+			reads source without it, and {experimentLedger} tells it which. Describe your change as
+			the candidate that was judged, not as current behaviour. A proposal missing a required
+			placeholder is repaired, and one that fails validation is discarded and the current
+			prompt carries on.
 			""";
 	}
 }

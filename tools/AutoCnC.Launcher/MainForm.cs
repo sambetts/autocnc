@@ -2304,11 +2304,7 @@ namespace AutoCnC.Launcher
 						code => FinishContinuousArmBuild(run,
 							ContinuousEvaluationArm.Control, code));
 				else
-					EnqueueContinuousStep(run,
-						continuousPromotion.BenchmarkArm(repo, run,
-							continuousEvaluationPlan, ContinuousEvaluationArm.Candidate),
-						code => FinishContinuousArmBenchmark(run,
-							ContinuousEvaluationArm.Candidate, code));
+					EnqueueNextBenchmarkStep(run);
 			}
 			catch (Exception ex) when (ex is InvalidDataException or IOException or
 				UnauthorizedAccessException or InvalidOperationException or
@@ -2320,40 +2316,52 @@ namespace AutoCnC.Launcher
 			}
 		}
 
-		void FinishContinuousArmBenchmark(TrainingRun run, ContinuousEvaluationArm arm,
-			int exitCode)
+		/// <summary>
+		/// Queues the evaluation's next benchmark step, or completes the evaluation once the
+		/// promotion runner has the evidence for a verdict. A pinned set is two steps; a sequential
+		/// set is as many stages as its test needs.
+		/// </summary>
+		void EnqueueNextBenchmarkStep(TrainingRun run)
 		{
+			var step = continuousPromotion.NextBenchmarkStep(repo, run, continuousEvaluationPlan);
+			if (step != null)
+			{
+				EnqueueContinuousStep(run, step, code => FinishContinuousBenchmarkStep(run, step, code));
+				return;
+			}
+
+			if (SamePath(activeTrainingRun?.RunDirectory, run.RunDirectory))
+				activeTrainingRun = null;
+			FinishContinuousEvaluation(run,
+				continuousPromotion.CompleteEvaluation(run, continuousEvaluationPlan, 0));
+		}
+
+		void FinishContinuousBenchmarkStep(TrainingRun run, ContinuousScriptPlan step, int exitCode)
+		{
+			var arm = (step.Arm ?? ContinuousEvaluationArm.Candidate).ToString().ToLowerInvariant();
 			if (exitCode != 0)
 			{
 				FinishContinuousFailure(run,
-					$"The immutable {arm.ToString().ToLowerInvariant()} benchmark exited with code {exitCode}.");
+					$"The immutable {arm} benchmark exited with code {exitCode}.");
 				return;
 			}
 
 			try
 			{
-				if (arm == ContinuousEvaluationArm.Candidate)
-					EnqueueContinuousStep(run,
-						continuousPromotion.BenchmarkArm(repo, run,
-							continuousEvaluationPlan, ContinuousEvaluationArm.Control),
-						code => FinishContinuousArmBenchmark(run,
-							ContinuousEvaluationArm.Control, code));
-				else
+				continuousPromotion.CaptureBenchmarkStep(run, continuousEvaluationPlan, step);
+				if (continuousEvaluationPlan.Warning != null)
 				{
-					if (SamePath(activeTrainingRun?.RunDirectory, run.RunDirectory))
-						activeTrainingRun = null;
-					FinishContinuousEvaluation(run,
-						continuousPromotion.CompleteEvaluation(run,
-							continuousEvaluationPlan, exitCode));
+					AppendImprovementOutput("WARNING: " + continuousEvaluationPlan.Warning);
+					continuousEvaluationPlan.Warning = null;
 				}
+				EnqueueNextBenchmarkStep(run);
 			}
 			catch (Exception ex) when (ex is InvalidDataException or IOException or
 				UnauthorizedAccessException or InvalidOperationException or
 				System.Text.Json.JsonException)
 			{
 				FinishContinuousFailure(run,
-					$"Could not continue the immutable {arm.ToString().ToLowerInvariant()} benchmark: " +
-					ex.Message);
+					$"Could not continue the immutable {arm} benchmark: " + ex.Message);
 			}
 		}
 
@@ -2415,6 +2423,17 @@ namespace AutoCnC.Launcher
 				var action = continuousLoop.EvaluationCompleted(decision);
 				if (action == ContinuousTrainingAction.Restore)
 					action = continuousLoop.RestorationCompleted();
+
+				try
+				{
+					continuousPromotion.RecordExperiment(run, continuousEvaluationPlan,
+						completion.Evaluation, decision);
+				}
+				catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
+					InvalidDataException or System.Text.Json.JsonException)
+				{
+					AppendImprovementOutput("Could not record the experiment in the ledger: " + ex.Message);
+				}
 
 				pendingContinuousAction = action;
 				continuousCandidateRun = run;

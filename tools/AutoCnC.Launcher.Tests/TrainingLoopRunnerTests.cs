@@ -86,6 +86,8 @@ namespace AutoCnC.Launcher.Tests
 			proposal = null;
 			improvements = 0;
 			candidateWins = true;
+			stageOutcome = null;
+			assemblyHash = null;
 		}
 
 		[TearDown]
@@ -304,6 +306,30 @@ namespace AutoCnC.Launcher.Tests
 			var adoption = messages.FindIndex(message => message.StartsWith("Next prompt:", StringComparison.Ordinal));
 			Assert.That(evaluation, Is.GreaterThanOrEqualTo(0));
 			Assert.That(adoption, Is.GreaterThan(evaluation));
+		}
+
+		[Test]
+		public void AFightWhoseAssemblyChangedUnderTheSameSourceIsFlagged()
+		{
+			options.Rounds = 2;
+			candidateWins = false;
+			improve = () => File.WriteAllText(source, "candidate-" + improvements);
+			assemblyHash = () => "stale-" + runDirectories.Count;
+			Run();
+
+			Assert.That(messages, Has.Some.StartsWith("WARNING: this fight's bot assembly differs"),
+				"the restored champion fought with bytes it did not produce before");
+		}
+
+		[Test]
+		public void TheSameSourceFightingWithTheSameAssemblyIsNotFlagged()
+		{
+			options.Rounds = 2;
+			candidateWins = false;
+			improve = () => File.WriteAllText(source, "candidate-" + improvements);
+			Run();
+
+			Assert.That(messages, Has.None.StartsWith("WARNING: this fight's bot assembly differs"));
 		}
 
 		[Test]
@@ -1009,6 +1035,8 @@ namespace AutoCnC.Launcher.Tests
 				File.WriteAllText(Argument(job, "-BattleLog"),
 					"seconds,event,player,detail\n0,player,You,side=you;faction=gdi\n600,over,You,result=Won\n");
 				File.WriteAllText(Argument(job, "-DecisionTrace"), "{}\n");
+				File.WriteAllText(Path.Combine(Path.GetDirectoryName(Argument(job, "-Telemetry")), "bot-assembly.json"),
+					"{\"Assemblies\":[{\"Sha256\":\"" + (assemblyHash?.Invoke() ?? "same") + "\"}]}");
 			}
 			else if (job.ScriptPath == repo.ExportAgentRulesScript)
 				File.WriteAllText(Argument(job, "-Output"), "{\"actors\":[]}");
@@ -1047,6 +1075,9 @@ namespace AutoCnC.Launcher.Tests
 
 		/// <summary>How a fake sequential stage plays: (candidate arm?, scenario, round) to outcome.</summary>
 		Func<bool, int, int, string> stageOutcome;
+
+		/// <summary>The assembly hash a fake fight reports; null reports the same one every time.</summary>
+		Func<string> assemblyHash;
 
 		void WriteStage(ScriptJob job, bool candidate)
 		{

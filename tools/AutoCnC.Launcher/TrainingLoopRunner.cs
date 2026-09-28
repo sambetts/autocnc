@@ -213,7 +213,11 @@ namespace AutoCnC.Launcher
 				arguments.AddRange(["-CancellationFile", run.CancellationPath, "-PerformanceReport", run.PerformancePath]);
 
 			TrainingScriptResult result;
-			var fought = BotWorkspace.Fingerprint(Path.GetDirectoryName(project));
+
+			// Keyed on the commit as well as the source: the SDK stamps the checkout's HEAD into
+			// the assembly's informational version, so identical source built at another commit
+			// is legitimately different bytes.
+			var fought = run.Manifest.SourceRevision + "|" + BotWorkspace.Fingerprint(Path.GetDirectoryName(project));
 			try
 			{
 				result = Execute(repo.RunBotScript, arguments, "Fighting", token,
@@ -237,16 +241,18 @@ namespace AutoCnC.Launcher
 		readonly Dictionary<string, string> foughtAssemblies = new(StringComparer.Ordinal);
 
 		/// <summary>
-		/// Warns when the same bot source fights with a different assembly than it did before.
+		/// Warns when the same bot source, at the same commit, fights with a different assembly
+		/// than it did before.
 		/// </summary>
 		/// <remarks>
 		/// A tripwire for the fault that once ran rejected candidates as the champion: restored
 		/// files kept older timestamps, an incremental build kept the candidate's output, and 11 of
 		/// 52 "champion" fights ran code the gate had just thrown out. run-bot.ps1 now always
-		/// rebuilds, and a deterministic build of the same source yields the same bytes, so a
-		/// changed hash here means the fight is not evidence about the source it is filed under.
+		/// rebuilds, and a deterministic build of the same source at the same commit yields the same
+		/// bytes, so a changed hash here means the fight is not evidence about the source it is
+		/// filed under.
 		/// </remarks>
-		void CheckFoughtAssembly(TrainingRun run, string fingerprint)
+		void CheckFoughtAssembly(TrainingRun run, string source)
 		{
 			var path = Path.Combine(run.EvidenceDirectory, "bot-assembly.json");
 			if (!File.Exists(path))
@@ -259,12 +265,12 @@ namespace AutoCnC.Launcher
 					return;
 				var hash = string.Join(",", assemblies.EnumerateArray()
 					.Select(item => item.TryGetProperty("Sha256", out var sha) ? sha.GetString() : ""));
-				if (foughtAssemblies.TryGetValue(fingerprint, out var previous) &&
+				if (foughtAssemblies.TryGetValue(source, out var previous) &&
 					!string.Equals(previous, hash, StringComparison.OrdinalIgnoreCase))
 					output("WARNING: this fight's bot assembly differs from the one the same source fought with " +
 						$"earlier ({previous[..Math.Min(12, previous.Length)]} then, {hash[..Math.Min(12, hash.Length)]} now). " +
 						"The build may not match the source; treat this fight's evidence with suspicion.");
-				foughtAssemblies[fingerprint] = hash;
+				foughtAssemblies[source] = hash;
 			}
 			catch (Exception ex) when (ex is JsonException or IOException or InvalidOperationException)
 			{

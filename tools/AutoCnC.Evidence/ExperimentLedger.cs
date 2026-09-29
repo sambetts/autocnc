@@ -69,6 +69,14 @@ namespace AutoCnC.Evidence
 
 		public string FightOutcome { get; set; }
 		public string FightMatchup { get; set; }
+
+		/// <summary>
+		/// Outcomes of the fights the round played and passed over, oldest first, while looking for
+		/// one the bot lost. Counted in the champion's record, which would otherwise count only the
+		/// losses the round went looking for.
+		/// </summary>
+		public List<string> EarlierFights { get; set; } = [];
+
 		public List<string> ChangedFiles { get; set; } = [];
 		public int PairsCompared { get; set; }
 		public int CandidateWins { get; set; }
@@ -306,8 +314,15 @@ namespace AutoCnC.Evidence
 				text.Append('.');
 
 				if (!string.IsNullOrWhiteSpace(record.FightOutcome))
+				{
 					text.Append(CultureInfo.InvariantCulture,
-						$" Read a {record.FightOutcome}{(string.IsNullOrWhiteSpace(record.FightMatchup) ? "" : " as " + record.FightMatchup)}.");
+						$" Read a {record.FightOutcome}{(string.IsNullOrWhiteSpace(record.FightMatchup) ? "" : " as " + record.FightMatchup)}");
+					var passedOver = record.EarlierFights?.Count ?? 0;
+					if (passedOver > 0)
+						text.Append(CultureInfo.InvariantCulture,
+							$", after {passedOver} fight(s) on other seeds it won");
+					text.Append('.');
+				}
 
 				if (!string.IsNullOrWhiteSpace(record.Hypothesis))
 					text.Append(" Hypothesis: ").Append(Clip(record.Hypothesis, 240)).Append('.');
@@ -356,7 +371,7 @@ namespace AutoCnC.Evidence
 				return null;
 
 			var fights = ordered.Where(r => string.Equals(r.ChampionFingerprint, champion, StringComparison.Ordinal))
-				.Select(r => r.FightOutcome)
+				.SelectMany(r => (r.EarlierFights ?? []).Append(r.FightOutcome))
 				.Where(outcome => outcome is "Won" or "Lost")
 				.ToList();
 			var wins = fights.Count(outcome => outcome == "Won");

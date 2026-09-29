@@ -675,6 +675,14 @@ Every training fight rebuilds the bot from source (`dotnet build --no-incrementa
 the hash of the assembly that played in `evidence\bot-assembly.json`, so a fight is always evidence
 about the source it is filed under.
 
+Each round plays up to `-MaxFightsPerRound` training fights (default 4) on fresh random seeds and
+stops at the first one the bot loses. The agent studies that game, because a lost game is where a
+gap that decides games shows. If every fight is won it studies the last. The wins passed over stay
+in the history as finished fights, are listed in the studied run's manifest (`EarlierFights`), and
+count in the champion's record in the experiment ledger, so looking for losses does not make the
+bot look worse than it is. While the bot wins 70% of its games this costs about a minute and a
+half a round. A pinned `-Seed` always fights once.
+
 The promotion gate is selected by `-Benchmark` and `-BenchmarkDifficulty`, and defaults to
 `hard-16-9-fresh` at `Hard`. That set has no fixed matches. For each champion it draws a pool of
 fresh seeds on the training map that nothing has been selected on, and plays the candidate and the

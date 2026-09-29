@@ -275,3 +275,53 @@ off.
   would reverse a deliberate rule.
 - **History is not rewritten.** Opening fights before today are source-attributed rather than
   proven, and the champion's earlier records should be read with that in mind.
+
+## 29 September: learning from losses
+
+**The first 20 rounds under the new gate kept nothing.**
+
+- 9 measured worse, 8 of them stopped before 96 pairs.
+- 1 was "not better", also stopped early.
+- 10 were inconclusive after all 96 pairs.
+
+The gate and the cache behaved as designed: every replayed champion game reproduced exactly, and
+clearly worse changes were rejected after as few as 16 games.
+
+**The changes rarely decided a game.** Across 1,456 fresh paired games, the candidates changed
+the winner in 136 (9.3%): 61 in their favour and 75 against. So the gate had very little to measure.
+
+**Most rounds had studied a game the bot won.** The random-seed training fight is won about 70% of
+the time, and 14 of the 20 rounds studied a win:
+
+| Round studied | Rounds | Test games | Winner changed |
+| --- | ---: | ---: | ---: |
+| A win | 14 | 1,104 | 7.5% |
+| A loss | 6 | 352 | 15.1% |
+
+Changes made from a loss moved twice as many results. They were no better on balance (23 for, 30
+against), but a change the gate can measure is a precondition for one it can keep.
+
+**What changed:**
+
+- **`-MaxFightsPerRound` (default 4).** The loop (`TrainingLoopRunner.FightUntilALoss`) keeps
+  playing fresh random seeds while the bot wins, and the round studies the first loss, or the last
+  win if every fight was won. At a 70% win rate this is about 2.5 fights a round, roughly a minute
+  and a half more.
+- **Each fight is its own run, announced as it starts,** so the nightly pause still cancels
+  whichever fight is in progress.
+- **The wins passed over are kept.** They are listed in the studied run's manifest
+  (`EarlierFights`) and in its ledger record, and the champion's record counts them.
+  - Stopping at the first loss would otherwise make the bot look worse than it is.
+  - Counting every fight keeps the pooled win rate an unbiased estimate: by Wald's identity, the
+    expected wins over the expected fights is still the true win rate.
+- **The prompt says what the fight is:** the first loss after how many wins, or that every fight
+  was won.
+- **`docs/agent-mechanics.md`**, the fixed half of every prompt, now:
+  - gives these numbers;
+  - asks for the moment the lost game became unwinnable;
+  - asks for an estimate, recorded in `hypothesis`, of how many of 100 games the change would turn
+    each way;
+  - asks for something bigger when the net is under about 5, where a coherent set of edits serving
+    one plan counts as one change.
+- **The next-prompt contract** tells each round to keep the next one aimed at changes that decide
+  games.

@@ -65,12 +65,21 @@ namespace AutoCnC.Launcher
 		/// </summary>
 		public string AuditBenchmark { get; set; } = "hard-holdout";
 
+		/// <summary>
+		/// Training fights a round may play, on fresh random seeds, to find one the bot loses: it
+		/// stops at the first loss and the agent studies that game. 1 fights once, as rounds always
+		/// did. A pinned <see cref="Seed"/> always fights once, since every fight would be the same.
+		/// </summary>
+		public int MaxFightsPerRound { get; set; } = 1;
+
 		internal string Validate(RepoLayout repo)
 		{
 			if (repo?.SupportsTraining != true)
 				throw new ArgumentException("Select an AutoC&C checkout with the current authoring API.");
 			if (Rounds < 0 || MaxGameSeconds < 0 || Opponents < 1 || Parallel < 0 || Parallel > 16)
 				throw new ArgumentException("Rounds and MaxGameSeconds must be nonnegative; Opponents must be positive; Parallel must be 0 to 16.");
+			if (MaxFightsPerRound < 1 || MaxFightsPerRound > 10)
+				throw new ArgumentException("MaxFightsPerRound must be 1 to 10.");
 			if (string.IsNullOrWhiteSpace(Map))
 				throw new ArgumentException("A map is required for unattended training.");
 			if (ExecutionMode != BattleExecutionModes.Headless && ExecutionMode != BattleExecutionModes.Rendered)

@@ -42,6 +42,20 @@ something a bad round can overwrite.
   change that rarely comes into play rarely flips a game and usually ends inconclusive. The gate
   sees about +15 points of win rate or more; +10 points passes about a third of the time. Prefer
   a change that fires in most games of the matchup it targets.
+- **What has happened so far.** In the first 20 rounds under this gate nothing was kept. Their
+  changes altered the winner in 9% of their test games, and lost slightly more of those games
+  than they won. Fourteen of those rounds studied a fight the bot had won, and their changes
+  altered the winner in 7.5% of games. The six that studied a loss altered it in 15%.
+- **So your fight is a loss whenever one turned up.** The round plays fresh random seeds until
+  the bot loses, up to a limit (four fights by default), and gives you the first loss; the result
+  line says how many wins came before it. Find the moment that game became unwinnable, and change
+  what decided it. If every fight was won, look for what would have lost a closer game, not for
+  polish.
+- **Size the change to the gate.** Before building, estimate how many of 100 fresh games your
+  change would turn from a loss into a win, and how many from a win into a loss. If the net is
+  under about 5, choose something bigger. A coherent set of edits serving one plan counts as one
+  change: an opening, an army composition or a push reworked together is judged as a whole, and
+  that is how a change becomes big enough to measure. Say the estimate in `hypothesis`.
 - *Inconclusive* and *not better* mean the gate could not see an effect, not that the idea is
   wrong. The experiment ledger in your prompt says which verdict every recent round got, and
   whether its new code ran at all.

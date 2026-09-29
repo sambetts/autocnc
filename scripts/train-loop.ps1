@@ -43,6 +43,13 @@
 	Time limit for each training battle in Headless mode. 0 means unlimited. Benchmark
 	time limits come from the selected set in scripts/benchmarks.json instead.
 
+.PARAMETER MaxFightsPerRound
+	Training fights a round may play to find one the bot loses. It fights on fresh random
+	seeds, stops at the first loss, and the agent studies that game; if every fight is won it
+	studies the last. Defaults to 4, which costs about a minute and a half per round while the
+	bot wins 70% of its games. The wins passed over stay in the history and in the champion's
+	record. 1 fights once; a pinned -Seed always fights once.
+
 .PARAMETER Benchmark
 	Promotion gate from scripts/benchmarks.json. Defaults to hard-16-9-fresh: fresh seeds for
 	every champion, played in stages until a sequential test on the games only one arm won
@@ -164,6 +171,9 @@ param(
 	[ValidateRange(0, [int]::MaxValue)]
 	[int]$MaxGameSeconds = 5400,
 	[Parameter(ParameterSetName = 'Loop')]
+	[ValidateRange(1, 10)]
+	[int]$MaxFightsPerRound = 4,
+	[Parameter(ParameterSetName = 'Loop')]
 	[string]$Benchmark = 'hard-16-9-fresh',
 	[Parameter(ParameterSetName = 'Loop')]
 	[string]$BenchmarkDifficulty = 'Hard',
@@ -226,6 +236,7 @@ $options = @{
 	Rounds = $Rounds
 	Seed = $Seed
 	MaxGameSeconds = $MaxGameSeconds
+	MaxFightsPerRound = $MaxFightsPerRound
 	Benchmark = $Benchmark
 	BenchmarkDifficulty = $BenchmarkDifficulty
 	Parallel = $Parallel

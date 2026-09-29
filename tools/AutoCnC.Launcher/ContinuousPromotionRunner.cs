@@ -953,6 +953,7 @@ namespace AutoCnC.Launcher
 				Hypothesis = Hypothesis(candidateSource),
 				FightOutcome = fight?.Outcome,
 				FightMatchup = run.Manifest.Battle == null ? null : Matchup(run),
+				EarlierFights = run.Manifest.EarlierFights?.Select(earlier => earlier.Outcome).ToList() ?? [],
 				ChangedFiles = ChangedFiles(candidateSource, controlSource),
 				PairsCompared = evaluation.PairsCompared,
 				CandidateWins = evaluation.CandidateWins,

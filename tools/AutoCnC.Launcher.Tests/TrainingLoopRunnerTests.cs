@@ -88,6 +88,7 @@ namespace AutoCnC.Launcher.Tests
 			candidateWins = true;
 			stageOutcome = null;
 			assemblyHash = null;
+			fightOutcome = null;
 		}
 
 		[TearDown]
@@ -293,6 +294,73 @@ namespace AutoCnC.Launcher.Tests
 				Does.EndWith(Path.Combine("candidate-source", "checks.json")));
 			Assert.That(StageJobs(candidate: false).Single().Arguments, Does.Not.Contain("-ChecksFile"));
 			Assert.That(ExperimentLedger.Read(LedgerPath).Single().Hypothesis, Is.EqualTo("Pushes wait for siege"));
+		}
+
+		[Test]
+		public void AWonFightIsFollowedByFreshSeedsUntilTheBotLosesAndTheAgentStudiesTheLoss()
+		{
+			options.MaxFightsPerRound = 4;
+			fightOutcome = fight => fight < 3 ? "Won" : "Lost";
+			Run();
+
+			var studied = TrainingRun.Load(runDirectories[2]);
+			Assert.Multiple(() =>
+			{
+				Assert.That(runDirectories, Has.Count.EqualTo(3), "it stops at the first loss");
+				Assert.That(messages.Count(m => m.StartsWith("AUTOCNC_TRAINING_RUN=", StringComparison.Ordinal)),
+					Is.EqualTo(3), "every fight is announced, so the nightly pause can cancel the one in progress");
+				Assert.That(jobs.Where(job => job.ScriptPath == repo.TrainBotScript).Select(job => Argument(job, "-RunDirectory")),
+					Is.EqualTo(new[] { runDirectories[2] }));
+				Assert.That(studied.Manifest.Result.Outcome, Is.EqualTo("Lost"));
+				Assert.That(studied.Manifest.EarlierFights.Select(fight => fight.RunId),
+					Is.EqualTo(runDirectories.Take(2).Select(path => TrainingRun.Load(path).Manifest.Id)));
+				Assert.That(studied.Manifest.EarlierFights.Select(fight => fight.Outcome), Is.All.EqualTo("Won"));
+				Assert.That(File.ReadAllText(studied.PromptPath), Does.Contain("This is the first loss this round found"));
+				Assert.That(runDirectories.Take(2).Select(path => TrainingRun.Load(path).Manifest.Experiment), Is.All.Null,
+					"the wins passed over are finished fights, not experiments");
+			});
+
+			var record = ExperimentLedger.Read(LedgerPath).Single();
+			Assert.That(record.FightOutcome, Is.EqualTo("Lost"));
+			Assert.That(record.EarlierFights, Is.EqualTo(new[] { "Won", "Won" }));
+			Assert.That(ExperimentLedger.ChampionRecord([record]), Does.Contain("won 2 of the 3"),
+				"the champion's record still counts the wins the round passed over");
+		}
+
+		[Test]
+		public void WhenEveryFightIsWonTheRoundStudiesTheLastAndSaysSo()
+		{
+			options.MaxFightsPerRound = 3;
+			Run();
+
+			Assert.That(runDirectories, Has.Count.EqualTo(3));
+			var studied = TrainingRun.Load(runDirectories[2]);
+			Assert.That(File.ReadAllText(studied.PromptPath), Does.Contain("The bot won all 3 fights"));
+			Assert.That(messages, Has.Some.EqualTo("No loss in 3 fights; the round studies the last of them."));
+		}
+
+		[Test]
+		public void APinnedSeedFightsOnceBecauseEveryFightWouldBeTheSame()
+		{
+			options.MaxFightsPerRound = 4;
+			options.Seed = 42;
+			Run();
+
+			Assert.That(runDirectories, Has.Count.EqualTo(1));
+			Assert.That(TrainingRun.Load(runDirectories[0]).Manifest.EarlierFights, Is.Null);
+		}
+
+		[Test]
+		public void AFightStoppedWhileLookingForALossStopsTheLoopBeforeTheAgent()
+		{
+			options.MaxFightsPerRound = 4;
+			var fights = 0;
+			intercept = job => job.ScriptPath == repo.RunBotScript && ++fights == 2 ? 1 : null;
+
+			Assert.That(() => Run(), Throws.Exception);
+			Assert.That(runDirectories, Has.Count.EqualTo(2));
+			Assert.That(jobs.Where(job => job.ScriptPath == repo.TrainBotScript), Is.Empty);
+			Assert.That(messages, Has.Some.EqualTo("Run saved: " + runDirectories[1]));
 		}
 
 		[Test]
@@ -1029,11 +1097,13 @@ namespace AutoCnC.Launcher.Tests
 
 			if (job.ScriptPath == repo.RunBotScript)
 			{
+				var outcome = fightOutcome?.Invoke(runDirectories.Count) ?? "Won";
+				var enemy = outcome == "Won" ? "Lost" : "Won";
 				File.WriteAllText(Argument(job, "-Telemetry"),
 					"seconds,player,bot,state,units,army,buildings,basevalue,cash,killed,lost\n" +
-					"600,You,0,Won,3,300,2,400,100,2,1\n600,Enemy,1,Lost,0,0,0,0,0,1,2\n");
+					$"600,You,0,{outcome},3,300,2,400,100,2,1\n600,Enemy,1,{enemy},0,0,0,0,0,1,2\n");
 				File.WriteAllText(Argument(job, "-BattleLog"),
-					"seconds,event,player,detail\n0,player,You,side=you;faction=gdi\n600,over,You,result=Won\n");
+					$"seconds,event,player,detail\n0,player,You,side=you;faction=gdi\n600,over,You,result={outcome}\n");
 				File.WriteAllText(Argument(job, "-DecisionTrace"), "{}\n");
 				File.WriteAllText(Path.Combine(Path.GetDirectoryName(Argument(job, "-Telemetry")), "bot-assembly.json"),
 					"{\"Assemblies\":[{\"Sha256\":\"" + (assemblyHash?.Invoke() ?? "same") + "\"}]}");
@@ -1078,6 +1148,9 @@ namespace AutoCnC.Launcher.Tests
 
 		/// <summary>The assembly hash a fake fight reports; null reports the same one every time.</summary>
 		Func<string> assemblyHash;
+
+		/// <summary>How the nth fake training fight (1-based, across the whole run) ends; null wins them all.</summary>
+		Func<int, string> fightOutcome;
 
 		void WriteStage(ScriptJob job, bool candidate)
 		{

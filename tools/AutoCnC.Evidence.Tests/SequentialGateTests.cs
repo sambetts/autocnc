@@ -347,6 +347,18 @@ namespace AutoCnC.Evidence.Tests
 		}
 
 		[Test]
+		public void TheWinsARoundPassedOverCountInTheChampionRecordAndAreNamed()
+		{
+			var record = Record("20260929-100000", "inconclusive", "Restore", "Lost", "champ");
+			record.EarlierFights = ["Won", "Won", "Won"];
+			var other = Record("20260929-110000", "not-better", "Restore", "Won", "champ");
+
+			Assert.That(ExperimentLedger.ChampionRecord([record, other]), Does.Contain("won 4 of the 5"),
+				"a round that fought until it lost must not make the champion look worse than it is");
+			Assert.That(ExperimentLedger.Render([record]), Does.Contain("Read a Lost, after 3 fight(s) on other seeds it won."));
+		}
+
+		[Test]
 		public void AfterAPromotionTheChampionRecordStartsAgain()
 		{
 			var records = new List<ExperimentRecord>

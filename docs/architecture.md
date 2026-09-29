@@ -482,7 +482,11 @@ candidate's `checks.json` is passed to every one of its games (`-ChecksFile`), a
 After a promotion the PowerShell loop also plays the new champion on its audit set (`hard-holdout`
 by default), and once the champion it replaced as a baseline, into `<runs>/<bot>/audit.jsonl`
 (`TrainingLoopRunner.AuditPromotion`). That result is for the record only: it decides nothing and
-is never shown to the agent.
+is never shown to the agent. The PowerShell loop also looks for a loss to learn from
+(`FightUntilALoss`). Each round keeps playing fresh random seeds, each fight its own announced run,
+while the bot wins, up to `MaxFightsPerRound`, and studies the first loss or the last win. The
+wins passed over are recorded as the studied run's `EarlierFights` and counted in the ledger's
+champion record.
 
 The champion snapshot is captured with the training run before its fight starts, so a queued chat
 turn after the result cannot silently redefine the control. Experiment metadata is created

@@ -528,6 +528,13 @@ namespace AutoCnC.Launcher
 				? "No player assessment was provided."
 				: "Player assessment of why the battle was won or lost:" + Environment.NewLine +
 					result.PlayerFeedback.Trim();
+			var earlierFights = run.Manifest.EarlierFights is { Count: > 0 } passedOver
+				? Environment.NewLine + (string.Equals(result?.Outcome, "Won", StringComparison.OrdinalIgnoreCase)
+					? $"The bot won all {passedOver.Count + 1} fights this round played on fresh seeds; this is the " +
+						"last of them, so no loss turned up to study."
+					: $"This is the first loss this round found: the bot won the {passedOver.Count} fight(s) it " +
+						"played on other fresh seeds first, so this game is where it can still lose.")
+				: "";
 
 			return
 			[
@@ -556,7 +563,7 @@ namespace AutoCnC.Launcher
 					$"faction={battle?.Faction}, opponent faction={battle?.BotFaction}, speed={battle?.GameSpeed}, " +
 					$"execution={battle?.ExecutionMode ?? BattleExecutionModes.Rendered}"),
 				("{result}", $"{result?.Outcome ?? "unknown"} after {result?.DurationSeconds ?? 0} game seconds; {score}" +
-					Environment.NewLine + playerFeedback),
+					Environment.NewLine + playerFeedback + earlierFights),
 				("{sourceRevision}", run.Manifest.SourceRevision),
 
 				// Inlined rather than referenced: the gospel is the half of the prompt the agent
@@ -818,6 +825,10 @@ namespace AutoCnC.Launcher
 			twenty-seven thousand characters of recipes before. Make yours shorter and more specific
 			than this one, not longer, and do not restate how the gate works: that is in the
 			mechanics reference above, which is kept current.
+
+			Keep the next round aimed at changes that decide games. It is given a lost fight
+			whenever one turns up, and a change is kept only if it wins games the champion loses;
+			polishing games the bot already wins has never been kept.
 
 			It must explicitly restrict edits to {workspace}.
 

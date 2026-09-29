@@ -133,11 +133,8 @@ namespace AutoCnC.Launcher
 						Evaluate(cancellationToken);
 					}
 
-					activeRun = TrainingRun.Create(project, options.Battle(), options.RunsRoot);
 					output($"=== Training round {round}{(options.Rounds == 0 ? "" : $"/{options.Rounds}")} ===");
-					output($"AUTOCNC_TRAINING_RUN={activeRun.RunDirectory}");
-					promotion.CaptureChampion(activeRun);
-					Fight(project, cancellationToken);
+					FightUntilALoss(project, cancellationToken);
 					RequireSuccess(Execute(repo.ExportAgentRulesScript,
 						["-Output", activeRun.GameRulesPath], "Exporting game rules", cancellationToken));
 					TrainingAgent.Prepare(activeRun, repo.AgentGameGuide, repo.AgentMechanics,
@@ -193,6 +190,62 @@ namespace AutoCnC.Launcher
 			if (string.IsNullOrWhiteSpace(agent?.Command))
 				throw new ArgumentException("AgentConfiguration must specify a command.");
 			return agent;
+		}
+
+		/// <summary>
+		/// Plays the round's training fight, and keeps playing fresh random seeds while the bot
+		/// wins, up to <see cref="TrainingLoopOptions.MaxFightsPerRound"/>. The round studies the
+		/// last fight played: the first loss, or the last win when every fight was won.
+		/// </summary>
+		/// <remarks>
+		/// <para>
+		/// A lost game is where a gap that decides games shows. In the first 20 rounds under the
+		/// fresh-seed gate, 14 studied a fight the bot had won, and their changes altered the winner
+		/// in 7.5% of their test games; the six that studied a loss altered it in 15%. A change has
+		/// to flip games to be kept at all, so the round is given a loss whenever one turns up.
+		/// </para>
+		/// <para>
+		/// Every fight is its own run, announced as it starts so the nightly pause can cancel
+		/// whichever one is in progress. The wins passed over stay in the history as finished
+		/// fights and are recorded on the studied run, so the champion's record keeps counting
+		/// them: stopping at the first loss would otherwise make the bot look worse than it is.
+		/// </para>
+		/// </remarks>
+		void FightUntilALoss(string project, CancellationToken token)
+		{
+			var limit = options.Seed != 0 ? 1 : Math.Max(1, options.MaxFightsPerRound);
+			var passedOver = new List<TrainingEarlierFight>();
+			for (var fight = 1; ; fight++)
+			{
+				token.ThrowIfCancellationRequested();
+				activeRun = TrainingRun.Create(project, options.Battle(), options.RunsRoot);
+				output($"AUTOCNC_TRAINING_RUN={activeRun.RunDirectory}");
+				promotion.CaptureChampion(activeRun);
+				Fight(project, token);
+
+				var outcome = activeRun.Manifest.Result?.Outcome;
+				var won = string.Equals(outcome, "Won", StringComparison.OrdinalIgnoreCase);
+				if (!won || fight >= limit)
+				{
+					if (passedOver.Count > 0)
+					{
+						activeRun.RecordEarlierFights(passedOver);
+						output(won
+							? $"No loss in {fight} fights; the round studies the last of them."
+							: $"Fight {fight} was lost after {passedOver.Count} won; the round studies this loss.");
+					}
+
+					return;
+				}
+
+				passedOver.Add(new TrainingEarlierFight
+				{
+					RunId = activeRun.Manifest.Id,
+					Outcome = outcome,
+					DurationSeconds = activeRun.Manifest.Result?.DurationSeconds ?? 0
+				});
+				output($"Fight {fight} of at most {limit} was won; playing another seed to find a loss to learn from.");
+			}
 		}
 
 		void Fight(string project, CancellationToken token)

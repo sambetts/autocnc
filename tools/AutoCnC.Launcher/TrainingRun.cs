@@ -267,7 +267,27 @@ namespace AutoCnC.Launcher
 		/// </remarks>
 		public ProcessOwnership Owner { get; set; }
 
+		/// <summary>
+		/// Fights the round played first, on other random seeds, and passed over, or null when the
+		/// round fought once.
+		/// </summary>
+		/// <remarks>
+		/// The unattended loop keeps fighting until the bot loses, up to a limit, because a lost
+		/// game is where a gap that decides games shows. The wins it passed over are kept here so
+		/// the champion's record still counts every fight it played, not only the losses the round
+		/// went looking for.
+		/// </remarks>
+		public List<TrainingEarlierFight> EarlierFights { get; set; }
+
 		public List<string> Warnings { get; set; } = [];
+	}
+
+	/// <summary>A fight a round played and passed over while looking for one the bot lost.</summary>
+	public sealed class TrainingEarlierFight
+	{
+		public string RunId { get; set; }
+		public string Outcome { get; set; }
+		public int DurationSeconds { get; set; }
 	}
 
 	/// <summary>One durable fight and all evidence needed to understand or improve it.</summary>
@@ -799,6 +819,14 @@ namespace AutoCnC.Launcher
 				Manifest.Warnings.Add("The replay could not be copied: " + ex.Message);
 			}
 
+			Save();
+		}
+
+		/// <summary>Records the fights this round passed over before the one it studies.</summary>
+		public void RecordEarlierFights(IEnumerable<TrainingEarlierFight> fights)
+		{
+			var list = fights?.Where(fight => fight != null).ToList() ?? [];
+			Manifest.EarlierFights = list.Count == 0 ? null : list;
 			Save();
 		}
 

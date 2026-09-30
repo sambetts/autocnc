@@ -1,6 +1,9 @@
-Improve the battle bot in {workspace} from the evidence of its latest fight. Edit only files under {workspace}: not the platform checkout, the engine, the tools, or training artifacts.
+# Improve the AutoC&C Reference bot
 
-## Mechanics and SDK reference
+Improve the battle bot in {workspace} so that it wins games the champion loses. Edit only files under
+{workspace}: never the platform checkout, the engine, the tools, `docs/` or training artifacts. You may
+read engine source to understand the opponent, but never turn it into map cells, grid constants or
+opponent-specific branches.
 
 {gameMechanics}
 
@@ -14,70 +17,100 @@ Source revision before the fight: `{sourceRevision}`
 
 {botAudit}
 
-Read {summary} whole first. Open anything else only for a question it cannot answer, and say which: units {units}, map facts {mapFacts}, checks {checks} and verdict {checkResults}, trend {trend}, guide {gameGuide}, actor and weapon stats {gameRules} (query it, never read it whole). Read `docs/unit-matchups.md` before arguing counters. Raw records: manifest {fightManifest}, battle log {battleLog}, telemetry {telemetry}, decision trace {decisionTrace} (20 MB; filter lines before parsing). Only the trace says which rule a unit, the yard, the bank or the doctrine obeyed, and where a unit was sent (`targetX`/`targetY`); units.csv says where it died.
+## Evidence
 
-Facts that have cost rounds:
-- Trace events carry `action`, `reason`, `reasonId` and `outcome` at top level; `assessment` holds `BattleState` under `state`; a bank-blocked order has outcome `production-budget-suppressed`. Many push decisions carry prose only.
-- Our deaths are `lost` rows, killer in `otheractor`. Friendly fire is `attacked` rows whose `otherplayer` is us; the engagement matrix omits it. `spotted` rows carry `frombase=`, which is how a forward base shows. `c17` is Nod's delivery plane.
-- `CanHitUs` ignores distance; a thing shoots us only inside its `WeaponRangeUnits`, its longest weapon (an `atwr` reads its anti-air reach). Sight is `RevealsShroud` in `engine\mods\cnc\rules\*.yaml`.
-- Engine: a unit that cannot move drops an `Attack` out of range; an `Attack` on a building this side has seen continues in fog, on a unit it is dropped.
-- `EnemiesNearBase` counts visible enemy buildings within 15 cells of our yard. `AttackBaseMode` evaluates about three times a game second, harvesters twice, the yard once.
-- The opponent's towers have fired only since 31ee989. Rules written before then may not know a tower exists.
-- A scratch net8.0 console outside {workspace} referencing `engine\bin\AutoCnC.Core.dll` and the built `engine\bin\bots\AutoCnC.Reference.dll` replays any `*Logic` class on states rebuilt from the trace; a short script over sibling run folders sharing this fight's `rulesFingerprint` says whether losses share a gap and how often a rule would fire in a win. Keep nothing of either.
-
-## Checks the champion carries, and the trend
+Read {summary} whole first; its tables are computed, so do not re-derive them. Open anything else only
+for a question it cannot answer, and name the question: units {units}; map {mapFacts}; checks {checks},
+verdict {checkResults}; trend {trend}; guide {gameGuide}; manifest {fightManifest}; rules {gameRules}
+(query with a script); battle log {battleLog}; telemetry {telemetry}; trace {decisionTrace} (stream it,
+filter on `event`). `docs/unit-matchups.md` is the duel lab: read it before arguing counters. Where each
+push lost its units, and to what, is not in the summary: battle-log `lost` rows carry killer and cell.
 
 {checkReport}
 
 {trendReport}
 
-These checks were written by the round that produced the champion and are evaluated against every fight it plays. A quick win moves `meanArmyValue` and `creditsKilled`; a loss measured against a median of wins moves nearly everything. Say so once if one applies, and give any other listed shift or failing check a sentence: refuted, or never came up.
-
 ## Experiment ledger
 
 {experimentLedger}
 
-The ledger is the harness's record of recent rounds, written after each verdict from the candidate's own benchmark games. Read it before choosing: do not repeat a change that measured worse, and treat "inconclusive" or "not better" as untested at this gate's resolution, not as refuted. A new reason id that fired in 0 of a candidate's games means that change never ran.
+Inconclusive and not-better are not refutations; a change whose ids fired in no game was never tested.
 
-## How a change is judged
+## The pool
 
-See "How a bot is measured" in the mechanics reference above: the gate plays fresh seeds and keeps a change only if it wins games the champion loses. Never tune match length. Losses share 7-19 harvesters lost, early pushes without siege, and an enemy forward base near ours standing to the end.
+The champion's games are in `..\..\gate\hard-16-9-fresh.json` beside the folder holding {summary}. Try
+once; the last four rounds were denied it, and the session store holds nothing beyond the facts below.
 
-## Where the bot stands
+## What is known (champion `2c79ea9`, 96 fresh games, 68 won)
 
-The champion is the source in {workspace}. Every candidate from 26 September 16:09 to 27 September 23:22 (twenty-four rounds) was rejected by the old gate, eight pinned seeds the champion already won 8 of 8: a candidate could at best tie, and a tie was decided by a fitness score that is capped in a win. Those rejections say nothing about the ideas. The last of them made harvesters refuse fields whose ground or road a remembered enemy tower reaches (`economy.harvester-avoids-tower-ground`); it is not in the source.
+- By pairing, ours first: GDI-GDI 16/24, GDI-Nod 18/24, Nod-GDI 14/24, Nod-Nod 20/24.
+- What precedes the first push decides most games. Raided, Defence won, pushed from Opening at 275-410s:
+  35 of 38 won. Straight out of Defence at 4,000: 13 of 22 (3 of the 9 losses launched with enemies in
+  sight; no win did). Quiet opening, blind rifle probe at 220-245s: 18 of 32; 8 of 12 against GDI lost.
+- Losses end economic (about 58% of HAL's spend), but income at 420s is level: HAL pulls away once our
+  army is spent. HAL plants its yard on tiberium within 30 cells of ours in 71 of 96 games; wins kill it
+  within a minute. Our home fields are worked out by about 480s.
+- `hq` stands near 370s and the first siege piece near 400s; refinery four leads `hq` for a measured
+  income reason (`Plans.cs`).
+- HAL (`SquadManagerBotModule`, `engine/mods/cnc/rules/ai.yaml`): a squad forms once 15 plus a random
+  0-29 units idle at home and attack-moves on our nearest actor; a hit on any of its buildings or
+  harvesters pulls its idle units onto the attacker. It runs up to four barracks and four factories; we
+  drive one of each, because `QueueFor` returns a group's first queue.
+- Pushes are spent at tower lines (duel lab: one `gtwr` or `atwr` wipes out `e1`), yet push tactics
+  alone have not moved the gate: holding the first push, tower discipline with a blind siege, the yard
+  as objective, muster clocks.
 
-Earlier attempts, all rejected by that old gate, so none is refuted; retry one only with a reason to expect it to flip games. Harvesters: a one-credit bank for refinery four; recovery hold funding the factory; refinery five from the bank; a floor until one dies; the bank stopping at the released floor; no field charge for a harvester shot in transit; escorts standing off tiberium; a drive-off outliving a fleet report; radius raided-ground reports; refusing tower-covered fields. Pushes: the first push held to 10,000 or a raid; recalling a bled push; probing our mirror on a stale sighting; infantry waiting at towers; line units shooting their armour's tower first or standing off an unseen defence; siege re-aiming off targets beside our units, stepping back from closing infantry, or shelling the tower in its reach until it falls; counter-battery attack-moving at a fogged hit's cell. Other: a Nod opening's only escort scouting; rockets or APCs on first sight of aircraft; counter rungs above harvester or siege rungs; `ftnk` as Nod armour; a forward yard at the contested field; the screen or Defence attacking their forward base; a covering tower sited toward where the base is hurt.
+## The candidate judged after this prompt was written
 
-Open leads; take one only if your fight shows it:
-- Only harvester field choice reads `EnemyDefences`; refinery siting, the survey and the engine's own harvester search (which can wander from a safe field into a tower's reach) do not.
-- Enemy `orca` did about 870,000 damage to our buildings last fight, a quarter from crashing husks; three `atwr` killed 19 and all died. Do not cut anti-air on one quiet fight.
-- `DefensiveLogic.CanEngage` gives towers a mover's leash; our `gtwr`'s blockable bullets hit our own buildings.
+"Siege shells what the side has seen": `Modes/EnemyStructures.cs` remembers every enemy building any
+unit sees. In Attack a siege piece shells the nearest remembered ground tower within its reach plus 5
+cells, then other remembered buildings, through the fog (`arty`/`msam` carry `TargetFrozenActors`;
+see `OpenRA.Mods.Common/TargetExtensions.cs`). Line units stand off remembered towers, and with no
+siege in position but one alive, a unit the duel lab says the tower beats waits outside its reach
+(`StandOffLogic.Outmatched`, 75s budget). Ids `assault.siege-shells-remembered-defence`/`-structure`,
+`assault.stand-off-remembered-*`, `assault.await-siege-*`. Pushes before any siege exists, and home
+defence, are unchanged. The ledger says whether it was kept and which ids fired.
 
-## Choose one gap
+## Work in this order
 
-Name one gap, cite the {summary} number that chose it, price it in credits and seconds, name its decisive moment, and say whether the losses share it. The gate keeps only a change that flips games on fresh seeds, so prefer a gap that decides games and a change that fires in most games of the matchup it targets; moving 600 credits nine seconds sooner flips nothing. Change one thing that works for either faction; a few coordinated edits that only work together count as one thing. In a loss start from `scale`, the costliest `doctrineEpisodes` row and the largest `unitTypes` share of spend; in a win rank `unitTypes` by cost times lost beside `lossClusters`, and look for spend that did nothing. A rule whose comment and orders disagree is the cheapest fix. A real bug that had nothing to act on in this fight is a lead, not a gap.
+1. If the fight is a loss, find the moment it became unwinnable, the decision that led there, and a
+   condition this side could observe before it. If it is a win, say so in one line and work from the
+   facts above instead of polishing it.
+2. Check the condition concentrates the champion's losses. Estimate flips each way per 100 games; under
+   a net of about 5, choose something bigger: one coherent change that fires in most games it targets.
+   Untried levers of that size: composition per matchup (the duel lab rates Nod's `ltnk` well below
+   `ftnk` and `e1` against HAL-GDI's usual mix), siege before the first push, a second production group.
+3. Build, have a code-review agent review the diff (each of the last two found real bugs), fix, build
+   with Release last. Do not launch a game; do not add tests or a test project.
+4. Say whether the fight was a loss and what came before it, give each failing check and flagged trend
+   shift one sentence, and name the touched set and your estimate.
 
 ## Reading this bot
 
-`README.md` is a 200 KB journal, newest last: read its last two sections and add one short one. Doctrine `Logic/ReferenceBotLogic.cs`; assignments `Doctrines/*.cs`; pushes `Modes/AttackBaseMode.cs` with `StandOffLogic`; home `Modes/DefensiveMode.cs`; harvesters `Modes/HarvesterMode.cs` and `Logic/HarvesterLogic.cs` (95 KB, grep it); production `Modes/TrainUnitsMode.cs` and `Plans.cs` (a rung counts what is standing; `ArmyBalanceLogic` releases a floor at 3/4); banks `Logic/IncomeFirstLogic.cs`.
+`README.md` is a journal, newest last: read its last two sections and add one short one. Doctrine:
+`Logic/ReferenceBotLogic.cs`. Pushes: `Modes/AttackBaseMode.cs`, `Logic/AttackBaseLogic.cs`,
+`Logic/AssaultStagingLogic.cs`, `Logic/StandOffLogic.cs`. Home: `Modes/DefensiveMode.cs`,
+`Logic/DefensiveLogic.cs`. Harvesters: `Modes/HarvesterMode.cs`, `Logic/HarvesterLogic.cs`. Production:
+`Modes/BuildBaseMode.cs`, `Modes/TrainUnitsMode.cs`, `Plans.cs`, `Logic/ArmyMixLogic.cs`.
 
-## Work
-
-Edit only files under {workspace}. Keep the SDK boundary and existing conventions; base changes on evidence, not tuning. No unit tests and no test project. No literal map cells, no branching on map, faction or opponent, and no constant tuned to one seed.
-
-1. Read the ledger, and account for every failing check and listed shift.
-2. Choose the gap. Read only the source its decisive moment runs through, make the smallest coherent change, and put its evidence in prose beside the code.
-3. Before building, trace the change on this fight's numbers: when it fires, what else it moves, how often it would fire in wins, and what changes as the other faction. Revert anything the trace shows going wrong, and say so in the README.
-4. Write `checks.json`, then build until it succeeds, Release last. Do not launch a game.
+Traps: our losses are battle-log `lost` rows; `killed` rows are theirs. `c17` is Nod's delivery plane.
+`attacked` rows whose `otherplayer` is us are friendly fire. `EnemyBaseFound` latches only when a
+building is in sight at an assessment, so a push can "probe for their base" after a scout died finding
+it. `BattleState` has no composition: a doctrine rule cannot see our siege count, a mode can.
+`ctx.ResolveActor` is not visibility-filtered. Shared memory is keyed by `Player`; clocks count
+`WorldTick`. A unit told to `Hold` under fire never shoots back.
 
 ## checks.json
 
-Write `checks.json` into {workspace} before you finish; the harness evaluates it in every one of your candidate's benchmark games and records the tallies in the ledger. Set `authoredForRevision` to `{sourceRevision}`, set `hypothesis` to one sentence saying what the change does and which games it should flip, and give every check a `category`:
-- `activation` proves a path ran. Give every new code path a `ReasonId` and a reason literal nothing else uses, and assert it with `reason-id:` or `reason:`, so "the branch is wrong" can be told from "it never ran". A path that only stops something leaves no ID, so put the ID on what it still does.
-- `invariant` guards a safety property that must also hold in a loss. Always include `summary.fight.durationSeconds <= 2400`.
-- `outcome` records a measured result. Checks are observations, not a gate: wins on fresh seeds decide promotion.
-
-`units.*` filters only on `type=`, `owner=` and `mode=`, and an empty match reads 0, so a one-faction check must hold in the other faction's game. A table's first column is its key; a key nobody produced errors. Confirm queries resolve with `dotnet tools\AutoCnC.Evidence\bin\Release\net8.0\AutoCnC.Evidence.dll summarise <dir> --checks <your checks.json>` on a scratch copy of the evidence, never the evidence directory, which it rewrites. Against this fight, a new branch's activation check should read FAIL.
+Write `checks.json` into {workspace} before you finish, with `authoredForRevision` set to
+`{sourceRevision}` and a one-sentence `hypothesis` saying what the change should move and which games it
+should flip. Give every new code path a `ReasonId` literal nothing else uses, so a `reason-id:` check can
+tell "the branch is wrong" from "it never ran". Categorise each check: `activation` (a new path ran;
+reads FAIL against this fight), `invariant` (holds in a loss too; always include
+`summary.fight.durationSeconds <= 2400`) or `outcome` (a measured result). They run in every candidate
+game and their tallies go into the ledger; they are observations, not a gate, and wins on fresh seeds
+decide promotion. `units.*` filters only on `type=`, `owner=` and `mode=`. Validate them with
+`dotnet tools\AutoCnC.Evidence\bin\Release\net8.0\AutoCnC.Evidence.dll summarise <scratch copy of the evidence> --checks <checks.json>`,
+never on the evidence folder itself.
 
 {nextPromptContract}

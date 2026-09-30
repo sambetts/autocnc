@@ -61,6 +61,9 @@ namespace AutoCnC.Reference.Modes
 			// again and may reuse the buffer.
 			var structures = ctx.SenseStructures(new WDist(SightRadius));
 			var structureInSight = structures.Count > 0;
+
+			// Each one, for the push's siege pieces and line units. See EnemyStructures.
+			EnemyStructures.Record(self.Owner, structures);
 			var found = false;
 			var foundX = 0;
 			var foundY = 0;

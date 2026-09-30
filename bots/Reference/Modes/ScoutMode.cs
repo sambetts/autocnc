@@ -50,6 +50,10 @@ namespace AutoCnC.Reference.Modes
 			// one that ends up in the battle log.
 			var structures = ctx.SenseStructures(new WDist(SightRadius));
 			var inSight = structures.Count > 0;
+
+			// Each one, not just the first: a scout often sees a tower for one second before the
+			// tower kills it. See EnemyStructures.
+			EnemyStructures.Record(self.Owner, structures);
 			if (inSight)
 			{
 				// Remember where, not just that. The push that this discovery unlocks starts at

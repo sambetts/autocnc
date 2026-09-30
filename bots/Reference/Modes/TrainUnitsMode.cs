@@ -118,6 +118,10 @@ namespace AutoCnC.Reference.Modes
 
 		public override UnitDecision OnTick(Actor self, ModeContext ctx)
 		{
+			// Remember every enemy building this side can see, for the push's siege pieces and
+			// line units. Throttled per side; the factories run all match. See EnemyStructures.
+			EnemyStructures.Survey(self, ctx);
+
 			var plan = ctx.ProductionPlan;
 			if (plan == null || plan.Count == 0)
 				return UnitDecision.Continue;

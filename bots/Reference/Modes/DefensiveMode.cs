@@ -77,6 +77,10 @@ namespace AutoCnC.Reference.Modes
 
 		public override UnitDecision OnTick(Actor self, ModeContext ctx)
 		{
+			// Remember every enemy building this side can see. Throttled per side; see
+			// EnemyStructures.
+			EnemyStructures.Survey(self, ctx);
+
 			// The Scout doctrine's army once their main base has fallen and nothing more is in
 			// sight: go and find what is left rather than stand at home until the match times out.
 			if (hunt.Active(self, ctx))

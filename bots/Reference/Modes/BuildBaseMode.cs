@@ -208,6 +208,10 @@ namespace AutoCnC.Reference.Modes
 			if (ctx.CanDeploy && ctx.DeploysIntoBuilding)
 				return UnitDecision.Deploy("deploying to found the base");
 
+			// Remember every enemy building this side can see. Throttled per side; see
+			// EnemyStructures.
+			EnemyStructures.Survey(self, ctx);
+
 			// --- Sense -------------------------------------------------------------
 			for (var i = 0; i < ConstructionQueues.Length; i++)
 			{

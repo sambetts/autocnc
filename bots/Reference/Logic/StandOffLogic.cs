@@ -9,6 +9,8 @@
  */
 #endregion
 
+using System;
+using System.Collections.Generic;
 using AutoCnC.Core;
 
 namespace AutoCnC.Reference.Logic
@@ -57,10 +59,14 @@ namespace AutoCnC.Reference.Logic
 			// because a unit in this mode is evaluated about three times a game second (3.1 to
 			// 3.3 measured on 16:9, more under fire), not once every 1.4. The duel lab's four arty
 			// (2,400 credits) destroy a gtwr in 16.7 s and an obelisk in 20.3 s, and on 16:9 four
-			// or five took 16 s for a gun and a gtwr together. Forty-five seconds is two towers at
-			// the lab's rate or one at half of it, and it is what bounds the wait when the siege
+			// or five took 16 s for a gun and a gtwr together.
+			//
+			// Seventy-five seconds, up from forty-five, because a line unit now also waits for a
+			// siege piece that is still on its way (AwaitingSiege): one built at home walks 40 to
+			// 60 cells at 1.758 cells a second, 23 to 34 seconds, before it shells anything, and two
+			// pieces then need about 33 seconds for a gtwr. It still bounds the wait when the
 			// piece is in position but shelling something else.
-			MaxTicks: 45 * 25,
+			MaxTicks: 75 * 25,
 
 			// The most one evaluation adds to that count: one game second. A unit that left the
 			// band and came back later has not been standing off in between.
@@ -74,6 +80,12 @@ namespace AutoCnC.Reference.Logic
 	/// because only the mode can sense allies. <paramref name="ShooterAnswerable"/> is whether the
 	/// counter-battery rule has a live answer to something outranging this unit that stands
 	/// outside the defence's reach. Cells are map cells; distances and ranges are world units.
+	/// <para>
+	/// <paramref name="Remembered"/> is a defence nobody on this side can see right now, placed from
+	/// the side's memory of it. <paramref name="AwaitingSiege"/> is the case with no siege piece in
+	/// position but one of ours alive and on its way, which only concerns a unit the duel lab says
+	/// the defence beats (<see cref="StandOffLogic.Outmatched"/>).
+	/// </para>
 	/// </remarks>
 	public readonly record struct StandOffState(
 		bool CanMove,
@@ -99,7 +111,10 @@ namespace AutoCnC.Reference.Logic
 		uint TargetActorId,
 		string TargetType,
 		bool ShooterAnswerable,
-		int SpentTicks);
+		int SpentTicks,
+		string UnitType = null,
+		bool Remembered = false,
+		bool AwaitingSiege = false);
 
 	/// <summary>
 	/// Keeps line units out of the reach of a static defence that outranges them while a siege
@@ -142,10 +157,20 @@ namespace AutoCnC.Reference.Logic
 	/// as it would have.
 	/// </para>
 	/// <para>
-	/// What it deliberately does not do: act without a siege piece in position (the push then
-	/// has nothing that kills the tower for free, and the old rules decide), act for a unit that
-	/// matches the defence's reach (an <c>e3</c> against a <c>gtwr</c> is an even range duel,
-	/// not a free kill), or wait without end — see <see cref="StandOffTuning.MaxTicks"/>.
+	/// What it deliberately does not do: wait with no siege piece of ours alive (the push then has
+	/// nothing that kills the tower for free, and the old rules decide), hold back a unit that beats
+	/// the tower when the siege is only on its way, or wait without end — see
+	/// <see cref="StandOffTuning.MaxTicks"/>.
+	/// </para>
+	/// <para>
+	/// <b>It used to need the tower in sight, and a line unit cannot see one from outside its
+	/// reach</b> (<c>e1</c> sees 5 cells, a <c>gtwr</c> reaches 6). A rifleman that stepped out
+	/// lost sight of the tower, the rule lost its opinion and the rifleman walked back in. The mode
+	/// now also offers the towers the side remembers (<c>assault.stand-off-remembered-*</c>), and
+	/// the siege piece shells them from memory (<see cref="SiegeTargetLogic"/>). With no piece in
+	/// position but one alive, a unit the duel lab says the tower beats waits outside its reach
+	/// (<c>assault.await-siege-*</c>): on 16:9 the first push lost 25 <c>e1</c> to one <c>gtwr</c>
+	/// at 398-423s while its first <c>arty</c> was being built at home.
 	/// </para>
 	/// ZERO OpenRA dependencies by design and integer-only, so it is lockstep-safe.
 	/// </remarks>
@@ -190,6 +215,64 @@ namespace AutoCnC.Reference.Logic
 				&& Depth(distanceUnits, defenceRangeUnits, t) <= t.HoldBandUnits;
 
 		/// <summary>
+		/// Whether this defence concerns this unit, by type as well as by reach.
+		/// </summary>
+		/// <remarks>
+		/// With a siege piece in position, a unit the defence outranges or beats outright stands
+		/// off: an <c>e3</c> matches a <c>gtwr</c>'s six cells and is still wiped out by it in the
+		/// duel lab, so an even range is not an even fight. While the siege is only on its way
+		/// (<paramref name="awaitingSiege"/>), waiting costs the push time, so only a unit the tower
+		/// beats outright waits: a tank that kills a <c>gtwr</c> losing a tenth of itself is not
+		/// held back.
+		/// </remarks>
+		public static bool Concerns(
+			int distanceUnits,
+			int defenceRangeUnits,
+			int weaponRangeUnits,
+			string unitType,
+			string defenceType,
+			bool awaitingSiege,
+			in StandOffTuning t)
+		{
+			// A tower short of power, or still being built, reports no reach at all. It is not
+			// shooting anyone, and a reach of zero would put the stand-off band inside the one it
+			// has once the power comes back.
+			if (defenceRangeUnits <= 0)
+				return false;
+
+			if (!IsLineUnit(weaponRangeUnits) || Depth(distanceUnits, defenceRangeUnits, t) > t.HoldBandUnits)
+				return false;
+
+			var outmatched = Outmatched(unitType, defenceType);
+			return awaitingSiege ? outmatched : outmatched || Outranges(defenceRangeUnits, weaponRangeUnits);
+		}
+
+		/// <summary>
+		/// Whether 2,400 credits of <paramref name="unitType"/> ordered to destroy one powered
+		/// <paramref name="defenceType"/> are wiped out or lose at least half their value.
+		/// </summary>
+		/// <remarks>
+		/// Read off the "Against defences" table in <c>docs/unit-matchups.md</c>, which the engine
+		/// measured on open ground. Rules about unit types, not about any map or opponent. A pair
+		/// that is not listed is one the attacker wins cheaply: <c>e1</c> kills a <c>gun</c> losing
+		/// 276 of 2,400, <c>mtnk</c> a <c>gtwr</c> losing 213, <c>e4</c> any tower losing under 1,000.
+		/// </remarks>
+		public static bool Outmatched(string unitType, string defenceType) =>
+			!string.IsNullOrEmpty(unitType)
+				&& !string.IsNullOrEmpty(defenceType)
+				&& OutmatchedBy.TryGetValue(defenceType, out var beaten)
+				&& beaten.Contains(unitType);
+
+		static readonly Dictionary<string, HashSet<string>> OutmatchedBy =
+			new(StringComparer.OrdinalIgnoreCase)
+			{
+				["atwr"] = new(StringComparer.OrdinalIgnoreCase) { "e1", "e2", "e3", "jeep", "apc", "bggy", "bike", "ltnk", "stnk" },
+				["gtwr"] = new(StringComparer.OrdinalIgnoreCase) { "e1", "e2", "e3", "jeep", "bggy", "bike" },
+				["gun"] = new(StringComparer.OrdinalIgnoreCase) { "jeep", "apc", "bggy", "bike", "ltnk" },
+				["obli"] = new(StringComparer.OrdinalIgnoreCase) { "e1", "e3", "jeep", "apc", "mtnk", "htnk", "bggy", "bike", "ltnk", "ftnk", "stnk" },
+			};
+
+		/// <summary>
 		/// Whether an ally with this reach, this far from the defence, is a siege piece shelling it
 		/// or about to.
 		/// </summary>
@@ -209,30 +292,40 @@ namespace AutoCnC.Reference.Logic
 		/// </summary>
 		public static UnitDecision? Decide(in StandOffState s, in StandOffTuning t)
 		{
-			if (!s.HasDefence || !s.SiegeInPosition || !s.CanMove || !s.HasWeapon)
+			if (!s.HasDefence || !s.CanMove || !s.HasWeapon)
+				return null;
+
+			var awaiting = !s.SiegeInPosition && s.AwaitingSiege;
+			if (!s.SiegeInPosition && !awaiting)
 				return null;
 
 			if (s.SpentTicks >= t.MaxTicks)
 				return null;
 
-			if (!Concerns(s.DefenceDistanceUnits, s.DefenceRangeUnits, s.WeaponRangeUnits, t))
+			if (!Concerns(s.DefenceDistanceUnits, s.DefenceRangeUnits, s.WeaponRangeUnits,
+				s.UnitType, s.DefenceType, awaiting, t))
 				return null;
 
 			var defence = string.IsNullOrEmpty(s.DefenceType) ? "the defence" : s.DefenceType;
 			var siege = string.IsNullOrEmpty(s.SiegeType) ? "siege" : s.SiegeType;
+			var shelling = awaiting ? $"our {siege} is on its way" : $"{siege} shells it";
 
 			if (Depth(s.DefenceDistanceUnits, s.DefenceRangeUnits, t) <= 0)
 			{
 				var (x, y) = StepOutCell(s, t);
 				return UnitDecision.MoveTo(x, y,
-					$"standing off {defence}: {s.DefenceDistanceUnits}u inside its {s.DefenceRangeUnits}u reach while {siege} shells it",
-					"assault.stand-off-step-out");
+					$"standing off {defence}: {s.DefenceDistanceUnits}u inside its {s.DefenceRangeUnits}u reach while {shelling}",
+					awaiting ? "assault.await-siege-step-out"
+						: s.Remembered ? "assault.stand-off-remembered-step-out"
+						: "assault.stand-off-step-out");
 			}
 
 			if (s.HasTargetInReach)
 				return UnitDecision.Attack(s.TargetActorId,
-					$"screening {siege} from outside {defence}'s {s.DefenceRangeUnits}u reach, engaging {(string.IsNullOrEmpty(s.TargetType) ? "what is in range" : s.TargetType)}",
-					"assault.stand-off-screen");
+					$"screening from outside {defence}'s {s.DefenceRangeUnits}u reach while {shelling}, engaging {(string.IsNullOrEmpty(s.TargetType) ? "what is in range" : s.TargetType)}",
+					awaiting ? "assault.await-siege-screen"
+						: s.Remembered ? "assault.stand-off-remembered-screen"
+						: "assault.stand-off-screen");
 
 			// Something mobile is outranging us from outside the tower's reach. Closing on it is
 			// the counter-battery rule's job, and holding still under its fire is not a screen.
@@ -240,8 +333,10 @@ namespace AutoCnC.Reference.Logic
 				return null;
 
 			return UnitDecision.Hold(
-				$"holding {s.DefenceDistanceUnits}u from {defence}, outside its {s.DefenceRangeUnits}u reach, while {siege} shells it",
-				"assault.stand-off-defence");
+				$"holding {s.DefenceDistanceUnits}u from {defence}, outside its {s.DefenceRangeUnits}u reach, while {shelling}",
+				awaiting ? "assault.await-siege-hold"
+					: s.Remembered ? "assault.stand-off-remembered-defence"
+					: "assault.stand-off-defence");
 		}
 
 		/// <summary>

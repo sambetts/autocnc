@@ -2987,6 +2987,38 @@ which go to the `hq`, and from 466s to `msam`. It changes nothing before 265s or
 and Scout. In a win it fires in the same windows, where it only stops scout re-buys. What it gives
 up is the push's watcher: Attack's `WatchMode` jeeps here lived 14 and 76 seconds.
 
+## Siege pieces could not see what they shoot
+
+The next `16:9` at Hard (Nod against GDI) was lost at 943s, fitness 0.654, on 64% of the
+opponent's spend. The first push left Scout at 365s with 42 `e1`, 4 `e3` and no siege (the first
+`arty` was born at 404s). It marched on the base seen at 258s and lost 25 `e1` to one `gtwr` at
+(33,33) in 26 seconds (398-423s), plus 14 to jeeps. The scout that found that tower had died to
+it at 259s. The second push (555s, with `arty`) lost 13 `e1` to one `atwr` at 593-661s. Two `arty`
+died walking into its reach and a `gun`'s (526s, 561s), and the tower fell only at 667s. From 660s
+both armies were spent, HAL out-earned us 2:1 from its planted yards, and the base fell at 880-943s.
+
+`arty` sees 5 cells and reaches 11; `msam` sees 6 and reaches 11. Sensing returns only what is
+visible, so a siege piece could only pick a building a line unit was standing next to, inside the
+tower's reach. The previous stand-off rule needed the tower in sight too. An `e1` (sight 5) loses
+sight of a `gtwr` (reach 6) the moment it steps out, so it walked straight back in.
+
+**The siege now shells what the side has seen** ([`EnemyStructures`](Modes/EnemyStructures.cs),
+[`SiegeTargetLogic`](Logic/SiegeTargetLogic.cs), [`AttackBaseMode`](Modes/AttackBaseMode.cs)).
+Every enemy building any unit sees is remembered: one whole-map `SenseStructures` every 0.4s per
+side, plus each scout's own sightings. It is forgotten when `ResolveActor` no longer finds it. In
+Attack, a siege piece that nothing mobile is shooting takes the nearest remembered ground tower
+within its reach plus 5 cells, then other remembered buildings
+(`assault.siege-shells-remembered-defence` / `-structure`). Both pieces carry `TargetFrozenActors`,
+so the engine fires at the image the fog kept, as a human's artillery would. A piece gives a target
+up after 90s spent shelling it, and then leaves the buildings under that tower to the old rules. Line units now stand off towers they cannot see (`assault.stand-off-remembered-*`).
+With no piece in position but one alive, a unit the duel lab says the tower beats also waits outside
+its reach (`assault.await-siege-*`; the table is `StandOffLogic.Outmatched`). The lifetime stand-off
+budget is 75s, up from 45s.
+
+Not changed: a push before any siege piece exists behaves as before, and so does `DefensiveMode`.
+Traced through this fight, the first push would have stepped out of the `gtwr`'s reach from 404s,
+and the `atwr` would have been shelled from 11 cells from 566s.
+
 ## Start your own
 
 

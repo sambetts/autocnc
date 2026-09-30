@@ -64,6 +64,10 @@ namespace AutoCnC.Reference.Modes
 
 		public override UnitDecision OnTick(Actor self, ModeContext ctx)
 		{
+			// Remember every enemy building this side can see: a harvester is often the first to
+			// meet a tower. Throttled per side; see EnemyStructures.
+			EnemyStructures.Survey(self, ctx);
+
 			// --- Sense -------------------------------------------------------------
 			var nearbyThreatCount = 0;
 			long threatXTotal = 0;

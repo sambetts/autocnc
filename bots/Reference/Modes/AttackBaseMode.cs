@@ -9,6 +9,7 @@
  */
 #endregion
 
+using System.Collections.Generic;
 using AutoCnC.Reference.Logic;
 using AutoCnC.Sdk;
 using AutoCnC.Core;
@@ -74,6 +75,18 @@ namespace AutoCnC.Reference.Modes
 		int standOffTicks;
 		int lastStandOffTick = int.MinValue;
 
+		// What this siege piece is shelling from the side's memory, how long it has actually spent
+		// shelling it, and what it has given up on in this push. See SiegeTargetLogic.
+		SiegeTuning siegeTuning = SiegeTuning.Default;
+		uint siegeTargetId;
+		int siegeShellTicks;
+		int lastSiegeShellTick = int.MinValue;
+		readonly HashSet<uint> siegeGivenUp = [];
+
+		// Reused for every read of the side's memory, because a push evaluates several times a
+		// second and the list is only ever read inside one evaluation.
+		readonly List<RememberedStructure> remembered = [];
+
 		public override void OnEnter(Actor self, ModeContext ctx)
 		{
 			tuning = AssaultTuning.Default;
@@ -81,10 +94,18 @@ namespace AutoCnC.Reference.Modes
 			counterBatteryTuning = CounterBatteryTuning.Default;
 			standOffTuning = StandOffTuning.Default;
 			sweepTuning = AssaultSweepTuning.Default;
+			siegeTuning = SiegeTuning.Default;
 
 			// A new push is a new situation, so whatever was shelling the last one is not
 			// evidence about this one. The spent budget above survives on purpose.
 			shellingActorId = 0;
+
+			// Nor is what a siege piece shelled or gave up on last time: it may stand somewhere
+			// else now, where the building it could not reach is in range.
+			siegeTargetId = 0;
+			siegeShellTicks = 0;
+			lastSiegeShellTick = int.MinValue;
+			siegeGivenUp.Clear();
 
 			// What this unit's warhead is for. See DefensiveMode.OnEnter.
 			role = WeaponMatchLogic.RoleOf(self.Info.Name);
@@ -106,6 +127,11 @@ namespace AutoCnC.Reference.Modes
 		public override UnitDecision OnTick(Actor self, ModeContext ctx)
 		{
 			// --- Sense -------------------------------------------------------------
+			// Every enemy building anybody on this side can see, remembered for the siege pieces
+			// and the line units that cannot. Throttled per side, so a whole push calling it costs
+			// one look. See EnemyStructures.
+			EnemyStructures.Survey(self, ctx);
+
 			var objective = ctx.ResolveActor(objectiveId);
 
 			// Objective destroyed or never chosen: pick the next one. Deliberately sticky, so
@@ -163,6 +189,7 @@ namespace AutoCnC.Reference.Modes
 			// What they are made of, for the barracks that cannot see any of it. See
 			// EnemySightings: the push is where most of the enemy army is ever looked at.
 			EnemySightings.Record(self.Owner, state.Threats);
+			EnemyStructures.Record(self.Owner, state.Threats);
 
 			// --- Decide ------------------------------------------------------------
 			// Answer the gun we cannot reach, but only while there is nothing at all inside our
@@ -199,6 +226,15 @@ namespace AutoCnC.Reference.Modes
 				counterBatteryEvaluations++;
 				return counterBattery.Value;
 			}
+
+			// A siege piece shells what the side remembers before it walks anywhere. It sees five
+			// or six cells and reaches eleven, so without this it could only pick a building a line
+			// unit was standing next to — inside the tower's reach. Towers first, from outside
+			// their reach, and before the staging rule so a piece gathering for the push still
+			// takes the free shot. See SiegeTargetLogic.
+			var siegeShot = SiegeShot(self, ctx, weaponRange, state);
+			if (siegeShot.HasValue)
+				return siegeShot.Value;
 
 			// Form up first. Staging is judged against the side's remembered sighting rather
 			// than against whatever this unit can currently see, because it is the one target
@@ -464,14 +500,21 @@ namespace AutoCnC.Reference.Modes
 		}
 
 		/// <summary>
-		/// Stay out of the reach of a static defence that outranges this unit while a siege piece
-		/// of ours shells it, or null when the push's own rules should answer.
+		/// Stay out of the reach of a static defence that outranges or outmatches this unit while a
+		/// siege piece of ours shells it, or is on its way to; or null when the push's own rules
+		/// should answer.
 		/// </summary>
 		/// <remarks>
 		/// The judgement lives in <see cref="StandOffLogic"/>; this only senses the defence this
 		/// unit is deepest into and whether a siege piece stands against it. Nothing is sensed for
 		/// a unit that cannot move, has no weapon, is itself a siege piece or has spent its
 		/// allowance, and allies are only sensed for a defence that already qualifies.
+		/// <para>
+		/// Defences come from two places: the ones in sight, and the ones the side remembers
+		/// (<see cref="EnemyStructures"/>). The second is what lets a rifleman that stepped out of a
+		/// tower's reach keep standing out of it: it sees five cells and a <c>gtwr</c> reaches six,
+		/// so from outside the reach the tower is gone from its sensing.
+		/// </para>
 		/// </remarks>
 		UnitDecision? StandOff(Actor self, ModeContext ctx, int weaponRange, ThreatSnapshot? inReach, bool counterBatteryAnswer)
 		{
@@ -479,36 +522,51 @@ namespace AutoCnC.Reference.Modes
 				|| standOffTicks >= standOffTuning.MaxTicks)
 				return null;
 
+			var unitType = self.Info.Name;
 			var structures = ctx.SenseStructures(new WDist(standOffTuning.SenseUnits));
-			ThreatSnapshot? defence = null;
-			string siegeType = null;
-			var deepest = int.MaxValue;
+			EnemyStructures.Nearby(self, ctx, standOffTuning.SenseUnits, true, remembered);
+
+			var pick = default(StandOffPick);
+			var ownSiege = -1;
+
 			for (var i = 0; i < structures.Count; i++)
 			{
 				var s = structures[i];
 				if (s.Kind != ThreatKind.Defence || !s.IsAttackable || !s.CanHitUs)
 					continue;
 
-				if (!StandOffLogic.Concerns(s.DistanceUnits, s.WeaponRangeUnits, weaponRange, standOffTuning))
-					continue;
-
-				var depth = StandOffLogic.Depth(s.DistanceUnits, s.WeaponRangeUnits, standOffTuning);
-				if (defence.HasValue && (depth > deepest || (depth == deepest && s.ActorId > defence.Value.ActorId)))
-					continue;
-
-				var siege = SiegeAgainst(ctx, s);
-				if (siege == null)
-					continue;
-
-				defence = s;
-				siegeType = siege;
-				deepest = depth;
+				Consider(ctx, self, s, false, unitType, weaponRange, ref ownSiege, ref pick);
 			}
 
-			if (!defence.HasValue)
+			for (var i = 0; i < remembered.Count; i++)
+			{
+				var r = remembered[i];
+
+				// One in sight was offered above, measured from its centre rather than a cell.
+				if (r.Visible || !r.IsAttackable)
+					continue;
+
+				var s = new ThreatSnapshot(
+					ActorId: r.ActorId,
+					DistanceUnits: r.DistanceUnits,
+					HealthPercent: 100,
+					Kind: ThreatKind.Defence,
+					IsAttackable: true,
+					CanHitUs: true)
+				{
+					ActorType = r.ActorType,
+					CellX = r.CellX,
+					CellY = r.CellY,
+					WeaponRangeUnits = r.RangeUnits
+				};
+
+				Consider(ctx, self, s, true, unitType, weaponRange, ref ownSiege, ref pick);
+			}
+
+			if (!pick.Found)
 				return null;
 
-			var d = defence.Value;
+			var d = pick.Defence;
 			var bounds = ctx.World.Map.Bounds;
 			var home = ctx.BaseCenter;
 			var here = self.Location;
@@ -548,14 +606,176 @@ namespace AutoCnC.Reference.Modes
 					DefenceY: d.CellY,
 					DefenceDistanceUnits: d.DistanceUnits,
 					DefenceRangeUnits: d.WeaponRangeUnits,
-					SiegeInPosition: true,
-					SiegeType: siegeType,
+					SiegeInPosition: !pick.Awaiting,
+					SiegeType: pick.SiegeType,
 					HasTargetInReach: inReach.HasValue,
 					TargetActorId: inReach?.ActorId ?? 0,
 					TargetType: inReach?.ActorType,
 					ShooterAnswerable: shooterAnswerable,
-					SpentTicks: standOffTicks),
+					SpentTicks: standOffTicks,
+					UnitType: unitType,
+					Remembered: pick.Remembered,
+					AwaitingSiege: pick.Awaiting),
 				standOffTuning);
+		}
+
+		/// <summary>The defence a line unit is deepest into, and on what terms.</summary>
+		struct StandOffPick
+		{
+			public bool Found;
+			public ThreatSnapshot Defence;
+			public string SiegeType;
+			public int Depth;
+			public bool Remembered;
+			public bool Awaiting;
+		}
+
+		/// <summary>
+		/// Offers one defence to the stand-off: taken if it concerns this unit and is deeper than
+		/// the one already picked.
+		/// </summary>
+		/// <remarks>
+		/// With a siege piece in position against it, the old terms apply, now including a unit the
+		/// tower beats at equal reach. With none in position, it only counts while this side has a
+		/// siege piece alive somewhere — in the Attack doctrine every one of them runs this mode and
+		/// is marching — and only for a unit the duel lab says the tower beats.
+		/// </remarks>
+		void Consider(
+			ModeContext ctx,
+			Actor self,
+			in ThreatSnapshot s,
+			bool remembered,
+			string unitType,
+			int weaponRange,
+			ref int ownSiege,
+			ref StandOffPick pick)
+		{
+			var depth = StandOffLogic.Depth(s.DistanceUnits, s.WeaponRangeUnits, standOffTuning);
+			if (depth > standOffTuning.HoldBandUnits)
+				return;
+
+			if (pick.Found && (depth > pick.Depth || (depth == pick.Depth && s.ActorId > pick.Defence.ActorId)))
+				return;
+
+			var siege = SiegeAgainst(ctx, s);
+			var awaiting = false;
+			if (siege != null)
+			{
+				if (!StandOffLogic.Concerns(s.DistanceUnits, s.WeaponRangeUnits, weaponRange,
+					unitType, s.ActorType, false, standOffTuning))
+					return;
+			}
+			else
+			{
+				if (!StandOffLogic.Concerns(s.DistanceUnits, s.WeaponRangeUnits, weaponRange,
+					unitType, s.ActorType, true, standOffTuning))
+					return;
+
+				if (ownSiege < 0)
+					ownSiege = EnemyStructures.OwnSiege(self, ctx);
+
+				if (ownSiege <= 0)
+					return;
+
+				awaiting = true;
+			}
+
+			pick.Found = true;
+			pick.Defence = s;
+			pick.SiegeType = siege;
+			pick.Depth = depth;
+			pick.Remembered = remembered;
+			pick.Awaiting = awaiting;
+		}
+
+		/// <summary>
+		/// Shell the building this side remembers that a siege piece should, or null when this is
+		/// not a siege piece or nothing it remembers is close enough.
+		/// </summary>
+		/// <remarks>
+		/// The choice lives in <see cref="SiegeTargetLogic"/>. The attack order names the building
+		/// itself; when nobody on this side can see it, the engine aims at the image the fog left of
+		/// it, which <c>arty</c> and <c>msam</c> may fire at (<c>TargetFrozenActors</c>). A piece
+		/// that has spent <see cref="SiegeTuning.MaxShellTicks"/> actually shelling one target gives
+		/// it up for this push, and then leaves the buildings under that tower to the push's own
+		/// rules.
+		/// </remarks>
+		UnitDecision? SiegeShot(Actor self, ModeContext ctx, int weaponRange, in AssaultState state)
+		{
+			if (!SiegeTargetLogic.IsSiege(weaponRange) || !ctx.CanMove || !ctx.HasWeapon)
+				return null;
+
+			// Something mobile inside our reach and able to hurt us is the push's own rules'
+			// business, and a piece that turned its back on it to shell a tower would die doing so.
+			var threats = state.Threats;
+			if (threats != null)
+			{
+				for (var i = 0; i < threats.Count; i++)
+				{
+					var t = threats[i];
+					if (t.IsAttackable && t.CanHitUs && t.DistanceUnits <= weaponRange
+						&& (t.Kind == ThreatKind.Infantry || t.Kind == ThreatKind.Vehicle))
+						return null;
+				}
+			}
+
+			EnemyStructures.Nearby(self, ctx, weaponRange + siegeTuning.SeekSlackUnits, false, remembered);
+
+			// A tower this piece gave up on is no longer a target, but it is still standing.
+			var givenUpTowerNear = false;
+			if (siegeGivenUp.Count > 0)
+			{
+				for (var i = remembered.Count - 1; i >= 0; i--)
+				{
+					if (!siegeGivenUp.Contains(remembered[i].ActorId))
+						continue;
+
+					givenUpTowerNear |= remembered[i].GroundDefence;
+					remembered.RemoveAt(i);
+				}
+			}
+
+			var index = SiegeTargetLogic.SelectTarget(remembered, weaponRange, siegeTargetId, siegeTuning);
+			if (index < 0)
+				return null;
+
+			var chosen = remembered[index];
+
+			// Every other building within reach of this piece stands under that tower, and walking up
+			// to shell one is the walk this rule exists to prevent. The push's own rules answer.
+			if (givenUpTowerNear && !chosen.GroundDefence)
+				return null;
+
+			if (chosen.ActorId != siegeTargetId)
+			{
+				siegeTargetId = chosen.ActorId;
+				siegeShellTicks = 0;
+				lastSiegeShellTick = int.MinValue;
+			}
+
+			// Charged only while this evaluation shells it, a second at most, so the minute a piece
+			// spent answering infantry is not held against the tower.
+			siegeShellTicks += SiegeTargetLogic.TicksToCharge(ctx.WorldTick, lastSiegeShellTick, siegeTuning);
+			lastSiegeShellTick = ctx.WorldTick;
+			if (siegeShellTicks > siegeTuning.MaxShellTicks)
+			{
+				siegeGivenUp.Add(chosen.ActorId);
+				siegeTargetId = 0;
+				siegeShellTicks = 0;
+				lastSiegeShellTick = int.MinValue;
+				return null;
+			}
+
+			var what = string.IsNullOrEmpty(chosen.ActorType) ? chosen.Kind.ToString() : chosen.ActorType;
+			var seen = chosen.Visible ? "in sight" : "remembered";
+			if (chosen.GroundDefence)
+				return UnitDecision.Attack(chosen.ActorId,
+					$"shelling the {seen} {what} {chosen.DistanceUnits}u away from outside its {chosen.RangeUnits}u reach",
+					chosen.Visible ? "assault.siege-shells-defence" : "assault.siege-shells-remembered-defence");
+
+			return UnitDecision.Attack(chosen.ActorId,
+				$"shelling the {seen} {what} {chosen.DistanceUnits}u away, no tower of theirs in reach",
+				chosen.Visible ? "assault.siege-shells-structure" : "assault.siege-shells-remembered-structure");
 		}
 
 		/// <summary>The type of a siege piece of ours standing against this defence, or null.</summary>

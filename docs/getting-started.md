@@ -80,6 +80,34 @@ Build complete. Next: ./scripts/launch.ps1
 
 ### If it fails
 
+#### Windows: running scripts is disabled
+
+If `setup.ps1` cannot be loaded because **running scripts is disabled on this system**,
+Windows PowerShell's execution policy is blocking it before setup starts. After reviewing
+and trusting the repository's scripts, run this in the same PowerShell window:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
+```
+
+Then rerun setup and build from the repository root:
+
+```powershell
+./scripts/setup.ps1
+./scripts/build.ps1
+```
+
+This applies only to the current PowerShell session, needs no administrator privileges,
+and leaves your saved execution policy unchanged. Repeat it in a new window if needed,
+including before running the launcher.
+
+If scripts are still blocked, check `Get-ExecutionPolicy -List`. A `MachinePolicy` or
+`UserPolicy` set by your organization takes precedence; ask your administrator rather
+than trying to override it. If a trusted script downloaded from the internet is blocked
+because it is unsigned, review it and use `Unblock-File` on that specific file before retrying.
+
+#### Other errors
+
 | Message | Cause |
 |---|---|
 | `Engine submodule not found` | Run `./scripts/setup.ps1` |

@@ -290,6 +290,9 @@ autocnc/
 **→ [`docs/getting-started.md`](docs/getting-started.md) is the full walkthrough**: install,
 write your first mode, assign it, iterate. Start there.
 
+**→ [Play your bot against other people](docs/multiplayer.md)**: prepare your bot,
+host or join a multiplayer game, and let it control your side.
+
 The short version:
 
 ### Prerequisites

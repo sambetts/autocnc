@@ -2,6 +2,99 @@
 
 The bot AutoC&C ships as an opponent and as a worked example. **Beating this is the goal.**
 
+## Current experiment: keep the production pocket open
+
+The supplied Hard loss lasted 1,417 seconds. `summary.json` places the lasting
+army crossover at 642s and shows the harvester fleet falling from nine at 720s to
+three at 840s. The more specific lead is in construction and unit lifecycles:
+three optional silos were placed at 585s, 589s and 593s, and infantry stopped
+leaving immediately afterwards. Rifles born before 596s averaged 77.6 observed
+cells travelled; the 33 born from 596s onward averaged 9.4. Twenty-four rifles
+lived over 200 seconds while travelling fewer than 15 cells. Rockets born at 653s
+and 662s also travelled only four and nine cells across lives exceeding 650 seconds.
+
+The trace disproves a missing attack assignment: those replacements received
+staging and attack-move orders. Rifle defenders later made 29,221 regroup
+evaluations, 23,445 suppressed as duplicate intents. Repeated orders did not free
+the pocket. Storage obstructing its remaining routes is strongly suggested by
+the timing and placement, not proven by a connectivity measurement.
+
+`BuildBaseMode` no longer appends surplus silos to any doctrine's construction
+plan. This removes optional clutter rather than adding more orders to trapped
+units. The original construction plans, expansion and production recovery priorities
+are unchanged. An idle developed high-cash yard records
+`economy.storage-skipped-for-egress` after its other work and repairs have had
+priority. Do not reintroduce optional core storage without placement that preserves
+connected production routes. The tradeoff is reduced storage headroom; no claim is
+made that the bot measures exact storage capacity.
+
+### Incoming fire always takes priority
+
+All assigned modes now share `DamageReactiveMode`. A hostile damage callback
+requests immediate reevaluation and remembers its reported attacker for five
+seconds after the last hit. Before staging, holding, pursuing an objective or
+escorting, combat units return fire; a fogged ground shooter is answered at its
+last reported cell. One live shooter stays the target rather than switching on
+every impact. Aircraft are never pursued beyond weapon range.
+
+Scouts, watchers and harvesters evade instead of abandoning their roles to chase
+the attacker. A combat unit that cannot shoot the attacker also evades if mobile.
+After a harvester's evasion expires it requests a fresh resource assignment,
+because moving cancels harvesting. Repairable buildings under fire request their
+own repair when they cannot return fire; active repairs do not suspend production.
+The reaction intentionally overrides the old harvesting work-window protection,
+assault stand-off and repair-bay retreat priorities while incoming fire is recent.
+This may reduce income under sustained harassment or bait an assault into a bad
+fight; it is the explicit player-requested policy, not a measured improvement.
+Positionless attackers trigger reevaluation and building repair without unsafe
+position reads; an immobile unit with no valid weapon or repair has no applicable
+response order. Existing shelling and harvester distress reports are preserved.
+
+### Preserved composition policy
+
+`MechanizedForceLogic` inserts a tank target of one per two standing siege pieces,
+rounded up, before the first siege rung. The first siege piece, earlier screen and
+harvester rungs, and urgent harvester recovery retain priority. The existing tank
+attrition write-off also disables this inserted target, so repeated tank losses
+cannot recreate the old permanent vehicle-queue blocker. No tank or siege type is
+selected by faction: buildability selects the existing role alternatives.
+
+Outside Defence, once siege exists, total rifle/rocket/tech infantry is limited to
+12 plus two per standing tank or siege piece. At the limit, all affected infantry
+plan rungs are marked met before choosing production, including endless and mixed
+rungs: merely returning Hold after selecting infantry could block the vehicle
+orders below it. Emergency Defence and a rocket screen sized to observed aircraft
+remain exempt. Counts include pending production. A force that loses its vehicles
+rebuilds them rather than replacing the entire line with additional infantry.
+
+### Evidence reconciliation
+
+Four failed checks were unresolved `reason-id:` queries, not false assertions.
+Counting only `unit-decision-evaluated` records confirms tank reinforcement ran
+twice, infantry restraint 269 times, surplus-silo production three times and
+remembered-building siege 252 times. The genuine numeric failures were income
+49.351/second against 50 and value exchange 0.893 against 1. The other four
+checks passed: three silos, 76 rifles below 300, rifle cost per kill 131 below
+300, and duration 1,417 below 2,400. Activation did not establish strategic benefit:
+only two tanks were delivered and no new tank policy is being introduced here.
+
+Flagged losses were 84,100 against the prior median 35,550. Duration and force
+size matter, but this was also worse exchange than the preceding win (2.096),
+with lower income (73.495 to 49.351) and mean army (6,986 to 3,712). Nominal
+delivery-aircraft cost contributes 102,000 to the unit ledger; actual economic
+spending was 77,430, so nominal spend shares cannot diagnose overspending.
+The 21,864 decision-gap idle seconds include 9,038 for rifles, 5,849 for
+harvesters and 4,088 for the MCV and production buildings. These are not engine
+idle-activity measurements. Nevertheless, the stationary infantry lifecycles
+corroborate unused reinforcements independently of that metric. The game became
+progressively harder to recover after reinforcement mobility broke around 596s;
+the later fleet collapse compounded it, and earnings stopped at 69,930 by 1,260s.
+
+`checks.json` records activation, invariant and outcome observations plus the
+unmeasured win-flip hypothesis: 10 losses rescued and three wins lost per 100 fresh
+games. Only fresh fights can establish improvement or disprove the obstruction
+hypothesis.
+
 A **battle bot** owns several **doctrines** — complete ways of fighting — and decides which one
 the match needs. This one has four, and moves between them as the battle turns.
 

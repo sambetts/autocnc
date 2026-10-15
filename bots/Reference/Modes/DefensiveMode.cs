@@ -26,7 +26,7 @@ namespace AutoCnC.Reference.Modes
 	/// the judgement lives in <see cref="DefensiveLogic"/>, which has no engine dependency and can
 	/// be read on its own.
 	/// </remarks>
-	public sealed class DefensiveMode : UnitMode
+	public sealed class DefensiveMode : DamageReactiveMode
 	{
 		DefensiveTuning tuning = DefensiveTuning.Default;
 		GuardPostTuning guardTuning = GuardPostTuning.Default;
@@ -77,6 +77,9 @@ namespace AutoCnC.Reference.Modes
 
 		public override UnitDecision OnTick(Actor self, ModeContext ctx)
 		{
+			if (RespondToIncomingFire(self, ctx) is { } reaction)
+				return reaction;
+
 			// Remember every enemy building this side can see. Throttled per side; see
 			// EnemyStructures.
 			EnemyStructures.Survey(self, ctx);
@@ -298,6 +301,8 @@ namespace AutoCnC.Reference.Modes
 
 		public override void OnDamaged(Actor self, ModeContext ctx, AttackInfo e)
 		{
+			base.OnDamaged(self, ctx, e);
+
 			// Being shot from outside our sense radius is the one case the periodic scan cannot
 			// see. Pull the anchor toward the attacker so the next evaluation reacts, rather than
 			// issuing an order from here and fighting the executor's order suppression.

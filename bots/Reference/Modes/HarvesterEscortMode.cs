@@ -10,7 +10,7 @@ using OpenRA.Traits;
 namespace AutoCnC.Reference.Modes
 {
 	/// <summary>Stays with a harvester and coordinates weapon-matched responses to its attackers.</summary>
-	public sealed class HarvesterEscortMode : UnitMode
+	public sealed class HarvesterEscortMode : DamageReactiveMode
 	{
 		const string WardType = "harv";
 		const int GuardRadius = 5 * 1024;
@@ -33,6 +33,9 @@ namespace AutoCnC.Reference.Modes
 
 		public override UnitDecision OnTick(Actor self, ModeContext ctx)
 		{
+			if (RespondToIncomingFire(self, ctx) is { } reaction)
+				return reaction;
+
 			// A screen vehicle escorting a harvester in Defence is the one fast pair of eyes the
 			// side has, and the fleet it escorts runs dry on the ground nobody has looked at.
 			// Until the survey is flown, one of them flies it. See TiberiumSurvey.

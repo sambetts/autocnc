@@ -21,7 +21,7 @@ using OpenRA.Traits;
 
 namespace AutoCnC.Reference.Modes
 {
-	public sealed class ScoutMode : UnitMode
+	public sealed class ScoutMode : DamageReactiveMode
 	{
 		/// <summary>How far out a structure counts as "found their base".</summary>
 		const int SightRadius = 10 * 1024;
@@ -42,6 +42,9 @@ namespace AutoCnC.Reference.Modes
 
 		public override UnitDecision OnTick(Actor self, ModeContext ctx)
 		{
+			if (RespondToIncomingFire(self, ctx, evadeOnly: true) is { } reaction)
+				return reaction;
+
 			// --- Sense -------------------------------------------------------------
 			// The question this scout was sent to answer, asked before anything else so a scout
 			// that dies this evaluation has still reported. Saying so here rather than leaving it
@@ -126,6 +129,8 @@ namespace AutoCnC.Reference.Modes
 
 		public override void OnDamaged(Actor self, ModeContext ctx, AttackInfo e)
 		{
+			base.OnDamaged(self, ctx, e);
+
 			// Don't wait for the next scheduled evaluation; being shot is the one thing a scout
 			// has to answer sooner than that.
 			ctx.RequestReevaluation();

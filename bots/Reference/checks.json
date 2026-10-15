@@ -1,84 +1,100 @@
 {
   "schemaVersion": 1,
-  "authoredForRevision": "5592f8b9669b718ccb5cfdfbbf2dec5850d5adcc",
-  "hypothesis": "Siege pieces that shell the towers and buildings this side remembers from outside their reach, while line units stand off remembered towers and wait outside an outmatching tower's reach for a siege piece that is alive but not yet in position, stop pushes dying on tower lines (this fight lost 38 e1 to one gtwr and one atwr) and should turn about 6 of 100 losses into wins, mostly pushes that reach HAL's towers after the first arty or msam exists, for about 2 wins lost to pushes that wait too long.",
+  "authoredForRevision": "30381f422137ad7a4a9d5844216def82bf23869d-dirty:ca4a51f0fa160aef2d1b24154c3a0021ad5d291ebd5efdaf6baf4f40951187d8",
+  "hypothesis": "Remove optional surplus silos to free reinforcements and prioritize return fire, evasion or building repair on every hostile hit; estimate 12 loss-to-win and 5 win-to-loss flips per 100 fresh games (net +7), with storage overflow, baited assaults and reduced harvester income the principal risks and obstruction still a hypothesis.",
   "checks": [
     {
-      "id": "siege-shells-remembered-tower",
+      "id": "damaged-combat-unit-responds",
       "category": "activation",
-      "description": "The new siege branch runs against a tower nobody can see. arty/msam see 5-6 cells and reach 11, and carry TargetFrozenActors, so a remembered tower within reach plus 5 cells is shelled through the fog. Traced through this fight it would have fired from about 430s (first arty at the gtwr seen at 258s at their base) and 566s on (the atwr at the planted base). A FAIL in a fight where Attack ran after siege existed means the branch never ran.",
-      "query": "reason-id:assault.siege-shells-remembered-defence",
+      "description": "A combat unit prioritizes a reported attacker over its normal task; requires an attackable shooter",
+      "query": "reason-id:reaction.return-fire",
       "operator": ">=",
       "value": "1"
     },
     {
-      "id": "siege-shells-remembered-building",
+      "id": "fogged-shooter-answered",
       "category": "activation",
-      "description": "The same branch against a building that is not a tower (yard, factory, refinery) when no tower is within reach plus 5 cells. Diagnostic: tells whether the siege gets past the tower line at all.",
+      "description": "A combat unit answers the reported position of a ground shooter that has entered fog; matchup-dependent",
+      "query": "reason-id:reaction.answer-reported-fire",
+      "operator": ">=",
+      "value": "1"
+    },
+    {
+      "id": "noncombatant-evades-fire",
+      "category": "activation",
+      "description": "An attacked mobile unit evades instead of ignoring fire it cannot safely answer; requires that situation to occur",
+      "query": "reason-id:reaction.evade-fire",
+      "operator": ">=",
+      "value": "1"
+    },
+    {
+      "id": "building-responds-with-repair",
+      "category": "activation",
+      "description": "An attacked repairable building requests repair when it cannot return fire; may not run if no eligible building takes damage",
+      "query": "reason-id:reaction.repair-under-fire",
+      "operator": ">=",
+      "value": "1"
+    },
+    {
+      "id": "storage-egress-policy-runs",
+      "category": "activation",
+      "description": "An otherwise idle developed high-cash yard explicitly forgoes optional storage; cash-poor or continuously busy games may not exercise this observation",
+      "query": "reason-id:economy.storage-skipped-for-egress",
+      "operator": ">=",
+      "value": "1"
+    },
+    {
+      "id": "no-surplus-silos",
+      "category": "invariant",
+      "description": "No silo is built by the current plans now that optional storage is removed",
+      "query": "units.count(type=silo,owner=Commander)",
+      "operator": "==",
+      "value": "0"
+    },
+    {
+      "id": "rifles-reach-the-field",
+      "category": "outcome",
+      "description": "Rifles average at least 60 observed cells travelled, above this fight's 48 overall and towards the 77.6 of its pre-blockage cohort; short lives and home-defence games may legitimately fall below this",
+      "query": "units.mean(cellsTravelled,type=e1,owner=Commander)",
+      "operator": ">=",
+      "value": "60"
+    },
+    {
+      "id": "scouting-preserved",
+      "category": "invariant",
+      "description": "The unchanged scout survey still runs; an extremely early defeat may prevent it",
+      "query": "reason-id:economy.survey-tiberium",
+      "operator": ">=",
+      "value": "1"
+    },
+    {
+      "id": "economy-remains-productive",
+      "category": "invariant",
+      "description": "Average income reaches 50 credits per second despite removing storage; map resources and raids affect this outcome",
+      "query": "summary.headline.creditsEarnedPerSecond",
+      "operator": ">=",
+      "value": "50"
+    },
+    {
+      "id": "reach-remains-active",
+      "category": "invariant",
+      "description": "Remembered-building siege remains reachable; some matchups end before a remembered target is needed",
       "query": "reason-id:assault.siege-shells-remembered-structure",
       "operator": ">=",
       "value": "1"
     },
     {
-      "id": "line-stands-off-remembered-tower",
-      "category": "activation",
-      "description": "Line units hold outside the reach of a tower they cannot see while a siege piece is in position against it. Before this, a rifleman that stepped out lost sight of the tower (e1 sees 5, gtwr reaches 6) and walked back in.",
-      "query": "reason-id:assault.stand-off-remembered-defence",
-      "operator": ">=",
-      "value": "1"
-    },
-    {
-      "id": "line-awaits-siege",
-      "category": "activation",
-      "description": "With no siege piece in position but one alive, a unit the duel lab says the tower beats (e1/e2/e3 against gtwr/atwr/obli, jeep/bggy against any tower) holds outside its reach. Traced through this fight it would have fired from 404s, when the first arty was born, with the first push feeding e1 into the gtwr at (33,33).",
-      "query": "reason-id:assault.await-siege-hold",
-      "operator": ">=",
-      "value": "1"
-    },
-    {
-      "id": "rifles-live-longer",
+      "id": "exchange-remains-positive",
       "category": "outcome",
-      "description": "What the change targets. 38 of this fight's 109 e1 died to two towers; e1 mean lifetime was 105.8s. Fewer riflemen fed to towers should raise it.",
-      "query": "units.mean(lifetimeSeconds,type=e1,owner=Commander)",
-      "operator": ">=",
-      "value": "120"
-    },
-    {
-      "id": "value-exchange-better",
-      "category": "outcome",
-      "description": "Towers killed from range for nothing and riflemen kept alive should lift the trade. This fight: 0.577.",
+      "description": "Mobile reinforcements help destroy at least as much value as is lost; this is an observation, not a promotion criterion",
       "query": "summary.headline.valueExchangeRatio",
       "operator": ">=",
-      "value": "0.7"
+      "value": "1"
     },
     {
-      "id": "buildings-razed",
-      "category": "outcome",
-      "description": "A push that breaks the tower line reaches the buildings behind it. This fight: 7.",
-      "query": "summary.headline.buildingsKilled",
-      "operator": ">=",
-      "value": "8"
-    },
-    {
-      "id": "spend-gap-narrower",
-      "category": "outcome",
-      "description": "Observation carried from earlier rounds: losses sit at 26-61% of the opponent's spend, wins at 77-149. This fight 64.4. Moves only if pushes stop handing HAL the economy.",
-      "query": "summary.scale.spendVsOpponentPercent",
-      "operator": ">=",
-      "value": "60"
-    },
-    {
-      "id": "fleet-not-smaller",
+      "id": "finishes-within-budget",
       "category": "invariant",
-      "description": "The change touches only the push; the economy should be untouched. This fight peaked at 9 harvesters.",
-      "query": "summary.headline.peakHarvesters",
-      "operator": ">=",
-      "value": "6"
-    },
-    {
-      "id": "no-timeout",
-      "category": "invariant",
-      "description": "No fight may run past the benchmark's 2,400s limit. A push that waits on siege is bounded (75s of standing off per unit lifetime, 90s per siege target), so it must not stall a game into a timeout.",
+      "description": "The fight finishes within the benchmark time limit",
       "query": "summary.fight.durationSeconds",
       "operator": "<=",
       "value": "2400"

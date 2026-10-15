@@ -22,9 +22,8 @@ namespace AutoCnC.Reference.Modes
 	/// Pushes into the enemy base and destroys high-value structures, ignoring distractions.
 	/// </summary>
 	/// <remarks>
-	/// The defining rule is that this mode <b>never chases</b>: it only fires on what is already
-	/// inside its weapon range, so a single enemy scout cannot peel an assault force off its
-	/// objective. That is the deliberate inverse of AutoTarget's behaviour.
+	/// Normal objective selection does not chase passing enemies. Actual incoming fire is the
+	/// exception: the shared damage response takes priority until the attacker stops shooting.
 	/// <para>
 	/// Objectives are sensed, and sensing is limited to what is visible now and near this unit.
 	/// A push that starts at home therefore begins with nothing to attack, so it marches on the
@@ -32,7 +31,7 @@ namespace AutoCnC.Reference.Modes
 	/// cell the map's own symmetry says their base should be. See <see cref="Probe"/>.
 	/// </para>
 	/// </remarks>
-	public sealed class AttackBaseMode : UnitMode
+	public sealed class AttackBaseMode : DamageReactiveMode
 	{
 		static readonly WDist ObjectiveSearchRadius = WDist.FromCells(40);
 
@@ -126,6 +125,9 @@ namespace AutoCnC.Reference.Modes
 
 		public override UnitDecision OnTick(Actor self, ModeContext ctx)
 		{
+			if (RespondToIncomingFire(self, ctx) is { } reaction)
+				return reaction;
+
 			// --- Sense -------------------------------------------------------------
 			// Every enemy building anybody on this side can see, remembered for the siege pieces
 			// and the line units that cannot. Throttled per side, so a whole push calling it costs
@@ -842,17 +844,9 @@ namespace AutoCnC.Reference.Modes
 
 		public override void OnDamaged(Actor self, ModeContext ctx, AttackInfo e)
 		{
-			// Taking fire from something already inside our reach is the expected cost of a base
-			// assault, and reacting to it is exactly the distraction this mode exists to avoid.
-			// Static defences are handled as blockers by AttackBaseLogic once they come into
-			// range, and everything else in range is handled by the last-stand scorer.
-			//
-			// Being shelled from BEYOND our reach is not the same thing, and this method used to
-			// treat it as though it were. Sensing is capped at this unit's own weapon range, so
-			// an 11-cell artillery piece is not merely outranked in the candidate list, it never
-			// enters it — the damage callback is the only way this side can learn the gun exists.
-			// Doing nothing with it meant 139 of 264 units lost on badland-ridges died to arty,
-			// which took 789,717 damage from this bot and returned 42,120.
+			base.OnDamaged(self, ctx, e);
+
+			// Retain the longer-range shelling report after the immediate damage response.
 			var attacker = e.Attacker;
 			if (attacker == null || attacker.IsDead || !attacker.IsInWorld)
 				return;

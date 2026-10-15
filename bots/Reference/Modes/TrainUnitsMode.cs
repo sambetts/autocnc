@@ -17,7 +17,7 @@ using OpenRA;
 
 namespace AutoCnC.Reference.Modes
 {
-	public sealed class TrainUnitsMode : UnitMode
+	public sealed class TrainUnitsMode : DamageReactiveMode
 	{
 		/// <summary>
 		/// How big a harvester fleet the standing refineries want. See <see cref="ExpansionLogic"/>.
@@ -118,6 +118,9 @@ namespace AutoCnC.Reference.Modes
 
 		public override UnitDecision OnTick(Actor self, ModeContext ctx)
 		{
+			if (RespondToIncomingFire(self, ctx) is { } reaction)
+				return reaction;
+
 			// Remember every enemy building this side can see, for the push's siege pieces and
 			// line units. Throttled per side; the factories run all match. See EnemyStructures.
 			EnemyStructures.Survey(self, ctx);
@@ -428,8 +431,32 @@ namespace AutoCnC.Reference.Modes
 					plan, ReferencePlans.HarvesterUnits,
 					standingHarvesters, shortBelow, factories > 0);
 
+			var standingSiege = ExpansionLogic.Standing(owned, ReferencePlans.SiegeVehicles);
+			var beforeMechanizedLine = plan;
+			plan = MechanizedForceLogic.ReinforceLine(
+				plan, standingArmour, standingSiege, armourAttrition.Losses, attrition);
+			var mechanizedLine = !ReferenceEquals(plan, beforeMechanizedLine);
+
+			var infantryCount = ExpansionLogic.Standing(owned, ReferencePlans.RifleBodies)
+				+ standingAntiAir
+				+ ExpansionLogic.Standing(owned, ReferencePlans.HarvesterGuardInfantry);
+			var infantryLimit = MechanizedForceLogic.InfantryLimit(standingArmour, standingSiege);
+			var limitInfantry = ctx.Doctrine != ReferenceDoctrines.Defence
+				&& standingSiege > 0
+				&& infantryCount >= infantryLimit;
+			if (limitInfantry)
+				plan = MechanizedForceLogic.LimitInfantry(plan, owned,
+					standingAntiAir < mix.RocketFloor + seen.Aircraft * mix.RocketsPerAircraft);
+
 			// --- Decide ------------------------------------------------------------
 			var choice = UnitProductionLogic.ChooseNext(state, plan);
+			if (limitInfantry && ctx.OwnsQueue(ReferencePlans.InfantryQueue)
+				&& (!choice.IsValid
+					|| !string.Equals(choice.Queue, ReferencePlans.InfantryQueue, System.StringComparison.OrdinalIgnoreCase)))
+				return UnitDecision.Hold(
+					$"mechanized infantry limit: {infantryCount}/{infantryLimit} bodies behind {standingArmour} tanks and {standingSiege} siege",
+					MechanizedForceLogic.InfantryReasonId);
+
 			if (!choice.IsValid)
 				return UnitDecision.Continue;
 
@@ -462,6 +489,12 @@ namespace AutoCnC.Reference.Modes
 					$"unit queue yielding {ctx.Cash} shared cash to the base's first emplacement, "
 						+ $"which costs {income.EmplacementPrice} and has nothing standing",
 					"defence.emplacement-before-bodies");
+
+			if (mechanizedLine
+				&& ArmyMixLogic.Names(ReferencePlans.DefenceArmourVehicles, choice.ActorType))
+				return UnitDecision.Produce(choice.Queue, choice.ActorType,
+					$"mechanized line reinforcement: {standingArmour}/{MechanizedForceLogic.ArmourTarget(standingSiege)} tanks covering {standingSiege} siege",
+					MechanizedForceLogic.ArmourReasonId);
 
 			// --- Act ---------------------------------------------------------------
 			var standingRifles = ExpansionLogic.Standing(owned, ReferencePlans.RifleBodies);

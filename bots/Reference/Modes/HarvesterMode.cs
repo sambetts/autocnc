@@ -27,7 +27,7 @@ namespace AutoCnC.Reference.Modes
 	/// engine dependency. The watchdog it returns is per-unit memory, so it lives in an instance
 	/// field: one mode instance per unit, never a static.
 	/// </remarks>
-	public sealed class HarvesterMode : UnitMode
+	public sealed class HarvesterMode : DamageReactiveMode
 	{
 		readonly HarvesterTuning tuning = HarvesterTuning.Default;
 		readonly List<FieldOption> fields = [];
@@ -64,6 +64,19 @@ namespace AutoCnC.Reference.Modes
 
 		public override UnitDecision OnTick(Actor self, ModeContext ctx)
 		{
+			if (RespondToIncomingFire(self, ctx, evadeOnly: true) is { } reaction)
+			{
+				FieldClaims.Release(self.Owner, self.ActorID);
+				// A flee order cancels harvesting; force a fresh assignment when it ends.
+				watchdog = watchdog with
+				{
+					AssignedX = int.MinValue,
+					AssignedY = int.MinValue,
+					EvaluationsSinceScan = int.MaxValue
+				};
+				return reaction;
+			}
+
 			// Remember every enemy building this side can see: a harvester is often the first to
 			// meet a tower. Throttled per side; see EnemyStructures.
 			EnemyStructures.Survey(self, ctx);
@@ -261,6 +274,8 @@ namespace AutoCnC.Reference.Modes
 
 		public override void OnDamaged(Actor self, ModeContext ctx, AttackInfo e)
 		{
+			base.OnDamaged(self, ctx, e);
+
 			var attacker = e.Attacker;
 			if (attacker != null
 				&& attacker.IsInWorld

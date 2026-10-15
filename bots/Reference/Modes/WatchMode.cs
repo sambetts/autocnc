@@ -33,7 +33,7 @@ namespace AutoCnC.Reference.Modes
 	/// sighting is the target it lacks.
 	/// </para>
 	/// </remarks>
-	public sealed class WatchMode : UnitMode
+	public sealed class WatchMode : DamageReactiveMode
 	{
 		/// <summary>The same radius <see cref="ScoutMode"/> treats as "found their base".</summary>
 		const int SightRadius = 10 * 1024;
@@ -55,6 +55,9 @@ namespace AutoCnC.Reference.Modes
 
 		public override UnitDecision OnTick(Actor self, ModeContext ctx)
 		{
+			if (RespondToIncomingFire(self, ctx, evadeOnly: true) is { } reaction)
+				return reaction;
+
 			// --- Sense -------------------------------------------------------------
 			// Before the survey step, as in ScoutMode, so a surveyor that passes one of their
 			// structures still reports it. Only the scalars survive past TryStep, which senses
@@ -174,6 +177,8 @@ namespace AutoCnC.Reference.Modes
 
 		public override void OnDamaged(Actor self, ModeContext ctx, AttackInfo e)
 		{
+			base.OnDamaged(self, ctx, e);
+
 			// Being shot is the one thing a watcher has to answer before its next evaluation.
 			ctx.RequestReevaluation();
 		}

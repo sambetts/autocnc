@@ -18,7 +18,7 @@ using OpenRA;
 
 namespace AutoCnC.Reference.Modes
 {
-	public sealed class RunHomeMode : UnitMode
+	public sealed class RunHomeMode : DamageReactiveMode
 	{
 		// Tweak these. Distances are in world units: 1024 units == 1 cell.
 		const int PanicRadius = 7 * 1024;
@@ -26,6 +26,9 @@ namespace AutoCnC.Reference.Modes
 
 		public override UnitDecision OnTick(Actor self, ModeContext ctx)
 		{
+			if (RespondToIncomingFire(self, ctx, evadeOnly: true) is { } reaction)
+				return reaction;
+
 			// Anything hostile nearby that could actually hurt us?
 			var threats = ctx.SenseThreats(new WDist(PanicRadius));
 			var danger = threats.Any(t => t.CanHitUs);

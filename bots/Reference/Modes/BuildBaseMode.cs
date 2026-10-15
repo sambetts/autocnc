@@ -39,7 +39,7 @@ using OpenRA;
 
 namespace AutoCnC.Reference.Modes
 {
-	public sealed class BuildBaseMode : UnitMode
+	public sealed class BuildBaseMode : DamageReactiveMode
 	{
 		/// <summary>
 		/// Every construction queue a yard drives, most important first.
@@ -200,6 +200,9 @@ namespace AutoCnC.Reference.Modes
 
 		public override UnitDecision OnTick(Actor self, ModeContext ctx)
 		{
+			if (RespondToIncomingFire(self, ctx) is { } reaction)
+				return reaction;
+
 			// 1. Still an MCV? Unfold it. Everything else depends on this.
 			//
 			//    DeploysIntoBuilding matters: a Tiberian Dawn construction yard can also
@@ -250,7 +253,6 @@ namespace AutoCnC.Reference.Modes
 
 			// --- Decide ------------------------------------------------------------
 			var owned = ctx.OwnedBuildingCounts();
-
 			var order = BaseConstructionLogic.ChooseNext(
 				queues, ctx.Cash, ctx.PowerBalance, owned, ctx.BuildPlan, PowerCandidates);
 
@@ -459,6 +461,16 @@ namespace AutoCnC.Reference.Modes
 								$"repairing {BaseRepairLogic.TypeOf(damaged, repair)} at {BaseRepairLogic.HealthOf(damaged, repair)}%: replacing it costs more than buying it back",
 								"defence.repair-building");
 					}
+
+					// Optional storage filled the infantry exit's surroundings just before
+					// reinforcements stopped leaving. Do not spend surplus on core clutter
+					// without a placement policy that preserves connected production routes.
+					if (refineryCount >= 4 && ctx.Cash > 5000 && ctx.PowerBalance >= 30)
+						return UnitDecision.Continue with
+						{
+							Reason = "surplus storage forgone to keep production routes open",
+							ReasonId = "economy.storage-skipped-for-egress"
+						};
 
 					return UnitDecision.Continue;   // plan complete, or nothing affordable yet
 			}

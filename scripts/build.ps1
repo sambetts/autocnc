@@ -25,6 +25,33 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $engineDir = Join-Path $repoRoot 'engine'
 
+$sdkHelp = 'Install the .NET SDK 8.0 or newer (not just the runtime) from https://dotnet.microsoft.com/download. On Windows, run: winget install --id Microsoft.DotNet.SDK.8 --exact. Reopen PowerShell after installation. Visual Studio Build Tools are not required.'
+if (-not (Get-Command dotnet -CommandType Application -ErrorAction SilentlyContinue)) {
+    throw "dotnet was not found on PATH. $sdkHelp"
+}
+
+Write-Host '==> Checking .NET SDK' -ForegroundColor Cyan
+Push-Location $repoRoot
+try {
+    try {
+        $sdkVersion = (dotnet --version 2>&1 | Out-String).Trim()
+        $sdkExitCode = $LASTEXITCODE
+    }
+    catch {
+        throw "Could not run the .NET SDK: $($_.Exception.Message). $sdkHelp"
+    }
+
+    if ($sdkExitCode -ne 0) {
+        throw "No usable .NET SDK could be selected (exit code $sdkExitCode). $sdkVersion`n$sdkHelp"
+    }
+    if ($sdkVersion -notmatch '^(\d+)\.' -or [int]$Matches[1] -lt 8) {
+        throw "The selected .NET SDK '$sdkVersion' is not supported; version 8.0 or newer is required. $sdkHelp"
+    }
+}
+finally {
+    Pop-Location
+}
+
 if (-not (Test-Path (Join-Path $engineDir 'OpenRA.sln'))) {
     throw 'Engine submodule not found. Run ./scripts/setup.ps1 first.'
 }

@@ -170,8 +170,11 @@ namespace AutoCnC.Platform
 		/// this exact build" true rather than aspirational — otherwise a same-named copy left in
 		/// <c>engine/bin/bots</c> would quietly win and you would play stale code.
 		/// </remarks>
-		static IEnumerable<string> CandidateFiles()
+		internal static IEnumerable<string> CandidateFiles(bool noBots)
 		{
+			if (noBots)
+				yield break;
+
 			var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
 			foreach (var file in LaunchCandidates())
@@ -220,7 +223,7 @@ namespace AutoCnC.Platform
 				var identities = new HashSet<Assembly>();
 				LoadErrors.Clear();
 
-				foreach (var file in CandidateFiles())
+				foreach (var file in CandidateFiles(LaunchOptions.NoBots))
 					LoadFrom(file, found, identities);
 
 				loaded = found.OrderBy(b => b.Definition.Name, StringComparer.OrdinalIgnoreCase).ToList();

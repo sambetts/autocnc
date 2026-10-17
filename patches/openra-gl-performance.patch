@@ -1,0 +1,59 @@
+diff --git a/OpenRA.Platforms.Default/OpenGL.cs b/OpenRA.Platforms.Default/OpenGL.cs
+--- a/OpenRA.Platforms.Default/OpenGL.cs
++++ b/OpenRA.Platforms.Default/OpenGL.cs
+@@ -761,11 +761,12 @@
+ 
+ 			switch (severity)
+ 			{
+-				case GL_DEBUG_SEVERITY_HIGH:
++				case GL_DEBUG_SEVERITY_HIGH when type != GL_DEBUG_TYPE_PERFORMANCE:
+ 					error = BuildErrorText(source, type, severity, message);
+ 					WriteGraphicsLog(error);
+ 					throw new InvalidOperationException("OpenGL Error: See graphics.log for details.");
+ 
++				case GL_DEBUG_SEVERITY_HIGH:
+ 				case GL_DEBUG_SEVERITY_MEDIUM:
+ 					error = BuildErrorText(source, type, severity, message);
+ 					Console.WriteLine(error);
+diff --git a/OpenRA.Test/OpenRA.Test.csproj b/OpenRA.Test/OpenRA.Test.csproj
+--- a/OpenRA.Test/OpenRA.Test.csproj
++++ b/OpenRA.Test/OpenRA.Test.csproj
+@@ -5,6 +5,7 @@
+ 
+ 	<ItemGroup>
+ 		<ProjectReference Include="..\OpenRA.Game\OpenRA.Game.csproj" />
++		<ProjectReference Include="..\OpenRA.Platforms.Default\OpenRA.Platforms.Default.csproj" />
+ 		<ProjectReference Include="..\OpenRA.Mods.Common\OpenRA.Mods.Common.csproj">
+ 			<Private>True</Private>
+ 		</ProjectReference>
+diff --git a/OpenRA.Test/OpenRA.Platforms.Default/OpenGLTest.cs b/OpenRA.Test/OpenRA.Platforms.Default/OpenGLTest.cs
+new file mode 100644
+--- /dev/null
++++ b/OpenRA.Test/OpenRA.Platforms.Default/OpenGLTest.cs
+@@ -0,0 +1,26 @@
++using System;
++using System.Reflection;
++using System.Text;
++using NUnit.Framework;
++
++namespace OpenRA.Test
++{
++	[TestFixture]
++	sealed class OpenGLTest
++	{
++		[TestCase(0x9146)]
++		[TestCase(0x9147)]
++		public void PerformanceWarningsAreNonfatal(int severity)
++		{
++			var gl = Assembly.Load("OpenRA.Platforms.Default").GetType("OpenRA.Platforms.Default.OpenGL", true);
++			var handler = gl.GetMethod("DebugMessageHandler", BindingFlags.Static | BindingFlags.NonPublic);
++			var message = new StringBuilder(
++				"API_ID_RECOMPILE_FRAGMENT_SHADER performance warning has been generated. Fragment shader recompiled due to state change.");
++
++			Assert.DoesNotThrow(() => handler.Invoke(null,
++			[
++				0x8246, 0x8250, 0u, severity, message.Length, message, IntPtr.Zero
++			]));
++		}
++	}
++}

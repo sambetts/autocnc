@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    One-time setup: fetch the pinned OpenRA engine and apply the required local patch.
+    One-time setup: fetch the pinned OpenRA engine and apply the required local patches.
 #>
 [CmdletBinding()]
 param()

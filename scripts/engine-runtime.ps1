@@ -75,7 +75,7 @@ function Get-WindowsX64DotNetPaths {
 
 function Get-EngineRuntime {
     $operatingSystem = Get-EngineOperatingSystem
-    $dotnet = (Get-Command dotnet -CommandType Application -ErrorAction Stop).Source
+    $dotnet = (Get-Command dotnet -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
     $runtime = Get-EngineDotNetInfo $dotnet
 
     if ($operatingSystem -eq 'win' -and $runtime.Architecture -eq 'arm64') {

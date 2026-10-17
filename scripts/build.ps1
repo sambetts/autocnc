@@ -52,7 +52,7 @@ finally {
     Pop-Location
 }
 
-if (-not (Test-Path (Join-Path $engineDir 'OpenRA.sln'))) {
+if (-not (Test-Path (Join-Path $engineDir 'OpenRA.slnx'))) {
     throw 'Engine submodule not found. Run ./scripts/setup.ps1 first.'
 }
 
@@ -66,7 +66,7 @@ if (-not $SkipEngine -or $enginePatched) {
     . (Join-Path $PSScriptRoot 'engine-runtime.ps1')
     $engineRuntime = Get-EngineRuntime
     Write-Host "==> Building OpenRA engine ($Configuration)" -ForegroundColor Cyan
-    dotnet build (Join-Path $engineDir 'OpenRA.sln') -c $Configuration -v minimal --nologo `
+    dotnet build (Join-Path $engineDir 'OpenRA.slnx') -c $Configuration -v minimal --nologo `
         "-p:TargetPlatform=$($engineRuntime.TargetPlatform)"
     if ($LASTEXITCODE -ne 0) { throw "Engine build failed with exit code $LASTEXITCODE" }
 }

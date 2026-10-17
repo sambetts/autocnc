@@ -59,7 +59,7 @@ namespace AutoCnC.Launcher
 		public string ReferenceBot => Path.Combine(Root, "bots", "Reference", "ReferenceBot.csproj");
 
 		/// <summary>The engine is a submodule, so a fresh clone may not have fetched it yet.</summary>
-		public bool EngineFetched => File.Exists(Path.Combine(EngineDir, "OpenRA.sln"));
+		public bool EngineFetched => File.Exists(Path.Combine(EngineDir, "OpenRA.slnx"));
 
 		/// <summary>Building the engine takes minutes, so it is worth knowing before we start.</summary>
 		public bool EngineBuilt => File.Exists(Path.Combine(EngineBinDir, "OpenRA.dll"));

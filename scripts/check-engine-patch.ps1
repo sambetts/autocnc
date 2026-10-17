@@ -24,7 +24,7 @@ $encoding = New-Object Text.UTF8Encoding $false
 
 try {
     New-Item -ItemType Directory -Path (Split-Path -Parent $world) -Force | Out-Null
-    New-Item -ItemType File -Path (Join-Path $engine 'OpenRA.sln') | Out-Null
+    New-Item -ItemType File -Path (Join-Path $engine 'OpenRA.slnx') | Out-Null
     try {
         $null = Initialize-EnginePatch $engine
         throw 'A directory without an engine checkout was accepted.'
@@ -44,7 +44,7 @@ try {
         $localEdit = "// Unrelated local edit retained by the patch.`n"
         $original = ($source + $localEdit).Replace("`n", $lineEnding)
         [IO.File]::WriteAllText($world, $original, $encoding)
-        git -C $engine add -- OpenRA.sln OpenRA.Game/World.cs
+        git -C $engine add -- OpenRA.slnx OpenRA.Game/World.cs
         if ($LASTEXITCODE -ne 0) { throw 'Could not stage the patch test fixture.' }
 
         $changed = & {

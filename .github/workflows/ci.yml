@@ -80,7 +80,7 @@ jobs:
           restore-keys: nuget-${{ runner.os }}-
 
       - name: Build OpenRA engine
-        run: dotnet build engine/OpenRA.sln -c Release -v minimal --nologo
+        run: dotnet build engine/OpenRA.slnx -c Release -v minimal --nologo
 
       - name: Build AutoC&C platform
         run: dotnet build AutoCnC.sln -c Release -v minimal --nologo

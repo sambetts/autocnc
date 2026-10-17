@@ -146,7 +146,7 @@ namespace AutoCnC.Launcher.Tests
 			string target, bool skipEngine, bool patchApplied)
 		{
 			CopyScript("build.ps1");
-			Write("engine\\OpenRA.sln", "");
+			Write("engine\\OpenRA.slnx", "");
 			Write("scripts\\engine-patch.ps1", $$"""
 				function Initialize-EnginePatch($EngineDirectory) { ${{patchApplied.ToString().ToLowerInvariant()}} }
 				""");
@@ -169,7 +169,7 @@ namespace AutoCnC.Launcher.Tests
 			var output = string.Join('\n', result.Output);
 			Assert.That(result.ExitCode, Is.Zero, output);
 			Assert.That(output, skipEngine && !patchApplied
-				? Does.Not.Contain("OpenRA.sln")
+				? Does.Not.Contain("OpenRA.slnx")
 				: Does.Contain($"|-p:TargetPlatform={target}"));
 			Assert.That(output, Does.Contain("SDK_ARGS=pack|"));
 		}

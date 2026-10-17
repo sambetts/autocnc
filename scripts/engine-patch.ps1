@@ -8,7 +8,7 @@ function Initialize-EnginePatch([string]$EngineDirectory) {
     if (-not (Test-Path -LiteralPath $patch -PathType Leaf)) {
         throw "Required engine patch not found: $patch"
     }
-    if (-not (Test-Path -LiteralPath (Join-Path $EngineDirectory 'OpenRA.slnx') -PathType Leaf) -or
+    if (-not (Test-Path -LiteralPath (Join-Path $EngineDirectory 'OpenRA.sln') -PathType Leaf) -or
         -not (Test-Path -LiteralPath (Join-Path $EngineDirectory '.git'))) {
         throw 'Engine submodule not found. Run ./scripts/setup.ps1 first.'
     }

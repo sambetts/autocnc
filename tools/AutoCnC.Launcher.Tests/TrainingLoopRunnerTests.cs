@@ -53,7 +53,7 @@ namespace AutoCnC.Launcher.Tests
 			foreach (var directory in new[] { scripts, tools, docs, workspace, Path.Combine(checkout, "engine", "bin") })
 				Directory.CreateDirectory(directory);
 			File.WriteAllText(Path.Combine(checkout, "AutoCnC.sln"), "");
-			File.WriteAllText(Path.Combine(checkout, "engine", "OpenRA.slnx"), "");
+			File.WriteAllText(Path.Combine(checkout, "engine", "OpenRA.sln"), "");
 			File.WriteAllText(Path.Combine(checkout, "engine", "bin", "OpenRA.dll"), "engine");
 			File.WriteAllText(Path.Combine(scripts, "authoring-api.version"), RepoLayout.RequiredAuthoringApiVersion.ToString());
 			foreach (var name in new[] { "run-bot.ps1", "train-bot.ps1", "benchmark-bot.ps1", "export-agent-rules.ps1" })

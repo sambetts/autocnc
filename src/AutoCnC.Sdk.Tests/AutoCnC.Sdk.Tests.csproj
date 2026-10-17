@@ -3,6 +3,7 @@
   <PropertyGroup>
     <RootNamespace>AutoCnC.Sdk.Tests</RootNamespace>
     <AssemblyName>AutoCnC.Sdk.Tests</AssemblyName>
+    <TargetFramework>net8.0</TargetFramework>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
 

@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $engineDir = Join-Path $repoRoot 'engine'
 
-$sdkHelp = 'Install the .NET SDK 10.0 or newer (not just the runtime) from https://dotnet.microsoft.com/download. On Windows, run: winget install --id Microsoft.DotNet.SDK.10 --exact. Reopen PowerShell after installation. Visual Studio Build Tools are not required.'
+$sdkHelp = 'Install the .NET SDK 8.0 or newer (not just the runtime) from https://dotnet.microsoft.com/download. On Windows, run: winget install --id Microsoft.DotNet.SDK.8 --exact. Reopen PowerShell after installation. Visual Studio Build Tools are not required.'
 if (-not (Get-Command dotnet -CommandType Application -ErrorAction SilentlyContinue)) {
     throw "dotnet was not found on PATH. $sdkHelp"
 }
@@ -44,15 +44,15 @@ try {
     if ($sdkExitCode -ne 0) {
         throw "No usable .NET SDK could be selected (exit code $sdkExitCode). $sdkVersion`n$sdkHelp"
     }
-    if ($sdkVersion -notmatch '^(\d+)\.' -or [int]$Matches[1] -lt 10) {
-        throw "The selected .NET SDK '$sdkVersion' is not supported; version 10.0 or newer is required. $sdkHelp"
+    if ($sdkVersion -notmatch '^(\d+)\.' -or [int]$Matches[1] -lt 8) {
+        throw "The selected .NET SDK '$sdkVersion' is not supported; version 8.0 or newer is required. $sdkHelp"
     }
 }
 finally {
     Pop-Location
 }
 
-if (-not (Test-Path (Join-Path $engineDir 'OpenRA.slnx'))) {
+if (-not (Test-Path (Join-Path $engineDir 'OpenRA.sln'))) {
     throw 'Engine submodule not found. Run ./scripts/setup.ps1 first.'
 }
 
@@ -66,7 +66,7 @@ if (-not $SkipEngine -or $enginePatched) {
     . (Join-Path $PSScriptRoot 'engine-runtime.ps1')
     $engineRuntime = Get-EngineRuntime
     Write-Host "==> Building OpenRA engine ($Configuration)" -ForegroundColor Cyan
-    dotnet build (Join-Path $engineDir 'OpenRA.slnx') -c $Configuration -v minimal --nologo `
+    dotnet build (Join-Path $engineDir 'OpenRA.sln') -c $Configuration -v minimal --nologo `
         "-p:TargetPlatform=$($engineRuntime.TargetPlatform)"
     if ($LASTEXITCODE -ne 0) { throw "Engine build failed with exit code $LASTEXITCODE" }
 }

@@ -25,7 +25,7 @@ available under the same terms.
 - **Licence:** GPL-3.0-or-later — [COPYING](https://github.com/OpenRA/OpenRA/blob/bleed/COPYING)
 - **Contributors:** [AUTHORS](https://github.com/OpenRA/OpenRA/blob/bleed/AUTHORS)
 
-The engine is included as a **git submodule pinned to the public tag `playtest-20261011`**.
+The engine is included as a **git submodule pinned to the public tag `release-20250330`**.
 Its full source is not copied into this repository. `scripts/setup.ps1` fetches it from the
 upstream project and applies `patches/openra-local-random.patch`, which makes the built-in
 opponent's local RNG reproducible from the lobby seed. The patch is GPL-3.0-or-later.

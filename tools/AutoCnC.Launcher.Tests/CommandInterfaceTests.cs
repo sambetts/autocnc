@@ -41,7 +41,7 @@ namespace AutoCnC.Launcher.Tests
 			Write("scripts\\train-bot.ps1", "");
 			Write("scripts\\difficulties.json",
 				"""{"default":"Normal","levels":[{"name":"Normal","botLabel":"Cabal","summary":"A balanced AI opponent for testing your doctrine."}]}""");
-			Write("engine\\OpenRA.slnx", "");
+			Write("engine\\OpenRA.sln", "");
 			Write("engine\\mods\\cnc\\maps\\test-range\\map.yaml",
 				"Title: Test range (fixture)\nPlayers:\n\tPlayerReference@Multi0:\n\t\tPlayable: True\n\tPlayerReference@Multi1:\n\t\tPlayable: True\n");
 			Write("mods\\autocnc\\mod.yaml",

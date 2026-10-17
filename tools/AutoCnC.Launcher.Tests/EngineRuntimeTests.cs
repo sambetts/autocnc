@@ -37,7 +37,7 @@ namespace AutoCnC.Launcher.Tests
 			var result = Probe($$"""
 				function Get-EngineOperatingSystem { '{{os}}' }
 				function Get-EngineDotNetInfo($DotNetPath) {
-				    [pscustomobject]@{ DotNetPath = $DotNetPath; Architecture = '{{architecture}}'; HasNet10Runtime = $true }
+				    [pscustomobject]@{ DotNetPath = $DotNetPath; Architecture = '{{architecture}}'; HasNet6Runtime = $true }
 				}
 				$expectedHost = (Get-Command dotnet -CommandType Application).Source
 				$runtime = Get-EngineRuntime
@@ -69,16 +69,16 @@ namespace AutoCnC.Launcher.Tests
 		[TestCase(false, "x64", true)]
 		[TestCase(true, "arm64", true)]
 		[TestCase(true, "x64", false)]
-		public void MissingCompatibleRuntimeHasAnActionableError(bool exists, string architecture, bool net10)
+		public void MissingCompatibleRuntimeHasAnActionableError(bool exists, string architecture, bool net6)
 		{
 			if (exists)
 				Write("x64 runtime\\dotnet.exe", "");
 
-			var result = Probe(WindowsArm64Probe(architecture, net10) + "\nGet-EngineRuntime\n");
+			var result = Probe(WindowsArm64Probe(architecture, net6) + "\nGet-EngineRuntime\n");
 
 			Assert.That(result.ExitCode, Is.Not.Zero);
 			var output = string.Join('\n', result.Output);
-			Assert.That(output, Does.Contain(".NET 10 x64 runtime"));
+			Assert.That(output, Does.Contain(".NET 6 x64 runtime"));
 			Assert.That(output, Does.Contain("DOTNET_ROOT_X64"));
 		}
 
@@ -88,7 +88,7 @@ namespace AutoCnC.Launcher.Tests
 			var result = Probe("""
 				function Get-EngineOperatingSystem { 'linux' }
 				function Get-EngineDotNetInfo($DotNetPath) {
-				    [pscustomobject]@{ DotNetPath = $DotNetPath; Architecture = 'arm'; HasNet10Runtime = $true }
+				    [pscustomobject]@{ DotNetPath = $DotNetPath; Architecture = 'arm'; HasNet6Runtime = $true }
 				}
 				Get-EngineRuntime
 				""");
@@ -97,11 +97,26 @@ namespace AutoCnC.Launcher.Tests
 			Assert.That(string.Join('\n', result.Output), Does.Contain("do not support 'linux-arm'"));
 		}
 
-		[TestCase("arm64", "10.0.0", true)]
-		[TestCase("x64", "10.0.0", true)]
+		[Test]
+		public void StableEngineRequiresTheNet6Runtime()
+		{
+			var result = Probe("""
+				function Get-EngineOperatingSystem { 'linux' }
+				function Get-EngineDotNetInfo($DotNetPath) {
+				    [pscustomobject]@{ DotNetPath = $DotNetPath; Architecture = 'x64'; HasNet6Runtime = $false }
+				}
+				Get-EngineRuntime
+				""");
+
+			Assert.That(result.ExitCode, Is.Not.Zero);
+			Assert.That(string.Join('\n', result.Output), Does.Contain("stable OpenRA engine requires the .NET 6 runtime"));
+		}
+
+		[TestCase("arm64", "6.0.0", true)]
+		[TestCase("x64", "6.0.0", true)]
 		[TestCase("x64", "8.0.0", false)]
 		public void HostInspectionUsesInvariantOutputAndRestoresTheLanguage(
-			string architecture, string runtimeVersion, bool hasNet10)
+			string architecture, string runtimeVersion, bool hasNet6)
 		{
 			var result = Probe($$"""
 				function Invoke-DotNetProbe {
@@ -112,11 +127,11 @@ namespace AutoCnC.Launcher.Tests
 				}
 				$env:DOTNET_CLI_UI_LANGUAGE = 'fr'
 				$runtime = Get-EngineDotNetInfo Invoke-DotNetProbe
-				"$($runtime.Architecture)|$($runtime.HasNet10Runtime)|$env:DOTNET_CLI_UI_LANGUAGE"
+				"$($runtime.Architecture)|$($runtime.HasNet6Runtime)|$env:DOTNET_CLI_UI_LANGUAGE"
 				""");
 
 			Assert.That(result.ExitCode, Is.Zero);
-			Assert.That(result.Output, Does.Contain($"{architecture}|{hasNet10}|fr"));
+			Assert.That(result.Output, Does.Contain($"{architecture}|{hasNet6}|fr"));
 		}
 
 		[TestCase(23, "Could not inspect .NET host")]
@@ -273,7 +288,7 @@ namespace AutoCnC.Launcher.Tests
 			return CopyScript(script);
 		}
 
-		static string WindowsArm64Probe(string candidateArchitecture, bool candidateHasNet10) => $$"""
+		static string WindowsArm64Probe(string candidateArchitecture, bool candidateHasNet6) => $$"""
 			$script:x64Host = Join-Path $PSScriptRoot 'x64 runtime\dotnet.exe'
 			function Get-EngineOperatingSystem { 'win' }
 			function Get-WindowsX64DotNetPaths {
@@ -285,7 +300,7 @@ namespace AutoCnC.Launcher.Tests
 			    [pscustomobject]@{
 			        DotNetPath = $DotNetPath
 			        Architecture = $architecture
-			        HasNet10Runtime = ${{candidateHasNet10.ToString().ToLowerInvariant()}}
+			        HasNet6Runtime = ${{candidateHasNet6.ToString().ToLowerInvariant()}}
 			    }
 			}
 			""";

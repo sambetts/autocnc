@@ -19,7 +19,7 @@ finally {
 }
 
 $engineDir = Join-Path $repoRoot 'engine'
-if (-not (Test-Path (Join-Path $engineDir 'OpenRA.slnx'))) {
+if (-not (Test-Path (Join-Path $engineDir 'OpenRA.sln'))) {
     throw "Engine submodule looks empty: $engineDir. Check the submodule checkout and rerun ./scripts/setup.ps1."
 }
 

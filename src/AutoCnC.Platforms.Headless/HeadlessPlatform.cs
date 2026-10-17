@@ -163,7 +163,6 @@ namespace OpenRA.Platforms.Headless
 		public TextureScaleFilter ScaleFilter { get; set; }
 
 		public void SetData(byte[] colors, int width, int height) => Size = new Size(width, height);
-		public void SetSubData(byte[] colors, int xoffset, int yoffset, int width, int height) { }
 		public void SetFloatData(float[] data, int width, int height) => Size = new Size(width, height);
 		public void SetDataFromReadBuffer(Rectangle rect) => Size = rect.Size;
 		public byte[] GetData() => new byte[checked(4 * Size.Width * Size.Height)];

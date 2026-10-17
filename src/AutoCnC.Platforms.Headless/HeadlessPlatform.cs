@@ -118,7 +118,7 @@ namespace OpenRA.Platforms.Headless
 		public IVertexBuffer<T> CreateEmptyVertexBuffer<T>(int size) where T : struct =>
 			new HeadlessVertexBuffer<T>();
 
-		public IVertexBuffer<T> CreateVertexBuffer<T>(T[] data, bool dynamic = true) where T : struct =>
+		public IVertexBuffer<T> CreateVertexBuffer<T>(int size) where T : struct =>
 			new HeadlessVertexBuffer<T>();
 
 		public T[] CreateVertices<T>(int size) where T : struct => new T[size];
@@ -194,7 +194,7 @@ namespace OpenRA.Platforms.Headless
 		public void SetVec(string name, float x) { }
 		public void SetVec(string name, float x, float y) { }
 		public void SetVec(string name, float x, float y, float z) { }
-		public void SetVec(string name, ReadOnlyMemory<float> vec, int length) { }
+		public void SetVec(string name, float[] vec, int length) { }
 		public void SetTexture(string parameter, ITexture texture) { }
 		public void SetMatrix(string parameter, float[] matrix) { }
 		public void PrepareRender() { }

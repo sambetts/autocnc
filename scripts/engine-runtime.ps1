@@ -42,7 +42,7 @@ function Get-EngineDotNetInfo([string]$DotNetPath) {
     [pscustomobject]@{
         DotNetPath = $DotNetPath
         Architecture = $architecture.Groups[1].Value.ToLowerInvariant()
-        HasNet8Runtime = $text -match '(?m)^\s*Microsoft\.NETCore\.App\s+8\.0\.\d+\s'
+        HasNet10Runtime = $text -match '(?m)^\s*Microsoft\.NETCore\.App\s+10\.0\.\d+\s'
     }
 }
 
@@ -86,14 +86,14 @@ function Get-EngineRuntime {
             if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) { continue }
 
             $candidateRuntime = Get-EngineDotNetInfo $candidate
-            if ($candidateRuntime.Architecture -eq 'x64' -and $candidateRuntime.HasNet8Runtime) {
+            if ($candidateRuntime.Architecture -eq 'x64' -and $candidateRuntime.HasNet10Runtime) {
                 $compatible = $candidateRuntime
                 break
             }
         }
 
         if ($null -eq $compatible) {
-            throw 'OpenRA on Windows ARM64 requires the .NET 8 x64 runtime. Install it alongside ARM64 .NET, or set DOTNET_ROOT_X64 to an existing x64 .NET 8 installation. The ARM64 SDK and launcher do not need replacing.'
+            throw 'OpenRA on Windows ARM64 requires the .NET 10 x64 runtime. Install it alongside ARM64 .NET, or set DOTNET_ROOT_X64 to an existing x64 .NET 10 installation. The ARM64 SDK and launcher do not need replacing.'
         }
 
         $runtime = $compatible

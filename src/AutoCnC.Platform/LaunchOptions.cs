@@ -72,6 +72,9 @@ namespace AutoCnC.Platform
 		/// </summary>
 		public static string BattleBotPath => Value("Launch.BattleBotPath") ?? Value("Launch.DoctrinePath");
 
+		/// <summary>Disable all local battle bot discovery and loading for this process.</summary>
+		public static bool NoBots => Boolean("Launch.NoBots");
+
 		/// <summary>Bot type for the test opponent, e.g. <c>hal9001</c>. Blank means no auto battle.</summary>
 		public static string Bot => Value("Launch.Bot");
 

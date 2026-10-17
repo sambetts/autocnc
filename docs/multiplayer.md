@@ -70,6 +70,7 @@ match world loads, so your bot can start from the first tick without waiting for
 **Other players:**
 
 1. Launch AutoC&C using `launch.ps1` as above, selecting their own bot if desired.
+   For manual play, use `./scripts/launch.ps1 -NoBots`.
 2. Open **Multiplayer** and join the host's game through the browser or direct connect
    using the host's address and port.
 
@@ -110,9 +111,17 @@ There is no need to exchange DLLs or add a bot to the mod manifest or lobby AI l
 If exactly one bot is installed it loads automatically; with multiple installed bots,
 select one explicitly instead of assuming the right one will run.
 
-For manual players, avoid selecting a bot on the command line and keep bot assemblies
-out of the scanned folders, including the built reference bot in `engine/bin/bots`.
-Otherwise the only installed bot may automatically take over their side.
+For manual players, launch with:
+
+```powershell
+./scripts/launch.ps1 -NoBots
+```
+
+This disables local battle bot discovery and loading for the entire process, including
+automatic selection, explicit bot names/paths, and in-game `/bot` loading. Installed
+DLLs can stay where they are. It does not affect other players' bots or lobby AI
+opponents. The equivalent engine argument is `Launch.NoBots=true`, which can also be
+passed through `-ExtraArgs`. Restart without this option to use a battle bot again.
 
 ## Troubleshooting
 
@@ -124,7 +133,7 @@ Otherwise the only installed bot may automatically take over their side.
 | The wrong bot runs, or none runs | Pass its declared name with `Launch.BattleBot`, or its DLL with `Launch.BattleBotPath`. A failed explicit selection does not silently fall back to another bot. |
 | Commands do nothing while watching | Join a playable slot: observers have no local army for the bot to control. |
 | Units sit idle | Check `/bot` and `/why`, then your bot's build plans and mode assignments. The platform supplies no strategy when no bot is loaded. |
-| A manual player's army moves on its own | Remove their launch-time bot selection and move installed bot DLLs out of the search folders before restarting. |
+| A manual player's army moves on its own | Restart their client with `./scripts/launch.ps1 -NoBots` to disable local battle bots, even when DLLs are installed. |
 
 To review the match afterwards, use OpenRA's replay browser. Replays contain the
 orders already issued, so watching does not require opponents' bot code. Exit the game

@@ -16,11 +16,16 @@
     A recorded match (.orarep) to watch instead of playing. Every battle is recorded, so this is
     how you go back over one you ran at 40x: replays are not tied to one frame per tick, so the
     replay bar can scrub and fast-forward independently of the speed it was played at.
+
+.PARAMETER NoBots
+    Disable local battle bot discovery and loading for this process, even if bots are installed
+    or selected through ExtraArgs. Does not affect other players or lobby AI opponents.
 #>
 [CmdletBinding()]
 param(
     [string]$Map,
     [string]$Replay,
+    [switch]$NoBots,
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]]$ExtraArgs
 )
@@ -57,6 +62,10 @@ if ($Replay) {
     if (-not (Test-Path -LiteralPath $Replay)) { throw "No such replay: $Replay" }
     $gameArgs += "Launch.Replay=$Replay"
     Write-Host "==> Replay: $(Split-Path -Leaf $Replay)" -ForegroundColor Cyan
+}
+if ($NoBots) {
+    $ExtraArgs = @($ExtraArgs | Where-Object { $_ -notmatch '^Launch\.NoBots=' })
+    $gameArgs += 'Launch.NoBots=true'
 }
 if ($ExtraArgs) { $gameArgs += $ExtraArgs }
 

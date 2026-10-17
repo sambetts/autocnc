@@ -76,6 +76,12 @@ try {
             throw 'The graphics performance patch was not applied.'
         }
         if (-not (Test-Path -LiteralPath $graphicsTest)) { throw 'The graphics regression tests were not installed.' }
+        $testProject = [IO.File]::ReadAllText((Join-Path $engine 'OpenRA.Test/OpenRA.Test.csproj')).Replace("`r`n", "`n")
+        $expectedProject = $graphicsSources['OpenRA.Test/OpenRA.Test.csproj'].Replace(
+            '    <ProjectReference Include="..\OpenRA.Game\OpenRA.Game.csproj" />',
+            "    <ProjectReference Include=`"..\OpenRA.Game\OpenRA.Game.csproj`" />`n" +
+            '    <ProjectReference Include="..\OpenRA.Platforms.Default\OpenRA.Platforms.Default.csproj" />')
+        if ($testProject -cne $expectedProject) { throw 'The patch did not add only the graphics test project reference.' }
 
         $patchedHash = (Get-FileHash -LiteralPath $world).Hash
         if (Initialize-EnginePatch $engine) { throw 'An already-applied patch was applied again.' }

@@ -20,12 +20,12 @@ diff --git a/OpenRA.Test/OpenRA.Test.csproj b/OpenRA.Test/OpenRA.Test.csproj
 +++ b/OpenRA.Test/OpenRA.Test.csproj
 @@ -5,6 +5,7 @@
  
- 	<ItemGroup>
- 		<ProjectReference Include="..\OpenRA.Game\OpenRA.Game.csproj" />
-+		<ProjectReference Include="..\OpenRA.Platforms.Default\OpenRA.Platforms.Default.csproj" />
- 		<ProjectReference Include="..\OpenRA.Mods.Common\OpenRA.Mods.Common.csproj">
- 			<Private>True</Private>
- 		</ProjectReference>
+   <ItemGroup>
+     <ProjectReference Include="..\OpenRA.Game\OpenRA.Game.csproj" />
++    <ProjectReference Include="..\OpenRA.Platforms.Default\OpenRA.Platforms.Default.csproj" />
+     <ProjectReference Include="..\OpenRA.Mods.Common\OpenRA.Mods.Common.csproj">
+       <Private>True</Private>
+     </ProjectReference>
 diff --git a/OpenRA.Test/OpenRA.Platforms.Default/OpenGLTest.cs b/OpenRA.Test/OpenRA.Platforms.Default/OpenGLTest.cs
 new file mode 100644
 --- /dev/null

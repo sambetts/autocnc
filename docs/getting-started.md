@@ -28,9 +28,9 @@ You need a line starting `8.` or higher.
 
 ### ARM64
 
-Keep your native ARM64 .NET SDK. The build scripts select OpenRA's native libraries to match
-the .NET host that will run the engine, rather than assuming x64. Linux ARM64 and Apple Silicon
-use their native `linux-arm64` and `osx-arm64` libraries.
+Keep your native ARM64 .NET SDK. The stable OpenRA release does not ship prebuilt ARM64 native
+libraries. Linux ARM64 and Apple Silicon need the native system dependencies listed in
+[OpenRA's install guide](https://github.com/OpenRA/OpenRA/blob/release-20250330/INSTALL.md).
 
 On **Windows ARM64**, the pinned OpenRA dependencies do not include ARM64 Windows DLLs.
 Install the **Windows x64 .NET 6 Runtime** alongside ARM64 .NET

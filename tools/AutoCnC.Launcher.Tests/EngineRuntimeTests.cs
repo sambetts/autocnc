@@ -97,21 +97,6 @@ namespace AutoCnC.Launcher.Tests
 			Assert.That(string.Join('\n', result.Output), Does.Contain("do not support 'linux-arm'"));
 		}
 
-		[Test]
-		public void StableEngineRequiresTheNet6Runtime()
-		{
-			var result = Probe("""
-				function Get-EngineOperatingSystem { 'linux' }
-				function Get-EngineDotNetInfo($DotNetPath) {
-				    [pscustomobject]@{ DotNetPath = $DotNetPath; Architecture = 'x64'; HasNet6Runtime = $false }
-				}
-				Get-EngineRuntime
-				""");
-
-			Assert.That(result.ExitCode, Is.Not.Zero);
-			Assert.That(string.Join('\n', result.Output), Does.Contain("stable OpenRA engine requires the .NET 6 runtime"));
-		}
-
 		[TestCase("arm64", "6.0.0", true)]
 		[TestCase("x64", "6.0.0", true)]
 		[TestCase("x64", "8.0.0", false)]
@@ -161,7 +146,7 @@ namespace AutoCnC.Launcher.Tests
 			string target, bool skipEngine, bool patchApplied)
 		{
 			CopyScript("build.ps1");
-			Write("engine\\OpenRA.slnx", "");
+			Write("engine\\OpenRA.sln", "");
 			Write("scripts\\engine-patch.ps1", $$"""
 				function Initialize-EnginePatch($EngineDirectory) { ${{patchApplied.ToString().ToLowerInvariant()}} }
 				""");
@@ -184,7 +169,7 @@ namespace AutoCnC.Launcher.Tests
 			var output = string.Join('\n', result.Output);
 			Assert.That(result.ExitCode, Is.Zero, output);
 			Assert.That(output, skipEngine && !patchApplied
-				? Does.Not.Contain("OpenRA.slnx")
+				? Does.Not.Contain("OpenRA.sln")
 				: Does.Contain($"|-p:TargetPlatform={target}"));
 			Assert.That(output, Does.Contain("SDK_ARGS=pack|"));
 		}

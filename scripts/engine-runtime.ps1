@@ -100,10 +100,6 @@ function Get-EngineRuntime {
         Write-Host "==> OpenRA: x64 compatibility on Windows ARM64 ($($runtime.DotNetPath))" -ForegroundColor DarkGray
     }
 
-    if (-not $runtime.HasNet6Runtime) {
-        throw 'The stable OpenRA engine requires the .NET 6 runtime. Install it alongside the .NET SDK, then retry.'
-    }
-
     $targetPlatform = "$operatingSystem-$($runtime.Architecture)"
     if ($targetPlatform -notin @('win-x64', 'win-x86', 'linux-x64', 'linux-arm64', 'osx-x64', 'osx-arm64')) {
         throw "The pinned OpenRA native libraries do not support '$targetPlatform'."

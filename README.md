@@ -303,9 +303,10 @@ The short version:
 - Git
 - An OpenRA-supported OS (Windows / Linux / macOS)
 
-**ARM64:** Linux ARM64 and Apple Silicon builds select native ARM64 engine libraries
-automatically. Windows ARM64 uses an **x64 .NET 6 runtime** for OpenRA under Windows emulation;
-the SDK and graphical launcher can stay ARM64. See [ARM64 setup](docs/getting-started.md#arm64).
+**ARM64:** The stable engine does not ship prebuilt ARM64 native libraries; Linux ARM64 and Apple
+Silicon require the native system libraries listed by OpenRA. Windows ARM64 uses an **x64 .NET 6
+runtime** for OpenRA under Windows emulation; the SDK and graphical launcher can stay ARM64. See
+[ARM64 setup](docs/getting-started.md#arm64).
 
 ### Setup
 

@@ -261,7 +261,7 @@ are told not to spend their budget writing unit tests.
 
 ## Engine integration
 
-The engine is a git submodule pinned to the public tag `playtest-20260222`. Setup and builds
+The engine is a git submodule pinned to the public tag `playtest-20261011`. Setup and builds
 apply `patches/openra-local-random.patch` to derive `LocalRandom` from the lobby seed, keeping
 built-in opponent behavior reproducible without relying on an unpublished engine commit.
 The patch is maintained in this repository; the submodule pointer stays on upstream history.

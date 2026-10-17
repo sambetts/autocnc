@@ -50,10 +50,10 @@ new file mode 100644
 +			var message = new StringBuilder(
 +				"API_ID_RECOMPILE_FRAGMENT_SHADER performance warning has been generated. Fragment shader recompiled due to state change.");
 +
-+			Assert.DoesNotThrow(() => handler.Invoke(null,
-+			[
++			Assert.DoesNotThrow(() => handler.Invoke(null, new object[]
++			{
 +				0x8246, 0x8250, 0u, severity, message.Length, message, IntPtr.Zero
-+			]));
++			}));
 +		}
 +	}
 +}

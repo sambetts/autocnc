@@ -7,7 +7,7 @@
     working on, pick a map and an opponent, and play. Everything it does, it does by running
     these scripts, so anything you can do there you can also do here.
 
-    Windows only - it is a Windows Forms app. On Linux and macOS use run-doctrine.ps1 directly,
+    Windows only - it is a Windows Forms app. On Linux and macOS use run-bot.ps1 directly,
     which takes exactly the same options.
 
 .PARAMETER NoBuild
@@ -30,7 +30,7 @@ $project = Join-Path $projectDir 'AutoCnC.Launcher.csproj'
 $exe = Join-Path $projectDir "bin\$Configuration\net8.0-windows\AutoCnC.Launcher.exe"
 
 if (-not $IsWindows -and $PSVersionTable.PSVersion.Major -ge 6) {
-    throw 'The launcher is a Windows Forms app. On this platform use ./scripts/run-doctrine.ps1, which takes the same options.'
+    throw 'The launcher is a Windows Forms app. On this platform use ./scripts/run-bot.ps1, which takes the same options.'
 }
 
 if (-not $NoBuild) {

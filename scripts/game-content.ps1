@@ -28,6 +28,9 @@ function Get-OpenRASupportDirectory([string]$EngineDirectory) {
 
 function Get-CncRequiredContent([string]$EngineDirectory) {
 	$manifest = Join-Path $EngineDirectory 'mods/cnc-content/mod.yaml'
+	if (-not (Test-Path -LiteralPath $manifest -PathType Leaf)) {
+		throw 'Engine submodule not found. Run ./scripts/setup.ps1 first.'
+	}
 	$inBase = $false
 	foreach ($line in Get-Content -LiteralPath $manifest) {
 		if ($line -match '^\t\tContentPackage@base:') { $inBase = $true; continue }

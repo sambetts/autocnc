@@ -43,9 +43,15 @@ function Get-RulesFingerprint([Parameter(Mandatory)][string]$RepoRoot) {
     }
     [void]$text.Append('engine ').Append($(if ($engine) { $engine } else { 'unknown' })).Append("`n")
 
-    $hash = [Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($text.ToString()))
+    $sha256 = [Security.Cryptography.SHA256]::Create()
+    try {
+        $hash = $sha256.ComputeHash([Text.Encoding]::UTF8.GetBytes($text.ToString()))
+    }
+    finally {
+        $sha256.Dispose()
+    }
     [pscustomobject]@{
-        Fingerprint = ([Convert]::ToHexString($hash).ToLowerInvariant()).Substring(0, 16)
+        Fingerprint = ([BitConverter]::ToString($hash).Replace('-', '').ToLowerInvariant()).Substring(0, 16)
         EngineRevision = $engine
         Files = $files
     }

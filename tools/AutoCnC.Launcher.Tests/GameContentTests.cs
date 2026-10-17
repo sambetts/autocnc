@@ -53,6 +53,16 @@ namespace AutoCnC.Launcher.Tests
 		}
 
 		[Test]
+		public void MissingEngineExplainsTheFreshCloneSetupStep()
+		{
+			File.Delete(Path.Combine(root, "engine", "mods", "cnc-content", "mod.yaml"));
+			var result = Run("install-content.ps1", []);
+
+			Assert.That(result.ExitCode, Is.Not.Zero);
+			Assert.That(string.Join('\n', result.Output), Does.Contain("Run ./scripts/setup.ps1 first."));
+		}
+
+		[Test]
 		public void PortableProfileTakesPrecedence()
 		{
 			var result = Probe("Get-OpenRASupportDirectory $engine");

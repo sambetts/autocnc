@@ -264,7 +264,9 @@ are told not to spend their budget writing unit tests.
 The engine is a git submodule pinned to the public tag `playtest-20260222`. Setup and builds
 apply `patches/openra-local-random.patch` to derive `LocalRandom` from the lobby seed, keeping
 built-in opponent behavior reproducible without relying on an unpublished engine commit.
-The patch is maintained in this repository; the submodule pointer stays on upstream history.
+`patches/openra-gl-performance.patch` also keeps performance diagnostics nonfatal, including
+driver shader-recompilation warnings, while preserving other high-severity error handling.
+Both patches are maintained in this repository; the submodule pointer stays on upstream history.
 Our assemblies
 reference `engine/bin/*.dll` as prebuilt binaries rather than by `ProjectReference`, following
 the OpenRA Mod SDK convention, so bumping the engine tag never drags its internal project layout
@@ -272,8 +274,9 @@ into our build. Both mod assemblies output into `engine/bin/`, because OpenRA re
 assemblies named in `mod.yaml` relative to that directory.
 
 To upgrade: preserve any local engine edits, reverse the tracked patch with
+`git -C engine apply --reverse ../patches/openra-gl-performance.patch` and
 `git -C engine apply --reverse ../patches/openra-local-random.patch`, then bump the submodule.
-Rebase the patch onto the new engine, run setup and a full build, and run the lint and
+Rebase the patches onto the new engine, run setup and a full build, and run the lint and
 `scripts/check-engine-patch.ps1`. Never commit the applied patch inside the engine submodule
 and point AutoC&C at that unpublished commit.
 

@@ -49,6 +49,23 @@ namespace AutoCnC.Launcher.Tests
 		}
 
 		[Test]
+		public void RulesFingerprintUsesTheSameHashInWindowsPowerShell()
+		{
+			CopyScript("rules-fingerprint.ps1");
+			Write("mods/autocnc/rules/test.yaml", "actor:\n\tHealth: 100\n");
+			var expected = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+				System.Text.Encoding.UTF8.GetBytes("file rules/test.yaml\nactor:\n\tHealth: 100\nengine unknown\n")))
+				.ToLowerInvariant()[..16];
+			var result = Probe("""
+				. (Join-Path $PSScriptRoot 'scripts/rules-fingerprint.ps1')
+				(Get-RulesFingerprint $PSScriptRoot).Fingerprint
+				""");
+
+			Assert.That(result.ExitCode, Is.Zero, string.Join('\n', result.Output));
+			Assert.That(result.Output, Does.Contain(expected));
+		}
+
+		[Test]
 		public void WindowsArm64SelectsAnX64RuntimeWithoutReplacingTheSdk()
 		{
 			Write("x64 runtime\\dotnet.exe", "");

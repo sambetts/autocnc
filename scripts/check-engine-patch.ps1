@@ -13,6 +13,12 @@ $gitApplication = Get-Command git -CommandType Application -ErrorAction Stop | S
 $sourceLines = @(git -C (Join-Path $repoRoot 'engine') show HEAD:OpenRA.Game/World.cs)
 if ($LASTEXITCODE -ne 0) { throw 'Could not read the pinned upstream World.cs. Run ./scripts/setup.ps1 first.' }
 $source = ($sourceLines -join "`n") + "`n"
+$graphicsSources = @{}
+foreach ($path in @('OpenRA.Platforms.Default/OpenGL.cs', 'OpenRA.Test/OpenRA.Test.csproj')) {
+    $lines = @(git -C (Join-Path $repoRoot 'engine') show "HEAD:$path")
+    if ($LASTEXITCODE -ne 0) { throw "Could not read the pinned upstream $path." }
+    $graphicsSources[$path] = ($lines -join "`n") + "`n"
+}
 $unseeded = 'LocalRandom = new MersenneTwister();'
 $seeded = "LocalRandom = new MersenneTwister(`n`t`t`t`tunchecked(orderManager.LobbyInfo.GlobalSettings.RandomSeed ^ 0x5f356495));"
 if (-not $source.Contains($unseeded)) { throw 'Expected the unpatched upstream engine revision.' }
@@ -44,7 +50,14 @@ try {
         $localEdit = "// Unrelated local edit retained by the patch.`n"
         $original = ($source + $localEdit).Replace("`n", $lineEnding)
         [IO.File]::WriteAllText($world, $original, $encoding)
-        git -C $engine add -- OpenRA.sln OpenRA.Game/World.cs
+        foreach ($path in $graphicsSources.Keys) {
+            $file = Join-Path $engine $path
+            New-Item -ItemType Directory -Path (Split-Path -Parent $file) -Force | Out-Null
+            [IO.File]::WriteAllText($file, $graphicsSources[$path].Replace("`n", $lineEnding), $encoding)
+        }
+        $graphicsTest = Join-Path $engine 'OpenRA.Test/OpenRA.Platforms.Default/OpenGLTest.cs'
+        if (Test-Path -LiteralPath $graphicsTest) { Remove-Item -LiteralPath $graphicsTest }
+        git -C $engine add -- OpenRA.sln OpenRA.Game/World.cs OpenRA.Platforms.Default/OpenGL.cs OpenRA.Test/OpenRA.Test.csproj
         if ($LASTEXITCODE -ne 0) { throw 'Could not stage the patch test fixture.' }
 
         $changed = & {
@@ -58,11 +71,24 @@ try {
         $expected = $source.Replace($unseeded, $seeded) + $localEdit
         $actual = [IO.File]::ReadAllText($world).Replace("`r`n", "`n")
         if ($actual -cne $expected) { throw 'The patch changed more than the local-random seed.' }
+        $gl = [IO.File]::ReadAllText((Join-Path $engine 'OpenRA.Platforms.Default/OpenGL.cs'))
+        if (-not $gl.Contains('case GL_DEBUG_SEVERITY_HIGH when type != GL_DEBUG_TYPE_PERFORMANCE:')) {
+            throw 'The graphics performance patch was not applied.'
+        }
+        if (-not (Test-Path -LiteralPath $graphicsTest)) { throw 'The graphics regression tests were not installed.' }
 
         $patchedHash = (Get-FileHash -LiteralPath $world).Hash
         if (Initialize-EnginePatch $engine) { throw 'An already-applied patch was applied again.' }
         if ((Get-FileHash -LiteralPath $world).Hash -ne $patchedHash) {
             throw 'Repeat patch application changed the engine source.'
+        }
+
+        $graphicsPatch = Join-Path $repoRoot 'patches/openra-gl-performance.patch'
+        git -C $engine apply --reverse -- $graphicsPatch
+        if ($LASTEXITCODE -ne 0) { throw 'Could not restore the pre-graphics-patch fixture.' }
+        if (-not (Initialize-EnginePatch $engine)) { throw 'An existing checkout did not receive the new graphics patch.' }
+        if ((Get-FileHash -LiteralPath $world).Hash -ne $patchedHash) {
+            throw 'Installing the graphics patch changed the already-patched local-random source.'
         }
 
         $conflicting = $original.Replace($unseeded, 'LocalRandom = new MersenneTwister(123);')
@@ -72,7 +98,7 @@ try {
             $null = Initialize-EnginePatch $engine
         }
         catch {
-            if ($_.Exception.Message -notlike 'Could not apply the required engine patch.*') { throw }
+            if ($_.Exception.Message -notlike 'Could not apply the required engine patch*') { throw }
             $rejected = $true
         }
         if (-not $rejected) { throw 'A conflicting engine edit was not rejected.' }
@@ -85,5 +111,5 @@ finally {
     if (Test-Path -LiteralPath $scratch) { Remove-Item -LiteralPath $scratch -Recurse -Force }
 }
 
-Write-Host 'Engine patch checks passed: missing checkout, LF/CRLF, repeat application, local edits, and conflicts.' -ForegroundColor Green
+Write-Host 'Engine patch checks passed: missing checkout, LF/CRLF, repeat application, partial upgrades, local edits, and conflicts.' -ForegroundColor Green
 exit 0

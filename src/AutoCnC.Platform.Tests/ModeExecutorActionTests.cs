@@ -26,6 +26,13 @@ namespace AutoCnC.Platform.Tests
 	[TestFixture]
 	public sealed class ModeExecutorActionTests
 	{
+		[Test]
+		public void NoBotsSkipsAllAssemblyDiscovery()
+		{
+			Assert.That(BattleBotLoader.CandidateFiles(noBots: true), Is.Empty,
+				"manual play must not scan installed bots or an explicit launch-time bot path");
+		}
+
 		[TestCase(UnitAction.ActivateSupportPower)]
 		public void PlayerScopedActionsAreNotRepeatedWhenTheControllerActorIsIdle(UnitAction action)
 		{

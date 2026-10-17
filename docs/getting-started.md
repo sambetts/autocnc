@@ -61,10 +61,13 @@ cd autocnc
 
 `--recursive` fetches the pinned public OpenRA engine. If you forgot it, `setup.ps1` will
 fetch the submodule for you. Setup also applies `patches/openra-local-random.patch`, which
-makes the built-in opponent reproducible from the lobby seed. Re-running setup is safe: an
+makes the built-in opponent reproducible from the lobby seed, and
+`patches/openra-gl-performance.patch`, which keeps OpenGL performance warnings nonfatal
+without disabling graphics error reporting. Re-running setup is safe: an
 already-applied patch is left alone, and conflicting engine edits stop setup rather than being
-overwritten. `engine/OpenRA.Game/World.cs` showing as modified after setup is expected; do not
-commit that change inside the submodule or replace its public commit with a local-only commit.
+overwritten. Patched engine sources and graphics regression tests showing as modified or
+untracked after setup are expected; do not commit them inside the submodule or replace its
+public commit with a local-only commit.
 
 The first build compiles the whole engine and takes a couple of minutes. Later builds skip it
 (`./scripts/build.ps1 -SkipEngine`) and take seconds.
@@ -72,6 +75,12 @@ The first build compiles the whole engine and takes a couple of minutes. Later b
 Builds also apply the patch if setup was skipped after a recursive clone. If this changes the
 engine source, the engine is rebuilt even with `-SkipEngine`. After updating the engine or its
 patch, run a full build without `-SkipEngine`, even if setup has already applied the patch.
+
+For a shader-recompilation performance warning, rerun setup and a full build. Medium-severity
+messages are already nonfatal in the pinned engine; an accompanying exception indicates a
+separate high-severity message, so check `graphics.log` for the actual fatal diagnostic.
+The graphics patch also makes high-severity performance messages nonfatal, but retains fatal
+handling for other high-severity messages. It does not eliminate driver shader recompilation.
 
 Expect to finish with:
 

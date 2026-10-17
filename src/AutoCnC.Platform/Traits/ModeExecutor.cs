@@ -329,6 +329,9 @@ namespace AutoCnC.Platform.Traits
 			if (w.LocalPlayer != null)
 				assessor = new BattleAssessor(w, w.LocalPlayer, info.AssessWindow, info.BaseRadius);
 
+			if (LaunchOptions.NoBots)
+				return;
+
 			// A bot named on the command line wins: the launcher has just been told, very
 			// explicitly, which code the player wants to watch fight.
 			if (LoadFromLaunchArguments())

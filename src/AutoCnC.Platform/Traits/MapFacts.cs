@@ -125,8 +125,8 @@ namespace AutoCnC.Platform.Traits
 					// "that was a strange match" and a reproduction.
 					RandomSeed = world.LobbyInfo.GlobalSettings.RandomSeed,
 					SeedWasPinned = LaunchOptions.Seed != 0,
-					WidthCells = world.Map.MapSize.Width,
-					HeightCells = world.Map.MapSize.Height,
+					WidthCells = world.Map.MapSize.X,
+					HeightCells = world.Map.MapSize.Y,
 					PlayableWidthCells = world.Map.Bounds.Width,
 					PlayableHeightCells = world.Map.Bounds.Height,
 					NominalTickMilliseconds = TurboSpeed.NominalTimestep,
@@ -157,7 +157,7 @@ namespace AutoCnC.Platform.Traits
 		{
 			foreach (var node in world.Map.ActorDefinitions)
 				if (node.Value.Value == "mpspawn")
-					yield return new ActorReference(node.Key, node.Value).GetValue<LocationInit, CPos>();
+					yield return new ActorReference(node.Value.Value, node.Value.ToDictionary()).GetValue<LocationInit, CPos>();
 		}
 
 		(int Total, Dictionary<string, int> ByType) ResourceCounts()

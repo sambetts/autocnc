@@ -230,7 +230,7 @@ sends an order when your intent actually changes. Returning the same decision ev
 **The engine is a pinned git submodule. We do not fork it.**
 
 ```
-engine/        →  github.com/OpenRA/OpenRA @ playtest-20260222   (upstream submodule)
+engine/        →  github.com/OpenRA/OpenRA @ release-20250330     (upstream submodule)
 patches/       →  reproducible engine changes applied by setup/build
 src/           →  our assemblies
 player-modes/  →  your assembly
@@ -246,8 +246,9 @@ Assemblies: OpenRA.Mods.Common.dll, OpenRA.Mods.Cnc.dll, AutoCnC.Core.dll, AutoC
 AutoC&C derives its manifest from the shipped `cnc` (Tiberian Dawn) mod, so OpenRA offers to
 download the freeware C&C assets on first run.
 
-Pinned to tag **`playtest-20260222`** (.NET 8, C# 12). The last *stable* tag is on end-of-life
-.NET 6 / C# 9.
+Pinned to the latest stable tag **`release-20250330`** (.NET 6, C# 9).
+AutoC&C tracks stable OpenRA releases by default; playtest tags are used only when explicitly
+requested.
 
 Setup and builds apply [`patches/openra-local-random.patch`](patches/openra-local-random.patch)
 to seed the built-in opponent's local RNG from the lobby seed. The submodule still points at
@@ -298,12 +299,14 @@ The short version:
 ### Prerequisites
 
 - .NET 8 SDK or newer (the **SDK**, not just the runtime — you're compiling code)
+- .NET 6 runtime for OpenRA (the stable engine release targets .NET 6; this runtime is out of support)
 - Git
 - An OpenRA-supported OS (Windows / Linux / macOS)
 
-**ARM64:** Linux ARM64 and Apple Silicon builds select native ARM64 engine libraries
-automatically. Windows ARM64 uses an **x64 .NET 8 runtime** for OpenRA under Windows emulation;
-the SDK and graphical launcher can stay ARM64. See [ARM64 setup](docs/getting-started.md#arm64).
+**ARM64:** The stable engine does not ship prebuilt ARM64 native libraries; Linux ARM64 and Apple
+Silicon require the native system libraries listed by OpenRA. Windows ARM64 uses an **x64 .NET 6
+runtime** for OpenRA under Windows emulation; the SDK and graphical launcher can stay ARM64. See
+[ARM64 setup](docs/getting-started.md#arm64).
 
 ### Setup
 

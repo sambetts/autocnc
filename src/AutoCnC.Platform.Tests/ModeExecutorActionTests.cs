@@ -438,10 +438,9 @@ namespace AutoCnC.Platform.Tests
 					currentCash: 1600,
 					productionPriority,
 					maxOrders: int.MaxValue);
-				var allowedProduction = evaluations
+				var allowedProduction = new HashSet<uint>(evaluations
 					.Where(result => result.Outcome == ProductionBudgetOutcome.Allowed)
-					.Select(result => result.Candidate.ControllerActorId)
-					.ToHashSet();
+					.Select(result => result.Candidate.ControllerActorId));
 				var eligible = priority.Where(actorId =>
 					actorId is 1 or 3 || allowedProduction.Contains(actorId));
 

@@ -1,16 +1,13 @@
 <Project>
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net6.0</TargetFramework>
     <LangVersion>12</LangVersion>
     <Nullable>disable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);CA1416</NoWarn>
-    <!-- The engine ships newer BCL facades than the net8.0 ref pack; the unification is benign. -->
-    <MSBuildWarningsAsMessages>$(MSBuildWarningsAsMessages);MSB3277</MSBuildWarningsAsMessages>
-
     <EngineDirectory Condition="'$(EngineDirectory)' == ''">$(MSBuildThisFileDirectory)..\engine</EngineDirectory>
     <EngineBinDirectory>$(EngineDirectory)\bin</EngineBinDirectory>
   </PropertyGroup>

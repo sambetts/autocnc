@@ -12,6 +12,7 @@ If you just want the API reference, skip to [writing-bots.md](writing-bots.md).
 | | |
 |---|---|
 | **.NET SDK 8.0 or newer** | [download](https://dotnet.microsoft.com/download) — the **SDK**, not just the runtime, since you're compiling code |
+| **.NET 6 Runtime** | [download](https://dotnet.microsoft.com/download/dotnet/6.0) — required by the stable OpenRA engine; this runtime is out of support |
 | **Git** | with submodule support (any modern version) |
 | **PowerShell** | Windows PowerShell or PowerShell 7 on Windows; PowerShell 7 on Linux/macOS |
 | **An IDE** | Visual Studio, Rider, or VS Code with the C# Dev Kit |
@@ -27,13 +28,13 @@ You need a line starting `8.` or higher.
 
 ### ARM64
 
-Keep your native ARM64 .NET SDK. The build scripts select OpenRA's native libraries to match
-the .NET host that will run the engine, rather than assuming x64. Linux ARM64 and Apple Silicon
-use their native `linux-arm64` and `osx-arm64` libraries.
+Keep your native ARM64 .NET SDK. The stable OpenRA release does not ship prebuilt ARM64 native
+libraries. Linux ARM64 and Apple Silicon need the native system dependencies listed in
+[OpenRA's install guide](https://github.com/OpenRA/OpenRA/blob/release-20250330/INSTALL.md).
 
 On **Windows ARM64**, the pinned OpenRA dependencies do not include ARM64 Windows DLLs.
-Install the **Windows x64 .NET 8 Runtime** alongside ARM64 .NET
-([download](https://dotnet.microsoft.com/download/dotnet/8.0), choose **.NET Runtime**, **Windows**,
+Install the **Windows x64 .NET 6 Runtime** alongside ARM64 .NET
+([download](https://dotnet.microsoft.com/download/dotnet/6.0), choose **.NET Runtime**, **Windows**,
 **x64**). An x64 SDK is not needed. Games, headless battles, replays, YAML linting and rule
 exports then use that runtime automatically under Windows' x64 emulation. Compilation and the
 graphical launcher continue using your normal .NET installation.
@@ -123,7 +124,7 @@ because it is unsigned, review it and use `Unblock-File` on that specific file b
 | `not our ref 75bdf886617cb3edce7617d18a07242ffaf5d76e` | Update AutoC&C to a revision with the public engine pin, then rerun `./scripts/setup.ps1`. That old pin referred to an unpublished engine commit; a deeper fetch cannot recover it. |
 | `Could not apply the required engine patch` | Inspect `git -C engine diff`, preserve your own edits, resolve the conflict, and rerun setup. Do not force-reset the engine. |
 | `OpenRA engine not built` | Run `./scripts/build.ps1` without `-SkipEngine` |
-| `OpenRA on Windows ARM64 requires the .NET 8 x64 runtime` | Install the Windows x64 .NET 8 Runtime alongside ARM64 .NET; see [ARM64](#arm64). |
+| `OpenRA on Windows ARM64 requires the .NET 6 x64 runtime` | Install the Windows x64 .NET 6 Runtime alongside ARM64 .NET; see [ARM64](#arm64). |
 | `The file is locked by: ".NET Host"` | The game is running. Close it and rebuild. |
 
 ---
@@ -699,7 +700,7 @@ Run the same safeguarded cycle without opening the launcher:
 ./scripts/train-loop.ps1 -BattleBot 'C:\bots\MyBot\MyBot.csproj'
 ```
 
-Use Windows PowerShell 5.1 or PowerShell 7 on Windows, with the .NET 8 SDK and the usual
+Use Windows PowerShell 5.1 or PowerShell 7 on Windows, with the .NET 8 SDK and the .NET 6 runtime plus the usual
 engine/game-content setup. The script builds its console host automatically; `-NoBuild` skips
 only that host build, never the bot's build or verification. An authenticated Copilot CLI must be
 available on PATH unless you supply `-AgentConfiguration`. Training edits the selected bot's

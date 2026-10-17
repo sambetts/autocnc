@@ -124,7 +124,7 @@ namespace AutoCnC.Platform.Traits
 		readonly Dictionary<ProductionOrderRevisionKey, ulong> productionOrderRevisions = [];
 		readonly Dictionary<Actor, RepairStateRevision> repairs = [];
 
-		[VerifySync]
+		[Sync]
 		public int RevisionsHash
 		{
 			get

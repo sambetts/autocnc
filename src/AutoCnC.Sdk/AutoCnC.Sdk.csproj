@@ -43,8 +43,8 @@
     for compilation only and never copied beside a built doctrine — the game already has them.
   -->
   <ItemGroup>
-    <None Include="$(EngineBinDirectory)\OpenRA.Game.dll" Pack="true" PackagePath="lib\net8.0\" Visible="false" />
-    <None Include="$(EngineBinDirectory)\OpenRA.Mods.Common.dll" Pack="true" PackagePath="lib\net8.0\" Visible="false" />
+    <None Include="$(EngineBinDirectory)\OpenRA.Game.dll" Pack="true" PackagePath="lib\net6.0\" Visible="false" />
+    <None Include="$(EngineBinDirectory)\OpenRA.Mods.Common.dll" Pack="true" PackagePath="lib\net6.0\" Visible="false" />
     <None Include="$(MSBuildThisFileDirectory)..\..\LICENSE" Pack="true" PackagePath="\" Visible="false" />
     <None Include="$(MSBuildThisFileDirectory)..\..\NOTICE.md" Pack="true" PackagePath="\" Visible="false" />
   </ItemGroup>

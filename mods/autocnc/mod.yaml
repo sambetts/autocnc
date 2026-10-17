@@ -70,7 +70,6 @@ Rules:
 	cnc|rules/ships.yaml
 	cnc|rules/aircraft.yaml
 	cnc|rules/husks.yaml
-	cnc|rules/map-generators.yaml
 	autocnc|rules/world.yaml
 	autocnc|rules/units.yaml
 
@@ -90,6 +89,7 @@ TileSets:
 	cnc|tilesets/winter.yaml
 	cnc|tilesets/snow.yaml
 	cnc|tilesets/temperat.yaml
+	cnc|tilesets/jungle.yaml
 
 Weapons:
 	cnc|weapons/explosions.yaml
@@ -146,7 +146,6 @@ ChromeLayout:
 	cnc|chrome/music.yaml
 	cnc|chrome/settings.yaml
 	cnc|chrome/settings-display.yaml
-	cnc|chrome/settings-gameplay.yaml
 	cnc|chrome/settings-audio.yaml
 	cnc|chrome/settings-input.yaml
 	cnc|chrome/settings-hotkeys.yaml
